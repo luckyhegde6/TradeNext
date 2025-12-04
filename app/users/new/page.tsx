@@ -1,12 +1,14 @@
 export const dynamic = "force-dynamic"; // This disables SSG and ISR
 
-import prisma from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Form from "next/form";
 
 export default function NewUser() {
   async function createUser(formData: FormData) {
     "use server";
+
+    // Lazy-load Prisma in server action
+    const { default: prisma } = await import("@/lib/prisma");
 
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
@@ -34,7 +36,7 @@ export default function NewUser() {
         </div>
         <div>
           <label htmlFor="email" className="flex text-lg font-medium mb-2 items-center">
-            Email 
+            Email
             <span className="ml-2 px-2 py-1 text-xs font-semibold text-white bg-gray-500 rounded-lg">
               Required
             </span>

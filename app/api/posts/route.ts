@@ -1,21 +1,19 @@
-import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
+  // Lazy-load service to avoid Prisma initialization at build time
+  const { getPaginatedPosts, getTotalPosts } = await import("@/lib/services/postService");
+
   const url = new URL(request.url);
   const page = parseInt(url.searchParams.get("page") || "1");
   const postsPerPage = 5;
-  const offset = (page - 1) * postsPerPage;
 
   // Fetch paginated posts
-  const posts = await prisma.post.findMany({
-    skip: offset,
-    take: postsPerPage,
-    orderBy: { createdAt: "desc" },
-    include: { author: { select: { name: true } } },
-  });
+  const posts = await getPaginatedPosts(page, postsPerPage);
 
-  const totalPosts = await prisma.post.count();
+  const totalPosts = await getTotalPosts();
   const totalPages = Math.ceil(totalPosts / postsPerPage);
 
   return NextResponse.json({ posts, totalPages });

@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic"; // This disables SSG and ISR
 
 import Form from "next/form";
-import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -9,24 +8,27 @@ export default function NewPost() {
   async function createPost(formData: FormData) {
     "use server";
 
+    // Lazy-load Prisma in server action
+    const { default: prisma } = await import("@/lib/prisma");
+
     const authorEmail = (formData.get("authorEmail") as string) || undefined;
     const title = formData.get("title") as string;
     const content = formData.get("content") as string;
 
     const postData = authorEmail
       ? {
-          title,
-          content,
-          author: {
-            connect: {
-              email: authorEmail,
-            },
+        title,
+        content,
+        author: {
+          connect: {
+            email: authorEmail,
           },
-        }
+        },
+      }
       : {
-          title,
-          content,
-        };
+        title,
+        content,
+      };
 
     await prisma.post.create({
       data: postData,
@@ -42,7 +44,7 @@ export default function NewPost() {
       <Form action={createPost} className="space-y-6">
         <div>
           <label htmlFor="title" className="flex text-lg font-medium mb-2 items-center">
-            Title 
+            Title
             <span className="ml-2 px-2 py-1 text-xs font-semibold text-white bg-gray-500 rounded-lg">
               Required
             </span>
