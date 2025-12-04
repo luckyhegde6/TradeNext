@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 export default async function Home() {
   // Lazy-load Prisma
@@ -90,7 +89,7 @@ export default async function Home() {
           <Link href="/posts" className="text-blue-600 hover:text-blue-700 font-medium">View all &rarr;</Link>
         </div>
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-          {posts.map((post) => (
+          {posts.map((post: { id: number; title: string; content: string | null; createdAt: Date; author: { name: string | null } | null }) => (
             <Link key={post.id} href={`/posts/${post.id}`} className="group block h-full">
               <div className="h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6 hover:shadow-md transition-all">
                 <div className="flex items-center justify-between mb-4">

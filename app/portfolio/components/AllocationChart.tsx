@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from 'react';
+
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
 import { Holding } from '@/lib/services/portfolioService';
@@ -49,11 +49,12 @@ export default function AllocationChart({ holdings }: AllocationChartProps) {
                     generateLabels: (chart: ChartJS) => {
                         const data = chart.data;
                         if (data.labels && data.datasets.length) {
+                            const bgColors = data.datasets[0].backgroundColor as string[];
                             return data.labels.map((label, i) => {
                                 const value = data.datasets[0].data[i] as number;
                                 return {
                                     text: `${label}: ${value.toFixed(1)}%`,
-                                    fillStyle: data.datasets[0].backgroundColor?.[i] as string,
+                                    fillStyle: bgColors[i],
                                     hidden: false,
                                     index: i,
                                 };
@@ -65,7 +66,7 @@ export default function AllocationChart({ holdings }: AllocationChartProps) {
             },
             tooltip: {
                 callbacks: {
-                    label: (context: any) => {
+                    label: (context: { label?: string; parsed?: number; dataIndex: number }) => {
                         const label = context.label || '';
                         const value = context.parsed || 0;
                         const holding = holdings[context.dataIndex];

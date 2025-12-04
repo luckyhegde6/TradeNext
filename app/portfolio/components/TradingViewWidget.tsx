@@ -12,8 +12,11 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
     useEffect(() => {
         if (!container.current) return;
 
+        // Store ref value to use in cleanup
+        const containerElement = container.current;
+
         // Clear previous widget
-        container.current.innerHTML = '';
+        containerElement.innerHTML = '';
 
         const script = document.createElement('script');
         script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
@@ -32,12 +35,10 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
             support_host: 'https://www.tradingview.com',
         });
 
-        container.current.appendChild(script);
+        containerElement.appendChild(script);
 
         return () => {
-            if (container.current) {
-                container.current.innerHTML = '';
-            }
+            containerElement.innerHTML = '';
         };
     }, [symbol]);
 
