@@ -10,7 +10,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -18,6 +17,9 @@ model User {
   email String  @unique
   name  String?
   posts Post[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  portfolios Portfolio[] 
 }
 
 model Post {
@@ -29,4 +31,74 @@ model Post {
   published Boolean  @default(false)
   authorId  Int?
   author    User?    @relation(fields: [authorId], references: [id])
+}
+
+model Portfolio {
+  id        String   @id @default(uuid())
+  userId    Int      // <-- change to Int to match User.id
+  name      String
+  currency  String   @default("INR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  portfolioId String
+  tradeDate   DateTime
+  ticker      String
+  side        String
+  quantity    Decimal  @db.Decimal(30,6)
+  price       Decimal  @db.Decimal(30,6)
+  fees        Decimal? @db.Decimal(30,6)
+  notes       String?
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id])
+}
+
+model DailyPrice {
+  ticker    String
+  tradeDate DateTime
+  open      Decimal? @db.Decimal(30,6)
+  high      Decimal? @db.Decimal(30,6)
+  low       Decimal? @db.Decimal(30,6)
+  close     Decimal? @db.Decimal(30,6)
+  volume    BigInt?
+  vwap      Decimal? @db.Decimal(30,6)
+
+  @@id([ticker, tradeDate])
+  @@map("daily_prices")
+}
+
+model Fundamental {
+  ticker              String
+  asOf                DateTime
+  periodType          String
+  revenue             Decimal? @db.Decimal(30,6)
+  netIncome           Decimal? @db.Decimal(30,6)
+  totalAssets         Decimal? @db.Decimal(30,6)
+  totalLiabilities    Decimal? @db.Decimal(30,6)
+  cash                Decimal? @db.Decimal(30,6)
+  shareholdersEquity  Decimal? @db.Decimal(30,6)
+  eps                 Decimal? @db.Decimal(30,6)
+  peRatio             Decimal? @db.Decimal(30,6)
+  roe                 Decimal? @db.Decimal(30,6)
+  roic                Decimal? @db.Decimal(30,6)
+  rawJson             Json?
+
+  @@id([ticker, asOf, periodType])
+  @@map("fundamentals")
+}
+
+model CorporateAction {
+  id         String   @id @default(uuid())
+  ticker     String
+  actionDate DateTime
+  actionType String
+  params     Json?
+
+  @@map("corporate_actions")
 }
