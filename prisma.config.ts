@@ -8,6 +8,7 @@ export default defineConfig({
     // where to place migrations (default)
     migrations: {
         path: 'prisma/migrations',
+        seed: 'npx tsx prisma/seed.ts',
     },
 
     // supply the migration/runtime connection URL from env

@@ -88,8 +88,49 @@ async function waitForPostgres(composeCmd, maxAttempts = 60, intervalMs = 2000) 
     process.stdout.write('⏳ Waiting for Postgres to be healthy');
     await waitForPostgres(composeCmd);
     console.log('');
-
+    
     console.log('✅ DB + Redis are ready in Docker.');
+    console.log('');
+
+    // Auto-migration Logic
+    try {
+      const { Client } = require('pg');
+      const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+      
+      console.log('🔍 Checking if database requires migration...');
+      const client = new Client({ connectionString });
+      await client.connect();
+      
+      // Check if _prisma_migrations table exists to determine if DB is initialized
+      const res = await client.query(`
+        SELECT COUNT(*) as count 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = '_prisma_migrations';
+      `);
+      const count = parseInt(res.rows[0].count, 10);
+      await client.end();
+
+      if (count === 0) {
+        console.log('⚠️  Database appears empty (no _prisma_migrations found).');
+        console.log('🚀 Running initial migration: npx prisma migrate dev --name add_tradenext_models');
+        console.log('   (This allows interactive prompts if needed, though usually automatic in clean state)');
+        
+        // Running with inherit to allow interaction if strictly necessary, strictly synchronous
+        execSync('npx prisma migrate dev --name add_tradenext_models', { stdio: 'inherit', shell: true });
+        console.log('✅ Migration completed successfully.');
+        
+        console.log('🌱 Running database seed...');
+        execSync('npx prisma db seed', { stdio: 'inherit', shell: true });
+        console.log('✅ Seeding completed successfully.');
+      } else {
+        console.log('✅ Database already initialized (migrations table found). skipping auto-migrate.');
+      }
+    } catch (e) {
+       console.error('⚠️  Auto-migration check failed:', e.message);
+       console.log('   Continuing... you may need to run migration manually if tables are missing.');
+    }
+
     console.log('');
     console.log('Now run the Next.js app on your host (fast dev loop):');
     console.log('  Ensure .env has DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tradenext');

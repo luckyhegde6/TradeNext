@@ -2,9 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { signIn, signOut } from "next-auth/react";
 
 export default function Header() {
   const pathname = usePathname();
+  const { data: session, status } = useSession();
+  const isLoggedIn = status === "authenticated";
+  interface UserWithRole {
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+    role?: string;
+  }
+  const user = session?.user as UserWithRole;
+  const isAdmin = user?.role === "admin";
 
   const isActive = (path: string) => pathname === path;
 
@@ -29,25 +41,55 @@ export default function Header() {
             <NavLink href="/" active={isActive("/")}>
               Dashboard
             </NavLink>
-            <NavLink href="/portfolio" active={isActive("/portfolio")}>
-              Portfolio
-            </NavLink>
+
+            {isLoggedIn ? (
+              <NavLink href="/portfolio" active={isActive("/portfolio")}>
+                Portfolio
+              </NavLink>
+            ) : (
+              <button
+                onClick={() => signIn()}
+                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-slate-400 dark:hover:text-slate-200`}
+              >
+                Portfolio
+              </button>
+            )}
+
             <NavLink href="/markets" active={isActive("/markets")}>
               Markets
             </NavLink>
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
             </NavLink>
+            {isAdmin && (
+              <NavLink href="/admin/users" active={isActive("/admin/users")}>
+                Admin Users
+              </NavLink>
+            )}
           </nav>
 
           {/* User Actions */}
           <div className="flex items-center space-x-4">
-            <Link
-              href="/portfolio"
-              className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-sm hover:shadow-md"
-            >
-              My Portfolio
-            </Link>
+            {isLoggedIn ? (
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {user?.name || user?.email}
+                </span>
+                <button
+                  onClick={() => signOut()}
+                  className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-all shadow-sm"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => signIn()}
+                className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-sm"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         </div>
       </div>
