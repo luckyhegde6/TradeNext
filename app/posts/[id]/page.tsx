@@ -36,6 +36,22 @@ export default async function Post({ params }: { params: Promise<{ id: string }>
     redirect("/posts");
   }
 
+  // Fetch session to check authorization
+  const { auth } = await import("@/lib/auth");
+  const session = await auth();
+
+  interface UserWithRole {
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+    role?: string;
+  }
+
+  const currentUser = session?.user as UserWithRole;
+  const isAuthor = currentUser?.email === post.author?.email;
+  const isAdmin = currentUser?.role === "admin";
+  const canDelete = isAuthor || isAdmin;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
       <article className="max-w-3xl w-full bg-white shadow-lg rounded-lg p-8">
@@ -59,15 +75,17 @@ export default async function Post({ params }: { params: Promise<{ id: string }>
         </div>
       </article>
 
-      {/* Delete Button */}
-      <form action={deletePost} className="mt-6">
-        <button
-          type="submit"
-          className="px-6 py-3 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors"
-        >
-          Delete Post
-        </button>
-      </form>
+      {/* Delete Button - Only visible to Author or Admin */}
+      {canDelete && (
+        <form action={deletePost} className="mt-6">
+          <button
+            type="submit"
+            className="px-6 py-3 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors"
+          >
+            Delete Post
+          </button>
+        </form>
+      )}
     </div>
   );
 }

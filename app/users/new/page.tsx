@@ -12,9 +12,13 @@ export default function NewUser() {
 
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+
+    const { hash } = await import("bcryptjs");
+    const hashedPassword = await hash(password, 10);
 
     await prisma.user.create({
-      data: { name, email },
+      data: { name, email, password: hashedPassword },
     });
 
     redirect("/");
@@ -47,6 +51,22 @@ export default function NewUser() {
             name="email"
             required
             placeholder="Enter user email ..."
+            className="w-full px-4 py-2 border rounded-lg"
+          />
+        </div>
+        <div>
+          <label htmlFor="password" className="flex text-lg font-medium mb-2 items-center">
+            Password
+            <span className="ml-2 px-2 py-1 text-xs font-semibold text-white bg-gray-500 rounded-lg">
+              Required
+            </span>
+          </label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            required
+            placeholder="Enter password ..."
             className="w-full px-4 py-2 border rounded-lg"
           />
         </div>

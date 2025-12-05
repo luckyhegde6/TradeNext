@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 
 interface Post {
   id: number;
@@ -20,6 +21,8 @@ export const dynamic = "force-dynamic";
 function PostsList() {
   const searchParams = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1");
+  const { status } = useSession();
+  const isLoggedIn = status === "authenticated";
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [totalPages, setTotalPages] = useState(1);
@@ -56,25 +59,45 @@ function PostsList() {
       ) : (
         <>
           {posts.length === 0 ? (
-            <p className="text-gray-600">No posts available.</p>
+            <div className="flex flex-col items-center space-y-4">
+              <p className="text-gray-600">No posts available.</p>
+              {isLoggedIn && (
+                <Link href="/posts/new">
+                  <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                    Create First Post
+                  </button>
+                </Link>
+              )}
+            </div>
           ) : (
-            <ul className="space-y-6 w-full max-w-4xl mx-auto">
-              {posts.map((post) => (
-                <li key={post.id} className="border p-6 rounded-lg shadow-md bg-white">
-                  <Link href={`/posts/${post.id}`} className="text-2xl font-semibold text-blue-600 hover:underline">
-                    {post.title}
+            <div className="w-full max-w-4xl mx-auto">
+              {isLoggedIn && (
+                <div className="flex justify-end mb-6">
+                  <Link href="/posts/new">
+                    <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                      Create Post
+                    </button>
                   </Link>
-                  <p className="text-sm text-gray-500">by {post.author?.name || "Anonymous"}</p>
-                  <p className="text-xs text-gray-400">
-                    {new Date(post.createdAt).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </p>
-                </li>
-              ))}
-            </ul>
+                </div>
+              )}
+              <ul className="space-y-6">
+                {posts.map((post) => (
+                  <li key={post.id} className="border p-6 rounded-lg shadow-md bg-white">
+                    <Link href={`/posts/${post.id}`} className="text-2xl font-semibold text-blue-600 hover:underline">
+                      {post.title}
+                    </Link>
+                    <p className="text-sm text-gray-500">by {post.author?.name || "Anonymous"}</p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(post.createdAt).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/* Pagination Controls */}
