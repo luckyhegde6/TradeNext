@@ -13,6 +13,6 @@ export default defineConfig({
     // supply the migration/runtime connection URL from env
     // (you can use DATABASE_URL or DIRECT_DATABASE_URL depending on your setup)
     datasource: {
-        url: env('DATABASE_URL'),
+        url: env('DATABASE_URL') || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext',
     },
 });

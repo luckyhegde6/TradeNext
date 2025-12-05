@@ -11,9 +11,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "stage": "netlify dev",
     "dev:local": "node scripts/dev-local-cross.js",
     "dev:clean": "bash scripts/dev-clean.sh",
-    "dev:only-host": "bash scripts/dev-only-host.sh",
+    "dev:only-host": "node scripts/dev-only-host-cross.cjs",
     "local": "npm run dev:only-host && npm run dev",
     "local:clean": "npm run dev:clean && npm run dev:only-host && npm run dev",
     "build": "npx prisma migrate deploy && next build",
@@ -29,7 +30,7 @@
     "db:down": "bash scripts/dev-db-down.sh",
     "db:enable-timescale": "npx ts-node scripts/enable_timescale.ts",
     "docker:terminate:win": "powershell -ExecutionPolicy Bypass -File scripts/docker-terminate.ps1",
-    "docker:terminate": "bash scripts/docker-terminate.sh"
+    "docker:terminate": "node scripts/docker-terminate-cross.cjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.1.0",
@@ -46,6 +47,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@netlify/plugin-nextjs": "^5.14.7",
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^20",
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
