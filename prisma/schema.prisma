@@ -75,6 +75,33 @@ model DailyPrice {
   @@map("daily_prices")
 }
 
+model IndexClose {
+  id        String   @id @default(uuid())
+  indexName String
+  asOf      DateTime
+  open      Decimal? @db.Decimal(30,6)
+  high      Decimal? @db.Decimal(30,6)
+  low       Decimal? @db.Decimal(30,6)
+  close     Decimal? @db.Decimal(30,6)
+  vwap      Decimal? @db.Decimal(30,6)
+  volume    BigInt?
+
+  @@index([indexName, asOf])
+  @@map("index_closes")
+}
+
+model IndexWeight {
+  id        String  @id @default(uuid())
+  indexName String
+  ticker    String
+  security  String?
+  weight    Decimal? @db.Decimal(10,4)
+  asOf      DateTime
+
+  @@index([indexName, ticker, asOf])
+  @@map("index_weights")
+}
+
 model Fundamental {
   ticker              String
   asOf                DateTime
@@ -103,4 +130,36 @@ model CorporateAction {
   params     Json?
 
   @@map("corporate_actions")
+}
+
+model Index {
+  id       String  @id @default(uuid())
+  name     String  @unique
+  display  String?
+  createdAt DateTime @default(now())
+}
+
+model IndexPoint {
+  id String @id @default(uuid())
+  indexName String
+  time DateTime
+  open Decimal? @db.Decimal(30,6)
+  high Decimal? @db.Decimal(30,6)
+  low Decimal? @db.Decimal(30,6)
+  close Decimal? @db.Decimal(30,6)
+  volume BigInt?
+  @@index([indexName, time])
+}
+
+model CorporateAnnouncement {
+  id                String   @id @default(cuid())
+  symbol            String
+  companyName       String
+  subject           String
+  details           String?
+  broadcastDateTime DateTime
+  attachment        String?
+  createdAt         DateTime @default(now())
+
+  @@index([broadcastDateTime])
 }
