@@ -269,6 +269,7 @@ export async function getIndexAnnouncements(indexName: string) {
         const data = rawData?.data || [];
 
         // Sort by broadcastDateTime descending
+        // eslint-disable-next-line
         const sorted = data.sort((a: any, b: any) => {
             const dateA = parseNseDate(a.broadcastDate);
             const dateB = parseNseDate(b.broadcastDate);

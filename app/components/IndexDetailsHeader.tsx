@@ -41,7 +41,10 @@ export default function IndexDetailsHeader({ symbol = "NIFTY 50" }: { symbol?: s
                 timestampStr = d.toLocaleString();
             }
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        console.error("Error parsing timestamp:", e);
+        /* ignore */
+    }
 
     return (
         <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 p-6 mb-6">

@@ -20,7 +20,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
     const data = await getCompany(ticker);
 
     // Don't require database data - NSE components will work independently
-    // if (!data) return notFound();
+    if (!data) return notFound();
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-slate-950 p-6">

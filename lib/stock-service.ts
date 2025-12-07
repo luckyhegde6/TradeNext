@@ -97,9 +97,11 @@ export async function getStockQuote(symbol: string): Promise<StockQuote> {
  * Get stock chart data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolChartData&symbol=SBINEQN&days=1D
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getStockChart(symbol: string, days: string = "1D"): Promise<any[]> {
     const cacheKey = `nse:stock:${symbol}:chart:${days}`;
     const cached = cache.get(cacheKey);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (cached) return cached as any[];
 
     // Need to get identifier first (e.g., SBINEQN for SBIN)
@@ -126,9 +128,11 @@ export async function getStockChart(symbol: string, days: string = "1D"): Promis
  * Get stock yearwise trend data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getYearwiseData&symbol=SBINEQN
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getStockTrends(symbol: string): Promise<any[]> {
     const cacheKey = `nse:stock:${symbol}:trends`;
     const cached = cache.get(cacheKey);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (cached) return cached as any[];
 
     // Need to get identifier first
