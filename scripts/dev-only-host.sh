@@ -30,4 +30,4 @@ echo " Ensure .env has DATABASE_URL=postgresql://postgres:postgres@localhost:543
 echo " Then: npm run dev"
 echo ""
 echo "If you need to apply migrations from host (recommended once after schema changes):"
-echo " npx prisma migrate dev --name add_tradenext_models"
+echo " npx prisma migrate dev --name add_indexname_to_announcements"

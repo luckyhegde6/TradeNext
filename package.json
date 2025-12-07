@@ -24,7 +24,7 @@
     "ingest:zip": "ts-node scripts/ingest_nse_zip.ts",
     "postinstall": "npx prisma generate --schema=prisma/schema.prisma",
     "prisma:gen": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name add_tradenext_models",
+    "prisma:migrate": "prisma migrate dev --name add_indexname_to_announcements",
     "prisma:studio": "prisma studio",
     "timescale:enable": "ts-node scripts/enable_timescale.ts",
     "db:up": "bash scripts/dev-db-up.sh",

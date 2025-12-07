@@ -113,7 +113,7 @@ async function waitForPostgres(composeCmd, maxAttempts = 60, intervalMs = 2000) 
 
       if (count === 0) {
         console.log('⚠️  Database appears empty (no _prisma_migrations found).');
-        console.log('🚀 Running initial migration: npx prisma migrate dev --name add_tradenext_models');
+        console.log('🚀 Running initial migration: npx prisma migrate dev --name add_indexname_to_announcements');
         console.log('   (This allows interactive prompts if needed, though usually automatic in clean state)');
         
         // Running with inherit to allow interaction if strictly necessary, strictly synchronous
@@ -138,7 +138,7 @@ async function waitForPostgres(composeCmd, maxAttempts = 60, intervalMs = 2000) 
     console.log('  Then: npm run dev');
     console.log('');
     console.log('If you need to apply migrations from host (recommended once after schema changes):');
-    console.log('  npx prisma migrate dev --name add_tradenext_models');
+    console.log('  npx prisma migrate dev --name add_indexname_to_announcements');
     console.log('');
   } catch (err) {
     console.error('Error during dev setup:', err.message || err);

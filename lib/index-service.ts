@@ -115,8 +115,8 @@ export async function getIndexDetails(indexName: string) {
         const quote = {
             indexName: data.indexName || indexName,
             lastPrice: String(data.lastPrice || data.last || 0),
-            change: String(data.change || 0),
-            pChange: String(data.pChange || data.percentChange || 0),
+            change: String(data.lastPrice - data.previousClose || 0),
+            pChange: String(data.percChange || data.percentChange || 0),
             open: String(data.open || 0),
             high: String(data.dayHigh || data.high || 0),
             low: String(data.dayLow || data.low || 0),
@@ -132,7 +132,7 @@ export async function getIndexDetails(indexName: string) {
             unchanged: data.unchanged || 0,
             totalTradedVolume: String(data.totalTradedVolume || 0),
             totalTradedValue: String(data.totalTradedValue || 0),
-            timestamp: data.timeVal || new Date().toISOString(),
+            timestamp: data.timeVal ? new Date(data.timeVal).toISOString() : new Date().toISOString(),
         };
 
         cache.set(cacheKey, quote, 120);
@@ -297,8 +297,6 @@ export async function getIndexAnnouncements(indexName: string) {
                                 details: item.details,
                                 broadcastDateTime: broadcastDate,
                                 attachment: item.attachment,
-                                // Only add indexName if it exists in schema
-                                ...(indexName ? { indexName } : {}),
                             }
                         });
                     }

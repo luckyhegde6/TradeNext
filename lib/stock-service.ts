@@ -1,14 +1,39 @@
 import cache from "@/lib/cache";
 import { nseFetch } from "@/lib/nse-client";
 
+// Type definitions
+interface StockQuote {
+    symbol: string;
+    companyName: string;
+    identifier: string;
+    isinCode: string;
+    series: string;
+    lastPrice: number;
+    open: number;
+    dayHigh: number;
+    dayLow: number;
+    previousClose: number;
+    change: number;
+    pChange: number;
+    totalTradedVolume: number;
+    totalTradedValue: number;
+    yearHigh: number;
+    yearLow: number;
+    peRatio: number;
+    marketCap: number;
+    industry: string;
+    sector: string;
+    indexList: string[];
+}
+
 /**
  * Get stock quote data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=SBIN
  */
-export async function getStockQuote(symbol: string) {
+export async function getStockQuote(symbol: string): Promise<StockQuote> {
     const cacheKey = `nse:stock:${symbol}:quote`;
     const cached = cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) return cached as StockQuote;
 
     const qs = `?functionName=getSymbolData&marketType=N&series=EQ&symbol=${encodeURIComponent(symbol)}`;
     try {
@@ -25,7 +50,7 @@ export async function getStockQuote(symbol: string) {
         const priceInfo = data.priceInfo || {};
         const secInfo = data.secInfo || {};
 
-        const quote = {
+        const quote: StockQuote = {
             symbol: metaData.symbol || symbol,
             companyName: metaData.companyName || '',
             identifier: metaData.identifier || '',
@@ -72,10 +97,10 @@ export async function getStockQuote(symbol: string) {
  * Get stock chart data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolChartData&symbol=SBINEQN&days=1D
  */
-export async function getStockChart(symbol: string, days: string = "1D") {
+export async function getStockChart(symbol: string, days: string = "1D"): Promise<any[]> {
     const cacheKey = `nse:stock:${symbol}:chart:${days}`;
     const cached = cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) return cached as any[];
 
     // Need to get identifier first (e.g., SBINEQN for SBIN)
     const quote = await getStockQuote(symbol);
@@ -101,10 +126,10 @@ export async function getStockChart(symbol: string, days: string = "1D") {
  * Get stock yearwise trend data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getYearwiseData&symbol=SBINEQN
  */
-export async function getStockTrends(symbol: string) {
+export async function getStockTrends(symbol: string): Promise<any[]> {
     const cacheKey = `nse:stock:${symbol}:trends`;
     const cached = cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) return cached as any[];
 
     // Need to get identifier first
     const quote = await getStockQuote(symbol);
