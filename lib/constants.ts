@@ -1,0 +1,187 @@
+// lib/constants.ts
+
+// Performance optimization: Priority load for these indices
+export const MAJOR_INDICES = [
+  { key: "NIFTY 50", name: "NIFTY 50" },
+  { key: "NIFTY BANK", name: "NIFTY BANK" },
+  { key: "NIFTY IT", name: "NIFTY IT" },
+  { key: "NIFTY NEXT 50", name: "NIFTY NEXT 50" },
+  { key: "NIFTY MIDCAP 50", name: "NIFTY MIDCAP 50" },
+  { key: "NIFTY SMLCAP 100", name: "NIFTY SMALLCAP 100" },
+  { key: "INDIA VIX", name: "INDIA VIX" },
+  { key: "NIFTY AUTO", name: "NIFTY AUTO" },
+  { key: "NIFTY PHARMA", name: "NIFTY PHARMA" }
+];
+
+export const INITIAL_SYMBOLS = [
+  "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+  "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL",
+  "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB", "DRREDDY",
+  "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE",
+  "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC",
+  "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT",
+  "LTIM", "M&M", "MARUTI", "NESTLEIND", "NTPC",
+  "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SBIN",
+  "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL",
+  "TECHM", "TITAN", "ULTRACEMCO", "UPL", "WIPRO"
+];
+
+// NSE Holidays 2025
+// Format: YYYY-MM-DD
+export const MARKET_HOLIDAYS = [
+  "2025-02-26", // Mahashivratri
+  "2025-03-14", // Holi
+  "2025-03-31", // Id-Ul-Fitr (Ramadan Eid)
+  "2025-04-10", // Shri Mahavir Jayanti
+  "2025-04-14", // Dr. Baba Saheb Ambedkar Jayanti
+  "2025-04-18", // Good Friday
+  "2025-05-01", // Maharashtra Day
+  "2025-08-15", // Independence Day / Parsi New Year
+  "2025-08-27", // Shri Ganesh Chaturthi
+  "2025-10-02", // Mahatma Gandhi Jayanti/Dussehra
+  "2025-10-21", // Diwali Laxmi Pujan (Muhurat Trading likely in evening, closed during day)
+  "2025-10-22", // Balipratipada
+  "2025-11-05", // Prakash Gurpurb Sri Guru Nanak Dev
+  "2025-12-25", // Christmas
+];
+
+export const MARKET_TIMINGS = {
+  start: "09:15", // IST
+  end: "15:30",   // IST
+};
+
+export const INDICES = [
+  { key: "NIFTY 50", name: "NIFTY 50" },
+  { key: "NIFTY NEXT 50", name: "NIFTY NEXT 50" },
+  { key: "NIFTY BANK", name: "NIFTY BANK" },
+  { key: "NIFTY FIN SERVICE", name: "NIFTY FINANCIAL SERVICES" },
+  { key: "NIFTY MID SELECT", name: "NIFTY MIDCAP SELECT" },
+  { key: "NIFTY 100", name: "NIFTY 100" },
+  { key: "NIFTY 200", name: "NIFTY 200" },
+  { key: "NIFTY 500", name: "NIFTY 500" },
+  { key: "NIFTY MIDCAP 50", name: "NIFTY MIDCAP 50" },
+  { key: "NIFTY MIDCAP 100", name: "NIFTY MIDCAP 100" },
+  { key: "NIFTY SMLCAP 100", name: "NIFTY SMALLCAP 100" },
+  { key: "INDIA VIX", name: "INDIA VIX" },
+  { key: "NIFTY MIDCAP 150", name: "NIFTY MIDCAP 150" },
+  { key: "NIFTY SMLCAP 50", name: "NIFTY SMALLCAP 50" },
+  { key: "NIFTY SMLCAP 250", name: "NIFTY SMALLCAP 250" },
+  { key: "NIFTY MIDSML 400", name: "NIFTY MIDSMALLCAP 400" },
+  { key: "NIFTY500 MULTICAP", name: "NIFTY500 MULTICAP 50:25:25" },
+  { key: "NIFTY LARGEMID250", name: "NIFTY LARGEMIDCAP 250" },
+  { key: "NIFTY TOTAL MKT", name: "NIFTY TOTAL MARKET" },
+  { key: "NIFTY MICROCAP250", name: "NIFTY MICROCAP 250" },
+  { key: "NIFTY500 LMS EQL", name: "NIFTY500 LARGEMIDSMALL EQUAL-CAP WEIGHTED" },
+  { key: "NIFTY FPI 150", name: "NIFTY INDIA FPI 150" },
+  { key: "NIFTY AUTO", name: "NIFTY AUTO" },
+  { key: "NIFTY FINSRV25 50", name: "NIFTY FINANCIAL SERVICES 25/50" },
+  { key: "NIFTY FMCG", name: "NIFTY FMCG" },
+  { key: "NIFTY IT", name: "NIFTY IT" },
+  { key: "NIFTY MEDIA", name: "NIFTY MEDIA" },
+  { key: "NIFTY METAL", name: "NIFTY METAL" },
+  { key: "NIFTY PHARMA", name: "NIFTY PHARMA" },
+  { key: "NIFTY PSU BANK", name: "NIFTY PSU BANK" },
+  { key: "NIFTY PVT BANK", name: "NIFTY PRIVATE BANK" },
+  { key: "NIFTY REALTY", name: "NIFTY REALTY" },
+  { key: "NIFTY HEALTHCARE", name: "NIFTY HEALTHCARE INDEX" },
+  { key: "NIFTY CONSR DURBL", name: "NIFTY CONSUMER DURABLES" },
+  { key: "NIFTY OIL AND GAS", name: "NIFTY OIL & GAS" },
+  { key: "NIFTY MIDSML HLTH", name: "NIFTY MIDSMALL HEALTHCARE" },
+  { key: "NIFTY FINSEREXBNK", name: "NIFTY FINANCIAL SERVICES EX-BANK" },
+  { key: "NIFTY MS FIN SERV", name: "NIFTY MIDSMALL FINANCIAL SERVICES" },
+  { key: "NIFTY MS IT TELCM", name: "NIFTY MIDSMALL IT & TELECOM" },
+  { key: "NIFTY CHEMICALS", name: "NIFTY CHEMICALS" },
+  { key: "NIFTY500 HEALTH", name: "NIFTY500 HEALTHCARE" },
+  { key: "NIFTY DIV OPPS 50", name: "NIFTY DIVIDEND OPPORTUNITIES 50" },
+  { key: "NIFTY GROWSECT 15", name: "NIFTY GROWTH SECTORS 15" },
+  { key: "NIFTY100 QUALTY30", name: "NIFTY100 QUALITY 30" },
+  { key: "NIFTY50 VALUE 20", name: "NIFTY50 VALUE 20" },
+  { key: "NIFTY50 TR 2X LEV", name: "NIFTY50 TR 2X LEVERAGE" },
+  { key: "NIFTY50 PR 2X LEV", name: "NIFTY50 PR 2X LEVERAGE" },
+  { key: "NIFTY50 TR 1X INV", name: "NIFTY50 TR 1X INVERSE" },
+  { key: "NIFTY50 PR 1X INV", name: "NIFTY50 PR 1X INVERSE" },
+  { key: "NIFTY50 DIV POINT", name: "NIFTY50 DIVIDEND POINTS" },
+  { key: "NIFTY ALPHA 50", name: "NIFTY ALPHA 50" },
+  { key: "NIFTY50 EQL WGT", name: "NIFTY50 EQUAL WEIGHT" },
+  { key: "NIFTY100 EQL WGT", name: "NIFTY100 EQUAL WEIGHT" },
+  { key: "NIFTY100 LOWVOL30", name: "NIFTY100 LOW VOLATILITY 30" },
+  { key: "NIFTY200 QUALTY30", name: "NIFTY200 QUALITY 30" },
+  { key: "NIFTY ALPHALOWVOL", name: "NIFTY ALPHA LOW-VOLATILITY 30" },
+  { key: "NIFTY200MOMENTM30", name: "NIFTY200 MOMENTUM 30" },
+  { key: "NIFTY M150 QLTY50", name: "NIFTY MIDCAP150 QUALITY 50" },
+  { key: "NIFTY200 ALPHA 30", name: "NIFTY200 ALPHA 30" },
+  { key: "NIFTYM150MOMNTM50", name: "NIFTY MIDCAP150 MOMENTUM 50" },
+  { key: "NIFTY500MOMENTM50", name: "NIFTY500 MOMENTUM 50" },
+  { key: "NIFTYMS400 MQ 100", name: "NIFTY MIDSMALLCAP400 MOMENTUM QUALITY 100" },
+  { key: "NIFTYSML250MQ 100", name: "NIFTY SMALLCAP250 MOMENTUM QUALITY 100" },
+  { key: "NIFTY TOP 10 EW", name: "NIFTY TOP 10 EQUAL WEIGHT" },
+  { key: "NIFTY AQL 30", name: "NIFTY ALPHA QUALITY LOW-VOLATILITY 30" },
+  { key: "NIFTY AQLV 30", name: "NIFTY ALPHA QUALITY VALUE LOW-VOLATILITY 30" },
+  { key: "NIFTY HIGHBETA 50", name: "NIFTY HIGH BETA 50" },
+  { key: "NIFTY LOW VOL 50", name: "NIFTY LOW VOLATILITY 50" },
+  { key: "NIFTY QLTY LV 30", name: "NIFTY QUALITY LOW-VOLATILITY 30" },
+  { key: "NIFTY SML250 Q50", name: "NIFTY SMALLCAP250 QUALITY 50" },
+  { key: "NIFTY TOP 15 EW", name: "NIFTY TOP 15 EQUAL WEIGHT" },
+  { key: "NIFTY100 ALPHA 30", name: "NIFTY100 ALPHA 30" },
+  { key: "NIFTY200 VALUE 30", name: "NIFTY200 VALUE 30" },
+  { key: "NIFTY500 EW", name: "NIFTY500 EQUAL WEIGHT" },
+  { key: "NIFTY MULTI MQ 50", name: "NIFTY500 MULTICAP MOMENTUM QUALITY 50" },
+  { key: "NIFTY500 VALUE 50", name: "NIFTY500 VALUE 50" },
+  { key: "NIFTY TOP 20 EW", name: "NIFTY TOP 20 EQUAL WEIGHT" },
+  { key: "NIFTY500 QLTY50", name: "NIFTY500 QUALITY 50" },
+  { key: "NIFTY500 LOWVOL50", name: "NIFTY500 LOW VOLATILITY 50" },
+  { key: "NIFTY500 MQVLV50", name: "NIFTY500 MULTIFACTOR MQVLV 50" },
+  { key: "NIFTY50 USD", name: "NIFTY50 USD" },
+  { key: "NIFTY500 FLEXICAP", name: "NIFTY500 FLEXICAP QUALITY 30" },
+  { key: "NIFTY TMMQ 50", name: "NIFTY TOTAL MARKET MOMENTUM QUALITY 50" },
+  { key: "NIFTY COMMODITIES", name: "NIFTY COMMODITIES" },
+  { key: "NIFTY CONSUMPTION", name: "NIFTY INDIA CONSUMPTION" },
+  { key: "NIFTY CPSE", name: "NIFTY CPSE" },
+  { key: "NIFTY ENERGY", name: "NIFTY ENERGY" },
+  { key: "NIFTY INFRA", name: "NIFTY INFRASTRUCTURE" },
+  { key: "NIFTY100 LIQ 15", name: "NIFTY100 LIQUID 15" },
+  { key: "NIFTY MID LIQ 15", name: "NIFTY MIDCAP LIQUID 15" },
+  { key: "NIFTY MNC", name: "NIFTY MNC" },
+  { key: "NIFTY PSE", name: "NIFTY PSE" },
+  { key: "NIFTY SERV SECTOR", name: "NIFTY SERVICES SECTOR" },
+  { key: "NIFTY100ESGSECLDR", name: "NIFTY100 ESG SECTOR LEADERS" },
+  { key: "NIFTY IND DIGITAL", name: "NIFTY INDIA DIGITAL" },
+  { key: "NIFTY100 ESG", name: "NIFTY100 ESG" },
+  { key: "NIFTY INDIA MFG", name: "NIFTY INDIA MANUFACTURING" },
+  { key: "NIFTY TATA 25 CAP", name: "NIFTY INDIA CORPORATE GROUP INDEX - TATA GROUP 25% CAP" },
+  { key: "NIFTY MULTI MFG", name: "NIFTY500 MULTICAP INDIA MANUFACTURING 50:30:20" },
+  { key: "NIFTY MULTI INFRA", name: "NIFTY500 MULTICAP INFRASTRUCTURE 50:30:20" },
+  { key: "NIFTY IND DEFENCE", name: "NIFTY INDIA DEFENCE" },
+  { key: "NIFTY IND TOURISM", name: "NIFTY INDIA TOURISM" },
+  { key: "NIFTY CAPITAL MKT", name: "NIFTY CAPITAL MARKETS" },
+  { key: "NIFTY EV", name: "NIFTY EV & NEW AGE AUTOMOTIVE" },
+  { key: "NIFTY NEW CONSUMP", name: "NIFTY INDIA NEW AGE CONSUMPTION" },
+  { key: "NIFTY CORP MAATR", name: "NIFTY INDIA SELECT 5 CORPORATE GROUPS (MAATR)" },
+  { key: "NIFTY MOBILITY", name: "NIFTY MOBILITY" },
+  { key: "NIFTY100 ENH ESG", name: "NIFTY100 ENHANCED ESG" },
+  { key: "NIFTY COREHOUSING", name: "NIFTY CORE HOUSING" },
+  { key: "NIFTY HOUSING", name: "NIFTY HOUSING" },
+  { key: "NIFTY IPO", name: "NIFTY IPO" },
+  { key: "NIFTY MS IND CONS", name: "NIFTY MIDSMALL INDIA CONSUMPTION" },
+  { key: "NIFTY NONCYC CONS", name: "NIFTY NON-CYCLICAL CONSUMER" },
+  { key: "NIFTY RURAL", name: "NIFTY RURAL" },
+  { key: "NIFTY SHARIAH 25", name: "NIFTY SHARIAH 25" },
+  { key: "NIFTY TRANS LOGIS", name: "NIFTY TRANSPORTATION & LOGISTICS" },
+  { key: "NIFTY50 SHARIAH", name: "NIFTY50 SHARIAH" },
+  { key: "NIFTY500 SHARIAH", name: "NIFTY500 SHARIAH" },
+  { key: "NIFTY SME EMERGE", name: "NIFTY SME EMERGE" },
+  { key: "NIFTY INTERNET", name: "NIFTY INDIA INTERNET" },
+  { key: "NIFTY WAVES", name: "NIFTY WAVES" },
+  { key: "NIFTY INFRALOG", name: "NIFTY INDIA INFRASTRUCTURE & LOGISTICS" },
+  { key: "NIFTY GS 8 13YR", name: "NIFTY 8-13 YR G-SEC" },
+  { key: "NIFTY GS 10YR", name: "NIFTY 10 YR BENCHMARK G-SEC" },
+  { key: "NIFTY GS 10YR CLN", name: "NIFTY 10 YR BENCHMARK G-SEC (CLEAN PRICE)" },
+  { key: "NIFTY GS 4 8YR", name: "NIFTY 4-8 YR G-SEC INDEX" },
+  { key: "NIFTY GS 11 15YR", name: "NIFTY 11-15 YR G-SEC INDEX" },
+  { key: "NIFTY GS 15YRPLUS", name: "NIFTY 15 YR AND ABOVE G-SEC INDEX" },
+  { key: "NIFTY GS COMPSITE", name: "NIFTY COMPOSITE G-SEC INDEX" },
+  { key: "BHARATBOND-APR30", name: "NIFTY BHARAT BOND INDEX - APRIL 2030" },
+  { key: "BHARATBOND-APR31", name: "NIFTY BHARAT BOND INDEX - APRIL 2031" },
+  { key: "BHARATBOND-APR32", name: "NIFTY BHARAT BOND INDEX - APRIL 2032" },
+  { key: "BHARATBOND-APR33", name: "NIFTY BHARAT BOND INDEX - APRIL 2033" }
+];

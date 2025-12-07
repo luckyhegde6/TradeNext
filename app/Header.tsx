@@ -9,12 +9,14 @@ export default function Header() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
   const isLoggedIn = status === "authenticated";
+
   interface UserWithRole {
     name?: string | null;
     email?: string | null;
     image?: string | null;
     role?: string;
   }
+
   const user = session?.user as UserWithRole;
   const isAdmin = user?.role === "admin";
 
@@ -61,10 +63,16 @@ export default function Header() {
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
             </NavLink>
+
             {isAdmin && (
-              <NavLink href="/admin/users" active={isActive("/admin/users")}>
-                Admin Users
-              </NavLink>
+              <>
+                <NavLink href="/admin/users" active={isActive("/admin/users")}>
+                  Admin Users
+                </NavLink>
+                <NavLink href="/admin/utils" active={pathname?.startsWith("/admin/utils") || false}>
+                  Utils
+                </NavLink>
+              </>
             )}
           </nav>
 
@@ -77,7 +85,7 @@ export default function Header() {
                 </span>
                 <button
                   onClick={() => signOut()}
-                  className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-all shadow-sm"
+                  className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-blue-600 text-sm font-medium rounded-md text-blue-600 bg-white hover:bg-blue-50 transition-all shadow-sm"
                 >
                   Sign Out
                 </button>

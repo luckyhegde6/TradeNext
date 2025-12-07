@@ -32,7 +32,7 @@ echo "🗄 Running prisma generate & migrate on host (requires Node installed lo
 npm ci --no-audit --no-fund
 npx prisma generate --schema=prisma/schema.prisma
 # run migrate; if you want create-only, change to --create-only
-npx prisma migrate dev --name add_tradenext_models
+npx prisma migrate dev --name add_indexname_to_announcements
 
 # enable timescale (run from host)
 echo ""

@@ -9,10 +9,11 @@ export interface CompanyData {
 export async function getCompanyData(ticker: string): Promise<CompanyData> {
   const upperTicker = ticker.toUpperCase();
 
+  // Use correct Prisma table name and column names
   const qPrice = `
-      SELECT trade_date, close FROM daily_prices
+      SELECT "tradeDate" as trade_date, close FROM daily_prices
       WHERE ticker = $1
-      ORDER BY trade_date DESC
+      ORDER BY "tradeDate" DESC
       LIMIT 30;
     `;
   const pricesRes = await poolQuery.query(qPrice, [upperTicker]);
@@ -21,7 +22,7 @@ export async function getCompanyData(ticker: string): Promise<CompanyData> {
   const qFund = `
       SELECT * FROM fundamentals
       WHERE ticker = $1
-      ORDER BY as_of DESC
+      ORDER BY "asOf" DESC
       LIMIT 1;
     `;
   const fundRes = await poolQuery.query(qFund, [upperTicker]);

@@ -30,7 +30,7 @@ echo "🗄  Running Prisma migrations inside tradenext container..."
 docker-compose run --rm tradenext sh -c "
   npm ci --no-audit --no-fund &&
   npx prisma generate &&
-  npx prisma migrate dev --name add_tradenext_models
+  npx prisma migrate dev --name add_indexname_to_announcements
 "
 
 # Step 3 – Enable Timescale

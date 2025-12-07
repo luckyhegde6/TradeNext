@@ -84,8 +84,8 @@ async function waitForPostgres(composeCmd, maxAttempts = 60, intervalMs = 2000) 
     console.log('');
 
     console.log('🗄 Running Prisma migrations (inside tradenext container)...');
-    // Use sh -c to run series of commands inside container
-    run(`${composeCmd} run --rm tradenext sh -c "npm ci --no-audit --no-fund && npx prisma generate --schema=prisma/schema.prisma && npx prisma migrate dev --name add_tradenext_models"`);
+    // Use sh -c to run series of commands inside containe
+    run(`${composeCmd} run --rm tradenext sh -c "npm ci --no-audit --no-fund && npx prisma generate --schema=prisma/schema.prisma && npx prisma migrate dev --name add_indexname_to_announcements"`);
 
     console.log('⏳ Enabling Timescale hypertable...');
     run(`${composeCmd} run --rm tradenext sh -c "npm ci --no-audit --no-fund && npx ts-node scripts/enable_timescale.ts"`);
