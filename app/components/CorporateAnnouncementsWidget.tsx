@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import Link from "next/link";
+import sanitizeHtml from "sanitize-html";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -55,7 +56,7 @@ export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { 
                         </h4>
                         {item.details && (
                             <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                {item.details.replace(/<[^>]*>?/gm, '')}
+                                {sanitizeHtml(item.details, { allowedTags: [], allowedAttributes: {} })}
                             </p>
                         )}
                         {item.attachment && (
