@@ -163,3 +163,47 @@ model CorporateAnnouncement {
 
   @@index([broadcastDateTime])
 }
+
+model IndexQuote {
+  id              String   @id @default(cuid())
+  indexName       String   @unique
+  lastPrice       String
+  change          String
+  pChange         String
+  open            String?
+  high            String?
+  low             String?
+  previousClose   String?
+  yearHigh        String?
+  yearLow         String?
+  peRatio         String?
+  pbRatio         String?
+  dividendYield   String?
+  marketStatus    String?
+  advances        Int?
+  declines        Int?
+  unchanged       Int?
+  totalTradedVolume String?
+  totalTradedValue  String?
+  updatedAt       DateTime @updatedAt
+  timestamp       DateTime @default(now())
+}
+
+model IndexHeatmapItem {
+  id              String   @id @default(cuid())
+  indexName       String
+  symbol          String
+  lastPrice       Decimal  @db.Decimal(30,6)
+  change          Decimal  @db.Decimal(30,6)
+  pChange         Decimal  @db.Decimal(30,6)
+  volume          BigInt?
+  value           Decimal? @db.Decimal(30,6)
+  high            Decimal? @db.Decimal(30,6)
+  low             Decimal? @db.Decimal(30,6)
+  yearHigh        Decimal? @db.Decimal(30,6)
+  yearLow         Decimal? @db.Decimal(30,6)
+  updatedAt       DateTime @updatedAt
+
+  @@unique([indexName, symbol])
+  @@index([indexName])
+}

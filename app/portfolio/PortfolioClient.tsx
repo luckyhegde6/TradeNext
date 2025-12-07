@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { PortfolioSummary } from '@/lib/services/portfolioService';
-import MetricsCards from './components/MetricsCards';
-import AllocationChart from './components/AllocationChart';
-import HoldingsTable from './components/HoldingsTable';
-import TradingViewWidget from './components/TradingViewWidget';
+import MetricsCards from '../components/MetricsCards';
+import AllocationChart from '../components/AllocationChart';
+import HoldingsTable from '../components/HoldingsTable';
+import TradingViewWidget from '../components/TradingViewWidget';
 
 export default function PortfolioClient() {
     const [data, setData] = useState<PortfolioSummary | null>(null);

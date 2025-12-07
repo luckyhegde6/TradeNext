@@ -11,7 +11,7 @@ export default function MarketStatus() {
     const [isOpen, setIsOpen] = useState(false);
     const [message, setMessage] = useState("Checking Market Status...");
 
-    const { data } = useSWR("/api/nse/index/NIFTY%2050", fetcher, {
+    const { data, error } = useSWR("/api/nse/index/NIFTY%2050", fetcher, {
         refreshInterval: 60000,
     });
 
@@ -57,11 +57,11 @@ export default function MarketStatus() {
         return () => clearInterval(timer);
     }, []);
 
-    if (!isOpen && !data) return null; // Hide if closed and no data (or show closed banner)
+    // Don't show if there's an error or no data
+    if (error || (!isOpen && !data)) return null;
 
-    // Nifty 50 Data Accessors (Index data structure depends on NSE response)
-    // Usually response is { name: "NIFTY 50", lastPrice: ..., change: ..., pChange: ... }
-    const lastPrice = data?.lastPrice || "Loading...";
+    // Nifty 50 Data Accessors
+    const lastPrice = data?.lastPrice ? Number(data.lastPrice).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : "Loading...";
     const pChange = data?.pChange || "0.00";
     const isPositive = parseFloat(pChange) >= 0;
 

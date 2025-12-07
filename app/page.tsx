@@ -4,6 +4,8 @@ import MarketStatus from "@/app/components/MarketStatus";
 import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 
+import IndexCorporateActions from "@/app/components/IndexCorporateActions";
+
 async function getRecentPosts() {
   try {
     const posts = await prisma.post.findMany({
@@ -27,7 +29,7 @@ export default async function Home() {
   const posts = await getRecentPosts();
 
   return (
-    <div className="bg-white dark:bg-slate-950 min-h-screen">
+    <div className="bg-gray-50 dark:bg-slate-950 min-h-screen">
       {/* Hero / Dashboard Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="text-center mb-8">
@@ -41,35 +43,31 @@ export default async function Home() {
           <MarketStatus />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Main Chart Area - 3 Columns */}
-          <div className="lg:col-span-3 space-y-6">
-            <HomeChart />
+        {/* Detailed Index Dashboard */}
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Main Content: Chart */}
+            <div className="lg:col-span-3 space-y-6">
+              <HomeChart symbol="NIFTY 50" />
+            </div>
 
-            {/* Quick Actions / Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Link href="/markets" className="p-4 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
-                <span className="block text-2xl font-bold text-blue-600">Indices</span>
-                <span className="text-sm text-gray-500">Track Performance</span>
-              </Link>
-              <Link href="/portfolio" className="p-4 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
-                <span className="block text-2xl font-bold text-indigo-600">Portfolio</span>
-                <span className="text-sm text-gray-500">Manage Assets</span>
-              </Link>
-              <Link href="/posts" className="p-4 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
-                <span className="block text-2xl font-bold text-emerald-600">Community</span>
-                <span className="text-sm text-gray-500">Latest Insights</span>
-              </Link>
-              <div className="p-4 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 text-center opacity-70">
-                <span className="block text-xl font-bold text-gray-400">More</span>
-                <span className="text-sm text-gray-500">Coming Soon</span>
+            {/* Sidebar: Announcements + Corp Actions + Metrics */}
+            <div className="lg:col-span-1 space-y-6">
+              <CorporateAnnouncementsWidget />
+              <IndexCorporateActions symbol="NIFTY 50" />
+
+              {/* Quick Links */}
+              <div className="grid grid-cols-2 gap-3">
+                <Link href="/markets" className="p-3 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
+                  <span className="block text-xl font-bold text-blue-600">Indices</span>
+                  <span className="text-xs text-gray-500">All Markets</span>
+                </Link>
+                <Link href="/portfolio" className="p-3 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
+                  <span className="block text-xl font-bold text-indigo-600">Portfolio</span>
+                  <span className="text-xs text-gray-500">My Assets</span>
+                </Link>
               </div>
             </div>
-          </div>
-
-          {/* Sidebar - 1 Column */}
-          <div className="lg:col-span-1">
-            <CorporateAnnouncementsWidget />
           </div>
         </div>
       </section>

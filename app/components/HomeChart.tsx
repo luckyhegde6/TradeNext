@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { MAJOR_INDICES } from "@/lib/constants";
 
 import useSWR from "swr";
 import {
@@ -29,12 +30,18 @@ ChartJS.register(
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-export default function HomeChart() {
-    const { data: chartData } = useSWR("/api/nse/index/NIFTY%2050/chart", fetcher, {
+export default function HomeChart({ symbol: initialSymbol = "NIFTY 50" }: { symbol?: string }) {
+    // State for selected index
+    const [selectedIndex, setSelectedIndex] = useState(initialSymbol);
+
+    // Encode symbol once
+    const encodedSymbol = encodeURIComponent(selectedIndex);
+
+    const { data: chartData } = useSWR(`/api/nse/index/${encodedSymbol}/chart`, fetcher, {
         refreshInterval: 60000,
     });
 
-    const { data: quoteData } = useSWR("/api/nse/index/NIFTY%2050", fetcher, {
+    const { data: quoteData } = useSWR(`/api/nse/index/${encodedSymbol}`, fetcher, {
         refreshInterval: 30000,
     });
 
@@ -57,7 +64,7 @@ export default function HomeChart() {
         labels,
         datasets: [
             {
-                label: 'NIFTY 50',
+                label: selectedIndex,
                 data: values,
                 borderColor: lineColor,
                 backgroundColor: fillColor,
@@ -116,10 +123,23 @@ export default function HomeChart() {
         <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 p-6 h-[600px]">
             <div className="flex justify-between items-start mb-6">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        NIFTY 50
+                    <div className="flex items-center gap-3 mb-2">
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                            {selectedIndex}
+                        </h2>
+                        <select
+                            value={selectedIndex}
+                            onChange={(e) => setSelectedIndex(e.target.value)}
+                            className="text-sm font-medium bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            {MAJOR_INDICES.map((idx) => (
+                                <option key={idx.key} value={idx.key}>
+                                    {idx.name}
+                                </option>
+                            ))}
+                        </select>
                         <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded">NSE Indices</span>
-                    </h2>
+                    </div>
                     {quoteData && (
                         <div className="mt-2 flex items-baseline gap-3">
                             <span className="text-4xl font-extrabold text-gray-900 dark:text-white">

@@ -1,5 +1,18 @@
 // lib/constants.ts
 
+// Performance optimization: Priority load for these indices
+export const MAJOR_INDICES = [
+  { key: "NIFTY 50", name: "NIFTY 50" },
+  { key: "NIFTY BANK", name: "NIFTY BANK" },
+  { key: "NIFTY IT", name: "NIFTY IT" },
+  { key: "NIFTY NEXT 50", name: "NIFTY NEXT 50" },
+  { key: "NIFTY MIDCAP 50", name: "NIFTY MIDCAP 50" },
+  { key: "NIFTY SMLCAP 100", name: "NIFTY SMALLCAP 100" },
+  { key: "INDIA VIX", name: "INDIA VIX" },
+  { key: "NIFTY AUTO", name: "NIFTY AUTO" },
+  { key: "NIFTY PHARMA", name: "NIFTY PHARMA" }
+];
+
 export const INITIAL_SYMBOLS = [
   "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
   "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL",

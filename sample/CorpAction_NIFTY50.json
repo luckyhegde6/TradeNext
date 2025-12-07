@@ -1,0 +1,124 @@
+{
+    "data": [
+        {
+            "series": "EQ",
+            "symbol": "SIKKO",
+            "toDate": "2025-12-08 00:00:00",
+            "company": "Sikko Industries Limited",
+            "purpose": "Bonus 1:1",
+            "bcStartDate": "-",
+            "faceVal": "1",
+            "bcEndDate": "-",
+            "exDate": "08-Dec-2025",
+            "caRecDate": "08-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "MODISONLTD",
+            "toDate": "2025-12-08 00:00:00",
+            "company": "MODISON LIMITED",
+            "purpose": "Interim Dividend - Rs 2.50 Per Share",
+            "bcStartDate": "-",
+            "faceVal": "1",
+            "bcEndDate": "-",
+            "exDate": "08-Dec-2025",
+            "caRecDate": "08-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "STEELCITY",
+            "toDate": "2025-12-11 00:00:00",
+            "company": "Steel City Securities Limited",
+            "purpose": "Interim Dividend - Re 1 Per Share",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "11-Dec-2025",
+            "caRecDate": "11-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "BHARATRAS",
+            "toDate": "2025-12-12 00:00:00",
+            "company": "Bharat Rasayan Limited",
+            "purpose": "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 5/- Per Share",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "12-Dec-2025",
+            "caRecDate": "12-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "BECTORFOOD",
+            "toDate": "2025-12-12 00:00:00",
+            "company": "Mrs. Bectors Food Specialities Limited",
+            "purpose": "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "12-Dec-2025",
+            "caRecDate": "12-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "NURECA",
+            "toDate": "2025-12-12 00:00:00",
+            "company": "Nureca Limited",
+            "purpose": "Buy Back",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "12-Dec-2025",
+            "caRecDate": "12-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "BHARATRAS",
+            "toDate": "2025-12-12 00:00:00",
+            "company": "Bharat Rasayan Limited",
+            "purpose": "Bonus 1:1",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "12-Dec-2025",
+            "caRecDate": "12-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "VLSFINANCE",
+            "toDate": "2025-12-12 00:00:00",
+            "company": "VLS Finance Limited",
+            "purpose": "Buy Back",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "12-Dec-2025",
+            "caRecDate": "12-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "KMEW",
+            "toDate": "2025-12-22 00:00:00",
+            "company": "Knowledge Marine & Engineering Works Limited",
+            "purpose": "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 5/- Per Share",
+            "bcStartDate": "-",
+            "faceVal": "10",
+            "bcEndDate": "-",
+            "exDate": "22-Dec-2025",
+            "caRecDate": "22-Dec-2025"
+        },
+        {
+            "series": "EQ",
+            "symbol": "NECLIFE",
+            "toDate": "2025-12-24 00:00:00",
+            "company": "Nectar Lifesciences Limited",
+            "purpose": "Buy Back",
+            "bcStartDate": "-",
+            "faceVal": "1",
+            "bcEndDate": "-",
+            "exDate": "24-Dec-2025",
+            "caRecDate": "24-Dec-2025"
+        }
+    ]
+}

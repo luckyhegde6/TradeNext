@@ -5,8 +5,13 @@ import Link from "next/link";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-export default function CorporateAnnouncementsWidget() {
-    const { data: announcements, isLoading } = useSWR("/api/announcements", fetcher, {
+export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { symbol?: string }) {
+    // Build API URL based on whether symbol is provided
+    const apiUrl = symbol
+        ? `/api/nse/index/${encodeURIComponent(symbol)}/announcements`
+        : "/api/announcements";
+
+    const { data: announcements, isLoading } = useSWR(apiUrl, fetcher, {
         refreshInterval: 60000, // Refresh every minute
     });
 
@@ -31,10 +36,10 @@ export default function CorporateAnnouncementsWidget() {
                 </h3>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar max-h-[500px]">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {announcements?.map((item: any) => (
-                    <div key={item.id} className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors border-gray-100 dark:border-slate-700">
+                {announcements?.map((item: any, index: number) => (
+                    <div key={`${item.symbol}-${item.broadcastDateTime}-${index}`} className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors border-gray-100 dark:border-slate-700">
                         <div className="flex justify-between items-start">
                             <span className="font-bold text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded">
                                 {item.symbol}

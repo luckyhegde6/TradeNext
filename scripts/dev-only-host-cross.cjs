@@ -117,9 +117,10 @@ async function waitForPostgres(composeCmd, maxAttempts = 60, intervalMs = 2000) 
         console.log('   (This allows interactive prompts if needed, though usually automatic in clean state)');
         
         // Running with inherit to allow interaction if strictly necessary, strictly synchronous
-        execSync('npx prisma migrate dev --name add_tradenext_models', { stdio: 'inherit', shell: true });
+        execSync('npx prisma migrate dev --name add_indexname_to_announcements', { stdio: 'inherit', shell: true });
         console.log('✅ Migration completed successfully.');
-        
+        console.log('Generating Prisma Client...'); 
+        execSync('npx prisma generate', { stdio: 'inherit', shell: true });
         console.log('🌱 Running database seed...');
         execSync('npx prisma db seed', { stdio: 'inherit', shell: true });
         console.log('✅ Seeding completed successfully.');
