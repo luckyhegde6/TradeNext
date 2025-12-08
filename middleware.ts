@@ -1,12 +1,34 @@
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
-    const isLoggedIn = !!req.auth;
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
+
+function checkAdminKey(req: NextRequest) {
+    if (!ADMIN_KEY) return false;
+    const headerKey = req.headers.get("x-admin-key");
+    if (headerKey && headerKey === ADMIN_KEY) return true;
+    const cookieKey = req.cookies.get("admin_key")?.value;
+    if (cookieKey && cookieKey === ADMIN_KEY) return true;
+    return false;
+}
+
+// Wrap NextAuth auth handler but add pre-check for docs routes
+export default auth((req: any) => {
+    // req is NextRequest with added auth by next-auth
     const { nextUrl } = req;
+    const pathname = nextUrl.pathname;
+
+    // Allow admin-key to access docs/openapi without redirecting to login
+    if (pathname.startsWith("/docs") || pathname === "/api/openapi") {
+        if (checkAdminKey(req)) return NextResponse.next();
+        // otherwise fall through to normal auth behaviour (so sign-in will be required)
+    }
+
+    const isLoggedIn = !!req.auth;
     const user = req.auth?.user as any; // Cast to any to access role
     const isAdmin = user?.role === "admin";
 

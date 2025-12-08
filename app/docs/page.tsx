@@ -1,4 +1,4 @@
-// app/docs/page.tsx
+// app/docs/page.tsx (client component)
 'use client';
 import { useEffect } from 'react';
 
@@ -17,7 +17,7 @@ export default function DocsPage() {
 
     script.onload = async () => {
       // @ts-expect-error - SwaggerUIBundle is loaded dynamically
-      window.ui = (window as Window & { SwaggerUIBundle: unknown }).SwaggerUIBundle({
+      window.ui = (window as Window & { SwaggerUIBundle: any }).SwaggerUIBundle({
         url: '/api/openapi',
         dom_id: '#swagger',
       });
@@ -31,6 +31,10 @@ export default function DocsPage() {
   return (
     <main style={{ padding: 16 }}>
       <h1>TradeNext API Docs</h1>
+      <p style={{ fontSize: 13, color: '#666' }}>
+        To view docs set cookie <code>admin_key=YOUR_ADMIN_KEY</code> (browser console) or send header{' '}
+        <code>x-admin-key</code>.
+      </p>
       <div id="swagger" />
     </main>
   );

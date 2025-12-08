@@ -33,8 +33,22 @@ const openapi = {
             },
         },
     },
+    components: {
+        securitySchemes: {
+            adminKey: {
+                type: "apiKey",
+                in: "header",
+                name: "x-admin-key",
+            },
+        },
+    },
 };
 
-export async function GET() {
+export async function GET(req: Request) {
+    try {
+        console.log({ url: "/api/openapi", ip: req.headers.get("x-forwarded-for") ?? "unknown" }, "openapi requested");
+    } catch (e) {
+        console.error({ error: e }, "openapi requested");
+    }
     return NextResponse.json(openapi);
 }
