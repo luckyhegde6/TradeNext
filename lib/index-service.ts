@@ -47,9 +47,19 @@ export async function getIndexChartData(indexName: string) {
     const startOfDay = new Date(targetDate); startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(targetDate); endOfDay.setHours(23, 59, 59, 999);
 
-    const dbCount = await prisma.indexPoint.count({
-        where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } }
-    });
+    let dbCount = 0;
+    try {
+        const countPromise = prisma.indexPoint.count({
+            where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } }
+        });
+        const timeoutPromise = new Promise<number>((_, reject) =>
+            setTimeout(() => reject(new Error('Database count timeout')), 3000)
+        );
+        dbCount = await Promise.race([countPromise, timeoutPromise]);
+    } catch (dbError) {
+        console.warn(`Database count query failed for ${indexName}:`, dbError.message || dbError);
+        dbCount = 0; // Fallback to fetching from NSE
+    }
 
     if (dbCount > 10) {
         const points = await prisma.indexPoint.findMany({
@@ -99,12 +109,18 @@ export async function getIndexChartData(indexName: string) {
 export async function getIndexDetails(indexName: string) {
     let dbQuote = null;
     try {
-        dbQuote = await prisma.indexQuote.findUnique({ where: { indexName } });
+        // Add timeout to database query to prevent hanging
+        const queryPromise = prisma.indexQuote.findUnique({ where: { indexName } });
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Database query timeout')), 5000)
+        );
+
+        dbQuote = await Promise.race([queryPromise, timeoutPromise]) as any;
         if (dbQuote && (Date.now() - dbQuote.updatedAt.getTime()) < 120000) {
             return dbQuote;
         }
     } catch (dbError) {
-        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError);
+        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError.message || dbError);
         // Continue to fetch from NSE
     }
 
@@ -263,7 +279,12 @@ export async function getIndexCorporateActions(indexName: string) {
         cache.set(cacheKey, data, 1800); // 30 mins
         return data;
     } catch (e) {
-        console.error("Corporate actions fetch error", e);
+        // Log specific error types
+        if (e instanceof Error && e.message.includes('404')) {
+            console.warn(`Corporate actions not available for ${indexName} (API returned 404)`);
+        } else {
+            console.error("Corporate actions fetch error", e);
+        }
         return [];
     }
 }
