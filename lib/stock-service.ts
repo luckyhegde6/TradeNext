@@ -1,4 +1,4 @@
-import cache from "@/lib/cache";
+import cache, { hotCache } from "@/lib/cache";
 import { nseFetch } from "@/lib/nse-client";
 
 // Type definitions
@@ -32,7 +32,7 @@ interface StockQuote {
  */
 export async function getStockQuote(symbol: string): Promise<StockQuote> {
     const cacheKey = `nse:stock:${symbol}:quote`;
-    const cached = cache.get(cacheKey);
+    const cached = hotCache.get(cacheKey); // Use hot cache for frequently accessed stock quotes
     if (cached) return cached as StockQuote;
 
     const qs = `?functionName=getSymbolData&marketType=N&series=EQ&symbol=${encodeURIComponent(symbol)}`;
@@ -85,7 +85,7 @@ export async function getStockQuote(symbol: string): Promise<StockQuote> {
         };
 
         console.log(`[Stock Service] Mapped quote:`, quote);
-        cache.set(cacheKey, quote, 120); // 2 mins
+        hotCache.set(cacheKey, quote, 120); // Cache in hot cache for 2 mins
         return quote;
     } catch (e) {
         console.error(`[Stock Service] Error fetching quote for ${symbol}:`, e);

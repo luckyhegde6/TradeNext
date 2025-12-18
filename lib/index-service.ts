@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma";
-import cache from "@/lib/cache"; // NodeCache
+import cache, { hotCache, staticCache } from "@/lib/cache"; // NodeCache
 import { nseFetch } from "@/lib/nse-client";
 import { MARKET_TIMINGS, MARKET_HOLIDAYS } from "@/lib/constants";
 import type { IndexQuote } from "@prisma/client";
@@ -103,7 +103,9 @@ export async function getIndexChartData(indexName: string) {
         return normalizedData;
     } catch (e) {
         console.error("Failed to fetch index chart:", e);
-        throw e;
+        // Return empty chart data instead of throwing
+        console.warn(`Chart data not available for ${indexName}, returning empty data`);
+        return { grapthData: [] };
     }
 }
 
@@ -126,7 +128,7 @@ export async function getIndexDetails(indexName: string) {
     }
 
     const cacheKey = `nse:index:${indexName}:quote`;
-    const cached = cache.get(cacheKey);
+    const cached = hotCache.get(cacheKey); // Use hot cache for frequently accessed index quotes
     if (cached) return cached;
 
     const qs = `?functionName=getIndexData&&index=${encodeURIComponent(indexName)}`;
@@ -158,7 +160,7 @@ export async function getIndexDetails(indexName: string) {
             timestamp: data.timeVal ? new Date(data.timeVal).toISOString() : new Date().toISOString(),
         };
 
-        cache.set(cacheKey, quote, 120);
+        hotCache.set(cacheKey, quote, 120); // Cache in hot cache for 2 minutes
 
         // Async database hydration (don't fail the request if DB is unavailable)
         (async () => {
@@ -176,14 +178,41 @@ export async function getIndexDetails(indexName: string) {
         return quote;
     } catch (e) {
         console.error("Failed to fetch index details:", e);
-        if (dbQuote) return dbQuote;
-        throw e;
+        if (dbQuote) {
+            console.log(`Returning cached data for ${indexName} due to API failure`);
+            return dbQuote;
+        }
+
+        // Return a fallback response instead of throwing error
+        console.warn(`Index ${indexName} not available, returning fallback data`);
+        return {
+            indexName,
+            lastPrice: "0",
+            change: "0",
+            pChange: "0",
+            open: "0",
+            high: "0",
+            low: "0",
+            previousClose: "0",
+            yearHigh: "0",
+            yearLow: "0",
+            peRatio: "0",
+            pbRatio: "0",
+            dividendYield: "0",
+            marketStatus: "Closed",
+            advances: 0,
+            declines: 0,
+            unchanged: 0,
+            totalTradedVolume: "0",
+            totalTradedValue: "0",
+            timestamp: new Date().toISOString(),
+        };
     }
 }
 
 export async function getIndexHeatmap(indexName: string) {
     const cacheKey = `nse:index:${indexName}:heatmap`;
-    const cached = cache.get(cacheKey);
+    const cached = cache.get(cacheKey); // Use regular cache for heatmap data
     if (cached) return cached;
 
     const qs = `?functionName=getConstituents&&index=${encodeURIComponent(indexName)}&&noofrecords=0`;
@@ -268,7 +297,7 @@ export async function getIndexHeatmap(indexName: string) {
 
 export async function getIndexCorporateActions(indexName: string) {
     const cacheKey = `nse:index:${indexName}:corpactions`;
-    const cached = cache.get(cacheKey);
+    const cached = staticCache.get(cacheKey); // Use static cache for corporate actions
     if (cached) return cached;
 
     const qs = `?functionName=getCorporateAction&&flag=CAC&&index=${encodeURIComponent(indexName)}`;
@@ -277,7 +306,7 @@ export async function getIndexCorporateActions(indexName: string) {
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const data = rawData?.data || [];
 
-        cache.set(cacheKey, data, 1800); // 30 mins
+        staticCache.set(cacheKey, data, 1800); // Cache in static cache for 30 mins
         return data;
     } catch (e) {
         // Log specific error types
@@ -292,7 +321,7 @@ export async function getIndexCorporateActions(indexName: string) {
 
 export async function getIndexAnnouncements(indexName: string) {
     const cacheKey = `nse:index:${indexName}:announcements`;
-    const cached = cache.get(cacheKey);
+    const cached = staticCache.get(cacheKey); // Use static cache for announcements
     if (cached) return cached;
 
     const qs = `?functionName=getAnnouncementsIndices&flag=CAN&&index=${encodeURIComponent(indexName)}`;
@@ -309,7 +338,7 @@ export async function getIndexAnnouncements(indexName: string) {
             return dateB.getTime() - dateA.getTime();
         });
 
-        cache.set(cacheKey, sorted, 1800); // 30 mins
+        staticCache.set(cacheKey, sorted, 1800); // Cache in static cache for 30 mins
 
         // Async DB hydration (don't fail the request if DB is unavailable)
         (async () => {
@@ -353,7 +382,7 @@ export async function getIndexAnnouncements(indexName: string) {
  */
 export async function getAdvanceDecline(indexName: string) {
     const cacheKey = `nse:index:${indexName}:advdec`;
-    const cached = cache.get(cacheKey);
+    const cached = cache.get(cacheKey); // Use regular cache for advance/decline data
     if (cached) return cached;
 
     const qs = `?functionName=getAdvanceDecline&&index=${encodeURIComponent(indexName)}`;

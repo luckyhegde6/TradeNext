@@ -8,10 +8,11 @@ const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@
 // Create connection pool and adapter with better serverless configuration
 const pool = new Pool({
   connectionString: databaseUrl,
-  max: 10, // Maximum number of connections
+  max: 5, // Reduce max connections for serverless
   min: 0,  // Minimum number of connections
-  idleTimeoutMillis: 30000, // Close idle connections after 30s
-  connectionTimeoutMillis: 2000, // Connection timeout
+  idleTimeoutMillis: 15000, // Close idle connections after 15s (shorter for serverless)
+  connectionTimeoutMillis: 5000, // Connection timeout (longer for remote DB)
+  query_timeout: 30000, // Query timeout
 });
 const adapter = new PrismaPg(pool);
 
