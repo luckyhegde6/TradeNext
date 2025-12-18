@@ -1,4 +1,14 @@
 import { poolQuery } from '@/lib/db/server';
+import type { QueryResult } from 'pg';
+
+interface PriceRow {
+  trade_date: Date;
+  close: string | number;
+}
+
+interface FundamentalsRow {
+  [key: string]: unknown;
+}
 
 export interface CompanyData {
   ticker: string;
@@ -23,7 +33,7 @@ export async function getCompanyData(ticker: string): Promise<CompanyData> {
     const priceTimeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Price query timeout')), 8000)
     );
-    const pricesRes = await Promise.race([pricePromise, priceTimeoutPromise]) as any;
+    const pricesRes = await Promise.race([pricePromise, priceTimeoutPromise]) as QueryResult<PriceRow>;
 
     // fundamentals (latest)
     const qFund = `
@@ -38,10 +48,10 @@ export async function getCompanyData(ticker: string): Promise<CompanyData> {
     const fundTimeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Fundamentals query timeout')), 8000)
     );
-    const fundRes = await Promise.race([fundPromise, fundTimeoutPromise]) as any;
+    const fundRes = await Promise.race([fundPromise, fundTimeoutPromise]) as QueryResult<FundamentalsRow>;
 
-    const prices = pricesRes.rows.map((r: Record<string, unknown>) => ({
-      trade_date: r.trade_date as Date,
+    const prices = pricesRes.rows.map((r: PriceRow) => ({
+      trade_date: r.trade_date,
       close: Number(r.close),
     }));
     const fundamentals = fundRes.rows[0] || null;

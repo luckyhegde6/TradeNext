@@ -83,7 +83,7 @@ async function nseFetch(path: string, qs = "") {
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       console.error(`[NSE Timeout] Request timed out for ${url}`);
       throw new Error(`NSE request timeout for ${url}`);
     }

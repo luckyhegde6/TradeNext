@@ -2,6 +2,7 @@ import prisma from "@/lib/prisma";
 import cache from "@/lib/cache"; // NodeCache
 import { nseFetch } from "@/lib/nse-client";
 import { MARKET_TIMINGS, MARKET_HOLIDAYS } from "@/lib/constants";
+import type { IndexQuote } from "@prisma/client";
 
 // Helper to check if market is currently open
 function isMarketOpen() {
@@ -57,7 +58,7 @@ export async function getIndexChartData(indexName: string) {
         );
         dbCount = await Promise.race([countPromise, timeoutPromise]);
     } catch (dbError) {
-        console.warn(`Database count query failed for ${indexName}:`, dbError.message || dbError);
+        console.warn(`Database count query failed for ${indexName}:`, dbError instanceof Error ? dbError.message : dbError);
         dbCount = 0; // Fallback to fetching from NSE
     }
 
@@ -115,12 +116,12 @@ export async function getIndexDetails(indexName: string) {
             setTimeout(() => reject(new Error('Database query timeout')), 5000)
         );
 
-        dbQuote = await Promise.race([queryPromise, timeoutPromise]) as any;
+        dbQuote = await Promise.race([queryPromise, timeoutPromise]) as IndexQuote | null;
         if (dbQuote && (Date.now() - dbQuote.updatedAt.getTime()) < 120000) {
             return dbQuote;
         }
     } catch (dbError) {
-        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError.message || dbError);
+        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError instanceof Error ? dbError.message : dbError);
         // Continue to fetch from NSE
     }
 
