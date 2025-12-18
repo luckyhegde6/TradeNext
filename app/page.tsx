@@ -1,23 +1,16 @@
 import Link from "next/link";
-import prisma from "@/lib/prisma";
 import MarketStatus from "@/app/components/MarketStatus";
 import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
-
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
 
 async function getRecentPosts() {
   try {
-    const posts = await prisma.post.findMany({
-      take: 3,
-      orderBy: { createdAt: "desc" },
-      include: {
-        author: {
-          select: { name: true },
-        },
-      },
+    const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/home/recent-posts`, {
+      cache: 'no-store'
     });
-    return posts;
+    const data = await res.json();
+    return data.posts || [];
   } catch {
     return [];
   }

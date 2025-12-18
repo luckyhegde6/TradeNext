@@ -16,7 +16,7 @@ export default auth((req) => {
         nextUrl.pathname.startsWith("/posts/new") ||
         nextUrl.pathname.startsWith("/users/new");
 
-    const isAdminRoute = nextUrl.pathname.startsWith("/admin");
+    const isAdminRoute = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/docs");
 
     // Redirect to login if accessing protected route while not logged in
     if ((isProtected || isAdminRoute) && !isLoggedIn) {

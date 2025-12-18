@@ -14,9 +14,8 @@ export default async function NewPost() {
   async function createPost(formData: FormData) {
     "use server";
 
-    // Lazy-load Prisma in server action
-    const { default: prisma } = await import("@/lib/prisma");
-    const { auth } = await import("@/lib/auth"); // Re-import not needed but good for clarity in action context if separate
+    const { auth } = await import("@/lib/auth");
+    const { createPost: createPostService } = await import("@/lib/services/postService");
     const session = await auth(); // Re-fetch session in action for security
 
     if (!session?.user?.email) {
@@ -27,17 +26,7 @@ export default async function NewPost() {
     const title = formData.get("title") as string;
     const content = formData.get("content") as string;
 
-    await prisma.post.create({
-      data: {
-        title,
-        content,
-        author: {
-          connect: {
-            email: authorEmail,
-          },
-        },
-      },
-    });
+    await createPostService({ title, content, authorEmail });
 
     revalidatePath("/posts");
     redirect("/posts");

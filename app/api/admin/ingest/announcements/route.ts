@@ -2,11 +2,24 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import csv from "csv-parser";
 import { Readable } from "stream";
+import { auth } from "@/lib/auth";
+import logger from "@/lib/logger";
 
 export const maxDuration = 60; // Allow longer timeout
 
 export async function POST() {
     try {
+        const session = await auth();
+        const user = session?.user as { role?: string };
+        const isAdmin = user?.role === "admin";
+
+        if (!session || !isAdmin) {
+            logger.warn({ msg: 'Unauthorized access to admin announcements ingest', user: session?.user?.email });
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        logger.info({ msg: 'Admin announcements ingest started', user: session.user.email });
+
         // Official NSE Corporate Announcements CSV URL
         const CSV_URL = "https://www.nseindia.com/api/corporate-announcements?index=equities&reqXbrl=false&csv=true";
 
@@ -69,10 +82,11 @@ export async function POST() {
             });
         }
 
+        logger.info({ msg: 'Admin announcements ingest completed', count: results.length });
         return NextResponse.json({ success: true, count: results.length });
     } catch (e: unknown) {
-        console.error("Ingest error:", e);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return NextResponse.json({ error: (e as any).message || "Ingestion failed" }, { status: 500 });
+        const errorMessage = (e instanceof Error ? e.message : "Ingestion failed");
+        logger.error({ msg: 'Admin announcements ingest failed', error: errorMessage });
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }

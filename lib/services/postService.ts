@@ -16,3 +16,17 @@ export async function getPaginatedPosts(page: number, postsPerPage: number) {
 export async function getTotalPosts() {
     return await prisma.post.count();
 }
+
+export async function createPost(data: { title: string; content: string; authorEmail: string }) {
+    return await prisma.post.create({
+        data: {
+            title: data.title,
+            content: data.content,
+            author: {
+                connect: {
+                    email: data.authorEmail,
+                },
+            },
+        },
+    });
+}

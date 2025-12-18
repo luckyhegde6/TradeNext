@@ -12,18 +12,11 @@ interface User {
 
 // User List Component
 async function UsersList() {
-    // Lazy-load Prisma
-    const { default: prisma } = await import("@/lib/prisma");
-
-    const users = await prisma.user.findMany({
-        orderBy: { createdAt: "desc" },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            createdAt: true,
-        },
+    const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/users`, {
+        cache: 'no-store'
     });
+    const data = await res.json();
+    const users = data.users || [];
 
     if (users.length === 0) {
         return <p className="text-gray-600 text-center py-8">No users found.</p>;
