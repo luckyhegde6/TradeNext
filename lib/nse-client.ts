@@ -4,7 +4,20 @@ import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
 import Redis from "ioredis";
 
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+// Redis is only available in local development environments
+let redis: Redis | null = null;
+if (process.env.REDIS_URL || process.env.NODE_ENV === 'development') {
+  try {
+    redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+    redis.on('error', (err) => {
+      console.warn('Redis connection error (this is normal in production):', err.message);
+      redis = null;
+    });
+  } catch (error) {
+    console.warn('Failed to initialize Redis (this is normal in production):', error);
+    redis = null;
+  }
+}
 
 const jar = new CookieJar();
 const fetchWithCookies = fetchCookie(fetch, jar);
