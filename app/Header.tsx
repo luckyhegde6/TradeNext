@@ -63,6 +63,9 @@ export default function Header() {
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
             </NavLink>
+            <NavLink href="/contact" active={isActive("/contact")}>
+              Contact
+            </NavLink>
 
             {isAdmin && (
               <>

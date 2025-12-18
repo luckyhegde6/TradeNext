@@ -1,0 +1,134 @@
+name: Update Changelog
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [ closed ]
+    branches: [ main ]
+
+jobs:
+  update-changelog:
+    if: github.event.pull_request.merged == true || github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the latest tag or use initial commit
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+
+        # Generate changelog entries from commits since last tag
+        if [ "$LATEST_TAG" != "$(git rev-parse HEAD)" ]; then
+          echo "## [Unreleased]" > changelog_entries.md
+          echo "" >> changelog_entries.md
+
+          # Get commits since last tag, excluding merge commits
+          git log --pretty=format:"%s" --no-merges ${LATEST_TAG}..HEAD | while read -r commit; do
+            # Categorize commits based on conventional commit format
+            if [[ $commit =~ ^feat: ]]; then
+              echo "- ${commit#feat: }" >> changelog_entries.md
+            elif [[ $commit =~ ^fix: ]]; then
+              echo "- ${commit#fix: }" >> changelog_entries.md
+            elif [[ $commit =~ ^docs: ]]; then
+              echo "- ${commit#docs: }" >> changelog_entries.md
+            elif [[ $commit =~ ^style: ]]; then
+              echo "- ${commit#style: }" >> changelog_entries.md
+            elif [[ $commit =~ ^refactor: ]]; then
+              echo "- ${commit#refactor: }" >> changelog_entries.md
+            elif [[ $commit =~ ^perf: ]]; then
+              echo "- ${commit#perf: }" >> changelog_entries.md
+            elif [[ $commit =~ ^test: ]]; then
+              echo "- ${commit#test: }" >> changelog_entries.md
+            elif [[ $commit =~ ^chore: ]]; then
+              echo "- ${commit#chore: }" >> changelog_entries.md
+            else
+              echo "- $commit" >> changelog_entries.md
+            fi
+          done
+
+          # Create new version entry
+          NEW_VERSION=$(date +"%Y.%m.%d")
+          sed -i "s/## \[Unreleased\]/## [${NEW_VERSION}] - $(date +%Y-%m-%d)\n\n### Added\n- Initial release features\n\n## [Unreleased]/" CHANGELOG.md
+
+          # Add the generated entries to the changelog
+          if [ -f changelog_entries.md ] && [ -s changelog_entries.md ]; then
+            # Remove empty lines and duplicates
+            grep -v '^$' changelog_entries.md | sort | uniq >> CHANGELOG.md
+          fi
+
+          rm -f changelog_entries.md
+        fi
+
+        echo "changelog-updated=true" >> $GITHUB_OUTPUT
+
+    - name: Commit changelog
+      if: steps.changelog.outputs.changelog-updated == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add CHANGELOG.md
+        git commit -m "docs: update changelog [skip ci]" || echo "No changes to commit"
+        git push
+
+  create-release-tag:
+    needs: update-changelog
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get next version
+      id: version
+      run: |
+        # Extract version from changelog
+        VERSION=$(grep -m1 "^## \[" CHANGELOG.md | sed 's/## \[\([0-9.]*\)\].*/\1/')
+        if [ -z "$VERSION" ]; then
+          VERSION="1.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Create release tag
+      run: |
+        git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+        git push origin "v${{ steps.version.outputs.version }}"
+
+    - name: Create GitHub release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        release_name: Release v${{ steps.version.outputs.version }}
+        body: |
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+        draft: false
+        prerelease: false
+

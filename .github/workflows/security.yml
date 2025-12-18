@@ -1,0 +1,107 @@
+name: Security Scan
+
+on:
+  schedule:
+    # Run weekly on Mondays at 3 AM UTC
+    - cron: '0 3 * * 1'
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run npm audit
+      run: npm audit --audit-level moderate
+      continue-on-error: true
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Run CodeQL Analysis
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+
+    - name: Security linting
+      run: |
+        echo "🔍 Running security-focused ESLint rules..."
+
+        # Check for common security issues
+        if grep -r "eval(" app/ lib/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx"; then
+          echo "❌ Found eval() usage - potential security risk"
+          exit 1
+        fi
+
+        if grep -r "innerHTML" app/ --include="*.tsx" --include="*.jsx"; then
+          echo "⚠️ Found innerHTML usage - review for XSS vulnerabilities"
+        fi
+
+        if grep -r "process\.env\." app/ --include="*.ts" --include="*.tsx" | grep -v "NEXT_PUBLIC_"; then
+          echo "⚠️ Found direct process.env usage in client code"
+        fi
+
+        echo "✅ Security linting completed"
+
+    - name: Dependency vulnerability check
+      run: |
+        echo "🔍 Checking for vulnerable dependencies..."
+
+        # Check for high-severity vulnerabilities
+        VULN_COUNT=$(npm audit --audit-level high --json 2>/dev/null | jq -r '.metadata.vulnerabilities.high // 0')
+
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "❌ Found $VULN_COUNT high-severity vulnerabilities"
+          npm audit --audit-level high
+          exit 1
+        fi
+
+        echo "✅ No high-severity vulnerabilities found"
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified

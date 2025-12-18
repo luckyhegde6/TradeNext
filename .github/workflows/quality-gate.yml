@@ -22,6 +22,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Run tests
+        run: npm run test -- --watchAll=false --passWithNoTests
+        env:
+          CI: true
+
       - name: Typecheck
         run: npm run typecheck || npm run build
 
