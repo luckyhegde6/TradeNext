@@ -5,8 +5,14 @@ import { PrismaPg } from '@prisma/adapter-pg';
 // Get database URL from environment or use default for local development
 const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
 
-// Create connection pool and adapter
-const pool = new Pool({ connectionString: databaseUrl });
+// Create connection pool and adapter with better serverless configuration
+const pool = new Pool({
+  connectionString: databaseUrl,
+  max: 10, // Maximum number of connections
+  min: 0,  // Minimum number of connections
+  idleTimeoutMillis: 30000, // Close idle connections after 30s
+  connectionTimeoutMillis: 2000, // Connection timeout
+});
 const adapter = new PrismaPg(pool);
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };

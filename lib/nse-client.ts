@@ -51,27 +51,44 @@ async function nseFetch(path: string, qs = "") {
   await ensureSession();
   const url = NSE_BASE + path + qs;
   console.log(`[NSE Fetch] ${url}`);
-  const resp = await fetchWithCookies(url, {
-    headers: {
-      "Accept": "application/json, text/plain, */*",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      "Referer": "https://www.nseindia.com/",
-    },
-    timeout: 15000,
+
+  // Add overall timeout for the entire request
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+  try {
+    const resp = await fetchWithCookies(url, {
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://www.nseindia.com/",
+      },
+      timeout: 8000, // 8 second fetch timeout
+      signal: controller.signal,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      console.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${url}`);
+      throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
+    }
+
+    const data = await resp.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-
-  if (!resp.ok) {
-    console.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${url}`);
-    throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
+    if ((data as any).error) {
+      console.error("[NSE Data Error]", JSON.stringify(data));
+    }
+    return data;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.error(`[NSE Timeout] Request timed out for ${url}`);
+      throw new Error(`NSE request timeout for ${url}`);
+    }
+    throw error;
   }
-
-  const data = await resp.json();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((data as any).error) {
-    console.error("[NSE Data Error]", JSON.stringify(data));
-  }
-  return data;
 }
 
 export { nseFetch, redis };
