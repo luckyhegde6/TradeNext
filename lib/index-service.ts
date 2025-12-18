@@ -97,9 +97,15 @@ export async function getIndexChartData(indexName: string) {
 }
 
 export async function getIndexDetails(indexName: string) {
-    const dbQuote = await prisma.indexQuote.findUnique({ where: { indexName } });
-    if (dbQuote && (Date.now() - dbQuote.updatedAt.getTime()) < 120000) {
-        return dbQuote;
+    let dbQuote = null;
+    try {
+        dbQuote = await prisma.indexQuote.findUnique({ where: { indexName } });
+        if (dbQuote && (Date.now() - dbQuote.updatedAt.getTime()) < 120000) {
+            return dbQuote;
+        }
+    } catch (dbError) {
+        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError);
+        // Continue to fetch from NSE
     }
 
     const cacheKey = `nse:index:${indexName}:quote`;
@@ -137,6 +143,7 @@ export async function getIndexDetails(indexName: string) {
 
         cache.set(cacheKey, quote, 120);
 
+        // Async database hydration (don't fail the request if DB is unavailable)
         (async () => {
             try {
                 await prisma.indexQuote.upsert({
@@ -144,7 +151,9 @@ export async function getIndexDetails(indexName: string) {
                     update: quote,
                     create: { ...quote, id: undefined }
                 });
-            } catch (err) { console.error("DB upsert error", err); }
+            } catch (err) {
+                console.warn("DB upsert error (continuing without saving to DB):", err);
+            }
         })();
 
         return quote;
@@ -168,7 +177,7 @@ export async function getIndexHeatmap(indexName: string) {
 
         cache.set(cacheKey, items, 300); // 5 mins
 
-        // Async Hydrate
+        // Async Hydrate (don't fail the request if DB is unavailable)
         (async () => {
             try {
                 for (const item of items) {
@@ -217,7 +226,9 @@ export async function getIndexHeatmap(indexName: string) {
                         }
                     });
                 }
-            } catch (err) { console.error("Heatmap DB Hydration Error", err); }
+            } catch (err) {
+                console.warn("Heatmap DB Hydration Error (continuing without saving to DB):", err);
+            }
         })();
 
         return items;
@@ -278,7 +289,7 @@ export async function getIndexAnnouncements(indexName: string) {
 
         cache.set(cacheKey, sorted, 1800); // 30 mins
 
-        // Async DB hydration
+        // Async DB hydration (don't fail the request if DB is unavailable)
         (async () => {
             try {
                 for (const item of data) {
@@ -302,7 +313,9 @@ export async function getIndexAnnouncements(indexName: string) {
                         });
                     }
                 }
-            } catch (err) { console.error("Announcements DB Error", err); }
+            } catch (err) {
+                console.warn("Announcements DB Error (continuing without saving to DB):", err);
+            }
         })();
 
         return sorted;
