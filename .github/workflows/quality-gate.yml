@@ -1,0 +1,57 @@
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck || npm run build
+
+      - name: Forbidden patterns check
+        run: |
+          echo "Checking for forbidden patterns..."
+
+          if grep -R "new PrismaClient" app/ --exclude-dir=api; then
+            echo "❌ Prisma used outside API/server"
+            exit 1
+          fi
+
+          if grep -R "process.env.NEXT_PUBLIC_.*KEY" .; then
+            echo "❌ Public env contains secret-like key"
+            exit 1
+          fi
+
+      - name: Swagger existence check
+        run: |
+          test -f app/api/openapi/route.ts || (
+            echo "❌ OpenAPI route missing"
+            exit 1
+          )
+
+      - name: Logger usage check
+        run: |
+          if ! grep -R "lib/logger" app/api lib; then
+            echo "❌ Logger not used in server code"
+            exit 1
+          fi
+
+      - name: Final gate
+        run: echo "✅ Quality gate passed"

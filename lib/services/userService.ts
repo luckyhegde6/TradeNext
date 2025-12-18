@@ -19,6 +19,29 @@ export async function getAllUsers(): Promise<User[]> {
     });
 }
 
+export async function getPaginatedUsers(page: number = 1, limit: number = 20): Promise<{ users: User[]; total: number; totalPages: number }> {
+    const offset = (page - 1) * limit;
+
+    const [users, total] = await Promise.all([
+        prisma.user.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                createdAt: true,
+            },
+            skip: offset,
+            take: limit,
+        }),
+        prisma.user.count()
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return { users, total, totalPages };
+}
+
 export async function getUserById(id: number): Promise<User | null> {
     return await prisma.user.findUnique({
         where: { id },

@@ -1,7 +1,6 @@
-export const dynamic = "force-dynamic";
-
 import Link from "next/link";
-import { Suspense } from "react";
+import { DataFetcher } from "@/app/components/ui/DataFetcher";
+import { CardSkeleton } from "@/app/components/ui/LoadingSpinner";
 
 interface User {
     id: number;
@@ -11,37 +10,56 @@ interface User {
 }
 
 // User List Component
-async function UsersList() {
-    const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/users`, {
-        cache: 'no-store'
-    });
-    const data = await res.json();
-    const users = data.users || [];
-
-    if (users.length === 0) {
-        return <p className="text-gray-600 text-center py-8">No users found.</p>;
-    }
-
+function UsersList() {
     return (
-        <ul className="space-y-4">
-            {users.map((user: User) => (
-                <li key={user.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6 shadow-sm hover:shadow-md transition-all">
-                    <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xl">
-                            {user.name?.[0] || user.email[0].toUpperCase()}
-                        </div>
-                        <div>
-                            <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                {user.name || "Unnamed User"}
+        <DataFetcher
+            apiCall={async () => {
+                const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/users?paginate=true&page=1&limit=50`);
+                if (!res.ok) throw new Error('Failed to fetch users');
+                return res.json();
+            }}
+            cacheKey="users:list"
+            cacheTTL={300000} // 5 minutes
+            loadingComponent={CardSkeleton}
+        >
+            {(data: { users: User[]; total: number; totalPages: number }) => {
+                if (data.users.length === 0) {
+                    return <p className="text-gray-600 text-center py-8">No users found.</p>;
+                }
+
+                return (
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center mb-6">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Showing {data.users.length} of {data.total} users
                             </p>
-                            <p className="text-sm text-gray-500 dark:text-slate-400">
-                                {user.email}
-                            </p>
                         </div>
+                        <ul className="space-y-4">
+                            {data.users.map((user: User) => (
+                                <li key={user.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6 shadow-sm hover:shadow-md transition-all">
+                                    <div className="flex items-center space-x-4">
+                                        <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xl">
+                                            {user.name?.[0] || user.email[0].toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                                                {user.name || "Unnamed User"}
+                                            </p>
+                                            <p className="text-sm text-gray-500 dark:text-slate-400">
+                                                {user.email}
+                                            </p>
+                                            <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                                                Joined {new Date(user.createdAt).toLocaleDateString()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
-                </li>
-            ))}
-        </ul>
+                );
+            }}
+        </DataFetcher>
     );
 }
 
@@ -59,16 +77,7 @@ export default function UsersPage() {
                     </Link>
                 </div>
 
-                <Suspense
-                    fallback={
-                        <div className="flex items-center justify-center min-h-[200px]">
-                            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="ml-3 text-gray-600 dark:text-slate-400">Loading users...</p>
-                        </div>
-                    }
-                >
-                    <UsersList />
-                </Suspense>
+                <UsersList />
             </div>
         </div>
     );
