@@ -151,7 +151,7 @@ export async function DELETE(
         }
 
         // Prevent deleting self
-        if (session.user.id === userId) {
+        if (parseInt(session.user.id) === userId) {
             return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
         }
 

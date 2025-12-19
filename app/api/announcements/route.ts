@@ -24,7 +24,7 @@ export async function GET(request: Request) {
         });
 
         if (!queryValidation.success) {
-            logger.warn({ msg: 'Invalid announcements query parameters', errors: queryValidation.error.errors });
+            logger.warn({ msg: 'Invalid announcements query parameters', errors: queryValidation.error.issues });
             return NextResponse.json({ error: 'Invalid query parameters' }, { status: 400 });
         }
 
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
         logger.info({ msg: 'Fetching announcements', page, limit });
 
         const cached = cache.get(CACHE_KEY);
-        if (cached) {
+        if (cached && Array.isArray(cached)) {
             // Apply pagination to cached data
             const offset = (page - 1) * limit;
             const paginatedAnnouncements = cached.slice(offset, offset + limit);

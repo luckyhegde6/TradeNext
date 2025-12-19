@@ -397,18 +397,6 @@ const openapi = {
             }
         },
 
-        // Portfolio
-        '/api/portfolio': {
-            get: {
-                summary: 'Get user portfolio',
-                security: [{ bearerAuth: [] }],
-                responses: {
-                    '200': { description: 'Portfolio data' },
-                    '401': { description: 'Unauthorized' }
-                }
-            }
-        },
-
         // Announcements
         '/api/announcements': {
             get: {

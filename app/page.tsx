@@ -4,6 +4,16 @@ import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
 
+interface Post {
+  id: string;
+  title: string;
+  content?: string;
+  createdAt: string;
+  author?: {
+    name?: string;
+  };
+}
+
 async function getRecentPosts() {
   try {
     const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/home/recent-posts`, {
@@ -72,7 +82,7 @@ export default async function Home() {
           <Link href="/posts" className="text-blue-600 hover:text-blue-700 font-medium text-sm sm:text-base">View all &rarr;</Link>
         </div>
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-          {posts.map((post) => (
+          {posts.map((post: Post) => (
             <Link key={post.id} href={`/posts/${post.id}`} className="group block h-full">
               <div className="h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6 hover:shadow-md transition-all">
                 <div className="flex items-center justify-between mb-4">

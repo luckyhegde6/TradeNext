@@ -1,7 +1,6 @@
 // app/api/cache/route.ts
 import { NextResponse } from "next/server";
 import { getCacheMetrics, cleanupExpiredKeys, clearAllCaches, hotCache, staticCache } from "@/lib/cache";
-import { queueManager } from "@/worker/ingestion-worker";
 import logger from "@/lib/logger";
 
 export const dynamic = 'force-dynamic';
@@ -39,10 +38,8 @@ export async function GET(request: Request) {
     }
 
     if (action === "metrics") {
-      const [metrics, queueStats] = await Promise.all([
-        getCacheMetrics(),
-        queueManager ? queueManager.getQueueStats() : Promise.resolve({ error: 'Queues not available' })
-      ]);
+      const metrics = getCacheMetrics();
+      const queueStats = { error: 'Queues disabled - Redis not configured' };
       const duration = Date.now() - startTime;
       logger.info({ msg: 'Cache metrics retrieved', duration });
       return NextResponse.json({ ...metrics, queues: queueStats });

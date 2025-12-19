@@ -19,6 +19,7 @@ interface PollingConfig {
 class EnhancedCacheManager {
   private pollingTimers = new Map<string, NodeJS.Timeout>();
   private pollingConfigs = new Map<string, PollingConfig>();
+  private cacheTimestamps = new Map<string, number>();
 
   /**
    * Get data with intelligent caching and optional polling
@@ -184,6 +185,20 @@ class EnhancedCacheManager {
         configs: Object.fromEntries(this.pollingConfigs)
       }
     };
+  }
+
+  /**
+   * Get cache timestamp for a key
+   */
+  private getCacheTimestamp(key: string): number {
+    return this.cacheTimestamps.get(key) || 0;
+  }
+
+  /**
+   * Update cache timestamp for a key
+   */
+  private updateCacheTimestamp(key: string): void {
+    this.cacheTimestamps.set(key, Date.now());
   }
 }
 

@@ -1,33 +1,25 @@
 // app/api/nse/indexes/route.ts
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
-import { nseFetch, redis } from "@/lib/nse-client";
+import { nseFetch } from "@/lib/nse-client";
+import cache from "@/lib/cache";
 
 const CACHE_KEY = "nse:indexes:all";
+const CACHE_TTL = 300; // 5 minutes
 
 export async function GET() {
   try {
-    // check Redis cache first (only if Redis is available)
-    if (redis) {
-      try {
-        const cached = await redis.get(CACHE_KEY);
-        if (cached) return NextResponse.json(JSON.parse(cached));
-      } catch (redisError) {
-        console.warn("Redis get error (continuing without cache):", redisError);
-      }
+    // Check server cache first
+    const cachedData = cache.get(CACHE_KEY);
+    if (cachedData) {
+      return NextResponse.json(cachedData);
     }
 
-    // call NSE
+    // Call NSE API
     const data = await nseFetch("/api/NextApi/apiClient", "?functionName=getIndexData&&type=All/");
 
-    // cache for 2 minutes (only if Redis is available)
-    if (redis) {
-      try {
-        await redis.set(CACHE_KEY, JSON.stringify(data), "EX", 120);
-      } catch (redisError) {
-        console.warn("Redis set error (continuing without cache):", redisError);
-      }
-    }
+    // Cache the result
+    cache.set(CACHE_KEY, data, CACHE_TTL);
 
     return NextResponse.json(data);
   } catch (e: unknown) {

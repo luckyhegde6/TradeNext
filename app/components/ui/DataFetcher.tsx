@@ -5,33 +5,39 @@ import { useApi, usePaginatedApi, usePollingApi } from '@/lib/hooks/useApi';
 import { LoadingSpinner, Skeleton } from './LoadingSpinner';
 
 interface DataFetcherProps<T> {
-  apiCall: () => Promise<T>;
+  apiUrl: string;
   cacheKey?: string;
   cacheTTL?: number;
   enableCache?: boolean;
-  loadingComponent?: React.ComponentType<{ message?: string }>;
+  loadingComponent?: 'spinner' | 'skeleton';
   errorComponent?: React.ComponentType<{ error: string; onRetry: () => void }>;
   emptyComponent?: React.ComponentType;
-  children: (data: T) => React.ReactNode;
+  render: (data: T) => React.ReactNode;
 }
 
 export function DataFetcher<T>({
-  apiCall,
+  apiUrl,
   cacheKey,
   cacheTTL,
   enableCache = true,
-  loadingComponent: LoadingComponent = LoadingSpinner,
+  loadingComponent = 'spinner',
   errorComponent: ErrorComponent,
   emptyComponent: EmptyComponent,
-  children
+  render
 }: DataFetcherProps<T>) {
+  const apiCall = async () => {
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error('Failed to fetch data');
+    return res.json();
+  };
+
   const { data, loading, error, refetch } = useApi(
     apiCall,
     { cacheKey, cacheTTL, enableCache }
   );
 
   if (loading) {
-    return <LoadingComponent message="Loading data..." />;
+    return loadingComponent === 'skeleton' ? <Skeleton /> : <LoadingSpinner message="Loading data..." />;
   }
 
   if (error) {
@@ -59,36 +65,45 @@ export function DataFetcher<T>({
     return <div className="text-center p-6 text-gray-500">No data available</div>;
   }
 
-  return <>{children(data)}</>;
+  return <>{render(data)}</>;
 }
 
 // Paginated data fetcher
 interface PaginatedDataFetcherProps<T> {
-  apiCall: (page: number, limit: number) => Promise<{ items: T[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>;
+  apiUrl: string;
   initialPage?: number;
   limit?: number;
   cacheKey?: string;
-  loadingComponent?: React.ComponentType;
+  loadingComponent?: 'spinner' | 'skeleton';
   errorComponent?: React.ComponentType<{ error: string; onRetry: () => void }>;
-  children: (data: { items: T[]; pagination: { page: number; limit: number; total: number; totalPages: number }; loadMore: () => void; hasMore: boolean }) => React.ReactNode;
+  render: (data: { items: T[]; pagination: { page: number; limit: number; total: number; totalPages: number }; loadMore: () => void; hasMore: boolean }) => React.ReactNode;
 }
 
 export function PaginatedDataFetcher<T>({
-  apiCall,
+  apiUrl,
   initialPage = 1,
   limit = 20,
   cacheKey,
-  loadingComponent: LoadingComponent = Skeleton,
+  loadingComponent = 'skeleton',
   errorComponent: ErrorComponent,
-  children
+  render
 }: PaginatedDataFetcherProps<T>) {
+  const apiCall = async (page: number, limit: number) => {
+    const url = new URL(apiUrl);
+    url.searchParams.set('page', page.toString());
+    url.searchParams.set('limit', limit.toString());
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error('Failed to fetch data');
+    return res.json();
+  };
+
   const { data, loading, error, refetch, loadMore, hasMore } = usePaginatedApi(
     apiCall,
     { page: initialPage, limit, cacheKey }
   );
 
   if (loading && !data) {
-    return <LoadingComponent />;
+    return loadingComponent === 'spinner' ? <LoadingSpinner /> : <Skeleton />;
   }
 
   if (error) {
@@ -113,27 +128,33 @@ export function PaginatedDataFetcher<T>({
     return <div className="text-center p-6 text-gray-500">No data available</div>;
   }
 
-  return <>{children({ ...data, loadMore, hasMore })}</>;
+  return <>{render({ items: data.items as T[], pagination: data.pagination, loadMore, hasMore })}</>;
 }
 
 // Real-time data fetcher with polling
 interface RealtimeDataFetcherProps<T> {
-  apiCall: () => Promise<T>;
+  apiUrl: string;
   pollInterval?: number;
   cacheKey?: string;
-  loadingComponent?: React.ComponentType<{ message?: string }>;
+  loadingComponent?: 'spinner' | 'skeleton';
   errorComponent?: React.ComponentType<{ error: string; onRetry: () => void }>;
-  children: (data: T) => React.ReactNode;
+  render: (data: T) => React.ReactNode;
 }
 
 export function RealtimeDataFetcher<T>({
-  apiCall,
+  apiUrl,
   pollInterval = 30000,
   cacheKey,
-  loadingComponent: LoadingComponent = LoadingSpinner,
+  loadingComponent = 'spinner',
   errorComponent: ErrorComponent,
-  children
+  render
 }: RealtimeDataFetcherProps<T>) {
+  const apiCall = async () => {
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error('Failed to fetch data');
+    return res.json();
+  };
+
   const { data, loading, error, refetch } = usePollingApi(
     apiCall,
     pollInterval,
@@ -141,7 +162,7 @@ export function RealtimeDataFetcher<T>({
   );
 
   if (loading && !data) {
-    return <LoadingComponent message="Connecting..." />;
+    return loadingComponent === 'skeleton' ? <Skeleton /> : <LoadingSpinner message="Connecting..." />;
   }
 
   if (error) {
@@ -166,27 +187,22 @@ export function RealtimeDataFetcher<T>({
     return <div className="text-center p-6 text-gray-500">No data available</div>;
   }
 
-  return <>{children(data)}</>;
+  return <>{render(data)}</>;
 }
 
 // Specific component for market data that handles connection states
 interface MarketDataFetcherProps {
   symbol: string;
-  children: (data: unknown) => React.ReactNode;
+  render: (data: unknown) => React.ReactNode;
 }
 
-export function MarketDataFetcher({ symbol, children }: MarketDataFetcherProps) {
+export function MarketDataFetcher({ symbol, render }: MarketDataFetcherProps) {
   return (
     <RealtimeDataFetcher
-      apiCall={async () => {
-        const response = await fetch(`/api/nse/stock/${symbol}/quote`);
-        if (!response.ok) throw new Error('Failed to fetch market data');
-        return response.json();
-      }}
+      apiUrl={`/api/nse/stock/${symbol}/quote`}
       pollInterval={15000} // 15 seconds for market data
       cacheKey={`market:stock:${symbol}`}
-    >
-      {(data) => children(data)}
-    </RealtimeDataFetcher>
+      render={(data) => render(data)}
+    />
   );
 }

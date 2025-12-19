@@ -43,10 +43,18 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
         const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as {
           grapthData?: unknown[];
           graphData?: unknown[];
+          equityResponse?: unknown[];
         };
         logger.debug({ msg: 'Raw NSE response', symbol, responseSize: JSON.stringify(rawData).length });
 
-        const data = rawData?.equityResponse?.[0] || rawData;
+        const data = (rawData?.equityResponse?.[0] || rawData) as {
+          metaData?: any;
+          tradeInfo?: any;
+          priceInfo?: any;
+          secInfo?: any;
+          grapthData?: unknown[];
+          graphData?: unknown[];
+        };
 
         // Extract data from nested structure
         const metaData = data.metaData || {};
@@ -156,6 +164,7 @@ export async function getStockTrends(symbol: string): Promise<any[]> {
         const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as {
           grapthData?: unknown[];
           graphData?: unknown[];
+          data?: unknown[];
         };
         const trends = rawData?.data || [];
 

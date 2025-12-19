@@ -23,7 +23,7 @@ export async function GET(request: Request) {
         });
 
         if (!queryValidation.success) {
-            logger.warn({ msg: 'Invalid users query parameters', errors: queryValidation.error.errors });
+            logger.warn({ msg: 'Invalid users query parameters', errors: queryValidation.error.issues });
             return NextResponse.json({ error: 'Invalid query parameters' }, { status: 400 });
         }
 
