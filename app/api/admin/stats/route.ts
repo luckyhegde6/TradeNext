@@ -8,7 +8,7 @@ export async function GET() {
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -56,8 +56,8 @@ export async function GET() {
 
         try {
             // Check if IngestRecord model exists and has data
-            if (prisma.ingestRecord) {
-                recentIngests = await prisma.ingestRecord.findMany({
+            if ((prisma as any).ingestRecord) {
+                recentIngests = await (prisma as any).ingestRecord.findMany({
                     take: 5,
                     orderBy: { createdAt: 'desc' },
                     select: {

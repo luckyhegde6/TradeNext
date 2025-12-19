@@ -25,7 +25,7 @@ export async function GET() {
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
         return NextResponse.json(user, { status: 201 });
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return NextResponse.json({ error: "Invalid input", details: error.errors }, { status: 400 });
+            return NextResponse.json({ error: "Invalid input", details: error.issues }, { status: 400 });
         }
         console.error('Admin users POST error:', error);
         return NextResponse.json({ error: "Failed to create user" }, { status: 500 });

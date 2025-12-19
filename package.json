@@ -17,6 +17,7 @@
     "dev:only-host": "node scripts/dev-only-host-cross.cjs",
     "local": "npm run dev:only-host && npm run dev",
     "local:clean": "npm run dev:clean && npm run dev:only-host && npm run dev",
+    "quickbuild": "next build",
     "build": "npx prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",

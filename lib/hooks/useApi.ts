@@ -1,3 +1,5 @@
+"use client";
+
 // Custom hooks for API calls with loading states and error handling
 import { useState, useEffect, useCallback } from 'react';
 // import { clientCache } from '@/lib/client-cache'; // Temporarily disabled due to Turbopack issues
@@ -110,7 +112,6 @@ export function usePaginatedApi<T>(
 
   const apiState = useApi(
     () => apiCall(currentPage, limit),
-    [currentPage, limit],
     {
       ...apiOptions,
       cacheKey: cacheKey ? `${cacheKey}_${currentPage}_${limit}` : undefined
@@ -124,9 +125,9 @@ export function usePaginatedApi<T>(
         setAllData(apiState.data.items);
       } else {
         // Subsequent pages, append data
-        setAllData(prev => [...prev, ...apiState.data.items]);
+        setAllData(prev => [...prev, ...(apiState.data?.items || [])]);
       }
-      setHasMore(currentPage < apiState.data.pagination.totalPages);
+      setHasMore(currentPage < (apiState.data?.pagination.totalPages || 0));
     }
   }, [apiState.data, apiState.loading, currentPage]);
 

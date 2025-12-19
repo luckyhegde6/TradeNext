@@ -28,7 +28,7 @@ jobs:
           CI: true
 
       - name: Typecheck
-        run: npm run typecheck || npm run build
+        run: npm run quickbuild
 
       - name: Forbidden patterns check
         run: |

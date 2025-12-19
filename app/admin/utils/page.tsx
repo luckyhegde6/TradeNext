@@ -136,7 +136,7 @@ export default function AdminOverviewPage() {
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">Portfolios</h3>
                     <p className="text-3xl font-bold text-green-600">{stats?.portfolios.total || 0}</p>
                     <p className="text-sm text-gray-500">
-                        {stats?.portfolios.withTransactions || 0} with transactions
+                        {stats?.portfolios.withHoldings || 0} with holdings
                     </p>
                 </div>
 

@@ -33,7 +33,7 @@ jobs:
       run: npm ci
 
     - name: Build application
-      run: npm run build
+      run: npm run quickbuild
 
     - name: Start local server
       run: |

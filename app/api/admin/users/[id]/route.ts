@@ -21,7 +21,7 @@ export async function GET(
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -43,11 +43,7 @@ export async function GET(
                 updatedAt: true,
                 portfolios: {
                     include: {
-                        holdings: {
-                            include: {
-                                stock: true
-                            }
-                        }
+                        transactions: true
                     }
                 },
                 posts: {
@@ -87,7 +83,7 @@ export async function PUT(
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -125,7 +121,7 @@ export async function PUT(
         return NextResponse.json(user);
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return NextResponse.json({ error: "Invalid input", details: error.errors }, { status: 400 });
+            return NextResponse.json({ error: "Invalid input", details: error.issues }, { status: 400 });
         }
         if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
             return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -143,7 +139,7 @@ export async function DELETE(
     try {
         const session = await auth();
 
-        if (!session || session.user.role !== 'admin') {
+        if (!session || !session.user || session.user.role !== 'admin') {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 

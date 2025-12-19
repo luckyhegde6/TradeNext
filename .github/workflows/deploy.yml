@@ -42,7 +42,6 @@ jobs:
         NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
         NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        REDIS_URL: ${{ secrets.REDIS_URL }}
 
     - name: Deploy to Netlify
       uses: nwtgck/actions-netlify@v3.0
