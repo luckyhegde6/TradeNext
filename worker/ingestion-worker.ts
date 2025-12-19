@@ -1,22 +1,11 @@
-// Background worker for data ingestion using BullMQ
-import { Queue, Worker } from "bullmq";
-import { runIngestion } from "@/lib/services/ingestService";
-import { getIndexDetails, getIndexHeatmap, getIndexCorporateActions, getIndexAnnouncements } from "@/lib/index-service";
-import { getStockQuote, getStockChart, getStockTrends } from "@/lib/stock-service";
+// Background workers disabled - Redis removed
 import logger from "@/lib/logger";
 
-// Redis connection for BullMQ
-const connection = process.env.REDIS_URL ? { url: process.env.REDIS_URL } : undefined;
+logger.info({ msg: 'Background workers disabled - Redis not configured' });
 
-if (!connection) {
-  logger.warn({ msg: 'Redis not configured, background workers will not be available' });
-}
-
-// Ingestion queue for CSV processing
-export const ingestionQueue = connection ? new Queue("data-ingestion", { connection }) : null;
-
-// Market data queue for NSE API polling
-export const marketDataQueue = connection ? new Queue("market-data", { connection }) : null;
+// Disabled queues
+export const ingestionQueue = null;
+export const marketDataQueue = null;
 
 // Worker for data ingestion
 if (ingestionQueue) {

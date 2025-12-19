@@ -16,4 +16,7 @@ export default defineConfig({
     datasource: {
         url: env('DATABASE_URL') || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext',
     },
+    db: {
+        url: env('DATABASE_URL') || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext',
+    },
 });

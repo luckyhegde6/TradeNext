@@ -1,41 +1,32 @@
 // lib/nse-client.ts
-import fetch from "node-fetch";
 import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
-import Redis from "ioredis";
 
-// Redis is only available when explicitly configured
-let redis: Redis | null = null;
-
-if (process.env.REDIS_URL) {
-  try {
-    redis = new Redis(process.env.REDIS_URL);
-    redis.on('error', (err) => {
-      console.warn('Redis connection error:', err.message);
-      redis = null;
-    });
-    redis.on('connect', () => {
-      console.log('Redis connected successfully');
-    });
-  } catch (error) {
-    console.warn('Failed to initialize Redis:', error);
-    redis = null;
-  }
-} else {
-  console.log('Redis not configured - using in-memory cache only');
-}
-
-const jar = new CookieJar();
-const fetchWithCookies = fetchCookie(fetch, jar);
+// Dynamic imports to avoid webpack bundling issues
+let fetch: any = null;
+let jar: CookieJar | null = null;
+let fetchWithCookies: any = null;
 
 const NSE_BASE = "https://www.nseindia.com";
 
+async function initFetch() {
+  if (!fetch) {
+    const fetchModule = await import("node-fetch");
+    fetch = fetchModule.default;
+
+    jar = new CookieJar();
+    fetchWithCookies = fetchCookie(fetch, jar);
+  }
+}
+
 async function ensureSession() {
+  await initFetch();
+
   // If jar empty or expired, fetch homepage to get cookies (bm, etc.)
-  const cookies = await jar.getCookies(NSE_BASE);
+  const cookies = await jar!.getCookies(NSE_BASE);
   if (!cookies || cookies.length === 0) {
     // fetch landing page to set cookies (User-Agent + Referer)
-    await fetchWithCookies(NSE_BASE + "/", {
+    await fetchWithCookies!(NSE_BASE + "/", {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept": "text/html,application/xhtml+xml",
@@ -48,6 +39,7 @@ async function ensureSession() {
 }
 
 async function nseFetch(path: string, qs = "") {
+  await initFetch();
   await ensureSession();
   const url = NSE_BASE + path + qs;
   console.log(`[NSE Fetch] ${url}`);
@@ -57,7 +49,7 @@ async function nseFetch(path: string, qs = "") {
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
   try {
-    const resp = await fetchWithCookies(url, {
+    const resp = await fetchWithCookies!(url, {
       headers: {
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -91,4 +83,4 @@ async function nseFetch(path: string, qs = "") {
   }
 }
 
-export { nseFetch, redis };
+export { nseFetch };

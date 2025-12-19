@@ -1,12 +1,14 @@
-import { Queue, Worker } from "bullmq";
-import { nseFetch, redis } from "@/lib/nse-client";
 import { INDICES } from "@/lib/constants";
 
-// Only initialize worker if Redis is available
+// Background workers disabled - Redis removed
+console.log('Fetcher worker disabled - Redis not configured');
+
+// Disabled queues and workers
 let q: Queue | null = null;
 let w: Worker | null = null;
 
-if (redis) {
+// Always false since Redis is removed
+if (false) {
   q = new Queue("nse-poll", { connection: redis.options });
 
   w = new Worker("nse-poll", async (job) => {

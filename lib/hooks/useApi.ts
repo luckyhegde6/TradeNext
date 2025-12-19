@@ -1,6 +1,6 @@
 // Custom hooks for API calls with loading states and error handling
 import { useState, useEffect, useCallback } from 'react';
-import { clientCache } from '@/lib/client-cache';
+// import { clientCache } from '@/lib/client-cache'; // Temporarily disabled due to Turbopack issues
 
 interface ApiState<T> {
   data: T | null;
@@ -33,6 +33,8 @@ export function useApi<T>(
       let result: T;
 
       // Try to get from cache first
+      // Temporarily disabled due to Turbopack issues
+      /*
       if (enableCache && cacheKey) {
         const cachedData = clientCache.marketData.get<T>(cacheKey);
         if (cachedData !== null) {
@@ -42,14 +44,18 @@ export function useApi<T>(
           return;
         }
       }
+      */
 
       // Make API call
       result = await apiCall();
 
       // Cache the result
+      // Temporarily disabled due to Turbopack issues
+      /*
       if (enableCache && cacheKey) {
         clientCache.marketData.set(cacheKey, result, cacheTTL);
       }
+      */
 
       setData(result);
     } catch (err) {

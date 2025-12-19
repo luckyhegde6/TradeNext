@@ -2,7 +2,6 @@ import prisma from "@/lib/prisma";
 import cache, { staticCache } from "@/lib/cache"; // NodeCache
 import { nseFetch } from "@/lib/nse-client";
 import { MARKET_TIMINGS, MARKET_HOLIDAYS } from "@/lib/constants";
-import { enhancedCache, nseCache, marketDataPoller } from "@/lib/enhanced-cache";
 import logger from "@/lib/logger";
 import type { IndexQuote } from "@prisma/client";
 
@@ -133,7 +132,13 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
         // Continue to fetch from NSE
     }
 
-    const cacheConfig = nseCache.indexQuote(indexName);
+    // Check cache first
+    const cacheKey = `nse:index:${indexName}:quote`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+        logger.debug({ msg: 'Cache hit for index details', indexName });
+        return cached;
+    }
 
     const fetchIndexDetails = async () => {
         const qs = `?functionName=getIndexData&&index=${encodeURIComponent(indexName)}`;
@@ -144,11 +149,29 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const data = rawData?.data?.[0] || rawData?.[0] || {};
 
+        // Ensure numeric values for calculations
+        const lastPrice = parseFloat(data.lastPrice || data.last || 0);
+        const previousClose = parseFloat(data.previousClose || data.prevClose || 0);
+        const percChange = parseFloat(data.percChange || data.percentChange || 0);
+
+        // Calculate change properly (lastPrice - previousClose)
+        const change = lastPrice - previousClose;
+
+        // Log for debugging
+        logger.info({
+            msg: 'Index quote calculation',
+            indexName: data.indexName || indexName,
+            lastPrice,
+            previousClose,
+            change,
+            percChange
+        });
+
         const quote = {
             indexName: data.indexName || indexName,
-            lastPrice: String(data.lastPrice || data.last || 0),
-            change: String(data.lastPrice - data.previousClose || 0),
-            pChange: String(data.percChange || data.percentChange || 0),
+            lastPrice: String(lastPrice),
+            change: String(change),
+            pChange: String(percChange),
             open: String(data.open || 0),
             high: String(data.dayHigh || data.high || 0),
             low: String(data.dayLow || data.low || 0),
@@ -168,6 +191,9 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
         };
 
         logger.info({ msg: 'Index details fetched successfully', indexName, lastPrice: quote.lastPrice });
+
+        // Cache the result
+        cache.set(cacheKey, quote, 120); // 2 minutes
 
         // Async database hydration (don't fail the request if DB is unavailable)
         (async () => {
@@ -190,13 +216,7 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
     };
 
     try {
-        const pollingConfig = enablePolling ? cacheConfig.pollingConfig : undefined;
-        const quote = await enhancedCache.getWithCache(cacheConfig, fetchIndexDetails, pollingConfig);
-
-        if (enablePolling) {
-            marketDataPoller.startPolling(indexName, 'index');
-        }
-
+        const quote = await fetchIndexDetails();
         return quote;
     } catch (e) {
         logger.error({
@@ -237,20 +257,11 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
     }
 }
 
-export async function getIndexHeatmap(indexName: string, page: number = 1, limit: number = 50) {
+export async function getIndexHeatmap(indexName: string) {
     const cacheKey = `nse:index:${indexName}:heatmap`;
     const cached = cache.get(cacheKey); // Use regular cache for heatmap data
     if (cached) {
-        // Apply pagination to cached data
-        const offset = (page - 1) * limit;
-        const paginatedItems = cached.slice(offset, offset + limit);
-        const total = cached.length;
-        const totalPages = Math.ceil(total / limit);
-
-        return {
-            items: paginatedItems,
-            pagination: { page, limit, total, totalPages }
-        };
+        return cached;
     }
 
     const qs = `?functionName=getConstituents&&index=${encodeURIComponent(indexName)}&&noofrecords=0`;
@@ -263,12 +274,6 @@ export async function getIndexHeatmap(indexName: string, page: number = 1, limit
 
         logger.info({ msg: 'Heatmap data fetched', indexName, count: items.length });
         cache.set(cacheKey, items, 300); // 5 mins
-
-        // Apply pagination
-        const offset = (page - 1) * limit;
-        const paginatedItems = items.slice(offset, offset + limit);
-        const total = items.length;
-        const totalPages = Math.ceil(total / limit);
 
         // Async Hydrate (don't fail the request if DB is unavailable)
         (async () => {
@@ -328,10 +333,7 @@ export async function getIndexHeatmap(indexName: string, page: number = 1, limit
             }
         })();
 
-        return {
-            items: paginatedItems,
-            pagination: { page, limit, total, totalPages }
-        };
+        return items;
     } catch (e) {
         logger.error({
             msg: 'Heatmap fetch error, falling back to DB',
@@ -339,32 +341,21 @@ export async function getIndexHeatmap(indexName: string, page: number = 1, limit
             error: e instanceof Error ? e.message : String(e)
         });
 
-        // Fallback to DB with pagination
-        const offset = (page - 1) * limit;
-        const [dbItems, total] = await Promise.all([
-            prisma.indexHeatmapItem.findMany({
-                where: { indexName },
-                skip: offset,
-                take: limit
-            }),
-            prisma.indexHeatmapItem.count({ where: { indexName } })
-        ]);
+        // Fallback to DB - return all items
+        const dbItems = await prisma.indexHeatmapItem.findMany({
+            where: { indexName }
+        });
 
-        const totalPages = Math.ceil(total / limit);
-
-        return {
-            items: dbItems.map(item => ({
-                symbol: item.symbol,
-                lastPrice: item.lastPrice,
-                change: item.change,
-                pChange: item.pChange,
-                volume: item.volume ? Number(item.volume) / 100000 : 0,
-                value: item.value,
-                high: item.high,
-                low: item.low,
-            })),
-            pagination: { page, limit, total, totalPages }
-        };
+        return dbItems.map(item => ({
+            symbol: item.symbol,
+            lastPrice: item.lastPrice,
+            change: item.change,
+            pChange: item.pChange,
+            volume: item.volume ? Number(item.volume) / 100000 : 0,
+            value: item.value,
+            high: item.high,
+            low: item.low,
+        }));
     }
 }
 

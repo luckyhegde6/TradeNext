@@ -111,23 +111,33 @@ class LocalStorageCache {
   private prefix = 'tradenext_cache_';
 
   get<T>(key: string): T | null {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null;
+    }
+
     try {
       const item = localStorage.getItem(this.prefix + key);
       if (!item) return null;
 
       const entry: CacheEntry<T> = JSON.parse(item);
-    if (Date.now() - entry.timestamp < entry.ttl) {
-      return entry.data;
-    } else {
-      this.delete(key); // Clean up expired entry
-      return null;
-    }
+      if (Date.now() - entry.timestamp < entry.ttl) {
+        return entry.data;
+      } else {
+        this.delete(key); // Clean up expired entry
+        return null;
+      }
     } catch {
       return null;
     }
   }
 
   set<T>(key: string, data: T, ttl: number = 300000): void {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
     try {
       const entry: CacheEntry<T> = {
         data,
@@ -141,6 +151,11 @@ class LocalStorageCache {
   }
 
   delete(key: string): void {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
     try {
       localStorage.removeItem(this.prefix + key);
     } catch (error) {
@@ -149,6 +164,11 @@ class LocalStorageCache {
   }
 
   clear(): void {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
     try {
       const keys = Object.keys(localStorage);
       keys.forEach(key => {
@@ -174,33 +194,70 @@ export class SmartCache {
   }
 
   static async get<T>(key: string): Promise<T | null> {
-    // Try localStorage first for fast access
-    const data = localStorageCache.get<T>(key);
-    if (data !== null) return data;
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return null;
+    }
 
-    // Fall back to IndexedDB for larger data
-    return await indexedDBCache.get<T>(key);
+    try {
+      // Try localStorage first for fast access
+      const data = localStorageCache.get<T>(key);
+      if (data !== null) return data;
+
+      // Fall back to IndexedDB for larger data
+      return await indexedDBCache.get<T>(key);
+    } catch (error) {
+      console.warn('SmartCache get failed:', error);
+      return null;
+    }
   }
 
   static async set<T>(key: string, data: T, ttl: number = 300000): Promise<void> {
-    if (this.isLargeData(data)) {
-      // Use IndexedDB for large data
-      await indexedDBCache.set(key, data, ttl);
-    } else {
-      // Use localStorage for small data
-      localStorageCache.set(key, data, ttl);
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      if (this.isLargeData(data)) {
+        // Use IndexedDB for large data
+        await indexedDBCache.set(key, data, ttl);
+      } else {
+        // Use localStorage for small data
+        localStorageCache.set(key, data, ttl);
+      }
+    } catch (error) {
+      console.warn('SmartCache set failed:', error);
     }
   }
 
   static async delete(key: string): Promise<void> {
-    // Try both storages
-    localStorageCache.delete(key);
-    await indexedDBCache.delete(key);
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      // Try both storages
+      localStorageCache.delete(key);
+      await indexedDBCache.delete(key);
+    } catch (error) {
+      console.warn('SmartCache delete failed:', error);
+    }
   }
 
   static async clear(): Promise<void> {
-    localStorageCache.clear();
-    await indexedDBCache.clear();
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorageCache.clear();
+      await indexedDBCache.clear();
+    } catch (error) {
+      console.warn('SmartCache clear failed:', error);
+    }
   }
 }
 
