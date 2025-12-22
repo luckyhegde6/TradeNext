@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import Form from "next/form";
 
 export const metadata: Metadata = {
   title: "Contact Us - TradeNext",
@@ -6,6 +7,33 @@ export const metadata: Metadata = {
 };
 
 export default function ContactPage() {
+  async function submitContactForm(formData: FormData) {
+    "use server";
+    
+    const name = formData.get("name") as string;
+    const email = formData.get("email") as string;
+    const subject = formData.get("subject") as string;
+    const message = formData.get("message") as string;
+    const newsletter = formData.get("newsletter") === "on";
+
+    // Log the form submission (in production, you'd send this to an email service or database)
+    console.log("Contact form submission:", {
+      name,
+      email,
+      subject,
+      message,
+      newsletter,
+    });
+
+    // In production, you could:
+    // 1. Send email via a service like SendGrid, Resend, or Netlify Emails
+    // 2. Store in database
+    // 3. Submit to Netlify Forms API programmatically
+    
+    // For now, we'll just return success
+    // You can add redirect or success handling here if needed
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       {/* Hero Section */}
@@ -78,14 +106,10 @@ export default function ContactPage() {
               Send us a Message
             </h2>
 
-            <form
-              name="contact"
-              method="POST"
-              data-netlify="true"
+            <Form
+              action={submitContactForm}
               className="space-y-6"
             >
-              <input type="hidden" name="form-name" value="contact" />
-              <input type="hidden" name="subject" value="Contact form submission from TradeNext website" />
 
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -167,7 +191,7 @@ export default function ContactPage() {
               >
                 Send Message
               </button>
-            </form>
+            </Form>
           </div>
         </div>
       </section>
