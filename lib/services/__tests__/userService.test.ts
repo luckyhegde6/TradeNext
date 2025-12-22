@@ -1,7 +1,5 @@
-import { getAllUsers, getPaginatedUsers, getUserById, createUser } from '../userService';
-
-// Mock Prisma
-jest.mock('@/lib/prisma', () => ({
+// Mock Prisma before importing the service
+jest.mock('../../prisma', () => ({
   __esModule: true,
   default: {
     user: {
@@ -13,7 +11,11 @@ jest.mock('@/lib/prisma', () => ({
   },
 }));
 
-import { default as mockPrisma } from '@/lib/prisma';
+import { getAllUsers, getPaginatedUsers, getUserById, createUser } from '../userService';
+import prisma from '../../prisma';
+
+// Get the mocked prisma instance
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 
 describe('User Service', () => {
   beforeEach(() => {

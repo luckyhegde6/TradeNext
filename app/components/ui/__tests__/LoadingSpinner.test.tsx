@@ -3,20 +3,20 @@ import { LoadingSpinner, Skeleton, CardSkeleton } from '../LoadingSpinner';
 
 describe('Loading Components', () => {
   describe('LoadingSpinner', () => {
-    test('should render with default props', () => {
-      render(<LoadingSpinner />);
+  test('should render with default props', () => {
+    render(<LoadingSpinner />);
 
-      const spinner = screen.getByRole('status');
-      expect(spinner).toBeInTheDocument();
-      expect(spinner).toHaveClass('w-8', 'h-8');
-    });
+    const spinner = screen.getByTestId('loading-spinner');
+    expect(spinner).toBeInTheDocument();
+    expect(spinner).toHaveClass('w-8', 'h-8');
+  });
 
-    test('should render with custom size', () => {
-      render(<LoadingSpinner size="lg" />);
+  test('should render with custom size', () => {
+    render(<LoadingSpinner size="lg" />);
 
-      const spinner = screen.getByRole('status');
-      expect(spinner).toHaveClass('w-12', 'h-12');
-    });
+    const spinner = screen.getByTestId('loading-spinner');
+    expect(spinner).toHaveClass('w-12', 'h-12');
+  });
 
     test('should render with custom message', () => {
       render(<LoadingSpinner message="Custom loading message" />);
@@ -31,61 +31,70 @@ describe('Loading Components', () => {
       expect(container).toHaveClass('custom-class');
     });
 
-    test('should have proper accessibility attributes', () => {
-      render(<LoadingSpinner />);
+  test('should have proper accessibility attributes', () => {
+    render(<LoadingSpinner />);
 
-      const spinner = screen.getByRole('status');
-      expect(spinner).toHaveAttribute('aria-hidden', 'false');
-    });
+    const spinner = screen.getByRole('status');
+    expect(spinner).toHaveAttribute('aria-label', 'Loading');
+  });
   });
 
   describe('Skeleton', () => {
-    test('should render single line skeleton', () => {
-      render(<Skeleton />);
+  test('should render single line skeleton', () => {
+    render(<Skeleton />);
 
-      const skeletonLines = screen.getAllByRole('presentation');
-      expect(skeletonLines).toHaveLength(1);
-    });
+    const skeleton = screen.getByTestId('skeleton');
+    expect(skeleton).toBeInTheDocument();
+    const skeletonLines = skeleton.querySelectorAll('[role="presentation"]');
+    expect(skeletonLines).toHaveLength(1);
+  });
 
-    test('should render multiple skeleton lines', () => {
-      render(<Skeleton lines={3} />);
+  test('should render multiple skeleton lines', () => {
+    render(<Skeleton lines={3} />);
 
-      const skeletonLines = screen.getAllByRole('presentation');
-      expect(skeletonLines).toHaveLength(3);
-    });
+    const skeleton = screen.getByTestId('skeleton');
+    expect(skeleton).toBeInTheDocument();
+    const skeletonLines = skeleton.querySelectorAll('[role="presentation"]');
+    expect(skeletonLines).toHaveLength(3);
+  });
 
-    test('should apply custom className', () => {
-      render(<Skeleton className="custom-skeleton" />);
+  test('should apply custom className', () => {
+    render(<Skeleton className="custom-skeleton" />);
 
-      const container = screen.getByRole('presentation').parentElement;
-      expect(container).toHaveClass('custom-skeleton');
-    });
+    const skeleton = screen.getByTestId('skeleton');
+    expect(skeleton).toHaveClass('custom-skeleton');
+  });
 
-    test('should have different widths for multiple lines', () => {
-      render(<Skeleton lines={3} />);
+  test('should have different widths for multiple lines', () => {
+    render(<Skeleton lines={3} />);
 
-      const lines = screen.getAllByRole('presentation');
-      expect(lines[0]).toHaveClass('w-full');
-      expect(lines[1]).toHaveClass('w-full');
-      expect(lines[2]).toHaveClass('w-3/4'); // Last line shorter
-    });
+    const skeleton = screen.getByTestId('skeleton');
+    expect(skeleton).toBeInTheDocument();
+    const lines = skeleton.querySelectorAll('[role="presentation"]');
+    expect(lines[0]).toHaveClass('w-full');
+    expect(lines[1]).toHaveClass('w-full');
+    expect(lines[2]).toHaveClass('w-3/4'); // Last line shorter
+  });
   });
 
   describe('CardSkeleton', () => {
-    test('should render card skeleton structure', () => {
-      render(<CardSkeleton />);
+  test('should render card skeleton structure', () => {
+    render(<CardSkeleton />);
 
-      // Should have multiple skeleton elements
-      const skeletonElements = screen.getAllByRole('presentation');
-      expect(skeletonElements.length).toBeGreaterThan(1);
-    });
+    const cardSkeleton = screen.getByTestId('card-skeleton');
+    expect(cardSkeleton).toBeInTheDocument();
 
-    test('should apply custom className', () => {
-      render(<CardSkeleton className="custom-card" />);
+    // Should have multiple skeleton elements
+    const skeletonElements = cardSkeleton.querySelectorAll('[role="presentation"]');
+    expect(skeletonElements.length).toBeGreaterThan(1);
+  });
 
-      const card = screen.getByRole('presentation').closest('.animate-pulse');
-      expect(card).toHaveClass('custom-card');
-    });
+  test('should apply custom className', () => {
+    render(<CardSkeleton className="custom-card" />);
+
+    const card = screen.getByTestId('card-skeleton');
+    expect(card).toHaveClass('custom-card');
+  });
   });
 });
 

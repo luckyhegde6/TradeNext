@@ -72,3 +72,7 @@ const indexedDBMock = {
 }
 global.indexedDB = indexedDBMock
 
+// Mock TextEncoder/TextDecoder for Prisma
+global.TextEncoder = require('util').TextEncoder
+global.TextDecoder = require('util').TextDecoder
+

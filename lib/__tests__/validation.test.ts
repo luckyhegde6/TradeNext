@@ -6,11 +6,11 @@ const ingestRequestSchema = z.object({
   sync: z.boolean().optional(),
 });
 
-const tickerSchema = z.string().min(1).max(10).regex(/^[A-Z0-9.]+$/);
+const tickerSchema = z.string().min(1).max(10).regex(/^[A-Z][A-Z0-9.]*$/);
 
 const heatmapQuerySchema = z.object({
-  page: z.string().optional().transform(val => val ? parseInt(val) : 1),
-  limit: z.string().optional().transform(val => val ? Math.min(parseInt(val), 200) : 50),
+  page: z.string().optional().transform(val => val ? parseInt(val) : 1).refine(val => !isNaN(val) && val > 0, { message: "Page must be a positive number" }),
+  limit: z.string().optional().transform(val => val ? Math.min(parseInt(val), 200) : 50).refine(val => !isNaN(val) && val > 0, { message: "Limit must be a positive number" }),
 });
 
 const announcementsQuerySchema = z.object({

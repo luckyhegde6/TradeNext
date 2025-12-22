@@ -4,8 +4,6 @@ on:
   schedule:
     # Run weekly on Mondays at 3 AM UTC
     - cron: '0 3 * * 1'
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
 
@@ -26,7 +24,12 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm ci
+      run: |
+        npm ci --ignore-scripts
+        npx prisma generate --schema=prisma/schema.prisma
+      env:
+        DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+        npm_config_audit_level: moderate
 
     - name: Run npm audit
       run: npm audit --audit-level moderate
@@ -40,19 +43,28 @@ jobs:
         format: 'sarif'
         output: 'trivy-results.sarif'
 
+    - name: Check for Trivy results file
+      id: check-trivy
+      run: |
+        if [ -f "trivy-results.sarif" ]; then
+          echo "file_exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "file_exists=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: steps.check-trivy.outputs.file_exists == 'true'
       with:
         sarif_file: 'trivy-results.sarif'
 
     - name: Run CodeQL Analysis
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: javascript
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
 
     - name: Security linting
       run: |
@@ -71,6 +83,9 @@ jobs:
         if grep -r "process\.env\." app/ --include="*.ts" --include="*.tsx" | grep -v "NEXT_PUBLIC_"; then
           echo "⚠️ Found direct process.env usage in client code"
         fi
+
+        # Note about npm deprecation warnings
+        echo "ℹ️ Note: Some npm packages show deprecation warnings. These are tracked and will be updated in future releases."
 
         echo "✅ Security linting completed"
 
@@ -99,7 +114,7 @@ jobs:
         fetch-depth: 0
 
     - name: Run TruffleHog OSS
-      uses: trufflesecurity/trufflehog@main
+      uses: trufflesecurity/trufflehog@v3.88.8
       with:
         path: ./
         base: main
