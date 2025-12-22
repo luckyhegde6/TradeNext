@@ -1,0 +1,115 @@
+version: 1.0
+project: TradeNext
+purpose: >
+  Engineering guardrails for AI agents and contributors.
+  All changes must be validated against this checklist.
+
+meta_rules:
+  - no_prisma_in_client_components
+  - no_business_logic_in_ui
+  - no_undocumented_api_routes
+  - no_unvalidated_inputs
+  - no_silent_failures
+
+architecture:
+  separation_of_concerns:
+    required: true
+    checks:
+      - ui_only_renders_data
+      - api_routes_orchestrate_only
+      - business_logic_in_lib_services
+      - integrations_in_lib_integrations
+      - prisma_used_only_in_server
+
+  nextjs_rules:
+    checks:
+      - server_components_do_not_import_prisma
+      - runtime_nodejs_explicit_where_needed
+      - data_fetch_via_api_or_services
+
+api_design:
+  validation:
+    required: true
+    checks:
+      - zod_or_equivalent_used
+      - request_schema_defined
+      - response_schema_defined
+
+  swagger:
+    required: true
+    checks:
+      - route_documented
+      - summary_present
+      - request_body_schema_present
+      - response_schema_present
+      - admin_routes_marked_secure
+
+security:
+  admin_access:
+    checks:
+      - admin_routes_protected
+      - nextauth_or_admin_key_used
+      - middleware_updated_if_needed
+
+  secrets:
+    checks:
+      - no_secrets_in_client
+      - no_secrets_in_next_public_env
+
+ingestion:
+  rules:
+    - ingestion_not_blocking_http
+    - background_job_or_queue_used
+    - ingestion_idempotent
+    - large_files_streamed
+
+market_data:
+  nse_api:
+    checks:
+      - server_side_proxy_only
+      - redis_cache_with_ttl
+      - retry_and_backoff
+      - rate_limit_respected
+
+performance:
+  checks:
+    - pagination_applied
+    - no_n_plus_one_queries
+    - cache_used_where_applicable
+    - timeseries_use_timescale
+
+logging:
+  required: true
+  checks:
+    - pino_logger_used
+    - start_logged
+    - success_logged
+    - error_logged_with_context
+
+ui_ux:
+  checks:
+    - loading_state_present
+    - error_state_present
+    - empty_state_handled
+    - responsive_layout
+
+maintainability:
+  checks:
+    - readable_in_isolation
+    - domain_driven_naming
+    - no_dead_code
+    - readme_updated_if_needed
+
+interview_readiness:
+  checks:
+    - explainable_in_system_design
+    - tradeoffs_documented
+    - senior_level_patterns_used
+
+final_gate:
+  required: true
+  checks:
+    - checklist_passed
+    - swagger_updated
+    - security_reviewed
+    - logs_added

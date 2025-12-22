@@ -52,10 +52,10 @@ export const getCacheMetrics = () => ({
 });
 
 // Cache cleanup utilities
+// Note: NodeCache automatically handles expired key cleanup
 export const cleanupExpiredKeys = () => {
-  cache.pruneExpiredKeys();
-  hotCache.pruneExpiredKeys();
-  staticCache.pruneExpiredKeys();
+  // NodeCache handles expiration automatically when keys are accessed
+  // No manual pruning needed - this function is a no-op
 };
 
 // Clear all caches (useful for development/testing)

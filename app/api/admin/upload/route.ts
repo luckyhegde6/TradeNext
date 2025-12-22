@@ -3,17 +3,30 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
+import { auth } from "@/lib/auth";
+import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        const user = session?.user as { role?: string };
+        const isAdmin = user?.role === "admin";
+
+        if (!session || !isAdmin) {
+            logger.warn({ msg: 'Unauthorized access to admin upload', user: session?.user?.email });
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const formData = await req.formData();
         const file = formData.get("file") as File;
 
         if (!file) {
             return NextResponse.json({ error: "No file provided" }, { status: 400 });
         }
+
+        logger.info({ msg: 'Admin file upload started', user: session.user.email, fileName: file.name });
 
         const buffer = Buffer.from(await file.arrayBuffer());
         // Create dailyUploads/zip directory if it doesn't exist
@@ -31,13 +44,15 @@ export async function POST(req: Request) {
 
         await writeFile(filePath, buffer);
 
+        logger.info({ msg: 'Admin file upload completed', fileName: uniqueName, filePath });
         return NextResponse.json({
             success: true,
             filePath,
             fileName: uniqueName
         });
     } catch (e: unknown) {
-        console.error(e);
-        return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+        const errorMessage = (e instanceof Error ? e.message : "Upload failed");
+        logger.error({ msg: 'Admin file upload failed', error: errorMessage });
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }

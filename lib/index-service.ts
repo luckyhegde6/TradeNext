@@ -1,7 +1,8 @@
 import prisma from "@/lib/prisma";
-import cache, { hotCache, staticCache } from "@/lib/cache"; // NodeCache
+import cache, { staticCache } from "@/lib/cache"; // NodeCache
 import { nseFetch } from "@/lib/nse-client";
 import { MARKET_TIMINGS, MARKET_HOLIDAYS } from "@/lib/constants";
+import logger from "@/lib/logger";
 import type { IndexQuote } from "@prisma/client";
 
 // Helper to check if market is currently open
@@ -109,7 +110,7 @@ export async function getIndexChartData(indexName: string) {
     }
 }
 
-export async function getIndexDetails(indexName: string) {
+export async function getIndexDetails(indexName: string, enablePolling: boolean = false) {
     let dbQuote = null;
     try {
         // Add timeout to database query to prevent hanging
@@ -123,25 +124,54 @@ export async function getIndexDetails(indexName: string) {
             return dbQuote;
         }
     } catch (dbError) {
-        console.warn(`Database query failed for ${indexName}, falling back to NSE:`, dbError instanceof Error ? dbError.message : dbError);
+        logger.warn({
+            msg: 'Database query failed for index, falling back to NSE',
+            indexName,
+            error: dbError instanceof Error ? dbError.message : String(dbError)
+        });
         // Continue to fetch from NSE
     }
 
+    // Check cache first
     const cacheKey = `nse:index:${indexName}:quote`;
-    const cached = hotCache.get(cacheKey); // Use hot cache for frequently accessed index quotes
-    if (cached) return cached;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+        logger.debug({ msg: 'Cache hit for index details', indexName });
+        return cached;
+    }
 
-    const qs = `?functionName=getIndexData&&index=${encodeURIComponent(indexName)}`;
-    try {
+    const fetchIndexDetails = async () => {
+        const qs = `?functionName=getIndexData&&index=${encodeURIComponent(indexName)}`;
+
+        logger.info({ msg: 'Fetching index details from NSE', indexName });
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const data = rawData?.data?.[0] || rawData?.[0] || {};
 
+        // Ensure numeric values for calculations
+        const lastPrice = parseFloat(data.lastPrice || data.last || 0);
+        const previousClose = parseFloat(data.previousClose || data.prevClose || 0);
+        const percChange = parseFloat(data.percChange || data.percentChange || 0);
+
+        // Calculate change properly (lastPrice - previousClose)
+        const change = lastPrice - previousClose;
+
+        // Log for debugging
+        logger.info({
+            msg: 'Index quote calculation',
+            indexName: data.indexName || indexName,
+            lastPrice,
+            previousClose,
+            change,
+            percChange
+        });
+
         const quote = {
             indexName: data.indexName || indexName,
-            lastPrice: String(data.lastPrice || data.last || 0),
-            change: String(data.lastPrice - data.previousClose || 0),
-            pChange: String(data.percChange || data.percentChange || 0),
+            lastPrice: String(lastPrice),
+            change: String(change),
+            pChange: String(percChange),
             open: String(data.open || 0),
             high: String(data.dayHigh || data.high || 0),
             low: String(data.dayLow || data.low || 0),
@@ -160,7 +190,10 @@ export async function getIndexDetails(indexName: string) {
             timestamp: data.timeVal ? new Date(data.timeVal).toISOString() : new Date().toISOString(),
         };
 
-        hotCache.set(cacheKey, quote, 120); // Cache in hot cache for 2 minutes
+        logger.info({ msg: 'Index details fetched successfully', indexName, lastPrice: quote.lastPrice });
+
+        // Cache the result
+        cache.set(cacheKey, quote, 120); // 2 minutes
 
         // Async database hydration (don't fail the request if DB is unavailable)
         (async () => {
@@ -171,20 +204,34 @@ export async function getIndexDetails(indexName: string) {
                     create: { ...quote, id: undefined }
                 });
             } catch (err) {
-                console.warn("DB upsert error (continuing without saving to DB):", err);
+                logger.warn({
+                    msg: 'DB upsert error for index details',
+                    indexName,
+                    error: err instanceof Error ? err.message : String(err)
+                });
             }
         })();
 
         return quote;
+    };
+
+    try {
+        const quote = await fetchIndexDetails();
+        return quote;
     } catch (e) {
-        console.error("Failed to fetch index details:", e);
+        logger.error({
+            msg: 'Failed to fetch index details',
+            indexName,
+            error: e instanceof Error ? e.message : String(e)
+        });
+
         if (dbQuote) {
-            console.log(`Returning cached data for ${indexName} due to API failure`);
+            logger.info({ msg: 'Returning cached DB data due to API failure', indexName });
             return dbQuote;
         }
 
         // Return a fallback response instead of throwing error
-        console.warn(`Index ${indexName} not available, returning fallback data`);
+        logger.warn({ msg: 'Index not available, returning fallback data', indexName });
         return {
             indexName,
             lastPrice: "0",
@@ -213,14 +260,19 @@ export async function getIndexDetails(indexName: string) {
 export async function getIndexHeatmap(indexName: string) {
     const cacheKey = `nse:index:${indexName}:heatmap`;
     const cached = cache.get(cacheKey); // Use regular cache for heatmap data
-    if (cached) return cached;
+    if (cached) {
+        return cached;
+    }
 
     const qs = `?functionName=getConstituents&&index=${encodeURIComponent(indexName)}&&noofrecords=0`;
     try {
+        logger.info({ msg: 'Fetching heatmap data from NSE', indexName });
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const items = rawData?.data || [];
 
+        logger.info({ msg: 'Heatmap data fetched', indexName, count: items.length });
         cache.set(cacheKey, items, 300); // 5 mins
 
         // Async Hydrate (don't fail the request if DB is unavailable)
@@ -232,7 +284,7 @@ export async function getIndexHeatmap(indexName: string) {
 
                     // Skip if symbol is missing or undefined
                     if (!symbol) {
-                        console.warn('Skipping item without symbol:', item);
+                        logger.warn({ msg: 'Skipping heatmap item without symbol', item });
                         continue;
                     }
 
@@ -273,15 +325,27 @@ export async function getIndexHeatmap(indexName: string) {
                     });
                 }
             } catch (err) {
-                console.warn("Heatmap DB Hydration Error (continuing without saving to DB):", err);
+                logger.warn({
+                    msg: 'Heatmap DB Hydration Error',
+                    indexName,
+                    error: err instanceof Error ? err.message : String(err)
+                });
             }
         })();
 
         return items;
     } catch (e) {
-        console.error("Heatmap fetch error", e);
-        // Fallback to DB
-        const dbItems = await prisma.indexHeatmapItem.findMany({ where: { indexName } });
+        logger.error({
+            msg: 'Heatmap fetch error, falling back to DB',
+            indexName,
+            error: e instanceof Error ? e.message : String(e)
+        });
+
+        // Fallback to DB - return all items
+        const dbItems = await prisma.indexHeatmapItem.findMany({
+            where: { indexName }
+        });
+
         return dbItems.map(item => ({
             symbol: item.symbol,
             lastPrice: item.lastPrice,

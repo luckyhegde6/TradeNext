@@ -1,0 +1,187 @@
+name: Performance Monitoring
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+
+jobs:
+  lighthouse-performance:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application
+      run: npm run quickbuild
+
+    - name: Start local server
+      run: |
+        npm run start &
+        sleep 10
+
+    - name: Run Lighthouse
+      uses: treosh/lighthouse-ci-action@v10
+      id: lighthouse
+      with:
+        urls: http://localhost:3000
+        configPath: .lighthouserc.json
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+        runs: 3
+
+    - name: Check performance thresholds
+      run: |
+        # Extract scores from Lighthouse results
+        PERF_SCORE=$(echo ${{ steps.lighthouse.outputs.manifest }} | jq -r '.summary.performance')
+        ACCESSIBILITY_SCORE=$(echo ${{ steps.lighthouse.outputs.manifest }} | jq -r '.summary.accessibility')
+        BEST_PRACTICES_SCORE=$(echo ${{ steps.lighthouse.outputs.manifest }} | jq -r '.summary["best-practices"]')
+        SEO_SCORE=$(echo ${{ steps.lighthouse.outputs.manifest }} | jq -r '.summary.seo')
+
+        echo "Performance Score: $PERF_SCORE"
+        echo "Accessibility Score: $ACCESSIBILITY_SCORE"
+        echo "Best Practices Score: $BEST_PRACTICES_SCORE"
+        echo "SEO Score: $SEO_SCORE"
+
+        # Check if scores meet minimum thresholds
+        if (( $(echo "$PERF_SCORE < 0.8" | bc -l) )); then
+          echo "❌ Performance score below threshold: $PERF_SCORE"
+          exit 1
+        fi
+
+        if (( $(echo "$ACCESSIBILITY_SCORE < 0.9" | bc -l) )); then
+          echo "❌ Accessibility score below threshold: $ACCESSIBILITY_SCORE"
+          exit 1
+        fi
+
+        echo "✅ All performance thresholds met!"
+
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request'
+      uses: dorny/test-reporter@v1
+      with:
+        name: Lighthouse Performance Tests
+        path: '**/lighthouseci/manifest.json'
+        reporter: json
+        fail-on-error: false
+
+  api-performance-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Artillery
+      run: npm install -g artillery
+
+    - name: Run API load test
+      run: |
+        # Create a simple load test configuration
+        cat > artillery-config.yml << EOF
+        config:
+          target: 'http://localhost:3000'
+          phases:
+            - duration: 60
+              arrivalRate: 5
+              name: Warm up
+            - duration: 120
+              arrivalRate: 10
+              name: Sustained load
+          defaults:
+            headers:
+              Content-Type: 'application/json'
+
+        scenarios:
+          - name: 'Get stock quotes'
+            weight: 60
+            requests:
+              - get:
+                  url: '/api/nse/stock/SBIN/quote'
+
+          - name: 'Get market data'
+            weight: 30
+            requests:
+              - get:
+                  url: '/api/nse/index/NIFTY%2050/quote'
+
+          - name: 'Get company data'
+            weight: 10
+            requests:
+              - get:
+                  url: '/api/company/SBIN'
+        EOF
+
+        # Start the application
+        npm run start &
+        SERVER_PID=$!
+        sleep 15
+
+        # Run the load test
+        artillery run artillery-config.yml --output test-results.json
+
+        # Kill the server
+        kill $SERVER_PID
+
+    - name: Analyze load test results
+      run: |
+        # Extract key metrics
+        REQUESTS=$(cat test-results.json | jq '.aggregate.counters."http.requests"')
+        RESPONSE_TIME_AVG=$(cat test-results.json | jq '.aggregate.summaries."http.response_time".mean')
+        RESPONSE_TIME_P95=$(cat test-results.json | jq '.aggregate.summaries."http.response_time".p95')
+        ERROR_RATE=$(cat test-results.json | jq '.aggregate.counters."errors.ETIMEDOUT" // 0')
+
+        echo "Total Requests: $REQUESTS"
+        echo "Average Response Time: ${RESPONSE_TIME_AVG}ms"
+        echo "95th Percentile Response Time: ${RESPONSE_TIME_P95}ms"
+        echo "Error Rate: $ERROR_RATE"
+
+        # Check performance thresholds
+        if (( $(echo "$RESPONSE_TIME_AVG > 1000" | bc -l) )); then
+          echo "❌ Average response time too high: ${RESPONSE_TIME_AVG}ms"
+          exit 1
+        fi
+
+        if (( $(echo "$RESPONSE_TIME_P95 > 2000" | bc -l) )); then
+          echo "❌ 95th percentile response time too high: ${RESPONSE_TIME_P95}ms"
+          exit 1
+        fi
+
+        echo "✅ API performance within acceptable limits!"
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-test-results
+        path: |
+          test-results.json
+          artillery-config.yml

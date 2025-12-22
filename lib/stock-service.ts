@@ -1,5 +1,7 @@
-import cache, { hotCache } from "@/lib/cache";
+import cache from "@/lib/cache";
 import { nseFetch } from "@/lib/nse-client";
+import { enhancedCache, nseCache, marketDataPoller } from "@/lib/enhanced-cache";
+import logger from "@/lib/logger";
 
 // Type definitions
 interface StockQuote {
@@ -30,19 +32,29 @@ interface StockQuote {
  * Get stock quote data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=SBIN
  */
-export async function getStockQuote(symbol: string): Promise<StockQuote> {
-    const cacheKey = `nse:stock:${symbol}:quote`;
-    const cached = hotCache.get(cacheKey); // Use hot cache for frequently accessed stock quotes
-    if (cached) return cached as StockQuote;
+export async function getStockQuote(symbol: string, enablePolling: boolean = false): Promise<StockQuote> {
+    const cacheConfig = nseCache.stockQuote(symbol);
 
-    const qs = `?functionName=getSymbolData&marketType=N&series=EQ&symbol=${encodeURIComponent(symbol)}`;
-    try {
-        console.log(`[Stock Service] Fetching quote for ${symbol}`);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as any;
-        console.log(`[Stock Service] Raw response:`, JSON.stringify(rawData).substring(0, 200));
+    const fetchQuote = async (): Promise<StockQuote> => {
+        const qs = `?functionName=getSymbolData&marketType=N&series=EQ&symbol=${encodeURIComponent(symbol)}`;
 
-        const data = rawData?.equityResponse?.[0] || rawData;
+        logger.info({ msg: 'Fetching stock quote from NSE', symbol });
+
+        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as {
+          grapthData?: unknown[];
+          graphData?: unknown[];
+          equityResponse?: unknown[];
+        };
+        logger.debug({ msg: 'Raw NSE response', symbol, responseSize: JSON.stringify(rawData).length });
+
+        const data = (rawData?.equityResponse?.[0] || rawData) as {
+          metaData?: any;
+          tradeInfo?: any;
+          priceInfo?: any;
+          secInfo?: any;
+          grapthData?: unknown[];
+          graphData?: unknown[];
+        };
 
         // Extract data from nested structure
         const metaData = data.metaData || {};
@@ -84,42 +96,50 @@ export async function getStockQuote(symbol: string): Promise<StockQuote> {
             indexList: secInfo.indexList || [],
         };
 
-        console.log(`[Stock Service] Mapped quote:`, quote);
-        hotCache.set(cacheKey, quote, 120); // Cache in hot cache for 2 mins
+        logger.info({ msg: 'Stock quote mapped successfully', symbol, lastPrice: quote.lastPrice });
         return quote;
-    } catch (e) {
-        console.error(`[Stock Service] Error fetching quote for ${symbol}:`, e);
-        throw e;
+    };
+
+    const pollingConfig = enablePolling ? cacheConfig.pollingConfig : undefined;
+    const quote = await enhancedCache.getWithCache(cacheConfig, fetchQuote, pollingConfig);
+
+    if (enablePolling) {
+        marketDataPoller.startPolling(symbol, 'stock');
     }
+
+    return quote;
 }
 
 /**
  * Get stock chart data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolChartData&symbol=SBINEQN&days=1D
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getStockChart(symbol: string, days: string = "1D"): Promise<any[]> {
-    const cacheKey = `nse:stock:${symbol}:chart:${days}`;
-    const cached = cache.get(cacheKey);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (cached) return cached as any[];
+export async function getStockChart(symbol: string, days: string = "1D"): Promise<unknown[]> {
+    const cacheConfig = nseCache.stockChart(symbol, days);
 
-    // Need to get identifier first (e.g., SBINEQN for SBIN)
-    const quote = await getStockQuote(symbol);
-    const identifier = quote.identifier || `${symbol}EQN`;
+    const fetchChart = async (): Promise<unknown[]> => {
+        // Need to get identifier first (e.g., SBINEQN for SBIN)
+        const quote = await getStockQuote(symbol);
+        const identifier = quote.identifier || `${symbol}EQN`;
 
-    const qs = `?functionName=getSymbolChartData&symbol=${encodeURIComponent(identifier)}&days=${days}`;
-    try {
-        console.log(`[Stock Service] Fetching chart for ${identifier}, days: ${days}`);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as any;
+        const qs = `?functionName=getSymbolChartData&symbol=${encodeURIComponent(identifier)}&days=${days}`;
+
+        logger.info({ msg: 'Fetching stock chart from NSE', symbol, identifier, days });
+
+        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as {
+          grapthData?: unknown[];
+          graphData?: unknown[];
+        };
         const chartData = rawData?.grapthData || rawData?.graphData || [];
 
-        console.log(`[Stock Service] Chart data points: ${chartData.length}`);
-        cache.set(cacheKey, chartData, 300); // 5 mins
+        logger.info({ msg: 'Stock chart data fetched', symbol, days, dataPoints: chartData.length });
         return chartData;
+    };
+
+    try {
+        return await enhancedCache.getWithCache(cacheConfig, fetchChart);
     } catch (e) {
-        console.error(`[Stock Service] Error fetching chart for ${symbol}:`, e);
+        logger.error({ msg: 'Failed to fetch stock chart', symbol, days, error: e instanceof Error ? e.message : String(e) });
         return [];
     }
 }
@@ -141,8 +161,11 @@ export async function getStockTrends(symbol: string): Promise<any[]> {
 
     const qs = `?functionName=getYearwiseData&symbol=${encodeURIComponent(identifier)}`;
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as any;
+        const rawData = await nseFetch("/api/NextApi/apiClient/GetQuoteApi", qs) as {
+          grapthData?: unknown[];
+          graphData?: unknown[];
+          data?: unknown[];
+        };
         const trends = rawData?.data || [];
 
         cache.set(cacheKey, trends, 3600); // 1 hour

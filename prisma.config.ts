@@ -1,6 +1,16 @@
 import 'dotenv/config';
 import { defineConfig, env } from 'prisma/config';
 
+// Get DATABASE_URL with fallback - handle case where it might not be set (e.g., during prisma generate)
+function getDatabaseUrl(): string {
+    try {
+        return process.env.DATABASE_URL || env('DATABASE_URL') || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+    } catch (error) {
+        // If env() throws, fall back to process.env or default
+        return process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+    }
+}
+
 export default defineConfig({
     // path to your Prisma schema
     schema: 'prisma/schema.prisma',
@@ -14,6 +24,6 @@ export default defineConfig({
     // supply the migration/runtime connection URL from env
     // (you can use DATABASE_URL or DIRECT_DATABASE_URL depending on your setup)
     datasource: {
-        url: env('DATABASE_URL') || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext',
+        url: getDatabaseUrl(),
     },
 });

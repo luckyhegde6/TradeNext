@@ -33,7 +33,7 @@ function SignInForm() {
     };
 
     return (
-        <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        <div className="w-full max-w-md mx-4 rounded-lg bg-white p-6 sm:p-8 shadow-md">
             <h2 className="mb-6 text-center text-2xl font-bold text-gray-900">Sign In to TradeNext</h2>
             {error && (
                 <div className="mb-4 rounded bg-red-100 p-3 text-sm text-red-700">
@@ -47,7 +47,7 @@ function SignInForm() {
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                         placeholder="you@example.com"
                         required
                     />
@@ -58,7 +58,7 @@ function SignInForm() {
                         type="password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                         placeholder="••••••••"
                         required
                     />
