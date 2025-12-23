@@ -22,19 +22,19 @@ function Freshness({ meta }: { meta: Meta }) {
   );
 }
 
-export function CorporateInfoTable({ 
-  data, 
-  meta 
-}: { 
-  data: any[]; 
+export function CorporateInfoTable({
+  data,
+  meta
+}: {
+  data: any[];
   meta?: Meta;
 }) {
   const { query, setQuery, filtered } = useFilter(
     data,
     (row, q) =>
       row.symbol?.toLowerCase().includes(q.toLowerCase()) ||
-      row.companyName?.toLowerCase().includes(q.toLowerCase()) ||
-      row.subject?.toLowerCase().includes(q.toLowerCase())
+      row.sm_name?.toLowerCase().includes(q.toLowerCase()) ||
+      row.desc?.toLowerCase().includes(q.toLowerCase())
   );
 
   return (
@@ -65,30 +65,33 @@ export function CorporateInfoTable({
             ),
           },
           {
-            key: "companyName",
+            key: "sm_name",
             label: "Company",
-            render: (v) => (
+            render: (_v, row) => (
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                {v || "-"}
+                {row.sm_name || "-"}
               </span>
             ),
           },
           {
-            key: "subject",
+            key: "desc",
             label: "Announcement",
-            render: (v) => (
-              <div className="max-w-2xl">
-                <span className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2" title={v}>
-                  {v || "-"}
-                </span>
-              </div>
-            ),
+            render: (_v, row) => {
+              const val = row.desc || row.subject || "-";
+              return (
+                <div className="max-w-2xl">
+                  <span className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2" title={val}>
+                    {val}
+                  </span>
+                </div>
+              );
+            },
           },
           {
-            key: "date",
+            key: "an_dt",
             label: "Date",
             align: "right",
-            render: (v) => v || "-",
+            render: (_v, row) => row.an_dt || row.broadcastDateTime || row.date || "-",
           },
         ]}
       />

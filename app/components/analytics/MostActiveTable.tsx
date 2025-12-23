@@ -22,17 +22,17 @@ function Freshness({ meta }: { meta: Meta }) {
   );
 }
 
-export function MostActiveTable({ 
-  data, 
-  meta 
-}: { 
-  data: MostActiveDTO[]; 
+export function MostActiveTable({
+  data,
+  meta
+}: {
+  data: MostActiveDTO[];
   meta?: Meta;
 }) {
   return (
     <div className="space-y-3">
       {meta && <Freshness meta={meta} />}
-      
+
       <PaginatedDataTable
         data={data}
         defaultSort="volume"
@@ -51,7 +51,7 @@ export function MostActiveTable({
             ),
           },
           {
-            key: "lastPrice",
+            key: "ltp",
             label: "Last Price",
             align: "right",
             render: v => v?.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00",
@@ -73,13 +73,13 @@ export function MostActiveTable({
             ),
           },
           {
-            key: "totalTradedVolume",
+            key: "volume",
             label: "Volume",
             align: "right",
             render: v => v?.toLocaleString("en-IN") || "0",
           },
           {
-            key: "totalTradedValue",
+            key: "turnover",
             label: "Turnover (₹ Cr)",
             align: "right",
             render: v => v ? (v / 1e7).toFixed(2) : "0.00",

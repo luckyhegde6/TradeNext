@@ -1,7 +1,7 @@
 // lib/nse-client.ts
 import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
-import logger from "@/lib/logger"; 
+import logger from "@/lib/logger";
 // Dynamic imports to avoid webpack bundling issues
 let fetch: any = null;
 let jar: CookieJar | null = null;
@@ -41,7 +41,7 @@ async function ensureSession() {
 async function nseFetch(path: string, qs = "") {
   await initFetch();
   await ensureSession();
-  const url = NSE_BASE + path + qs;
+  const url = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
   logger.info({ msg: `[NSE Fetch] ${url}` });
 
   // Add overall timeout for the entire request

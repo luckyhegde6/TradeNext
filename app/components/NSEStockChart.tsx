@@ -57,7 +57,7 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
 
     // Parse chart data
     // eslint-disable-next-line
-    const labels = chartData.map((item: any) => {
+    const labels = chartData.map((item: [number, number, string]) => {
         const date = new Date(item[0]);
         if (timeframe === '1D') {
             return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -65,7 +65,7 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
         return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
     });
     // eslint-disable-next-line
-    const prices = chartData.map((item: any) => item[1]);
+    const prices = chartData.map((item: [number, number, string]) => item[1]);
 
     const data = {
         labels,
@@ -95,8 +95,9 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
                 intersect: false,
                 callbacks: {
                     // eslint-disable-next-line
-                    label: function (context: any) {
-                        return `₹${context.parsed.y.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    label: function (context: { parsed: { y: number | null } }) {
+                        const val = context.parsed.y ?? 0;
+                        return `₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                     }
                 }
             },
@@ -117,8 +118,9 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
                 },
                 ticks: {
                     // eslint-disable-next-line
-                    callback: function (value: any) {
-                        return '₹' + value.toLocaleString('en-IN');
+                    callback: function (value: number | string) {
+                        const numericValue = typeof value === 'string' ? parseFloat(value) : value;
+                        return '₹' + numericValue.toLocaleString('en-IN');
                     }
                 }
             },

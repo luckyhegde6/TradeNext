@@ -4,6 +4,7 @@ import ClientChartWrapper from './ClientChartWrapper';
 import { getCompanyData } from '@/lib/services/companyService';
 import StockQuoteHeader from '@/app/components/StockQuoteHeader';
 import NSEStockChart from '@/app/components/NSEStockChart';
+import CorporateDataTabs from '@/app/components/analytics/CorporateDataTabs';
 
 async function getCompany(ticker: string) {
     try {
@@ -30,6 +31,12 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
 
                 {/* NSE Real-time Chart */}
                 <NSEStockChart symbol={ticker} />
+
+                {/* Corporate Data (Financials, Events, Announcements, Actions) */}
+                <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white px-1">Corporate Updates</h3>
+                    <CorporateDataTabs symbol={ticker} />
+                </div>
 
                 {/* Historical Data from DB (if available) */}
                 {data?.prices && data.prices.length > 0 && (

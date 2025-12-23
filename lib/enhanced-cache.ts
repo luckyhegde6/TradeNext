@@ -245,6 +245,13 @@ export const nseCache = {
     key: `nse:static:${key}`,
     ttl: 3600000, // 1 hour
     cacheInstance: staticCache
+  }),
+
+  // Corporate data - 1 hour TTL
+  corporate: (symbol: string, type: string) => ({
+    key: `nse:stock:${symbol}:corporate:${type}`,
+    ttl: 3600000, // 1 hour
+    cacheInstance: cache
   })
 };
 

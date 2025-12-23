@@ -37,11 +37,10 @@ export default function MarketAnalyticsTabs() {
           <button
             key={tab.key}
             onClick={() => setActive(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
-              active.key === tab.key
-                ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
-            }`}
+            className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${active.key === tab.key
+              ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
+              : "text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
           >
             {tab.label}
           </button>
@@ -62,7 +61,7 @@ export default function MarketAnalyticsTabs() {
 
             const meta = data.meta || { fetchedAt: data.timestamp || new Date().toISOString() };
             const countData = data.advance.count;
-            
+
             // Transform count object to array format expected by AdvanceDeclineCards
             const advanceDeclineData = [
               { identifier: "Advances", count: countData.Advances || 0 },
@@ -91,19 +90,20 @@ export default function MarketAnalyticsTabs() {
 
           {/* Handle corporate info data structure */}
           {active.key === "corporate-info" && (() => {
-            if (!data || !Array.isArray(data) || data.length === 0) {
+            const rawItems = Array.isArray(data) ? data : (data?.data || []);
+            if (!data || rawItems.length === 0) {
               return <p className="text-gray-500">No corporate info data available</p>;
             }
 
             const meta = { fetchedAt: new Date().toISOString() };
-            
+
             // Transform corporate announcement data to match CorporateInfoTable expectations
             // Use attchmntText (full text) if available, otherwise use desc (short description)
-            const transformedData = data.map((item: any) => ({
+            const transformedData = rawItems.map((item: any) => ({
               symbol: item.symbol || "",
-              companyName: item.sm_name || item.sm_name || "",
-              subject: item.attchmntText || item.desc || "",
-              date: item.an_dt || item.sort_date || "",
+              sm_name: item.companyName || "",
+              desc: `Issue: ${item.startDate} to ${item.endDate} | Price: ${item.priceRange} | Status: ${item.status}`,
+              an_dt: item.startDate || "",
             }));
 
             return (
@@ -142,14 +142,14 @@ export default function MarketAnalyticsTabs() {
               return <p className="text-gray-500">No data available</p>;
             }
 
-            const meta = data.meta || (data.stale !== undefined ? { 
-              fetchedAt: new Date().toISOString(), 
-              stale: data.stale 
+            const meta = data.meta || (data.stale !== undefined ? {
+              fetchedAt: new Date().toISOString(),
+              stale: data.stale
             } : undefined);
 
             return (
-              <GainersTable 
-                data={Array.isArray(data.data) ? data.data : []} 
+              <GainersTable
+                data={Array.isArray(data.data) ? data.data : []}
                 meta={meta}
               />
             );
@@ -161,14 +161,14 @@ export default function MarketAnalyticsTabs() {
               return <p className="text-gray-500">No data available</p>;
             }
 
-            const meta = data.meta || (data.stale !== undefined ? { 
-              fetchedAt: new Date().toISOString(), 
-              stale: data.stale 
+            const meta = data.meta || (data.stale !== undefined ? {
+              fetchedAt: new Date().toISOString(),
+              stale: data.stale
             } : undefined);
 
             return (
-              <LosersTable 
-                data={Array.isArray(data.data) ? data.data : []} 
+              <LosersTable
+                data={Array.isArray(data.data) ? data.data : []}
                 meta={meta}
               />
             );
@@ -180,13 +180,13 @@ export default function MarketAnalyticsTabs() {
               return <p className="text-gray-500">No data available</p>;
             }
 
-            const meta = data.meta || { 
-              fetchedAt: data.timestamp || new Date().toISOString() 
+            const meta = data.meta || {
+              fetchedAt: data.timestamp || new Date().toISOString()
             };
 
             return (
-              <MostActiveTable 
-                data={data.data} 
+              <MostActiveTable
+                data={data.data}
                 meta={meta}
               />
             );

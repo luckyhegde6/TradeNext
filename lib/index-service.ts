@@ -257,19 +257,41 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
     }
 }
 
+interface NSEIndexConstituent {
+    cmSymbol?: string;
+    symbol?: string;
+    lasttradedPrice?: number;
+    lastPrice?: number;
+    last?: number;
+    change?: number;
+    pchange?: number;
+    pChange?: number;
+    totaltradedquantity?: number;
+    tradedVolume?: number;
+    totalTradedVolume?: number | string;
+    totaltradedvalue?: number;
+    tradedValue?: number;
+    totalTradedValue?: number;
+    high?: number;
+    dayHigh?: number;
+    low?: number;
+    dayLow?: number;
+    yearHigh?: number;
+    yearLow?: number;
+}
+
 export async function getIndexHeatmap(indexName: string) {
     const cacheKey = `nse:index:${indexName}:heatmap`;
     const cached = cache.get(cacheKey); // Use regular cache for heatmap data
     if (cached) {
-        return cached;
+        return cached as NSEIndexConstituent[];
     }
 
     const qs = `?functionName=getConstituents&&index=${encodeURIComponent(indexName)}&&noofrecords=0`;
     try {
         logger.info({ msg: 'Fetching heatmap data from NSE', indexName });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
+        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as { data?: NSEIndexConstituent[] };
         const items = rawData?.data || [];
 
         logger.info({ msg: 'Heatmap data fetched', indexName, count: items.length });
@@ -364,14 +386,16 @@ export async function getIndexCorporateActions(indexName: string) {
     const cached = staticCache.get(cacheKey); // Use static cache for corporate actions
     if (cached) return cached;
 
-    const qs = `?functionName=getCorporateAction&&flag=CAC&&index=${encodeURIComponent(indexName)}`;
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
-        const data = rawData?.data || [];
+        // Use the new URL provided by the user for all equities corporate actions
+        const data = await nseFetch("https://www.nseindia.com/api/corporates-corporateActions?index=equities") as any;
 
-        staticCache.set(cacheKey, data, 1800); // Cache in static cache for 30 mins
-        return data;
+        // If data is an array, we might want to filter by index constituents if indexName is not "all"
+        // For now, return all as it used to do but with the new API
+        const actions = Array.isArray(data) ? data : (data?.data || []);
+
+        staticCache.set(cacheKey, actions, 1800); // Cache in static cache for 30 mins
+        return actions;
     } catch (e) {
         // Log specific error types
         if (e instanceof Error && e.message.includes('404')) {

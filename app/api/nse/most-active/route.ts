@@ -4,7 +4,7 @@ import { nseFetch } from "@/lib/nse-client";
 import { normalizeMostActive } from "@/lib/nse/normalize";
 
 export async function GET() {
-  const data = await nseFetch("/api/live-analysis-variations", "?index=volume");
+  const data = await nseFetch("https://www.nseindia.com/api/live-analysis-most-active-securities?index=value");
   const normalized = normalizeMostActive(data);
   return NextResponse.json(
     { data: normalized, timestamp: data.timestamp },

@@ -3,14 +3,14 @@ import { NextResponse } from 'next/server';
 
 const nse = (summary: string) => ({
     get: {
-      summary,
-      tags: ["NSE Analytics"],
-      responses: {
-        200: { description: "Success" },
-        500: { description: "NSE fetch failure" },
-      },
+        summary,
+        tags: ["NSE Analytics"],
+        responses: {
+            200: { description: "Success" },
+            500: { description: "NSE fetch failure" },
+        },
     },
-  });
+});
 
 const openapi = {
     openapi: '3.0.3',
@@ -135,6 +135,54 @@ const openapi = {
                 properties: {
                     error: { type: 'string', example: 'Validation failed' },
                     details: { type: 'array', items: { type: 'string' } }
+                }
+            },
+            CorporateData: {
+                type: 'object',
+                properties: {
+                    financials: {
+                        type: 'object',
+                        properties: {
+                            from_date: { type: 'string' },
+                            to_date: { type: 'string' },
+                            totalIncome: { type: 'string' },
+                            expenditure: { type: 'string' },
+                            eps: { type: 'string' }
+                        }
+                    },
+                    events: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                bm_purpose: { type: 'string' },
+                                bm_date: { type: 'string' },
+                                bm_desc: { type: 'string' }
+                            }
+                        }
+                    },
+                    announcements: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                desc: { type: 'string' },
+                                an_dt: { type: 'string' },
+                                attchmntText: { type: 'string' }
+                            }
+                        }
+                    },
+                    actions: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                subject: { type: 'string' },
+                                exDate: { type: 'string' },
+                                recDate: { type: 'string' }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -330,7 +378,34 @@ const openapi = {
                 }
             }
         },
-
+        '/api/nse/stock/{symbol}/corporate': {
+            get: {
+                summary: 'Get stock corporate data',
+                description: 'Fetch financial status, corporate events, announcements, and actions for a stock',
+                parameters: [
+                    { name: 'symbol', in: 'path', required: true, schema: { type: 'string' } },
+                    {
+                        name: 'type',
+                        in: 'query',
+                        schema: {
+                            type: 'string',
+                            enum: ['all', 'financials', 'events', 'announcements', 'actions'],
+                            default: 'all'
+                        }
+                    }
+                ],
+                responses: {
+                    '200': {
+                        description: 'Corporate data',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/CorporateData' }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         '/api/nse/index/{index}/quote': {
             get: {
                 summary: 'Get index quote',
@@ -381,7 +456,7 @@ const openapi = {
         '/api/nse/gainers': nse('Get gainers'),
 
         '/api/nse/losers': nse('Get losers'),
-        
+
         '/api/nse/most-active': nse('Get most active'),
 
         // Company Data
