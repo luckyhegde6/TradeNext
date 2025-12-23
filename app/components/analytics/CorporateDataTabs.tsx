@@ -62,15 +62,15 @@ function FinancialData({ data }: { data: FinancialStatusDTO | null }) {
     if (!data) return <div className="text-gray-500">No financial data available</div>;
 
     const income = parseFloat(data.totalIncome) || 0;
-    const expenditure = parseFloat(data.expenditure) || 0;
+    const expenditure = parseFloat(data.expenditure || "0") || 0;
     const profit = parseFloat(data.netProLossAftTax) || 0;
 
-    // Convert to Cr (assuming input is in lakhs)
+    // Convert to Cr (assuming input is in lakhs, which is standard for NSE data in this format)
     const chartData = [
         { name: 'Income', value: income / 100, color: '#3b82f6' },
         { name: 'Expenditure', value: expenditure / 100, color: '#ef4444' },
         { name: 'Net Profit', value: profit / 100, color: '#10b981' },
-    ];
+    ].filter(item => item.value > 0);
 
     const items = [
         { label: 'Period From', value: data.from_date },

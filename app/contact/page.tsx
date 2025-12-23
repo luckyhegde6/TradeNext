@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 export default function ContactPage() {
   async function submitContactForm(formData: FormData) {
     "use server";
-    
+
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
     const subject = formData.get("subject") as string;
@@ -29,7 +29,7 @@ export default function ContactPage() {
     // 1. Send email via a service like SendGrid, Resend, or Netlify Emails
     // 2. Store in database
     // 3. Submit to Netlify Forms API programmatically
-    
+
     // For now, we'll just return success
     // You can add redirect or success handling here if needed
   }
@@ -70,7 +70,7 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Email</h3>
-                  <p className="text-gray-600 dark:text-gray-400">support@tradenext.com</p>
+                  <p className="text-gray-600 dark:text-gray-400">luckyhegdedev+tradenext@gmail.com</p>
                 </div>
               </div>
 

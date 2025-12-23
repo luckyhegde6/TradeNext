@@ -1,6 +1,6 @@
 "use client";
-import Tabs from "@/components/Tabs";
-import MarketTable from "@/components/MarketTable";
+import Tabs from "@/app/components/Tabs";
+import MarketTable from "@/app/components/MarketTable";
 
 const tabs = [
   { key: "advance", label: "Advances / Declines", url: "/api/nse/advance-decline" },
