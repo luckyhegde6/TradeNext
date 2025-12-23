@@ -36,6 +36,8 @@ export async function GET() {
                 name: true,
                 email: true,
                 role: true,
+                isVerified: true,
+                isBlocked: true,
                 createdAt: true,
                 updatedAt: true,
                 _count: {
@@ -83,13 +85,16 @@ export async function POST(req: Request) {
                 name: validatedData.name,
                 email: validatedData.email,
                 password: hashedPassword,
-                role: validatedData.role
+                role: validatedData.role,
+                isVerified: true // Admin created users are verified by default
             },
             select: {
                 id: true,
                 name: true,
                 email: true,
                 role: true,
+                isVerified: true,
+                isBlocked: true,
                 createdAt: true
             }
         });

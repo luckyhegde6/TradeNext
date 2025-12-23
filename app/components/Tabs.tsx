@@ -2,7 +2,17 @@
 import { useState, useEffect } from "react";
 import MarketTable from "./MarketTable";
 
-export default function Tabs({ tabs }) {
+interface Tab {
+  key: string;
+  label: string;
+  url: string;
+}
+
+interface TabsProps {
+  tabs: Tab[];
+}
+
+export default function Tabs({ tabs }: TabsProps) {
   const [active, setActive] = useState(tabs[0]);
 
   return (

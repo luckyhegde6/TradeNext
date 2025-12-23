@@ -5,8 +5,29 @@ import { Providers } from "./Providers";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 
 export const metadata = {
-  title: "TradeNext",
-  description: "Market insights, portfolios, and NSE analytics",
+  title: {
+    default: "TradeNext - Smart NSE Analytics & Portfolio Manager",
+    template: "%s | TradeNext",
+  },
+  description: "Advanced market insights, real-time NSE analytics, and smart portfolio tracking with TradeNext (also known as TradeNext6 or TradeNxt).",
+  keywords: ["TradeNext", "TradeNext6", "TradeNxt", "NSE Analytics", "Stock Portfolio Manager", "Market Insights", "India Stocks"],
+  authors: [{ name: "TradeNext Team" }],
+  openGraph: {
+    title: "TradeNext - Smart NSE Analytics",
+    description: "Track your stocks and analyze the market with TradeNext.",
+    url: "https://tradenext.com",
+    siteName: "TradeNext",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TradeNext - Smart NSE Analytics",
+    description: "Advanced market insights and portfolio tracking.",
+  },
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

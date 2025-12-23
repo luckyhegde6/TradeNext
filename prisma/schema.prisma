@@ -16,8 +16,19 @@ model User {
   id    Int     @id @default(autoincrement())
   email String  @unique
   name  String?
+  mobile String?
   password String?
   role     String  @default("user")
+  
+  // Verification fields
+  isVerified             Boolean   @default(false)
+  verificationCode       String?
+  verificationExpiry     DateTime?
+  verificationResendCount Int       @default(0)
+  
+  // Account status
+  isBlocked              Boolean   @default(false)
+  
   posts Post[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -37,7 +48,7 @@ model Post {
 
 model Portfolio {
   id        String   @id @default(uuid())
-  userId    Int      // <-- change to Int to match User.id
+  userId    Int
   name      String
   currency  String   @default("INR")
   createdAt DateTime @default(now())
@@ -45,6 +56,7 @@ model Portfolio {
 
   user User @relation(fields: [userId], references: [id])
   transactions Transaction[]
+  fundTransactions FundTransaction[]
 }
 
 model Transaction {
@@ -52,10 +64,21 @@ model Transaction {
   portfolioId String
   tradeDate   DateTime
   ticker      String
-  side        String
+  side        String   // BUY | SELL
   quantity    Decimal  @db.Decimal(30,6)
   price       Decimal  @db.Decimal(30,6)
   fees        Decimal? @db.Decimal(30,6)
+  notes       String?
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id])
+}
+
+model FundTransaction {
+  id          String   @id @default(uuid())
+  portfolioId String
+  type        String   // DEPOSIT | WITHDRAWAL
+  amount      Decimal  @db.Decimal(30,6)
+  date        DateTime @default(now())
   notes       String?
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id])

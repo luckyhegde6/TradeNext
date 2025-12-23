@@ -8,12 +8,16 @@ Live DEMO [link](https://tradenext6.netlify.app/)
 This bundle contains starter code to add to your existing `TradeNext` repository:
 
 ## Project Details
-- Postgres/Timescale DB migrations
-- Node TypeScript ingestion script to consume NSE-style CSV and upsert into Timescale
-- Next.js starter pages: dashboard, holdings, company    profile (demo charts)
-- Piotroski F-score SQL function + TypeScript helper
-- docker-compose for local dev (Postgres+Timescale, Redis, API, Frontend)
-- AI TODO checklist for implementing remaining features
+- **User Management**: Secure signup with email verification, role-based access control (Admin/User).
+- **Profile Management**: Integrated modal for updating user details (Name, Mobile) and password management.
+- **Portfolio Engine**: 
+    - Real-time P&L tracking and cost-basis analysis.
+    - Transaction history for both stocks (Buy/Sell) and cash (Deposit/Withdraw).
+    - Advanced internal charts replacing external widgets for premium performance.
+    - AI-ready recommendations and FY performance reports (PDF/CSV).
+- **Market Intelligence**: Comprehensive NSE data tracking (quotes, charts, corporate actions).
+- Piotroski F-score SQL function + TypeScript helper.
+- Docker-ready infrastructure for local development.
 
 ## **How to use**
 

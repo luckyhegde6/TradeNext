@@ -4,6 +4,8 @@ import { enhancedCache, nseCache, marketDataPoller } from "@/lib/enhanced-cache"
 import logger from "@/lib/logger";
 import { FinancialStatusDTO, CorpEventDTO, CorporateAnnouncementDTO, CorpActionDTO } from "@/lib/nse/dto";
 import * as syncService from "@/lib/services/sync-service";
+import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
+import prisma from "@/lib/prisma";
 
 // Type definitions
 interface StockQuote {
@@ -28,6 +30,8 @@ interface StockQuote {
     industry: string;
     sector: string;
     indexList: string[];
+    averagePrice: number;
+    closePrice: number;
 }
 
 /**
@@ -36,6 +40,40 @@ interface StockQuote {
  */
 export async function getStockQuote(symbol: string, enablePolling: boolean = false): Promise<StockQuote> {
     const cacheConfig = nseCache.stockQuote(symbol);
+
+    // If market is closed, try DB first to avoid unnecessary NSE calls
+    if (!isMarketOpen()) {
+        const cachedInCache = cacheConfig.cacheInstance?.get(cacheConfig.key);
+        if (cachedInCache) return cachedInCache as StockQuote;
+
+        try {
+            const dbPrice = await prisma.dailyPrice.findFirst({
+                where: { ticker: symbol.toUpperCase() },
+                orderBy: { tradeDate: 'desc' }
+            });
+
+            if (dbPrice) {
+                // Return a partial quote from DB data if available
+                logger.debug({ msg: 'Using DB data for closed market quote', symbol });
+                const quote: Partial<StockQuote> = {
+                    symbol: symbol.toUpperCase(),
+                    lastPrice: Number(dbPrice.close || 0),
+                    open: Number(dbPrice.open || 0),
+                    dayHigh: Number(dbPrice.high || 0),
+                    dayLow: Number(dbPrice.low || 0),
+                    closePrice: Number(dbPrice.close || 0),
+                    previousClose: Number(dbPrice.close || 0), // Approximation
+                };
+
+                // Cache it until open
+                // Cache it until open
+                cacheConfig.cacheInstance?.set(cacheConfig.key, quote as StockQuote, Math.floor(getRecommendedTTL(120000) / 1000));
+                return quote as StockQuote;
+            }
+        } catch (err) {
+            logger.warn({ msg: 'DB lookup failed for quote', symbol, error: err });
+        }
+    }
 
     const fetchQuote = async (): Promise<StockQuote> => {
         const qs = `?functionName=getSymbolData&marketType=N&series=EQ&symbol=${encodeURIComponent(symbol)}`;
@@ -96,9 +134,42 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
             industry: secInfo.basicIndustry || '',
             sector: secInfo.pdSectorInd?.trim() || '',
             indexList: secInfo.indexList || [],
+            averagePrice: parseFloat(metaData.averagePrice || 0),
+            closePrice: parseFloat(metaData.closePrice || 0),
         };
 
         logger.info({ msg: 'Stock quote mapped successfully', symbol, lastPrice: quote.lastPrice });
+
+        // Background sync to DB for DailyPrice
+        (async () => {
+            try {
+                await prisma.dailyPrice.upsert({
+                    where: {
+                        ticker_tradeDate: {
+                            ticker: quote.symbol,
+                            tradeDate: new Date(new Date().setHours(0, 0, 0, 0))
+                        }
+                    },
+                    update: {
+                        open: quote.open,
+                        high: quote.dayHigh,
+                        low: quote.dayLow,
+                        close: quote.lastPrice,
+                    },
+                    create: {
+                        ticker: quote.symbol,
+                        tradeDate: new Date(new Date().setHours(0, 0, 0, 0)),
+                        open: quote.open,
+                        high: quote.dayHigh,
+                        low: quote.dayLow,
+                        close: quote.lastPrice,
+                    }
+                });
+            } catch (e) {
+                logger.error({ msg: "DailyPrice sync failed", symbol: quote.symbol, error: e });
+            }
+        })();
+
         return quote;
     };
 
@@ -173,7 +244,8 @@ export async function getStockTrends(symbol: string): Promise<NSETrendItem[]> {
         };
         const trends = (rawData?.data || []) as NSETrendItem[];
 
-        cache.set(cacheKey, trends, 3600); // 1 hour
+        const ttl = isMarketOpen() ? 3600 : Math.floor(getRecommendedTTL(3600000) / 1000);
+        cache.set(cacheKey, trends, ttl);
         return trends;
     } catch (e) {
         logger.error(`[Stock Service] Error fetching trends for ${symbol}:`, e);

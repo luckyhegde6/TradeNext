@@ -4,6 +4,8 @@ import MarqueeBanner from "@/app/components/MarqueeBanner";
 import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
+import { auth } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 interface Post {
   id: string;
@@ -31,6 +33,15 @@ export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   const posts = await getRecentPosts();
+  const session = await auth();
+
+  let hasPortfolio = false;
+  if (session?.user?.id) {
+    const portfolio = await prisma.portfolio.findFirst({
+      where: { userId: Number(session.user.id) }
+    });
+    hasPortfolio = !!portfolio;
+  }
 
   return (
     <div className="bg-gray-50 dark:bg-slate-950 min-h-screen">
@@ -68,9 +79,9 @@ export default async function Home() {
                   <span className="block text-xl font-bold text-blue-600">Indices</span>
                   <span className="text-xs text-gray-500">All Markets</span>
                 </Link>
-                <Link href="/portfolio" className="p-3 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
-                  <span className="block text-xl font-bold text-indigo-600">Portfolio</span>
-                  <span className="text-xs text-gray-500">My Assets</span>
+                <Link href={hasPortfolio ? "/portfolio" : "/portfolio/new"} className="p-3 bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 hover:shadow-md transition-all text-center">
+                  <span className="block text-xl font-bold text-indigo-600">{hasPortfolio ? "Portfolio" : "Create Portfolio"}</span>
+                  <span className="text-xs text-gray-500">{hasPortfolio ? "My Assets" : "Get Started"}</span>
                 </Link>
               </div>
             </div>

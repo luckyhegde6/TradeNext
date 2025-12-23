@@ -641,8 +641,16 @@ const openapi = {
         '/api/portfolio': {
             get: {
                 summary: 'Get user portfolio',
-                description: 'Retrieve the authenticated user\'s investment portfolio with holdings and performance',
+                description: 'Retrieve the authenticated user\'s investment portfolio with holdings and performance. Admins can view any user\'s portfolio by providing a userId.',
                 security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        name: 'userId',
+                        in: 'query',
+                        schema: { type: 'integer' },
+                        description: 'The ID of the user whose portfolio to retrieve (Admin only)'
+                    }
+                ],
                 responses: {
                     '200': {
                         description: 'Portfolio data',
@@ -733,6 +741,34 @@ const openapi = {
                             }
                         }
                     },
+                    '401': { description: 'Unauthorized' }
+                }
+            }
+        },
+
+        '/api/portfolio/create': {
+            post: {
+                summary: 'Initialize user portfolio',
+                description: 'Create a new portfolio for the authenticated user or another user if requester is admin.',
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    name: { type: 'string', minLength: 1, example: 'My Investments' },
+                                    userId: { type: 'integer', description: 'Target user ID (Admin only)' }
+                                },
+                                required: ['name']
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: 'Portfolio created successfully' },
+                    '400': { description: 'Invalid name or portfolio already exists' },
                     '401': { description: 'Unauthorized' }
                 }
             }
