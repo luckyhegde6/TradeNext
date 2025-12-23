@@ -62,6 +62,9 @@ export default function Header() {
             <NavLink href="/markets" active={isActive("/markets")}>
               Markets
             </NavLink>
+            <NavLink href="/markets/analytics" active={isActive("/markets/analytics")}>
+            Analytics
+            </NavLink>
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
             </NavLink>
@@ -205,29 +208,52 @@ export default function Header() {
   );
 }
 
-function NavLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function NavLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Link
       href={href}
-      className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors duration-200 ${active
-        ? "border-blue-500 text-gray-900 dark:text-white"
-        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-slate-400 dark:hover:text-slate-200"
-        }`}
+      aria-current={active ? "page" : undefined}
+      className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors duration-200 ${
+        active
+          ? "border-blue-500 text-gray-900 dark:text-white"
+          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-slate-400 dark:hover:text-slate-200"
+      }`}
     >
       {children}
     </Link>
   );
 }
 
-function MobileNavLink({ href, active, children, onClick }: { href: string; active: boolean; children: React.ReactNode; onClick: () => void }) {
+
+function MobileNavLink({
+  href,
+  active,
+  children,
+  onClick,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
   return (
     <Link
       href={href}
       onClick={onClick}
-      className={`block px-3 py-2 text-base font-medium rounded-md transition-colors duration-200 ${active
-        ? "bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
-        : "text-gray-500 hover:text-gray-900 hover:bg-gray-50 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
-        }`}
+      aria-current={active ? "page" : undefined}
+      className={`block px-3 py-2 text-base font-medium rounded-md transition-colors duration-200 ${
+        active
+          ? "bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
+          : "text-gray-500 hover:text-gray-900 hover:bg-gray-50 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+      }`}
     >
       {children}
     </Link>

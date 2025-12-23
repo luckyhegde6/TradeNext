@@ -58,6 +58,7 @@
     "react": "^19.2.3",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.3",
+    "recharts": "^3.6.0",
     "sanitize-html": "^2.17.0",
     "swr": "^2.3.7",
     "tough-cookie": "^6.0.0",

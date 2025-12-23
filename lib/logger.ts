@@ -31,8 +31,14 @@ const createCompatibleLogger = (): Logger => {
     warn: (message, ...args) => {
       console.warn(...formatMessage('WARN', message, ...args));
     },
-    error: (message, ...args) => {
-      console.error(...formatMessage('ERROR', message, ...args));
+    error: (message: unknown, ...args: unknown[]) => {
+      if (message instanceof Error) {
+        console.error("[ERROR]", message.message, message.stack);
+      } else if (typeof message === "string") {
+        console.error("[ERROR]", message, ...args);
+      } else {
+        console.error("[ERROR]", JSON.stringify(message), ...args);
+      }
     },
     debug: (message, ...args) => {
       if (isDev) {

@@ -52,6 +52,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       status: "ok",
+      meta: {
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+      },
       caches: {
         main: { keys: metrics.mainCache.keys },
         hot: { keys: metrics.hotCache.keys },

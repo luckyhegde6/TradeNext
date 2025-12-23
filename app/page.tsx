@@ -1,5 +1,6 @@
 import Link from "next/link";
 import MarketStatus from "@/app/components/MarketStatus";
+import MarqueeBanner from "@/app/components/MarqueeBanner";
 import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
@@ -33,6 +34,8 @@ export default async function Home() {
 
   return (
     <div className="bg-gray-50 dark:bg-slate-950 min-h-screen">
+      {/* Marquee Banner */}
+      <div className="sticky top-0 z-40"><MarqueeBanner /></div>
       {/* Hero / Dashboard Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="text-center mb-6 sm:mb-8">

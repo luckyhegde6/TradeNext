@@ -1,6 +1,17 @@
 // app/api/openapi/route.ts
 import { NextResponse } from 'next/server';
 
+const nse = (summary: string) => ({
+    get: {
+      summary,
+      tags: ["NSE Analytics"],
+      responses: {
+        200: { description: "Success" },
+        500: { description: "NSE fetch failure" },
+      },
+    },
+  });
+
 const openapi = {
     openapi: '3.0.3',
     info: {
@@ -359,6 +370,19 @@ const openapi = {
                 }
             }
         },
+
+        // NSE Analytics
+        '/api/nse/advance-decline': nse('Get advance/decline analysis'),
+
+        '/api/nse/corporate-info': nse('Get corporate info'),
+
+        '/api/nse/deals': nse('Get deals'),
+
+        '/api/nse/gainers': nse('Get gainers'),
+
+        '/api/nse/losers': nse('Get losers'),
+        
+        '/api/nse/most-active': nse('Get most active'),
 
         // Company Data
         '/api/company/{ticker}': {

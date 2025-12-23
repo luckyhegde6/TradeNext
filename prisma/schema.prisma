@@ -207,3 +207,28 @@ model IndexHeatmapItem {
   @@unique([indexName, symbol])
   @@index([indexName])
 }
+
+model MarketSnapshot {
+  id        String   @id @default(uuid())
+  type      String   // gainers | losers | advance | deals
+  payload   Json
+  capturedAt DateTime @default(now())
+
+  @@index([type, capturedAt])
+}
+
+model Alert {
+  id        String   @id @default(uuid())
+  type      String   // volume_spike | price_jump
+  symbol    String?
+  condition Json
+  triggeredAt DateTime @default(now())
+  seen      Boolean  @default(false)
+}
+
+model AIInsight {
+  id        String   @id @default(uuid())
+  snapshotId String
+  summary   String
+  createdAt DateTime @default(now())
+}

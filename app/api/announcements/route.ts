@@ -45,7 +45,11 @@ export async function GET(request: Request) {
 
             return NextResponse.json({
                 announcements: paginatedAnnouncements,
-                pagination: { page, limit, total, totalPages }
+                pagination: { page, limit, total, totalPages },
+                meta: {
+                    fetchedAt: new Date().toISOString(),
+                    stale: false,
+                  },
             });
         }
 
@@ -96,7 +100,11 @@ export async function GET(request: Request) {
 
         return NextResponse.json({
             announcements,
-            pagination: { page, limit, total, totalPages }
+            pagination: { page, limit, total, totalPages },
+            meta: {
+                fetchedAt: new Date().toISOString(),
+                stale: false,
+              },
         });
     } catch (error) {
         const duration = Date.now() - startTime;

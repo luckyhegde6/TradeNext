@@ -171,7 +171,7 @@ export async function getStockTrends(symbol: string): Promise<any[]> {
         cache.set(cacheKey, trends, 3600); // 1 hour
         return trends;
     } catch (e) {
-        console.error(`[Stock Service] Error fetching trends for ${symbol}:`, e);
+        logger.error(`[Stock Service] Error fetching trends for ${symbol}:`, e);
         return [];
     }
 }

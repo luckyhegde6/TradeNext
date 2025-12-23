@@ -4,9 +4,23 @@ import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { INDICES, MAJOR_INDICES } from "@/lib/constants";
+import MarketAnalyticsTabs from "@/app/components/MarketAnalyticsTabs";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
-
+function Freshness({ meta }: { meta: any }) {
+  return (
+    <div className="text-xs text-gray-500 mb-2 flex gap-2">
+      <span>
+        As of {new Date(meta.fetchedAt).toLocaleTimeString("en-IN")}
+      </span>
+      {meta.stale && (
+        <span className="text-amber-500">
+          (Updating…)
+        </span>
+      )}
+    </div>
+  );
+}
 const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
     // Refresh interval slightly randomized to avoid thundering herd on client
     const refreshInterval = 15000 + Math.floor(Math.random() * 5000);

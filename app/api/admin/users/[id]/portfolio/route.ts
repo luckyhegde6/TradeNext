@@ -117,7 +117,11 @@ export async function GET(
 
         return NextResponse.json({
             user,
-            portfolios: portfoliosWithHoldings
+            portfolios: portfoliosWithHoldings,
+            meta: {
+                fetchedAt: new Date().toISOString(),
+                stale: false,
+              },
         });
     } catch (error) {
         console.error('Admin user portfolio GET error:', error);

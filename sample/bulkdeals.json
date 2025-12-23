@@ -1,0 +1,1972 @@
+{
+    "as_on_date": "22-Dec-2025",
+    "BULK_DEALS_DATA": [
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AKUMS",
+            "name": "Akums Drugs and Pharma L",
+            "clientName": "ICICI PRUDENTIAL MUTUAL FUND",
+            "buySell": "BUY",
+            "qty": "7278535",
+            "watp": "428",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ASHOKAMET",
+            "name": "Ashoka Metcast Limited",
+            "clientName": "MITTAL PUNEET",
+            "buySell": "BUY",
+            "qty": "184013",
+            "watp": "16.63",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ASHOKAMET",
+            "name": "Ashoka Metcast Limited",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "BUY",
+            "qty": "60340",
+            "watp": "16.91",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "3 SIGMA GLOBAL FUND",
+            "buySell": "BUY",
+            "qty": "10000000",
+            "watp": "4.1",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "SW CAPITAL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "200000",
+            "watp": "4.66",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "CRAFT EMERGING MARKET FUND PCC- ELITE CAPITAL FUND",
+            "buySell": "BUY",
+            "qty": "20000000",
+            "watp": "4.1",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "BEACON STONE CAPITAL VCC - BEACON STONE I",
+            "buySell": "BUY",
+            "qty": "50000000",
+            "watp": "3.92",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "NEO APEX VENTURE LLP",
+            "buySell": "BUY",
+            "qty": "10000008",
+            "watp": "3.81",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "ARIHANT CAPITAL MARKETS LIMITED",
+            "buySell": "BUY",
+            "qty": "378240",
+            "watp": "3.73",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DCXINDIA",
+            "name": "DCX Systems Limited",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "990479",
+            "watp": "196.31",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "EXXARO",
+            "name": "Exxaro Tiles Limited",
+            "clientName": "DEEP DIAMOND INDIA LIMITED",
+            "buySell": "BUY",
+            "qty": "2415000",
+            "watp": "8.3",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "FWSTC",
+            "name": "Flywings Simulat T C Ltd",
+            "clientName": "GRETEX SHARE BROKING LIMITED",
+            "buySell": "BUY",
+            "qty": "53400",
+            "watp": "234.87",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "282358",
+            "watp": "483.83",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "NK SECURITIES RESEARCH PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "569614",
+            "watp": "486.33",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "SILVERLEAF CAPITAL SERVICES PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "290403",
+            "watp": "481.85",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "ALGOQUANT FINTECH LIMITED",
+            "buySell": "BUY",
+            "qty": "286360",
+            "watp": "477.35",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "BUY",
+            "qty": "290368",
+            "watp": "490.6",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "JWL",
+            "name": "Jupiter Wagons Limited",
+            "clientName": "GRAVITON RESEARCH CAPITAL LLP",
+            "buySell": "BUY",
+            "qty": "2195824",
+            "watp": "289.83",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "JWL",
+            "name": "Jupiter Wagons Limited",
+            "clientName": "JUMP TRADING FINANCIAL INDIA PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "2480002",
+            "watp": "296.18",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "MODIS",
+            "name": "Modis Navnirman Ltd",
+            "clientName": "RRS FAMILY TRUST",
+            "buySell": "BUY",
+            "qty": "140000",
+            "watp": "345",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NHIT",
+            "name": "National Highw Infra Trus",
+            "clientName": "PRAZIM TRADING AND INVESTMENT COMPANY PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "50600000",
+            "watp": "149.06",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NIITLTD",
+            "name": "NIIT Limited",
+            "clientName": "NK SECURITIES RESEARCH PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "731950",
+            "watp": "98.7",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NIITLTD",
+            "name": "NIIT Limited",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "707446",
+            "watp": "97.99",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "SREEKRISHNABHAT BHAKRE",
+            "buySell": "BUY",
+            "qty": "270000",
+            "watp": "314.59",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "BUY",
+            "qty": "253969",
+            "watp": "319.65",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "MICROCURVES TRADING PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "378269",
+            "watp": "317.73",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "603069",
+            "watp": "315.59",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "747521",
+            "watp": "314.59",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "JUMP TRADING FINANCIAL INDIA PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "617262",
+            "watp": "317.65",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "366258",
+            "watp": "315.08",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "QE SECURITIES LLP",
+            "buySell": "BUY",
+            "qty": "368712",
+            "watp": "314.41",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "MATHISYS ADVISORS LLP",
+            "buySell": "BUY",
+            "qty": "223662",
+            "watp": "319.46",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RATNAVEER",
+            "name": "Ratnaveer Precision Eng L",
+            "clientName": "ARIHANT CAPITAL MARKETS LIMITED",
+            "buySell": "BUY",
+            "qty": "785253",
+            "watp": "164.48",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RICOAUTO",
+            "name": "Rico Auto Industries Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "725946",
+            "watp": "126.7",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RICOAUTO",
+            "name": "Rico Auto Industries Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "835065",
+            "watp": "126.49",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SAWALIYA",
+            "name": "Sawaliya Food Products L",
+            "clientName": "BAAHUBALI ENTERPRISE",
+            "buySell": "BUY",
+            "qty": "8400",
+            "watp": "311.5",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHRENIK",
+            "name": "Shrenik Limited",
+            "clientName": "MARWADI CHANDARANA INTERMEDIARIES BROKERS PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "4706068",
+            "watp": "0.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHRENIK",
+            "name": "Shrenik Limited",
+            "clientName": "TATAD NAYAN GAUTAMBHAI",
+            "buySell": "BUY",
+            "qty": "5403816",
+            "watp": "0.59",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHUBHSHREE",
+            "name": "Shubhshree Biofuels Ene L",
+            "clientName": "JINENDRA KUMAR JAIN",
+            "buySell": "BUY",
+            "qty": "26700",
+            "watp": "367.15",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "TAKE",
+            "name": "Take Solutions Limited",
+            "clientName": "ALIA COMMOSALES LLP",
+            "buySell": "BUY",
+            "qty": "68584",
+            "watp": "36.3",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "TBI",
+            "name": "TBI Corn Limited",
+            "clientName": "JINENDRA KUMAR JAIN",
+            "buySell": "BUY",
+            "qty": "120000",
+            "watp": "81.95",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "VIDYAWIRES",
+            "name": "Vidya Wires Limited",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "1250026",
+            "watp": "53.47",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "VOLERCAR",
+            "name": "Voler Car Limited",
+            "clientName": "KUBER INVESTMENTS",
+            "buySell": "BUY",
+            "qty": "98400",
+            "watp": "200.07",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "WALCHANNAG",
+            "name": "Walchandnagar Ind. Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "566118",
+            "watp": "197.53",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "WALCHANNAG",
+            "name": "Walchandnagar Ind. Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "481597",
+            "watp": "198.39",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ZEEMEDIA",
+            "name": "Zee News Limited",
+            "clientName": "AUV INNOVATIONS LLP",
+            "buySell": "BUY",
+            "qty": "4734386",
+            "watp": "9.13",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AAREYDRUGS",
+            "name": "Aarey Drugs & Pharm Ltd",
+            "clientName": "SURAJ TRADELINKS PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "268722",
+            "watp": "71.93",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AKUMS",
+            "name": "Akums Drugs and Pharma L",
+            "clientName": "RUBY QC INVESTMENT HOLDINGS PTE.LTD.",
+            "buySell": "SELL",
+            "qty": "7278535",
+            "watp": "428",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "APTECHT",
+            "name": "Aptech Limited",
+            "clientName": "MONA RUSSELL MEHTA",
+            "buySell": "SELL",
+            "qty": "394552",
+            "watp": "98.26",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ASHOKAMET",
+            "name": "Ashoka Metcast Limited",
+            "clientName": "MITTAL PUNEET",
+            "buySell": "SELL",
+            "qty": "102881",
+            "watp": "16.86",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ASHOKAMET",
+            "name": "Ashoka Metcast Limited",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "SELL",
+            "qty": "129803",
+            "watp": "16.51",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AURIGROW",
+            "name": "Auri Grow India Limited",
+            "clientName": "DHAVAL SHANKARBHAI RABARI",
+            "buySell": "SELL",
+            "qty": "28666666",
+            "watp": "0.96",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "BLBLIMITED",
+            "name": "BLB Limited",
+            "clientName": "ADITYA  SAHAYA",
+            "buySell": "SELL",
+            "qty": "278187",
+            "watp": "14.05",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "ARIHANT CAPITAL MARKETS LIMITED",
+            "buySell": "SELL",
+            "qty": "39084015",
+            "watp": "3.93",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "NEO APEX VENTURE LLP",
+            "buySell": "SELL",
+            "qty": "10000008",
+            "watp": "3.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "METASONI ALLOYS PVT LTD",
+            "buySell": "SELL",
+            "qty": "10500000",
+            "watp": "3.96",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "SW CAPITAL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "7500000",
+            "watp": "3.8",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "TRADE CORNER",
+            "buySell": "SELL",
+            "qty": "27500000",
+            "watp": "4.02",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DAVANGERE",
+            "name": "Davangere Sugar Company L",
+            "clientName": "ASCENT WEALTH",
+            "buySell": "SELL",
+            "qty": "32050000",
+            "watp": "3.85",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "DCXINDIA",
+            "name": "DCX Systems Limited",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "990479",
+            "watp": "196.4",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "EEPL",
+            "name": "Eppeltone Engineers Ltd",
+            "clientName": "VINOD KUMAR",
+            "buySell": "SELL",
+            "qty": "72000",
+            "watp": "208.28",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "EXXARO",
+            "name": "Exxaro Tiles Limited",
+            "clientName": "INDIA FAST FORWARD ADVISORY SERVICES PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "2323124",
+            "watp": "8.3",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "FWSTC",
+            "name": "Flywings Simulat T C Ltd",
+            "clientName": "GRETEX SHARE BROKING LIMITED",
+            "buySell": "SELL",
+            "qty": "66000",
+            "watp": "236.94",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "NK SECURITIES RESEARCH PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "569614",
+            "watp": "486.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "283111",
+            "watp": "484.46",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "SELL",
+            "qty": "229830",
+            "watp": "488",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "SILVERLEAF CAPITAL SERVICES PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "290403",
+            "watp": "482.49",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "IDEAFORGE",
+            "name": "Ideaforge Techno Ltd",
+            "clientName": "ALGOQUANT FINTECH LIMITED",
+            "buySell": "SELL",
+            "qty": "286307",
+            "watp": "476.09",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "JWL",
+            "name": "Jupiter Wagons Limited",
+            "clientName": "JUMP TRADING FINANCIAL INDIA PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "2480002",
+            "watp": "296.28",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "JWL",
+            "name": "Jupiter Wagons Limited",
+            "clientName": "GRAVITON RESEARCH CAPITAL LLP",
+            "buySell": "SELL",
+            "qty": "2195868",
+            "watp": "290.14",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "MODIS",
+            "name": "Modis Navnirman Ltd",
+            "clientName": "AEGIS INVESTMENT FUND",
+            "buySell": "SELL",
+            "qty": "237429",
+            "watp": "345",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NHIT",
+            "name": "National Highw Infra Trus",
+            "clientName": "VIDYANITI LLP",
+            "buySell": "SELL",
+            "qty": "50600000",
+            "watp": "149.06",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NIITLTD",
+            "name": "NIIT Limited",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "707446",
+            "watp": "98.11",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NIITLTD",
+            "name": "NIIT Limited",
+            "clientName": "NK SECURITIES RESEARCH PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "731950",
+            "watp": "98.76",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "ALPHAGREP SECURITIES PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "747521",
+            "watp": "314.66",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "SREEKRISHNABHAT BHAKRE",
+            "buySell": "SELL",
+            "qty": "270000",
+            "watp": "319.29",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "342169",
+            "watp": "314.2",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "MICROCURVES TRADING PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "378269",
+            "watp": "318.1",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "610594",
+            "watp": "316.3",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "JUMP TRADING FINANCIAL INDIA PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "629228",
+            "watp": "318.19",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "MATHISYS ADVISORS LLP",
+            "buySell": "SELL",
+            "qty": "217789",
+            "watp": "317.14",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "QE SECURITIES LLP",
+            "buySell": "SELL",
+            "qty": "372135",
+            "watp": "312.76",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "QUADFUTURE",
+            "name": "Quadrant Future Tek Ltd",
+            "clientName": "IRAGE BROKING SERVICES LLP",
+            "buySell": "SELL",
+            "qty": "130634",
+            "watp": "320.5",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RATNAVEER",
+            "name": "Ratnaveer Precision Eng L",
+            "clientName": "ARIHANT CAPITAL MARKETS LIMITED",
+            "buySell": "SELL",
+            "qty": "204437",
+            "watp": "167.1",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RICOAUTO",
+            "name": "Rico Auto Industries Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "864766",
+            "watp": "126.24",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "RICOAUTO",
+            "name": "Rico Auto Industries Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "834041",
+            "watp": "126.55",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SAWALIYA",
+            "name": "Sawaliya Food Products L",
+            "clientName": "BAAHUBALI ENTERPRISE",
+            "buySell": "SELL",
+            "qty": "57000",
+            "watp": "311.19",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHRENIK",
+            "name": "Shrenik Limited",
+            "clientName": "MARWADI CHANDARANA INTERMEDIARIES BROKERS PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "713068",
+            "watp": "0.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHRENIK",
+            "name": "Shrenik Limited",
+            "clientName": "JINAL VIRALKUMAR KAPADIA",
+            "buySell": "SELL",
+            "qty": "6750000",
+            "watp": "0.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHRENIK",
+            "name": "Shrenik Limited",
+            "clientName": "TATAD NAYAN GAUTAMBHAI",
+            "buySell": "SELL",
+            "qty": "5203756",
+            "watp": "0.61",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "SHUBHSHREE",
+            "name": "Shubhshree Biofuels Ene L",
+            "clientName": "NEXT ORBIT VENTURES FUND",
+            "buySell": "SELL",
+            "qty": "27000",
+            "watp": "367.21",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "TAKE",
+            "name": "Take Solutions Limited",
+            "clientName": "ALIA COMMOSALES LLP",
+            "buySell": "SELL",
+            "qty": "822987",
+            "watp": "36.51",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "TBI",
+            "name": "TBI Corn Limited",
+            "clientName": "NEXT ORBIT VENTURES FUND",
+            "buySell": "SELL",
+            "qty": "120000",
+            "watp": "81.95",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "VEEKAYEM",
+            "name": "Veekayem Fash & App Ltd",
+            "clientName": "TANVI  CHATURVEDI",
+            "buySell": "SELL",
+            "qty": "43500",
+            "watp": "201.19",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "VIDYAWIRES",
+            "name": "Vidya Wires Limited",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "1233323",
+            "watp": "53.48",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "WALCHANNAG",
+            "name": "Walchandnagar Ind. Ltd",
+            "clientName": "HRTI PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "634501",
+            "watp": "197.89",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "WALCHANNAG",
+            "name": "Walchandnagar Ind. Ltd",
+            "clientName": "JUNOMONETA FINSOL PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "481597",
+            "watp": "198.45",
+            "remarks": "-"
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "ZEEMEDIA",
+            "name": "Zee News Limited",
+            "clientName": "MILOEUX MEDIA & ENTERTAINMENT PRIVATE LIMITED",
+            "buySell": "SELL",
+            "qty": "5500000",
+            "watp": "9.11",
+            "remarks": "-"
+        }
+    ],
+    "BULK_DEALS": "98",
+    "SHORT_DEALS": "94",
+    "BLOCK_DEALS": "4",
+    "SHORT_DEALS_DATA": [
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ADANIENSOL",
+            "name": "ADANI ENERGY SOLUTION LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "280",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ADANIENT",
+            "name": "ADANI ENTERPRISES LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ADANIGREEN",
+            "name": "ADANI GREEN ENERGY LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "475",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "APOLLO",
+            "name": "APOLLO MICRO SYSTEMS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "29163",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ASHOKLEY",
+            "name": "ASHOK LEYLAND LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "823",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ASIANPAINT",
+            "name": "ASIAN PAINTS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "17501",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ATHERENERG",
+            "name": "ATHER ENERGY LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "6",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "AVANTEL",
+            "name": "AVANTEL LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "AXISBANK",
+            "name": "AXIS BANK LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BAJAJ-AUTO",
+            "name": "BAJAJ AUTO LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BAJFINANCE",
+            "name": "BAJAJ FINANCE LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BANDHANBNK",
+            "name": "BANDHAN BANK LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "140",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BANKINDIA",
+            "name": "BANK OF INDIA",
+            "clientName": null,
+            "buySell": null,
+            "qty": "700",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BEL",
+            "name": "BHARAT ELECTRONICS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "9",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BHARTIARTL",
+            "name": "BHARTI AIRTEL LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BIOCON",
+            "name": "BIOCON LIMITED.",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "BSE",
+            "name": "BSE LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "35",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "CAMS",
+            "name": "COMPUTER AGE MGMT SER LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "78",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "CANBK",
+            "name": "CANARA BANK",
+            "clientName": null,
+            "buySell": null,
+            "qty": "931",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "CDSL",
+            "name": "CENTRAL DEPOSITORY SERVICES (INDIA) LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "493",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "COALINDIA",
+            "name": "COALINDIA",
+            "clientName": null,
+            "buySell": null,
+            "qty": "100",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "CUPID",
+            "name": "CUPID LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "DCBBANK",
+            "name": "DCB BANK LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1000",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "DCXINDIA",
+            "name": "DCX SYSTEMS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "173289",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "DIVISLAB",
+            "name": "DIVI'S LABORATORIES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "DIXON",
+            "name": "DIXON TECHNO (INDIA) LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "EASEMYTRIP",
+            "name": "EASY TRIP PLANNERS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "250",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "EICHERMOT",
+            "name": "EICHER MOTORS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "71",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "EIDPARRY",
+            "name": "EID PARRY INDIA LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "EIEL",
+            "name": "ENVIRO INFRA ENGINEERS L",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "EMBDL",
+            "name": "EQUINOX INDIA DEV LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "15722",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "FORCEMOT",
+            "name": "FORCE MOTORS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "FORTIS",
+            "name": "FORTIS HEALTHCARE (I) LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "78",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "GREAVESCOT",
+            "name": "GREAVES COTTON LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HAL",
+            "name": "HINDUSTAN AERONAUTICS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "96",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HCLTECH",
+            "name": "HCL TECHNOLOGIES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "97",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HDFCAMC",
+            "name": "HDFC AMC LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HFCL",
+            "name": "HIMACHAL FUTURISTIC COMMUNICATIONS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "13571",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HINDALCO",
+            "name": "HINDALCO  INDUSTRIES  LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "5",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HOMEFIRST",
+            "name": "HOMEFIRST",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "HUDCO",
+            "name": "HOUSING & URBAN DEVELOPMENT CORPORATION LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ICICIBANK",
+            "name": "ICICI BANK LTD.",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "IDEA",
+            "name": "IDEA CELLULAR LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "7249",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "IDFCFIRSTB",
+            "name": "IDFC FIRST BANK LIMI",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1428",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "IEX",
+            "name": "INDIAN ENERGY EXCHANGE LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1714",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "INDHOTEL",
+            "name": "THE INDIAN HOTELS CO. LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "INDIACEM",
+            "name": "THE INDIA CEMENTS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "5",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "INDIGO",
+            "name": "INTERGLOBE AVIATION LTD  ",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "INDUSINDBK",
+            "name": "INDUSIND BANK LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "INFY",
+            "name": "INFOSYS TECHNOLOGIES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "54400",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "IREDA",
+            "name": "INDIAN RENEWABLE ENERGY",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1368",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "IRFC",
+            "name": "IRFC",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3799",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "ITBEES",
+            "name": "NIP IND ETF IT",
+            "clientName": null,
+            "buySell": null,
+            "qty": "200",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "JINDALSTEL",
+            "name": "JINDAL STEEL & POWER LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "50",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "JIOFIN",
+            "name": "JIO FIN SERVICES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1000",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "KALYANKJIL",
+            "name": "KALYAN JEWELLERS IND LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "42",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "KAYNES",
+            "name": "KAYNES TECHNOLOGY IND LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "LUPIN",
+            "name": "LUPIN LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "MAZDOCK",
+            "name": "MAZAGON DOCK SHIPBUIL LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "204",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "MOTHERSON",
+            "name": "SAMVRDHNA MTHRSN INT",
+            "clientName": null,
+            "buySell": null,
+            "qty": "425",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "NATIONALUM",
+            "name": "NATIONAL ALUMINIUM CO LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "427",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "NBCC",
+            "name": "NATIONAL BUILDINGS LTD   ",
+            "clientName": null,
+            "buySell": null,
+            "qty": "30",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "NCC",
+            "name": "NCC LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "390",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "NHPC",
+            "name": "NHPC LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2128",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PATELENG",
+            "name": "PATEL ENGINEERING LTD.",
+            "clientName": null,
+            "buySell": null,
+            "qty": "26999",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PAYTM",
+            "name": "ONE 97 COMMUNICATIONS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "517",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PGEL",
+            "name": "PG ELECTROPLAST LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "4",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PNB",
+            "name": "PUNJAB NATIONAL BANK",
+            "clientName": null,
+            "buySell": null,
+            "qty": "225",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "POLYCAB",
+            "name": "POLYCAB INDIA LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PPLPHARMA",
+            "name": "PIRAMAL PHARMA LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2714",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "PREMEXPLN",
+            "name": "PREMIER EXPLOSIVES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "50",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "RAJESHEXPO",
+            "name": "RAJESH EXPORTS LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "940",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "RELIANCE",
+            "name": "RELIANCE INDUSTRIES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "275",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SAIL",
+            "name": "STEEL AUTHORITY OF INDIA",
+            "clientName": null,
+            "buySell": null,
+            "qty": "956",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SAMMAANCAP",
+            "name": "SAMMAAN CAPITAL LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1782",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SHRIRAMFIN",
+            "name": "SHRIRAM FINANCE LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "15",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SOLARINDS",
+            "name": "SOLAR INDUSTRIES (I) LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SPARC",
+            "name": "SUN PHARMA ADV.RES.CO.LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "SUNPHARMA",
+            "name": "SUN PHARMACEUTICALS IND.",
+            "clientName": null,
+            "buySell": null,
+            "qty": "5",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TANLA",
+            "name": "TANLA PLATFORMS LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TATACONSUM",
+            "name": "TATA CONSUMER PRODUCT",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1070",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TATAELXSI",
+            "name": "TATA ELXSI LIMITED       ",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TATATECH",
+            "name": "TATA TECHNOLOGIES LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "290",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TCS",
+            "name": "TATA CONSULTANCY SERV LT",
+            "clientName": null,
+            "buySell": null,
+            "qty": "5",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TITAGARH",
+            "name": "TITAGARH RAIL SYSTEMS",
+            "clientName": null,
+            "buySell": null,
+            "qty": "740",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TITAN",
+            "name": "TITAN INDUSTRIES LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TMPV",
+            "name": "TATA MOTORS PASS VEH LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "1",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TORNTPOWER",
+            "name": "TORRENT POWER LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "79",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TVSHLTD",
+            "name": "TVS Holdings Limited",
+            "clientName": null,
+            "buySell": null,
+            "qty": "46",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "TVSMOTOR",
+            "name": "TVS MOTOR COMPANY  LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "3",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "WAAREEENER",
+            "name": "WAAREE ENERGIES LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "16",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "WELENT",
+            "name": "WELSPUN ENTERPRISES LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "10",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "WIPRO",
+            "name": "WIPRO LTD",
+            "clientName": null,
+            "buySell": null,
+            "qty": "100",
+            "watp": null,
+            "remarks": null
+        },
+        {
+            "date": "19-Dec-2025",
+            "symbol": "WOCKPHARMA",
+            "name": "WOCKHARDT LIMITED",
+            "clientName": null,
+            "buySell": null,
+            "qty": "2800",
+            "watp": null,
+            "remarks": null
+        }
+    ],
+    "BLOCK_DEALS_DATA": [
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AKUMS",
+            "name": "Akums Drugs and Pharma L",
+            "clientName": "ICICI PRUDENTIAL MUTUAL FUND",
+            "buySell": "BUY",
+            "qty": "7278535",
+            "watp": "428",
+            "remarks": null
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NHIT",
+            "name": "National Highw Infra Trus",
+            "clientName": "PRAZIM TRADING AND INVESTMENT COMPANY PRIVATE LIMITED",
+            "buySell": "BUY",
+            "qty": "50600000",
+            "watp": "149.06",
+            "remarks": null
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "AKUMS",
+            "name": "Akums Drugs and Pharma L",
+            "clientName": "RUBY QC INVESTMENT HOLDINGS PTE.LTD.",
+            "buySell": "SELL",
+            "qty": "7278535",
+            "watp": "428",
+            "remarks": null
+        },
+        {
+            "date": "22-Dec-2025",
+            "symbol": "NHIT",
+            "name": "National Highw Infra Trus",
+            "clientName": "VIDYANITI LLP",
+            "buySell": "SELL",
+            "qty": "50600000",
+            "watp": "149.06",
+            "remarks": null
+        }
+    ]
+}

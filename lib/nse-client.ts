@@ -1,7 +1,7 @@
 // lib/nse-client.ts
 import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
-
+import logger from "@/lib/logger"; 
 // Dynamic imports to avoid webpack bundling issues
 let fetch: any = null;
 let jar: CookieJar | null = null;
@@ -42,7 +42,7 @@ async function nseFetch(path: string, qs = "") {
   await initFetch();
   await ensureSession();
   const url = NSE_BASE + path + qs;
-  console.log(`[NSE Fetch] ${url}`);
+  logger.info({ msg: `[NSE Fetch] ${url}` });
 
   // Add overall timeout for the entire request
   const controller = new AbortController();
@@ -63,20 +63,20 @@ async function nseFetch(path: string, qs = "") {
     clearTimeout(timeoutId);
 
     if (!resp.ok) {
-      console.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${url}`);
+      logger.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${url}`);
       throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
     }
 
     const data = await resp.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((data as any).error) {
-      console.error("[NSE Data Error]", JSON.stringify(data));
+      logger.error({ msg: "[NSE Data Error]", data: JSON.stringify(data) });
     }
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === 'AbortError') {
-      console.error(`[NSE Timeout] Request timed out for ${url}`);
+      logger.error({ msg: `[NSE Timeout] Request timed out for ${url}` });
       throw new Error(`NSE request timeout for ${url}`);
     }
     throw error;
