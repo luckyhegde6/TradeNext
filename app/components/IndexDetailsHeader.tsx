@@ -43,7 +43,6 @@ export default function IndexDetailsHeader({ symbol = "NIFTY 50" }: { symbol?: s
         }
     } catch (e) {
         console.error("Error parsing timestamp:", e);
-        /* ignore */
     }
 
     return (

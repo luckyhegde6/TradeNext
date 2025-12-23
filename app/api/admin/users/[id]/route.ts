@@ -10,7 +10,9 @@ const updateUserSchema = z.object({
     name: z.string().min(1).optional(),
     email: z.string().email().optional(),
     role: z.enum(['user', 'admin']).optional(),
-    password: z.string().min(6).optional()
+    password: z.string().min(6).optional(),
+    isVerified: z.boolean().optional(),
+    isBlocked: z.boolean().optional()
 });
 
 // GET - Get specific user details
@@ -39,6 +41,8 @@ export async function GET(
                 name: true,
                 email: true,
                 role: true,
+                isVerified: true,
+                isBlocked: true,
                 createdAt: true,
                 updatedAt: true,
                 portfolios: {
@@ -99,9 +103,11 @@ export async function PUT(
 
         // Prepare update data
         const updateData: any = {};
-        if (validatedData.name) updateData.name = validatedData.name;
-        if (validatedData.email) updateData.email = validatedData.email;
-        if (validatedData.role) updateData.role = validatedData.role;
+        if (validatedData.name !== undefined) updateData.name = validatedData.name;
+        if (validatedData.email !== undefined) updateData.email = validatedData.email;
+        if (validatedData.role !== undefined) updateData.role = validatedData.role;
+        if (validatedData.isVerified !== undefined) updateData.isVerified = validatedData.isVerified;
+        if (validatedData.isBlocked !== undefined) updateData.isBlocked = validatedData.isBlocked;
         if (validatedData.password) {
             updateData.password = await bcrypt.hash(validatedData.password, 12);
         }
@@ -114,6 +120,8 @@ export async function PUT(
                 name: true,
                 email: true,
                 role: true,
+                isVerified: true,
+                isBlocked: true,
                 updatedAt: true
             }
         });

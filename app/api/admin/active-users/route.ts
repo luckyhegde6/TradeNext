@@ -49,7 +49,11 @@ export async function GET() {
         return NextResponse.json({
             recentUsers,
             activity: recentActivity,
-            note: "Active users based on recent profile updates (simplified tracking)"
+            note: "Active users based on recent profile updates (simplified tracking)",
+            meta: {
+                fetchedAt: new Date().toISOString(),
+                stale: false,
+              },
         });
     } catch (error) {
         console.error('Admin active users error:', error);

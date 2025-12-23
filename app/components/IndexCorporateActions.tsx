@@ -24,14 +24,26 @@ export default function IndexCorporateActions({ symbol = "NIFTY 50" }: { symbol?
             </div>
             <div className="divide-y divide-gray-200 dark:divide-slate-800">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {actions.slice(0, 5).map((action: any, i: number) => (
-                    <div key={i} className="p-4 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                        <div className="flex justify-between">
-                            <span className="font-bold text-blue-600">{action.symbol}</span>
-                            <span className="text-xs text-gray-500">{action.exDate}</span>
+                {actions.slice(0, 6).map((action: any, i: number) => (
+                    <div key={i} className="p-4 hover:bg-gray-50/80 dark:hover:bg-slate-800/50 transition-all border-l-4 border-transparent hover:border-blue-500 group">
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex flex-col">
+                                <span className="font-bold text-blue-600 dark:text-blue-400 text-sm group-hover:underline cursor-pointer">
+                                    {action.symbol}
+                                </span>
+                            </div>
+                            <div className="flex flex-col items-end">
+                                <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-slate-800 px-2 py-0.5 rounded shadow-sm">
+                                    {action.exDate}
+                                </span>
+                            </div>
                         </div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{action.purpose}</p>
-                        <p className="text-xs text-gray-500 mt-1">{action.company}</p>
+                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 leading-snug line-clamp-2">
+                            {action.subject}
+                        </p>
+                        <div className="mt-2 flex items-center text-[11px] text-gray-500 dark:text-gray-400">
+                            <span className="truncate" title={action.comp}>{action.comp}</span>
+                        </div>
                     </div>
                 ))}
             </div>

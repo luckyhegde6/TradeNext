@@ -18,8 +18,14 @@ jest.mock('../cache', () => ({
     del: jest.fn(),
   },
 }));
+// Mock market hours
+jest.mock('../market-hours', () => ({
+  isMarketOpen: jest.fn().mockReturnValue(true), // Default to open for tests
+  getRecommendedTTL: jest.fn((ttl) => ttl), // Return provided TTL
+}));
 
 import { cache as mockCache, hotCache as mockHotCache } from '../cache';
+import { isMarketOpen, getRecommendedTTL } from '../market-hours';
 
 describe('Enhanced Cache System', () => {
   beforeEach(() => {

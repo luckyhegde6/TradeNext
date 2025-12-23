@@ -1,26 +1,10 @@
 import prisma from "@/lib/prisma";
 import cache, { staticCache } from "@/lib/cache"; // NodeCache
 import { nseFetch } from "@/lib/nse-client";
-import { MARKET_TIMINGS, MARKET_HOLIDAYS } from "@/lib/constants";
+import { MARKET_HOLIDAYS } from "@/lib/constants";
+import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 import logger from "@/lib/logger";
 import type { IndexQuote } from "@prisma/client";
-
-// Helper to check if market is currently open
-function isMarketOpen() {
-    const now = new Date();
-    const day = now.getDay();
-    const time = now.toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour12: false });
-
-    // Weekend
-    if (day === 0 || day === 6) return false;
-
-    // Holiday
-    const dateStr = now.toISOString().split("T")[0];
-    if (MARKET_HOLIDAYS.includes(dateStr)) return false;
-
-    // Time check (09:15 to 15:30)
-    return time >= MARKET_TIMINGS.start && time <= MARKET_TIMINGS.end;
-}
 
 // Helper to get the target "trading day" for chart
 function getTargetDate() {
@@ -120,8 +104,15 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
         );
 
         dbQuote = await Promise.race([queryPromise, timeoutPromise]) as IndexQuote | null;
-        if (dbQuote && (Date.now() - dbQuote.updatedAt.getTime()) < 120000) {
-            return dbQuote;
+        if (dbQuote) {
+            const lastUpdate = dbQuote.updatedAt.getTime();
+            const now = Date.now();
+
+            // If market is closed, DB data is likely the last available data and thus "fresh"
+            if (!isMarketOpen() || (now - lastUpdate) < 120000) {
+                logger.debug({ msg: 'Using DB data for index details', indexName, marketOpen: isMarketOpen() });
+                return dbQuote;
+            }
         }
     } catch (dbError) {
         logger.warn({
@@ -129,7 +120,6 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
             indexName,
             error: dbError instanceof Error ? dbError.message : String(dbError)
         });
-        // Continue to fetch from NSE
     }
 
     // Check cache first
@@ -157,16 +147,6 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
         // Calculate change properly (lastPrice - previousClose)
         const change = lastPrice - previousClose;
 
-        // Log for debugging
-        logger.info({
-            msg: 'Index quote calculation',
-            indexName: data.indexName || indexName,
-            lastPrice,
-            previousClose,
-            change,
-            percChange
-        });
-
         const quote = {
             indexName: data.indexName || indexName,
             lastPrice: String(lastPrice),
@@ -190,12 +170,11 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
             timestamp: data.timeVal ? new Date(data.timeVal).toISOString() : new Date().toISOString(),
         };
 
-        logger.info({ msg: 'Index details fetched successfully', indexName, lastPrice: quote.lastPrice });
+        // Cache the result with market-aware TTL
+        const ttl = isMarketOpen() ? 120 : Math.floor(getRecommendedTTL(120000) / 1000);
+        cache.set(cacheKey, quote, ttl);
 
-        // Cache the result
-        cache.set(cacheKey, quote, 120); // 2 minutes
-
-        // Async database hydration (don't fail the request if DB is unavailable)
+        // Async database hydration
         (async () => {
             try {
                 await prisma.indexQuote.upsert({
@@ -204,11 +183,7 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
                     create: { ...quote, id: undefined }
                 });
             } catch (err) {
-                logger.warn({
-                    msg: 'DB upsert error for index details',
-                    indexName,
-                    error: err instanceof Error ? err.message : String(err)
-                });
+                logger.warn({ msg: 'DB upsert error for index details', indexName, error: err });
             }
         })();
 
@@ -216,8 +191,7 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
     };
 
     try {
-        const quote = await fetchIndexDetails();
-        return quote;
+        return await fetchIndexDetails();
     } catch (e) {
         logger.error({
             msg: 'Failed to fetch index details',
@@ -257,23 +231,47 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
     }
 }
 
+interface NSEIndexConstituent {
+    cmSymbol?: string;
+    symbol?: string;
+    lasttradedPrice?: number;
+    lastPrice?: number;
+    last?: number;
+    change?: number;
+    pchange?: number;
+    pChange?: number;
+    totaltradedquantity?: number;
+    tradedVolume?: number;
+    totalTradedVolume?: number | string;
+    totaltradedvalue?: number;
+    tradedValue?: number;
+    totalTradedValue?: number;
+    high?: number;
+    dayHigh?: number;
+    low?: number;
+    dayLow?: number;
+    yearHigh?: number;
+    yearLow?: number;
+}
+
 export async function getIndexHeatmap(indexName: string) {
     const cacheKey = `nse:index:${indexName}:heatmap`;
     const cached = cache.get(cacheKey); // Use regular cache for heatmap data
     if (cached) {
-        return cached;
+        return cached as NSEIndexConstituent[];
     }
 
     const qs = `?functionName=getConstituents&&index=${encodeURIComponent(indexName)}&&noofrecords=0`;
     try {
         logger.info({ msg: 'Fetching heatmap data from NSE', indexName });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
+        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as { data?: NSEIndexConstituent[] };
         const items = rawData?.data || [];
 
         logger.info({ msg: 'Heatmap data fetched', indexName, count: items.length });
-        cache.set(cacheKey, items, 300); // 5 mins
+
+        const ttl = isMarketOpen() ? 300 : Math.floor(getRecommendedTTL(300000) / 1000);
+        cache.set(cacheKey, items, ttl);
 
         // Async Hydrate (don't fail the request if DB is unavailable)
         (async () => {
@@ -364,14 +362,17 @@ export async function getIndexCorporateActions(indexName: string) {
     const cached = staticCache.get(cacheKey); // Use static cache for corporate actions
     if (cached) return cached;
 
-    const qs = `?functionName=getCorporateAction&&flag=CAC&&index=${encodeURIComponent(indexName)}`;
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
-        const data = rawData?.data || [];
+        // Use the new URL provided by the user for all equities corporate actions
+        const data = await nseFetch("https://www.nseindia.com/api/corporates-corporateActions?index=equities") as any;
 
-        staticCache.set(cacheKey, data, 1800); // Cache in static cache for 30 mins
-        return data;
+        // If data is an array, we might want to filter by index constituents if indexName is not "all"
+        // For now, return all as it used to do but with the new API
+        const actions = Array.isArray(data) ? data : (data?.data || []);
+
+        const ttl = isMarketOpen() ? 1800 : Math.floor(getRecommendedTTL(1800000) / 1000);
+        staticCache.set(cacheKey, actions, ttl);
+        return actions;
     } catch (e) {
         // Log specific error types
         if (e instanceof Error && e.message.includes('404')) {
@@ -402,7 +403,8 @@ export async function getIndexAnnouncements(indexName: string) {
             return dateB.getTime() - dateA.getTime();
         });
 
-        staticCache.set(cacheKey, sorted, 1800); // Cache in static cache for 30 mins
+        const ttl = isMarketOpen() ? 1800 : Math.floor(getRecommendedTTL(1800000) / 1000);
+        staticCache.set(cacheKey, sorted, ttl);
 
         // Async DB hydration (don't fail the request if DB is unavailable)
         (async () => {
@@ -469,7 +471,9 @@ export async function getAdvanceDecline(indexName: string) {
         };
 
         console.log(`[Index Service] Advance/Decline result:`, result);
-        cache.set(cacheKey, result, 300); // 5 minutes
+
+        const ttl = isMarketOpen() ? 300 : Math.floor(getRecommendedTTL(300000) / 1000);
+        cache.set(cacheKey, result, ttl);
         return result;
     } catch (e) {
         console.error(`[Index Service] Error fetching advance/decline for ${indexName}:`, e);

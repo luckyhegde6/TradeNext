@@ -8,6 +8,7 @@ declare module "next-auth" {
   interface User {
     role: string;
     id: string;
+    mobile?: string | null;
   }
 
   interface Session {
@@ -15,6 +16,7 @@ declare module "next-auth" {
       id: string;
       email: string;
       name?: string;
+      mobile?: string | null;
       role: string;
     };
   }
@@ -45,6 +47,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           throw new Error("Invalid credentials");
         }
 
+        if ((user as any).isBlocked) {
+          throw new Error("Account is blocked. Please contact support.");
+        }
+
+        if (!(user as any).isVerified) {
+          throw new Error("Email not verified");
+        }
+
         const isPasswordValid = await compare(password, user.password);
 
         if (!isPasswordValid) {
@@ -56,8 +66,45 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           email: user.email,
           name: user.name,
           role: user.role,
+          mobile: (user as any).mobile,
         };
       },
     }),
   ],
+  callbacks: {
+    async jwt({ token, user, trigger, session }) {
+      if (user) {
+        token.role = user.role;
+        token.id = user.id;
+        token.mobile = user.mobile;
+      }
+
+      // Verify user existence in DB on every check to handle DB resets
+      if (token.id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: parseInt(token.id as string) },
+          select: { id: true }
+        });
+
+        if (!dbUser) {
+          return null; // Force logout/session invalidation
+        }
+      }
+
+      if (trigger === "update" && session) {
+        token.name = session.name;
+        token.mobile = session.mobile;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.role = token.role as string;
+        session.user.id = token.id as string;
+        session.user.mobile = token.mobile as string | null;
+        session.user.name = (token.name as string | null) || undefined;
+      }
+      return session;
+    },
+  },
 });

@@ -3,13 +3,23 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #111827; /* gray-900 */
+  --surface: #ffffff;
+  --surface-foreground: #111827;
+  --border: #e5e7eb; /* gray-200 */
+  --input-bg: #ffffff;
+  --primary: #2563eb; /* blue-600 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #020617; /* slate-950 */
+    --foreground: #f8fafc; /* slate-50 */
+    --surface: #0f172a; /* slate-900 */
+    --surface-foreground: #f8fafc;
+    --border: #1e293b; /* slate-800 */
+    --input-bg: #1e293b;
+    --primary: #3b82f6; /* blue-500 */
   }
 }
 

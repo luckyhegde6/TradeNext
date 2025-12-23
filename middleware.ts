@@ -13,8 +13,7 @@ export default auth((req) => {
     // Protected routes
     const isProtected =
         nextUrl.pathname.startsWith("/portfolio") ||
-        nextUrl.pathname.startsWith("/posts/new") ||
-        nextUrl.pathname.startsWith("/users/new");
+        nextUrl.pathname.startsWith("/posts/new");
 
     const isAdminRoute = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/docs");
 

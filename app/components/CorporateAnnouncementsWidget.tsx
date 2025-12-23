@@ -39,33 +39,43 @@ export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { 
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar max-h-[500px]">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {announcements?.map((item: any, index: number) => (
-                    <div key={`${item.symbol}-${item.broadcastDateTime}-${index}`} className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors border-gray-100 dark:border-slate-700">
-                        <div className="flex justify-between items-start">
-                            <span className="font-bold text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded">
-                                {item.symbol}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                                {new Date(item.broadcastDateTime).toLocaleString('en-IN', {
-                                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                                })}
-                            </span>
+                {announcements?.map((item: any, index: number) => {
+                    const symbol = item.symbol;
+                    const date = item.an_dt || item.broadcastDateTime;
+                    const subject = item.desc || item.subject;
+                    const details = item.attchmntText || item.details;
+                    const attachment = item.attchmntFile || item.attachment;
+                    const dt = item.dt || item.seq_id || index;
+
+                    return (
+                        <div key={`${symbol}-${dt}-${index}`} className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors border-gray-100 dark:border-slate-700">
+                            <div className="flex justify-between items-start">
+                                <span className="font-bold text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded">
+                                    {symbol}
+                                </span>
+                                <span className="text-xs text-gray-400">
+                                    {date && (date.includes('-') || date.includes('/')) ? date :
+                                        (date ? new Date(date).toLocaleString('en-IN', {
+                                            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                                        }) : '-')}
+                                </span>
+                            </div>
+                            <h4 className="font-semibold text-sm mt-2 text-gray-900 dark:text-gray-100 line-clamp-2">
+                                {subject}
+                            </h4>
+                            {details && (
+                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {sanitizeHtml(details, { allowedTags: [], allowedAttributes: {} })}
+                                </p>
+                            )}
+                            {attachment && (
+                                <a href={attachment} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline mt-1 inline-block">
+                                    View PDF
+                                </a>
+                            )}
                         </div>
-                        <h4 className="font-semibold text-sm mt-2 text-gray-900 dark:text-gray-100 line-clamp-2">
-                            {item.subject}
-                        </h4>
-                        {item.details && (
-                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                {sanitizeHtml(item.details, { allowedTags: [], allowedAttributes: {} })}
-                            </p>
-                        )}
-                        {item.attachment && (
-                            <a href={item.attachment} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline mt-1 inline-block">
-                                View PDF
-                            </a>
-                        )}
-                    </div>
-                ))}
+                    );
+                })}
 
                 {!announcements?.length && (
                     <div className="p-4 text-center text-gray-500">No recent announcements found.</div>

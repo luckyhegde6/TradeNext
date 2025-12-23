@@ -1,6 +1,7 @@
 // Enhanced caching system with polling and intelligent cache management
 import cache, { hotCache, staticCache } from "@/lib/cache";
 import logger from "@/lib/logger";
+import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 
 interface CacheConfig {
   key: string;
@@ -44,9 +45,10 @@ class EnhancedCacheManager {
     logger.debug({ msg: 'Cache miss, fetching fresh data', key });
     const data = await fetchFn();
 
-    // Cache the result
-    cacheInstance.set(key, data, ttl);
-    logger.debug({ msg: 'Data cached', key, ttl });
+    // Cache the result with market-aware TTL
+    const recommendedTtl = getRecommendedTTL(ttl);
+    cacheInstance.set(key, data, recommendedTtl);
+    logger.debug({ msg: 'Data cached', key, ttl: recommendedTtl, marketOpen: isMarketOpen() });
 
     // Set up polling if configured
     if (pollingConfig) {
@@ -72,13 +74,17 @@ class EnhancedCacheManager {
     }
 
     this.pollingConfigs.set(key, pollingConfig);
-    // key is used above, so it's not unused
 
     const timer = setInterval(async () => {
       try {
         const config = this.pollingConfigs.get(key);
         if (!config) return;
-        if (!config) return;
+
+        // SKIP polling if market is closed to avoid unnecessary API calls
+        if (!isMarketOpen()) {
+          logger.debug({ msg: 'Market closed, skipping polling refresh', key });
+          return;
+        }
 
         // Check if data is still fresh enough
         const cached = cacheConfig.cacheInstance?.get(key);
@@ -89,7 +95,8 @@ class EnhancedCacheManager {
         logger.debug({ msg: 'Polling refresh', key });
         const data = await this.fetchWithRetry(fetchFn, config.retryAttempts, config.backoffMultiplier);
 
-        cacheConfig.cacheInstance?.set(key, data, cacheConfig.ttl);
+        const recommendedTtl = getRecommendedTTL(cacheConfig.ttl);
+        cacheConfig.cacheInstance?.set(key, data, recommendedTtl);
         this.updateCacheTimestamp(key);
 
       } catch (error) {
@@ -98,7 +105,6 @@ class EnhancedCacheManager {
     }, pollingConfig.interval);
 
     this.pollingTimers.set(key, timer);
-    // key is used above, so it's not unused
     logger.info({ msg: 'Polling setup', key, interval: pollingConfig.interval });
   }
 
@@ -245,6 +251,13 @@ export const nseCache = {
     key: `nse:static:${key}`,
     ttl: 3600000, // 1 hour
     cacheInstance: staticCache
+  }),
+
+  // Corporate data - 1 hour TTL
+  corporate: (symbol: string, type: string) => ({
+    key: `nse:stock:${symbol}:corporate:${type}`,
+    ttl: 3600000, // 1 hour
+    cacheInstance: cache
   })
 };
 

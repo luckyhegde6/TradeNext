@@ -48,7 +48,11 @@ export async function POST(req: Request) {
         return NextResponse.json({
             success: true,
             filePath,
-            fileName: uniqueName
+            fileName: uniqueName,
+            meta: {
+                fetchedAt: new Date().toISOString(),
+                stale: false,
+              },
         });
     } catch (e: unknown) {
         const errorMessage = (e instanceof Error ? e.message : "Upload failed");

@@ -1,6 +1,8 @@
 // Client-side caching utilities using IndexedDB and localStorage
 // This runs in the browser
 
+import logger from "@/lib/logger";
+
 interface CacheEntry<T = unknown> {
   data: T;
   timestamp: number;
@@ -70,7 +72,7 @@ class IndexedDBCache {
         request.onerror = () => reject(request.error);
       });
     } catch (error) {
-      console.warn('IndexedDB cache set failed:', error);
+      logger.warn('IndexedDB cache set failed:', error);
     }
   }
 
@@ -86,7 +88,7 @@ class IndexedDBCache {
         request.onerror = () => reject(request.error);
       });
     } catch (error) {
-      console.warn('IndexedDB cache delete failed:', error);
+      logger.warn('IndexedDB cache delete failed:', error);
     }
   }
 
@@ -102,7 +104,7 @@ class IndexedDBCache {
         request.onerror = () => reject(request.error);
       });
     } catch (error) {
-      console.warn('IndexedDB cache clear failed:', error);
+      logger.warn('IndexedDB cache clear failed:', error);
     }
   }
 }
@@ -146,7 +148,7 @@ class LocalStorageCache {
       };
       localStorage.setItem(this.prefix + key, JSON.stringify(entry));
     } catch (error) {
-      console.warn('localStorage cache set failed:', error);
+      logger.warn('localStorage cache set failed:', error);
     }
   }
 
@@ -159,7 +161,7 @@ class LocalStorageCache {
     try {
       localStorage.removeItem(this.prefix + key);
     } catch (error) {
-      console.warn('localStorage cache delete failed:', error);
+      logger.warn('localStorage cache delete failed:', error);
     }
   }
 
@@ -177,7 +179,7 @@ class LocalStorageCache {
         }
       });
     } catch (error) {
-      console.warn('localStorage cache clear failed:', error);
+      logger.warn('localStorage cache clear failed:', error);
     }
   }
 }
@@ -207,7 +209,7 @@ export class SmartCache {
       // Fall back to IndexedDB for larger data
       return await indexedDBCache.get<T>(key);
     } catch (error) {
-      console.warn('SmartCache get failed:', error);
+      logger.warn('SmartCache get failed:', error);
       return null;
     }
   }
@@ -227,7 +229,7 @@ export class SmartCache {
         localStorageCache.set(key, data, ttl);
       }
     } catch (error) {
-      console.warn('SmartCache set failed:', error);
+      logger.warn('SmartCache set failed:', error);
     }
   }
 
@@ -242,7 +244,7 @@ export class SmartCache {
       localStorageCache.delete(key);
       await indexedDBCache.delete(key);
     } catch (error) {
-      console.warn('SmartCache delete failed:', error);
+      logger.warn('SmartCache delete failed:', error);
     }
   }
 
@@ -256,7 +258,7 @@ export class SmartCache {
       localStorageCache.clear();
       await indexedDBCache.clear();
     } catch (error) {
-      console.warn('SmartCache clear failed:', error);
+      logger.warn('SmartCache clear failed:', error);
     }
   }
 }
@@ -299,7 +301,7 @@ export const invalidateCache = {
   marketData: (pattern: string) => {
     // In a real implementation, you'd need to iterate through all keys
     // and delete matching ones. For now, we'll clear all market data
-    console.log(`Invalidating market cache pattern: ${pattern}`);
+    logger.warn(`Invalidating market cache pattern: ${pattern}`);
   },
   all: async () => {
     await SmartCache.clear();
