@@ -6,13 +6,29 @@
 
 | Category | Status |
 |----------|--------|
-| Database Migrations | [ ] `.ai/TODO.md` |
-| Authentication | [ ] `.ai/TODO.md` |
-| API Endpoints | [ ] `.ai/TODO.md` |
-| Piotroski F-score | [ ] `.ai/TODO.md` |
-| Ingestion Tests | [ ] `.ai/TODO.md` |
-| Scheduler | [ ] `.ai/TODO.md` |
-| CI/CD | [ ] `.ai/TODO.md` |
+| Database Migrations | [x] Complete |
+| Authentication | [x] Complete |
+| API Endpoints | [x] Complete |
+| Admin Routes | [x] Complete |
+| Portfolio Engine | [x] Complete |
+| Market Data | [x] Complete |
+| NSE Integration | [x] Complete |
+| Testing | [ ] In Progress |
+
+## Current Features
+
+### Completed
+- NextAuth.js with role-based access (admin/user)
+- Prisma 7 with PostgreSQL/TimescaleDB
+- Portfolio management with transactions
+- NSE market data integration
+- Corporate announcements & actions
+- Admin dashboard and user management
+
+### In Progress
+- Test coverage
+- Piotroski F-score implementation
+- Enhanced charting
 
 ## Engineering Standards
 
@@ -23,12 +39,16 @@ All implementations must follow:
 ## Commands
 
 ```bash
-# Run tests
+# Setup
+npm install
+npm run db:up
+npx prisma migrate dev
+npx prisma db seed
+
+# Development
+npm run dev
+
+# Testing
 npm run test
-
-# Build
-npm run build
-
-# Lint
 npm run lint
 ```

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.02.25] - 2026-02-25
+
+### Added
+- Admin credentials configurable via environment variables (ADMIN_EMAIL, ADMIN_PASSWORD)
+- Prisma Skills integration for AI agents
+- OpenCode MCP configuration (Prisma Local/Remote, Playwright)
+- Reusable admin authorization utility (lib/admin-auth.ts)
+- Secured /api/admin routes via middleware
+
+### Changed
+- Updated seed.ts to use environment variables for admin credentials
+- Removed duplicate seed-demo.ts script
+
 ## [2025.12.22] - 2025-12-22
 
 ### Added

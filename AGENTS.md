@@ -61,6 +61,7 @@ npm run prisma:migrate   # Run migrations
 npm run prisma:studio    # Open Prisma Studio
 npm run db:up            # Start local DB (docker)
 npm run db:down          # Stop local DB
+npx prisma db seed       # Seed database with demo + admin users
 ```
 
 ### Data Ingestion
@@ -284,16 +285,23 @@ Prisma ORM includes built-in safety checks to prevent destructive commands (like
 
 ### Demo Credentials
 ```bash
-Email: demo@tradenext.in
-Password: demo123
+Demo User:
+  Email: demo@tradenext.in
+  Password: demo123
+
+Admin User (configured via env):
+  Email: admin@tradenext6.app (or ADMIN_EMAIL from .env)
+  Password: admin123 (or ADMIN_PASSWORD from .env)
 ```
 
 ### Testing Steps
 1. Start the dev server: `npm run dev`
-2. Enable Playwright MCP in opencode.json
-3. Use Playwright MCP to:
+2. Start database: `npm run db:up`
+3. Run seed: `npx prisma db seed`
+4. Enable Playwright MCP in opencode.json
+5. Use Playwright MCP to:
    - Navigate to the login page
-   - Login with demo credentials
+   - Login with demo/admin credentials
    - Verify UI changes render correctly
    - Check responsive behavior
    - Test dark/light mode if applicable

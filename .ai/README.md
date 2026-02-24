@@ -21,6 +21,22 @@ This folder contains AI agent configuration files for TradeNext - a Next.js 16 s
 - Read `.ai/rules/` for coding standards
 - Use `.ai/commands/` for specific workflows
 
+## Prisma Integration
+
+This project uses Prisma 7 with AI agents. For accurate Prisma knowledge:
+
+```bash
+# Install Prisma Skills
+npx skills add prisma/skills
+```
+
+This provides:
+- `prisma-cli` - Complete CLI commands reference
+- `prisma-client-api` - CRUD operations, filters, transactions
+- `prisma-upgrade-v7` - Migration guide from v6 to v7
+- `prisma-database-setup` - Database configuration
+- `prisma-postgres` - Prisma Postgres workflows
+
 ## Technologies
 
 - Next.js 16 (App Router)
@@ -28,3 +44,9 @@ This folder contains AI agent configuration files for TradeNext - a Next.js 16 s
 - Tailwind CSS 4.x
 - Prisma 7 + PostgreSQL/TimescaleDB
 - Jest 30 + Testing Library
+- NextAuth.js (role-based auth)
+
+## Credentials
+
+Demo: `demo@tradenext.in` / `demo123`  
+Admin: `admin@tradenext6.app` / `admin123` (configurable via env)
