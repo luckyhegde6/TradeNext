@@ -1,8 +1,9 @@
-# AI TODO / Implementation Checklist (template)
+# TODO / Implementation Checklist
 
-This AI TODO is a template file to help you (or an assistant agent) implement and validate the remaining features.
+This file contains the implementation checklist for TradeNext features.
 
-## Priority items
+## Priority Items
+
 - [ ] Integrate migrations into repo and run them on DB startup (e.g., using a migration tool or init script).
 - [ ] Wire up authentication and seed a demo user + demo portfolio.
 - [ ] Add API endpoints:
@@ -15,12 +16,17 @@ This AI TODO is a template file to help you (or an assistant agent) implement an
 - [ ] Add CI for linting, typecheck, and run basic integration test against a test Postgres.
 
 ## Nice-to-have
+
 - [ ] Elasticsearch index for company documents and fast research queries.
 - [ ] Backtest engine for saved screens.
 - [ ] Alerts & notifications subsystem.
 
-## Notes for the implementer
+## Notes for Implementers
+
 - When implementing Piotroski checks, make sure to compare year-over-year changes requiring fetching prior-period fundamentals.
 - For performance, batch upserts using COPY or prepared statements and transactions.
 - Use Timescale continuous aggregates for monthly/quarterly rollups.
 
+---
+
+See `.ai/rules/checklist.md` for engineering guardrails.

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+      "plugin": ["opencode-helicone-session", "opencode-wakatime"],
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "gh_grep": {
+      "type": "remote",
+      "url": "https://mcp.grep.app"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "docker": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--init", "mcp/docker"]
+    },
+    "prisma": {
+      "command": "npx",
+      "args": ["-y", "prisma", "--prisma-json"]
+    },
+    "netlify": {
+      "command": "npx",
+      "args": ["-y", "@netlify/mcp"]
+    }
+  }
+}
