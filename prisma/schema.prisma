@@ -242,11 +242,14 @@ model MarketSnapshot {
 
 model Alert {
   id        String   @id @default(uuid())
-  type      String   // volume_spike | price_jump
+  userId    Int?
+  type      String   // volume_spike | price_jump | price_above | price_below
   symbol    String?
   condition Json
-  triggeredAt DateTime @default(now())
+  triggered Boolean  @default(false)
+  triggeredAt DateTime?
   seen      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model AIInsight {

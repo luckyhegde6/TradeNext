@@ -35,8 +35,9 @@
     "db:up": "bash scripts/dev-db-up.sh",
     "db:down": "bash scripts/dev-db-down.sh",
     "db:enable-timescale": "npx ts-node scripts/enable_timescale.ts",
-    "docker:terminate:win": "powershell -ExecutionPolicy Bypass -File scripts/docker-terminate.ps1",
-    "docker:terminate": "node scripts/docker-terminate-cross.cjs"
+"docker:terminate:win": "powershell -ExecutionPolicy Bypass -File scripts/docker-terminate.ps1",
+    "docker:terminate": "node scripts/docker-terminate-cross.cjs",
+    "db:seed-demo": "npx tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

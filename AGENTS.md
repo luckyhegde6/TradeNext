@@ -216,6 +216,100 @@ describe('Cache System', () => {
 - Schema in `prisma/schema.prisma`
 - Generate client after schema changes: `npm run prisma:gen`
 
+### Prisma Skills & MCP
+
+AI agents often struggle with Prisma 7 - they generate outdated v6 patterns, hallucinate APIs, and miss breaking changes. **Prisma Skills** fix this.
+
+#### Install Prisma Skills
+```bash
+# Add all Prisma skills
+npx skills add prisma/skills
+
+# Or install specific skills
+npx skills add prisma/skills --skill prisma-client-api
+npx skills add prisma/skills --skill prisma-cli
+npx skills add prisma/skills --skill prisma-upgrade-v7
+```
+
+Available skills:
+- `prisma-cli` - Complete CLI commands reference
+- `prisma-client-api` - CRUD operations, filters, transactions
+- `prisma-upgrade-v7` - Migration guide from v6 to v7
+- `prisma-database-setup` - PostgreSQL, MySQL, SQLite, MongoDB config
+- `prisma-postgres` - Prisma Postgres workflows
+
+#### Prisma MCP Server
+
+The project uses **both** local and remote Prisma MCP servers for database management.
+
+**Local MCP** - For migrations, generate, studio:
+```bash
+npx prisma mcp
+```
+
+**Remote MCP** - For Prisma Postgres management:
+```bash
+npx -y mcp-remote https://mcp.prisma.io/mcp
+```
+
+#### OpenCode MCP Configuration
+
+Update `opencode.json` with:
+```json
+{
+  "mcp": {
+    "prisma": {
+      "type": "local",
+      "command": ["npx", "-y", "prisma", "mcp"],
+      "enabled": true
+    },
+    "Prisma-Remote": {
+      "type": "remote",
+      "url": "https://mcp.prisma.io/mcp",
+      "enabled": true
+    }
+  }
+}
+```
+
+#### AI Safety Guardrails
+
+Prisma ORM includes built-in safety checks to prevent destructive commands (like `prisma migrate reset --force`) when run through AI coding agents. Agents must get explicit user consent before executing dangerous database operations.
+
+---
+
+## UI/UX Testing
+
+> **Important:** After making any UI/UX changes, ALWAYS test using Playwright MCP with demo credentials.
+
+### Demo Credentials
+```bash
+Email: demo@tradenext.in
+Password: demo123
+```
+
+### Testing Steps
+1. Start the dev server: `npm run dev`
+2. Enable Playwright MCP in opencode.json
+3. Use Playwright MCP to:
+   - Navigate to the login page
+   - Login with demo credentials
+   - Verify UI changes render correctly
+   - Check responsive behavior
+   - Test dark/light mode if applicable
+
+### Enable Playwright MCP
+In `opencode.json`, set:
+```json
+{
+  "mcp": {
+    "playwright": {
+      "enabled": true
+    }
+  }
+}
+```
+
 ---
 
 ## Project Structure
