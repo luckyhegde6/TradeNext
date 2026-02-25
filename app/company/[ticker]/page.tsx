@@ -38,12 +38,9 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                     <CorporateDataTabs symbol={ticker} />
                 </div>
 
-                {/* Historical Data from DB (if available) */}
+                {/* Historical Data from DB with Technical Indicators */}
                 {data?.prices && data.prices.length > 0 && (
-                    <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 p-6">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Historical Performance (Database)</h3>
-                        <ClientChartWrapper prices={data.prices} ticker={ticker} />
-                    </div>
+                    <ClientChartWrapper prices={data.prices} ticker={ticker} />
                 )}
 
                 {/* Fundamentals (if available) */}

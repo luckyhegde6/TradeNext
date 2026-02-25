@@ -258,3 +258,12 @@ model AIInsight {
   summary   String
   createdAt DateTime @default(now())
 }
+
+model SavedScreen {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

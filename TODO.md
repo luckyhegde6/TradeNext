@@ -13,7 +13,12 @@
 | Portfolio Engine | [x] Complete |
 | Market Data | [x] Complete |
 | NSE Integration | [x] Complete |
-| Testing | [ ] In Progress |
+| Testing | [x] Complete |
+| Enhanced Charts | [x] Complete |
+| Technical Indicators | [x] Complete |
+| Stock Screener | [x] Complete |
+| Price Alerts | [x] Complete |
+| CSV Import | [x] Complete |
 
 ## Current Features
 
@@ -24,11 +29,11 @@
 - NSE market data integration
 - Corporate announcements & actions
 - Admin dashboard and user management
-
-### In Progress
-- Test coverage
-- Piotroski F-score implementation
-- Enhanced charting
+- Technical indicators (RSI, MACD, Bollinger Bands, SMA, EMA)
+- Stock Screener with filters
+- Price Alerts system
+- CSV/Excel import for transactions
+- Piotroski F-Score (existing)
 
 ## Engineering Standards
 

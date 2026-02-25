@@ -2,8 +2,15 @@
 
 import dynamic from 'next/dynamic';
 
-const ChartClient = dynamic(() => import('../../components/CloseChart'), { ssr: false });
+const UnifiedChart = dynamic(() => import('../../components/UnifiedChart'), { ssr: false });
 
-export default function ClientChartWrapper({ prices, ticker }: { prices: { trade_date: Date; close: number }[]; ticker: string }) {
-    return <ChartClient prices={prices} ticker={ticker} />;
+export default function ClientChartWrapper({ prices, ticker }: { 
+  prices: { trade_date: Date; open?: number; high?: number; low?: number; close: number; volume?: number }[]; 
+  ticker: string 
+}) {
+    return (
+        <div>
+            <UnifiedChart prices={prices} ticker={ticker} />
+        </div>
+    );
 }
