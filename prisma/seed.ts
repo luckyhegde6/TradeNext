@@ -2,13 +2,28 @@ import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { withAccelerate } from '@prisma/extension-accelerate';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
 
-const DEMO_EMAIL = "demo@tradenext.in";
+let prisma: PrismaClient;
+
+if (useRemoteDb) {
+  const remoteUrl = process.env.DATABASE_REMOTE || process.env.ACCELERATE_URL;
+  if (remoteUrl) {
+    process.env.DATABASE_URL = remoteUrl;
+  }
+  prisma = new PrismaClient({
+    accelerateUrl: process.env.DATABASE_URL,
+  }).$extends(withAccelerate());
+} else {
+  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
+  prisma = new PrismaClient({ adapter });
+}
+
+const DEMO_EMAIL = "demo@tradenext6.app";
 const DEMO_PASSWORD = "demo123";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@tradenext6.app";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
