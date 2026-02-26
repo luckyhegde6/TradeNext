@@ -1,28 +1,44 @@
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { withAccelerate } from '@prisma/extension-accelerate';
 
-// Get database URL from environment or use default for local development
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
 
-// Create connection pool and adapter with better serverless configuration
-const pool = new Pool({
-  connectionString: databaseUrl,
-  max: 5, // Reduce max connections for serverless
-  min: 0,  // Minimum number of connections
-  idleTimeoutMillis: 15000, // Close idle connections after 15s (shorter for serverless)
-  connectionTimeoutMillis: 5000, // Connection timeout (longer for remote DB)
-  query_timeout: 30000, // Query timeout
-});
-const adapter = new PrismaPg(pool);
+let prismaClient: PrismaClient;
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-
-export const prisma = globalForPrisma.prisma || new PrismaClient({
+if (useRemoteDb) {
+  const remoteUrl = process.env.DATABASE_REMOTE || process.env.ACCELERATE_URL;
+  if (remoteUrl) {
+    process.env.DATABASE_URL = remoteUrl;
+  }
+  prismaClient = new PrismaClient({
+    accelerateUrl: process.env.DATABASE_URL,
+  }).$extends(withAccelerate());
+} else {
+  const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: 5,
+    min: 0,
+    idleTimeoutMillis: 15000,
+    connectionTimeoutMillis: 5000,
+    query_timeout: 30000,
+  });
+  const adapter = new PrismaPg(pool);
+  prismaClient = new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-});
+  });
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient };
 
-export default prisma;
+const prismaInstance = globalForPrisma.prismaClient || prismaClient;
+
+export const db = prismaInstance;
+export const prisma = prismaInstance;
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prismaClient = prismaInstance;
+
+export default prismaInstance;
