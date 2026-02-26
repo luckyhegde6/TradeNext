@@ -24,9 +24,14 @@ if (useRemoteDb) {
 }
 
 const DEMO_EMAIL = "demo@tradenext6.app";
-const DEMO_PASSWORD = "demo123";
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD || "demo123";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@tradenext6.app";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+if (!ADMIN_PASSWORD || !DEMO_PASSWORD) {
+  console.error("ERROR: ADMIN_PASSWORD and DEMO_PASSWORD environment variables must be set");
+  process.exit(1);
+}
 
 async function main() {
   console.log("Starting database seeding...");
