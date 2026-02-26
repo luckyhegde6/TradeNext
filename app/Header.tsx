@@ -69,12 +69,20 @@ export default function Header() {
             </NavLink>
 
             {isLoggedIn ? (
-              <NavLink
-                href={hasPortfolio === false ? "/portfolio/new" : "/portfolio"}
-                active={isActive("/portfolio") || isActive("/portfolio/new")}
-              >
-                {hasPortfolio === false ? "Create Portfolio" : "Portfolio"}
-              </NavLink>
+              <>
+                <NavLink
+                  href={hasPortfolio === false ? "/portfolio/new" : "/portfolio"}
+                  active={isActive("/portfolio") || isActive("/portfolio/new")}
+                >
+                  {hasPortfolio === false ? "Create Portfolio" : "Portfolio"}
+                </NavLink>
+                <NavLink
+                  href="/alerts"
+                  active={isActive("/alerts")}
+                >
+                  Alerts
+                </NavLink>
+              </>
             ) : (
               <button
                 onClick={() => signIn()}
@@ -87,9 +95,17 @@ export default function Header() {
             <NavLink href="/markets" active={isActive("/markets")}>
               Markets
             </NavLink>
+            <NavLink href="/news/market" active={isActive("/news/market")}>
+              News
+            </NavLink>
             <NavLink href="/markets/analytics" active={isActive("/markets/analytics")}>
               Analytics
             </NavLink>
+            {isLoggedIn && (
+              <NavLink href="/markets/screener" active={isActive("/markets/screener")}>
+                Screener
+              </NavLink>
+            )}
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
             </NavLink>

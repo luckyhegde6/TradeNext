@@ -47,25 +47,66 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
         if (cachedInCache) return cachedInCache as StockQuote;
 
         try {
+            // Get the latest price
             const dbPrice = await prisma.dailyPrice.findFirst({
                 where: { ticker: symbol.toUpperCase() },
                 orderBy: { tradeDate: 'desc' }
             });
 
+            // Get 52W high/low from DB (last 365 days)
+            const oneYearAgo = new Date();
+            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+            
+            const yearStats = await prisma.dailyPrice.aggregate({
+                where: { 
+                    ticker: symbol.toUpperCase(),
+                    tradeDate: { gte: oneYearAgo }
+                },
+                _max: { high: true },
+                _min: { low: true },
+            });
+
             if (dbPrice) {
                 // Return a partial quote from DB data if available
                 logger.debug({ msg: 'Using DB data for closed market quote', symbol });
+                
+                // Calculate approximate traded value from volume and close price
+                const dailyVolume = dbPrice.volume ? Number(dbPrice.volume) : 0;
+                const dailyClose = Number(dbPrice.close || 0);
+                const approximateValue = dailyVolume * dailyClose; // Approximate in rupees
+
+                // Calculate change and pChange from previous day's close
+                const prevDayPrice = await prisma.dailyPrice.findFirst({
+                    where: { 
+                        ticker: symbol.toUpperCase(),
+                        tradeDate: { lt: dbPrice.tradeDate }
+                    },
+                    orderBy: { tradeDate: 'desc' }
+                });
+                
+                const previousClose = prevDayPrice ? Number(prevDayPrice.close) : dailyClose;
+                const change = dailyClose - previousClose;
+                const pChange = previousClose > 0 ? (change / previousClose) * 100 : 0;
+
                 const quote: Partial<StockQuote> = {
                     symbol: symbol.toUpperCase(),
-                    lastPrice: Number(dbPrice.close || 0),
+                    lastPrice: dailyClose,
                     open: Number(dbPrice.open || 0),
                     dayHigh: Number(dbPrice.high || 0),
                     dayLow: Number(dbPrice.low || 0),
-                    closePrice: Number(dbPrice.close || 0),
-                    previousClose: Number(dbPrice.close || 0), // Approximation
+                    closePrice: dailyClose,
+                    previousClose: previousClose,
+                    change: change,
+                    pChange: pChange,
+                    // Calculate 52W high/low from DB
+                    yearHigh: yearStats._max.high ? Number(yearStats._max.high) : undefined,
+                    yearLow: yearStats._min.low ? Number(yearStats._min.low) : undefined,
+                    // Use latest day's volume
+                    totalTradedVolume: dailyVolume > 0 ? dailyVolume : undefined,
+                    // Calculate approximate traded value
+                    totalTradedValue: approximateValue > 0 ? approximateValue : undefined,
                 };
 
-                // Cache it until open
                 // Cache it until open
                 cacheConfig.cacheInstance?.set(cacheConfig.key, quote as StockQuote, Math.floor(getRecommendedTTL(120000) / 1000));
                 return quote as StockQuote;

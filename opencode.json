@@ -1,0 +1,70 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "server": {
+    "port": 4096,
+    "mdns": true
+  },
+    "lsp": {
+    "typescript": {
+      "enabled": true,
+      "command": [
+        "npx",
+        "typescript-language-server",
+        "--stdio"
+      ]
+    }
+  },
+    "plugin": ["opencode-helicone-session", "opencode-wakatime"],
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "gh_grep": {
+      "type": "remote",
+      "url": "https://mcp.grep.app"
+    },
+     "Prisma-Remote": {
+       "type": "remote",
+       "url": "https://mcp.prisma.io/mcp",
+       "enabled": false
+      },
+      "Prisma": {
+       "type": "local",
+       "command": ["npx", "-y", "prisma", "mcp"],
+       "enabled": false
+      },
+     "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@latest"
+      ],
+      "enabled": true
+    },
+     "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "memory": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    }
+  },
+    "permission": {
+    "skill": {
+      "*": "allow",
+      "pr-review": "allow",
+      "internal-*": "deny",
+      "experimental-*": "ask"
+    }
+  }
+}

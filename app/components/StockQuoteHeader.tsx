@@ -60,37 +60,37 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">Open</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.open?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.open ? `₹${quote.open.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">High</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.dayHigh?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.dayHigh ? `₹${quote.dayHigh.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">Low</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.dayLow?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.dayLow ? `₹${quote.dayLow.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">Prev. Close</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.previousClose?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.previousClose ? `₹${quote.previousClose.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">52W High</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.yearHigh?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.yearHigh ? `₹${quote.yearHigh.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">52W Low</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{quote.yearLow?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.yearLow ? `₹${quote.yearLow.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
             </div>
@@ -100,13 +100,13 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">Volume</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        {quote.totalTradedVolume?.toLocaleString('en-IN')}
+                        {quote.totalTradedVolume ? quote.totalTradedVolume.toLocaleString('en-IN') : '-'}
                     </div>
                 </div>
                 <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">Value (Cr)</div>
                     <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
-                        ₹{(quote.totalTradedValue / 10000000)?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {quote.totalTradedValue ? `₹${(quote.totalTradedValue / 10000000).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '-'}
                     </div>
                 </div>
                 {quote.peRatio > 0 && (

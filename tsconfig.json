@@ -16,7 +16,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "rootDir": ".",
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
