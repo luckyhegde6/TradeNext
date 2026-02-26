@@ -15,7 +15,7 @@ if (useRemoteDb) {
   }
   prisma = new PrismaClient({
     accelerateUrl: process.env.DATABASE_URL,
-  }).$extends(withAccelerate());
+  }).$extends(withAccelerate()) as unknown as PrismaClient;
 } else {
   const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
   const pool = new Pool({ connectionString });
