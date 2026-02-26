@@ -47,3 +47,5 @@ next-env.d.ts
 deno.lock
 
 nul
+
+.swc

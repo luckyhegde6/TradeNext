@@ -95,6 +95,18 @@
 - Import transactions from CSV/Excel
 - Supports multiple broker formats
 
+### Market News
+- India tab (NSE corporate announcements)
+- Global tab (TradingView news)
+- 8-hour cache based on market timing
+- Accessible at /news/market
+
+### Analytics Page
+- Corporate Announcements tab (NSE: /api/corporate-announcements)
+- Corp Events tab (NSE: /api/event-calendar) - Shows table format
+- Dividends/Splits/Bonus tab (NSE: /api/corporates-corporateActions)
+- Insider Trading tab (NSE: /api/corporates-pit) - Insider Trading PIT
+
 ---
 
 ## UX Observations

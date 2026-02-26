@@ -281,7 +281,7 @@ Prisma ORM includes built-in safety checks to prevent destructive commands (like
 
 ## UI/UX Testing
 
-> **Important:** After making any UI/UX changes, ALWAYS test using Playwright MCP with demo credentials.
+> **Important:** After making any UI/UX changes or implementing new features, ALWAYS test using Playwright MCP with demo credentials.
 
 ### Demo Credentials
 ```bash
@@ -302,9 +302,14 @@ Admin User (configured via env):
 5. Use Playwright MCP to:
    - Navigate to the login page
    - Login with demo/admin credentials
-   - Verify UI changes render correctly
-   - Check responsive behavior
-   - Test dark/light mode if applicable
+   - Test all implemented features by:
+     - Navigating to new pages (e.g., /news/market, /markets/analytics)
+     - Verifying API data loads correctly
+     - Checking for console errors
+     - Testing interactive elements (tabs, buttons, forms)
+     - Verifying responsive behavior
+     - Testing dark/light mode if applicable
+6. Check API endpoints directly in browser or via curl to verify data
 
 ### Enable Playwright MCP
 In `opencode.json`, set:

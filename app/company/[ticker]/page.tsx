@@ -1,10 +1,11 @@
 // app/company/[ticker]/page.tsx
 import { notFound } from 'next/navigation';
-import ClientChartWrapper from './ClientChartWrapper';
+import DynamicChartWrapper from './DynamicChartWrapper';
 import { getCompanyData } from '@/lib/services/companyService';
 import StockQuoteHeader from '@/app/components/StockQuoteHeader';
 import NSEStockChart from '@/app/components/NSEStockChart';
 import CorporateDataTabs from '@/app/components/analytics/CorporateDataTabs';
+import PiotroskiFScore from '@/app/components/analytics/PiotroskiFScore';
 
 async function getCompany(ticker: string) {
     try {
@@ -38,10 +39,11 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                     <CorporateDataTabs symbol={ticker} />
                 </div>
 
-                {/* Historical Data from DB with Technical Indicators */}
-                {data?.prices && data.prices.length > 0 && (
-                    <ClientChartWrapper prices={data.prices} ticker={ticker} />
-                )}
+                {/* Piotroski F-Score */}
+                <PiotroskiFScore symbol={ticker} />
+
+                {/* Technical Indicators Chart - Dynamically loads from NSE API */}
+                <DynamicChartWrapper ticker={ticker} dbPrices={data?.prices} />
 
                 {/* Fundamentals (if available) */}
                 {data?.fundamentals && (

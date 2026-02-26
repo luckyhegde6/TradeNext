@@ -6,7 +6,11 @@ interface Alert {
   id: string;
   type: string;
   symbol: string | null;
-  condition: Record<string, unknown>;
+  condition: {
+    threshold?: number | string;
+    changePercent?: number | string;
+    [key: string]: unknown;
+  };
   triggered: boolean;
   triggeredAt: string | null;
   seen: boolean;

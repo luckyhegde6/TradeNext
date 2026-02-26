@@ -81,24 +81,24 @@
 ## Priority 5: Piotroski F-Score
 
 ### Tasks
-- [ ] Research Piotroski F-Score criteria (9-point scoring)
-- [ ] Gather required financial data:
-  - [ ] Net Income
-  - [ ] Operating Cash Flow
-  - [ ] Return on Assets (ROA)
-  - [ ] Operating Cash Flow / Total Assets
-  - [ ] Change in ROA
-  - [ ] Accruals
-  - [ ] Change in Leverage
-  - [ ] Change in Current Ratio
-  - [ ] Change in Shares Outstanding
-  - [ ] Gross Margin
-  - [ ] Asset Turnover
-- [ ] Fetch financial data from existing database or external API
-- [ ] Create F-Score calculation function
-- [ ] Build UI to display F-Score on company page
-- [ ] Add historical F-Score tracking
-- [ ] Create interpretation guide (0-2 Poor, 3-4 Low, 5-6 Med, 7-8 Good, 9 Excellent)
+- [x] Research Piotroski F-Score criteria (9-point scoring)
+- [x] Gather required financial data:
+  - [x] Net Income
+  - [x] Operating Cash Flow
+  - [x] Return on Assets (ROA)
+  - [x] Operating Cash Flow / Total Assets
+  - [x] Change in ROA
+  - [x] Accruals
+  - [x] Change in Leverage
+  - [x] Change in Current Ratio
+  - [x] Change in Shares Outstanding
+  - [x] Gross Margin
+  - [x] Asset Turnover
+- [x] Fetch financial data from existing database or external API
+- [x] Create F-Score calculation function
+- [x] Build UI to display F-Score on company page
+- [x] Add historical F-Score tracking
+- [x] Create interpretation guide (0-2 Poor, 3-4 Low, 5-6 Med, 7-8 Good, 9 Excellent)
 - [ ] Add to stock screener as filter option
 
 ---

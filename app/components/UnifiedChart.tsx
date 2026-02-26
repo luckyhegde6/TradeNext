@@ -222,6 +222,7 @@ export default function UnifiedChart({ prices, ticker }: UnifiedChartProps) {
               label: (context) => {
                 const label = context.dataset.label || '';
                 const value = context.parsed.y;
+                if (value === null || value === undefined) return '';
                 if (context.dataset.yAxisID === 'y1' || label === 'Volume') {
                   return `${label}: ${value.toLocaleString()}`;
                 }

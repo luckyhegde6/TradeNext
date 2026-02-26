@@ -17,7 +17,7 @@ export async function GET() {
       take: 100,
     });
 
-    const userIds = [...new Set(alerts.map(a => a.userId).filter(Boolean))];
+    const userIds = [...new Set(alerts.map(a => a.userId).filter((id): id is number => id !== null))];
     const users = await prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, email: true, name: true },
