@@ -126,8 +126,8 @@ async function main() {
   console.log("Additional users seeded");
 
   console.log("\n=== Login Credentials ===");
-  console.log("Demo:  ", DEMO_EMAIL, "/", DEMO_PASSWORD);
-  console.log("Admin: ", ADMIN_EMAIL, "/", ADMIN_PASSWORD);
+  console.log("Demo:  ", DEMO_EMAIL, "/", "***");
+  console.log("Admin: ", ADMIN_EMAIL, "/", "***");
   console.log("========================\n");
 
   console.log("Seeding completed!");
