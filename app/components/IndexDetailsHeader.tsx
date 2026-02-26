@@ -27,6 +27,14 @@ export default function IndexDetailsHeader({ symbol = "NIFTY 50" }: { symbol?: s
         return isNaN(num) ? "-" : num.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     };
 
+    const formatChange = (val: string | number | undefined) => {
+        if (val === undefined || val === null || val === "NaN") return "-";
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        if (isNaN(num)) return "-";
+        const sign = num >= 0 ? '+' : '';
+        return `${sign}${num.toFixed(2)}`;
+    };
+
     const isPositive = parseFloat(data.pChange || "0") >= 0;
     const textCol = isPositive ? "text-green-600" : "text-red-600";
     const bgCol = isPositive ? "bg-green-100 dark:bg-green-900/30" : "bg-red-100 dark:bg-red-900/30";
@@ -56,8 +64,8 @@ export default function IndexDetailsHeader({ symbol = "NIFTY 50" }: { symbol?: s
                         </span>
                         <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${bgCol} ${textCol}`}>
                             <Icon className="w-5 h-5" />
-                            <span className="text-xl font-bold">{data.change}</span>
-                            <span className="text-lg font-medium">({data.pChange}%)</span>
+                            <span className="text-xl font-bold">{formatChange(data.change)}</span>
+                            <span className="text-lg font-medium">({formatChange(data.pChange)}%)</span>
                         </div>
                     </div>
                     <p className="text-sm text-gray-500 mt-2">

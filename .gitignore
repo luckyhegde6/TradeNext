@@ -45,3 +45,7 @@ next-env.d.ts
 .netlify
 
 deno.lock
+
+nul
+
+.swc

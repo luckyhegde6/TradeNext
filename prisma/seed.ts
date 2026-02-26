@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
-
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
@@ -9,24 +8,106 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-async function main() {
-  const password = await hash('password123', 12);
+const DEMO_EMAIL = "demo@tradenext.in";
+const DEMO_PASSWORD = "demo123";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@tradenext6.app";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
-  // Create admin user and other users
-  await prisma.user.upsert({
-    where: { email: 'luckyhegdedev@gmail.com' },
+async function main() {
+  console.log("Starting database seeding...");
+  console.log("Admin email:", ADMIN_EMAIL);
+
+  const adminPasswordHash = await hash(ADMIN_PASSWORD, 12);
+  const demoPasswordHash = await hash(DEMO_PASSWORD, 12);
+
+  // Create admin user
+  const admin = await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
     update: {},
     create: {
-      email: 'luckyhegdedev@gmail.com',
-      name: 'Lucky Admin',
-      password,
+      email: ADMIN_EMAIL,
+      name: 'Admin User',
+      password: adminPasswordHash,
       role: 'admin',
       isVerified: true,
       isBlocked: false,
+      mobile: '+919999999998',
+    },
+  });
+  console.log("Admin user:", admin.email);
+
+  // Create demo user with portfolio
+  const demoUser = await prisma.user.upsert({
+    where: { email: DEMO_EMAIL },
+    update: {},
+    create: {
+      email: DEMO_EMAIL,
+      name: 'Demo User',
+      password: demoPasswordHash,
+      role: 'user',
+      isVerified: true,
+      isBlocked: false,
+      mobile: '+919999999999',
+    },
+  });
+  console.log("Demo user:", demoUser.email);
+
+  // Create demo portfolio with transactions
+  const portfolio = await prisma.portfolio.upsert({
+    where: { id: `demo-portfolio-${demoUser.id}` },
+    update: {},
+    create: {
+      id: `demo-portfolio-${demoUser.id}`,
+      userId: demoUser.id,
+      name: 'Demo Portfolio',
+      currency: 'INR',
     },
   });
 
-  // Create 5 users with mobile numbers
+  // Add fund transactions
+  await prisma.fundTransaction.upsert({
+    where: { id: `demo-fund-${portfolio.id}` },
+    update: {},
+    create: {
+      id: `demo-fund-${portfolio.id}`,
+      portfolioId: portfolio.id,
+      type: 'DEPOSIT',
+      amount: 500000,
+      date: new Date('2024-01-01'),
+      notes: 'Initial investment',
+    },
+  });
+
+  // Add stock transactions
+  const transactions = [
+    { ticker: 'RELIANCE', side: 'BUY', quantity: 100, price: 2400, tradeDate: new Date('2024-01-15') },
+    { ticker: 'TCS', side: 'BUY', quantity: 50, price: 3800, tradeDate: new Date('2024-02-10') },
+    { ticker: 'INFY', side: 'BUY', quantity: 75, price: 1450, tradeDate: new Date('2024-03-05') },
+    { ticker: 'HDFCBANK', side: 'BUY', quantity: 80, price: 1520, tradeDate: new Date('2024-04-20') },
+    { ticker: 'ICICIBANK', side: 'BUY', quantity: 150, price: 980, tradeDate: new Date('2024-05-15') },
+  ];
+
+  for (let i = 0; i < transactions.length; i++) {
+    const t = transactions[i];
+    await prisma.transaction.upsert({
+      where: { id: `demo-txn-${portfolio.id}-${i}` },
+      update: {},
+      create: {
+        id: `demo-txn-${portfolio.id}-${i}`,
+        portfolioId: portfolio.id,
+        ticker: t.ticker,
+        side: t.side,
+        quantity: t.quantity,
+        price: t.price,
+        tradeDate: t.tradeDate,
+        fees: 50,
+      },
+    });
+  }
+
+  console.log("Demo portfolio created with", transactions.length, "transactions");
+
+  // Create additional demo users
   const usersData = [
     { email: 'alice@example.com', name: 'Alice', mobile: '9876543210', password: await hash('password', 10), isVerified: true },
     { email: 'bob@example.com', name: 'Bob', mobile: '9876543211', password: await hash('password', 10), isVerified: true },
@@ -42,79 +123,14 @@ async function main() {
       create: userData
     });
   }
+  console.log("Additional users seeded");
 
-  // Find all users to get their IDs
-  const userRecords = await prisma.user.findMany();
+  console.log("\n=== Login Credentials ===");
+  console.log("Demo:  ", DEMO_EMAIL, "/", "***");
+  console.log("Admin: ", ADMIN_EMAIL, "/", "***");
+  console.log("========================\n");
 
-  const userIdMapping = {
-    admin: userRecords.find((user) => user.email === 'luckyhegdedev@gmail.com')?.id,
-    alice: userRecords.find((user) => user.email === 'alice@example.com')?.id,
-    bob: userRecords.find((user) => user.email === 'bob@example.com')?.id,
-    charlie: userRecords.find((user) => user.email === 'charlie@example.com')?.id,
-    diana: userRecords.find((user) => user.email === 'diana@example.com')?.id,
-    edward: userRecords.find((user) => user.email === 'edward@example.com')?.id,
-  };
-
-  // Seed Portfolios
-  const portfolios = [
-    { name: 'Retirement Fund', userId: userIdMapping.admin!, currency: 'INR' },
-    { name: 'Growth Stocks', userId: userIdMapping.alice!, currency: 'INR' },
-  ];
-
-  for (const pf of portfolios) {
-    const portfolio = await prisma.portfolio.upsert({
-      where: { id: `seed-pf-${pf.userId}` }, // Use a stable ID for seeding
-      update: pf,
-      create: {
-        id: `seed-pf-${pf.userId}`,
-        ...pf
-      }
-    });
-
-    // Add Fund Transactions (Deposits)
-    await prisma.fundTransaction.createMany({
-      data: [
-        { portfolioId: portfolio.id, type: 'DEPOSIT', amount: 1000000, date: new Date('2024-01-01') },
-        { portfolioId: portfolio.id, type: 'DEPOSIT', amount: 500000, date: new Date('2024-06-01') },
-      ],
-      skipDuplicates: true
-    });
-
-    // Add Transactions
-    await prisma.transaction.createMany({
-      data: [
-        { portfolioId: portfolio.id, ticker: 'RELIANCE', side: 'BUY', quantity: 10, price: 2500, tradeDate: new Date('2024-01-15') },
-        { portfolioId: portfolio.id, ticker: 'TCS', side: 'BUY', quantity: 5, price: 3400, tradeDate: new Date('2024-02-10') },
-        { portfolioId: portfolio.id, ticker: 'INFY', side: 'BUY', quantity: 15, price: 1500, tradeDate: new Date('2024-03-05') },
-        { portfolioId: portfolio.id, ticker: 'RELIANCE', side: 'SELL', quantity: 2, price: 2900, tradeDate: new Date('2024-11-20') },
-      ],
-      skipDuplicates: true
-    });
-  }
-
-  // Create 15 posts distributed among users
-  const posts = [
-    // Alice's posts
-    {
-      title: 'Getting Started with TypeScript and Prisma',
-      content: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce id erat a lorem tincidunt ultricies. Vivamus porta bibendum nulla vel accumsan.',
-      published: true,
-      authorId: userIdMapping.alice
-    },
-    // ... other posts entries (truncated in replacement content for brevity but I'll include some)
-    {
-      title: 'Market Intelligence: The New TradeNext features',
-      content: 'TradeNext now supports multi-portfolio tracking and deep analytics.',
-      published: true,
-      authorId: userIdMapping.admin
-    }
-  ];
-
-  for (const post of posts) {
-    await prisma.post.create({ data: post });
-  }
-
-  console.log('Seeding completed.');
+  console.log("Seeding completed!");
 }
 
 main()

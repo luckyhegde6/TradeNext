@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TradeNext Project Config",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "framework": { "type": "string", "enum": ["nextjs"] },
+        "database": { "type": "string", "enum": ["prisma"] }
+      },
+      "required": ["name", "framework"]
+    },
+    "paths": {
+      "type": "object",
+      "properties": {
+        "lib": { "type": "string", "default": "lib" },
+        "app": { "type": "string", "default": "app" },
+        "tests": { "type": "string", "default": "lib/__tests__" }
+      }
+    },
+    "testing": {
+      "type": "object",
+      "properties": {
+        "framework": { "type": "string" },
+        "coverageThreshold": { "type": "number" }
+      }
+    }
+  },
+  "required": ["project"]
+}

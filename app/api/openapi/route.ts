@@ -449,6 +449,120 @@ const openapi = {
         // NSE Analytics
         '/api/nse/advance-decline': nse('Get advance/decline analysis'),
 
+        '/api/nse/corporate-announcements': {
+            get: {
+                summary: 'Get corporate announcements',
+                description: 'Fetch latest corporate announcements from NSE India',
+                tags: ['NSE Analytics'],
+                responses: {
+                    '200': {
+                        description: 'Corporate announcements list',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            symbol: { type: 'string' },
+                                            companyName: { type: 'string' },
+                                            desc: { type: 'string' },
+                                            dt: { type: 'string' },
+                                            attchmntFile: { type: 'string' },
+                                            sm_isin: { type: 'string' },
+                                            an_dt: { type: 'string' },
+                                            sort_date: { type: 'string' },
+                                            seq_id: { type: 'string' },
+                                            smIndustry: { type: 'string' },
+                                            attchmntText: { type: 'string' },
+                                            fileSize: { type: 'string' },
+                                            attFileSize: { type: 'string' },
+                                            hasXbrl: { type: 'boolean' }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    '500': { description: 'NSE fetch failure' }
+                }
+            }
+        },
+
+        '/api/nse/corporate-events': {
+            get: {
+                summary: 'Get corporate events',
+                description: 'Fetch corporate events/board meetings from NSE India',
+                tags: ['NSE Analytics'],
+                responses: {
+                    '200': {
+                        description: 'Corporate events list',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            symbol: { type: 'string' },
+                                            companyName: { type: 'string' },
+                                            purpose: { type: 'string' },
+                                            details: { type: 'string' },
+                                            date: { type: 'string' }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    '500': { description: 'NSE fetch failure' }
+                }
+            }
+        },
+
+        '/api/nse/insider-trading': {
+            get: {
+                summary: 'Get insider trading data',
+                description: 'Fetch insider trading (Promoter/PAC) transactions from NSE India',
+                tags: ['NSE Analytics'],
+                responses: {
+                    '200': {
+                        description: 'Insider trading transactions',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            symbol: { type: 'string' },
+                                            companyName: { type: 'string' },
+                                            regulation: { type: 'string' },
+                                            acqName: { type: 'string' },
+                                            secType: { type: 'string' },
+                                            securities: { type: 'number' },
+                                            transactionType: { type: 'string' },
+                                            broadcastDate: { type: 'string' },
+                                            xbrl: { type: 'string' },
+                                            personCategory: { type: 'string' },
+                                            acqMode: { type: 'string' },
+                                            exchange: { type: 'string' },
+                                            secVal: { type: 'number' },
+                                            beforeShares: { type: 'string' },
+                                            beforePer: { type: 'string' },
+                                            afterShares: { type: 'string' },
+                                            afterPer: { type: 'string' }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    '500': { description: 'NSE fetch failure' }
+                }
+            }
+        },
+
         '/api/nse/corporate-info': nse('Get corporate info'),
 
         '/api/nse/deals': nse('Get deals'),
@@ -458,6 +572,69 @@ const openapi = {
         '/api/nse/losers': nse('Get losers'),
 
         '/api/nse/most-active': nse('Get most active'),
+
+        // News
+        '/api/news/market': {
+            get: {
+                summary: 'Get market news',
+                description: 'Fetch India and global market news. Uses cache by default, force=true to bypass.',
+                tags: ['News'],
+                parameters: [
+                    {
+                        name: 'type',
+                        in: 'query',
+                        schema: { type: 'string', enum: ['all', 'india', 'global'], default: 'all' }
+                    },
+                    {
+                        name: 'force',
+                        in: 'query',
+                        schema: { type: 'boolean', default: false },
+                        description: 'Force refresh from external APIs'
+                    }
+                ],
+                responses: {
+                    '200': {
+                        description: 'Market news',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    oneOf: [
+                                        {
+                                            type: 'object',
+                                            properties: {
+                                                news: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            id: { type: 'string' },
+                                                            title: { type: 'string' },
+                                                            summary: { type: 'string' },
+                                                            source: { type: 'string' },
+                                                            url: { type: 'string' },
+                                                            publishedAt: { type: 'string' },
+                                                            symbol: { type: 'string' }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        {
+                                            type: 'object',
+                                            properties: {
+                                                india: { type: 'array', items: { type: 'object' } },
+                                                global: { type: 'array', items: { type: 'object' } }
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    '500': { description: 'Failed to fetch news' }
+                }
+            }
+        },
 
         // Company Data
         '/api/company/{ticker}': {

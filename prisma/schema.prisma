@@ -98,6 +98,45 @@ model DailyPrice {
   @@map("daily_prices")
 }
 
+model CorporateAction {
+  id          Int      @id @default(autoincrement())
+  symbol      String
+  companyName String
+  series      String?
+  subject     String
+  exDate      DateTime?
+  recDate     DateTime?
+  faceValue   String?
+  actionType  String
+  createdAt   DateTime @default(now())
+  
+  @@index([symbol])
+  @@index([exDate])
+  @@map("corporate_actions")
+}
+
+model InsiderTrading {
+  id              Int      @id @default(autoincrement())
+  symbol          String
+  companyName     String
+  acqName         String
+  transactionType String
+  securities      Decimal  @db.Decimal(30,2)
+  price           Decimal? @db.Decimal(30,2)
+  value           Decimal? @db.Decimal(30,2)
+  secAcqPromoter  String?
+  secType         String?
+  afterSec        Decimal? @db.Decimal(30,2)
+  mode             String?
+  remarks         String?
+  broadcastDate   DateTime?
+  createdAt       DateTime  @default(now())
+  
+  @@index([symbol])
+  @@index([broadcastDate])
+  @@map("insider_trading")
+}
+
 model IndexClose {
   id        String   @id @default(uuid())
   indexName String
@@ -143,16 +182,6 @@ model Fundamental {
 
   @@id([ticker, asOf, periodType])
   @@map("fundamentals")
-}
-
-model CorporateAction {
-  id         String   @id @default(uuid())
-  ticker     String
-  actionDate DateTime
-  actionType String
-  params     Json?
-
-  @@map("corporate_actions")
 }
 
 model Index {
@@ -242,11 +271,14 @@ model MarketSnapshot {
 
 model Alert {
   id        String   @id @default(uuid())
-  type      String   // volume_spike | price_jump
+  userId    Int?
+  type      String   // volume_spike | price_jump | price_above | price_below
   symbol    String?
   condition Json
-  triggeredAt DateTime @default(now())
+  triggered Boolean  @default(false)
+  triggeredAt DateTime?
   seen      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model AIInsight {
@@ -254,4 +286,39 @@ model AIInsight {
   snapshotId String
   summary   String
   createdAt DateTime @default(now())
+}
+
+model SavedScreen {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FinancialScore {
+  id              String   @id @default(uuid())
+  symbol          String
+  fScore          Int      @default(0)
+  roa             Decimal? @db.Decimal(10,4)
+  roaChange       Decimal? @db.Decimal(10,4)
+  cfo             Decimal? @db.Decimal(10,4)
+  cfoVsNi         Decimal? @db.Decimal(10,4)
+  currentRatio    Decimal? @db.Decimal(10,4)
+  currentRatioChg Decimal? @db.Decimal(10,4)
+  leverage        Decimal? @db.Decimal(10,4)
+  leverageChange  Decimal? @db.Decimal(10,4)
+  sharesChange    Decimal? @db.Decimal(10,4)
+  grossMargin     Decimal? @db.Decimal(10,4)
+  marginChange    Decimal? @db.Decimal(10,4)
+  assetTurnover   Decimal? @db.Decimal(10,4)
+  turnoverChange  Decimal? @db.Decimal(10,4)
+  periodType      String   @default("annual")
+  asOf            DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@unique([symbol, periodType, asOf])
+  @@index([symbol])
+  @@map("financial_scores")
 }

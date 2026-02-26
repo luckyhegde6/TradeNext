@@ -91,8 +91,8 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
 
             const existing = await prisma.corporateAction.findFirst({
                 where: {
-                    ticker: symbol,
-                    actionDate: actionDate,
+                    symbol: symbol,
+                    exDate: actionDate,
                     actionType: action.subject
                 }
             });
@@ -100,10 +100,13 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
             if (!existing) {
                 await prisma.corporateAction.create({
                     data: {
-                        ticker: symbol,
-                        actionDate: actionDate,
-                        actionType: action.subject,
-                        params: action as any
+                        symbol: symbol,
+                        companyName: action.symbol || action.comp || symbol,
+                        subject: action.subject,
+                        exDate: actionDate,
+                        recDate: action.recDate ? new Date(action.recDate) : null,
+                        faceValue: action.faceVal,
+                        actionType: 'CORPORATE_ACTION'
                     }
                 });
             }
