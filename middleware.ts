@@ -22,7 +22,7 @@ export default auth((req) => {
 
     // Redirect to login if accessing protected route while not logged in
     if ((isProtected || isAdminRoute) && !isLoggedIn) {
-        return NextResponse.redirect(new URL("/api/auth/signin", nextUrl));
+        return NextResponse.redirect(new URL("/auth/signin?callbackUrl=" + encodeURIComponent(nextUrl.pathname), nextUrl));
     }
 
     // Redirect to home if accessing admin route while not admin
