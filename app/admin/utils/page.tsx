@@ -54,18 +54,36 @@ interface ActiveUsers {
     note: string;
 }
 
+interface NseStats {
+    totalCalls: number;
+    byEndpoint: Array<{
+        endpoint: string;
+        count: number;
+    }>;
+    hourlyData: Record<string, number>;
+    flaggedUsers: Array<{
+        userId: number;
+        userName: string | null;
+        userEmail: string;
+        endpoint: string;
+        requestCount: number;
+    }>;
+}
+
 export default function AdminOverviewPage() {
     const [stats, setStats] = useState<Stats | null>(null);
     const [activeUsers, setActiveUsers] = useState<ActiveUsers | null>(null);
+    const [nseStats, setNseStats] = useState<NseStats | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchStats = async () => {
             try {
-                const [statsRes, activeUsersRes] = await Promise.all([
+                const [statsRes, activeUsersRes, nseStatsRes] = await Promise.all([
                     fetch('/api/admin/stats'),
-                    fetch('/api/admin/active-users')
+                    fetch('/api/admin/active-users'),
+                    fetch('/api/admin/nse-stats?hours=24')
                 ]);
 
                 if (!statsRes.ok || !activeUsersRes.ok) {
@@ -74,9 +92,15 @@ export default function AdminOverviewPage() {
 
                 const statsData = await statsRes.json();
                 const activeUsersData = await activeUsersRes.json();
+                
+                let nseData = null;
+                if (nseStatsRes.ok) {
+                    nseData = await nseStatsRes.json();
+                }
 
                 setStats(statsData);
                 setActiveUsers(activeUsersData);
+                setNseStats(nseData);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Unknown error');
             } finally {
@@ -297,6 +321,54 @@ export default function AdminOverviewPage() {
                     <div>
                         <h4 className="font-medium text-gray-900 mb-2">Database Version</h4>
                         <p className="text-gray-600 font-mono text-sm">{stats?.database.version || 'Unknown'}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* NSE API Monitoring */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">NSE API Calls (24h)</h3>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Total Calls</span>
+                            <span className="text-2xl font-bold text-purple-600">{nseStats?.totalCalls || 0}</span>
+                        </div>
+                        <div className="border-t pt-3">
+                            <h4 className="font-medium text-gray-900 mb-2">Top Endpoints</h4>
+                            <div className="space-y-2">
+                                {nseStats?.byEndpoint.slice(0, 5).map((ep, i) => (
+                                    <div key={i} className="flex justify-between text-sm">
+                                        <span className="text-gray-600 truncate max-w-[200px]" title={ep.endpoint}>{ep.endpoint || 'unknown'}</span>
+                                        <span className="font-semibold">{ep.count}</span>
+                                    </div>
+                                )) || <p className="text-gray-500 text-sm">No data available</p>}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Rate Limited Users</h3>
+                    <div className="space-y-3">
+                        {nseStats?.flaggedUsers && nseStats.flaggedUsers.length > 0 ? (
+                            nseStats.flaggedUsers.map((user, i) => (
+                                <div key={i} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-900">{user.userName || 'Unknown'}</p>
+                                        <p className="text-xs text-gray-500">{user.userEmail}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">
+                                            {user.requestCount} requests
+                                        </span>
+                                        <p className="text-xs text-gray-500 mt-1">{user.endpoint}</p>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-gray-500 text-sm">No flagged users</p>
+                        )}
                     </div>
                 </div>
             </div>

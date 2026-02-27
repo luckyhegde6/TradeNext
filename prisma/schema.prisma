@@ -322,3 +322,90 @@ model FinancialScore {
   @@index([symbol])
   @@map("financial_scores")
 }
+
+model StockRecommendation {
+  id              String   @id @default(uuid())
+  symbol          String
+  entryRange      String?
+  shortTerm       String?
+  longTerm        String?
+  intraday        String?
+  recommendation  String   // ACCUMULATE | BUY | HOLD | SELL | NEUTRAL
+  analystRating   String?
+  profitRangeMin  Decimal? @db.Decimal(30,2)
+  profitRangeMax  Decimal? @db.Decimal(30,2)
+  targetPrice     Decimal? @db.Decimal(30,2)
+  analysis        String?
+  imageUrl        String?
+  isActive        Boolean  @default(true)
+  createdBy       Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([symbol])
+  @@index([isActive])
+  @@map("stock_recommendations")
+}
+
+model UserAlert {
+  id              String   @id @default(uuid())
+  userId          Int
+  symbol          String?
+  alertType       String   // price_above | price_below | volume_spike | custom
+  title           String
+  message         String?
+  targetPrice     Decimal? @db.Decimal(30,2)
+  currentPrice    Decimal? @db.Decimal(30,2)
+  status          String   @default("active") // active | triggered | dismissed
+  triggeredAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("user_alerts")
+}
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  userId          Int?
+  userEmail       String?
+  action          String   // API_CALL | USER_ACTION | PORTFOLIO_ACTION | NSE_CALL | LOGIN | LOGOUT
+  resource        String?
+  resourceId      String?
+  method          String?
+  path            String?
+  requestBody     Json?
+  responseStatus  Int?
+  responseTime    Int?     // milliseconds
+  ipAddress       String?
+  userAgent       String?
+  metadata        Json?
+  nseEndpoint     String?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([resource])
+  @@map("audit_logs")
+}
+
+model RateLimit {
+  id              String   @id @default(uuid())
+  userId          Int
+  endpoint        String
+  requestCount    Int      @default(0)
+  windowStart     DateTime @default(now())
+  isFlagged       Boolean  @default(false)
+  lastRequestAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@index([isFlagged])
+  @@map("rate_limits")
+}
