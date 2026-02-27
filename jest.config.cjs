@@ -23,7 +23,9 @@ const customJestConfig = {
   ],
   testMatch: [
     '<rootDir>/**/__tests__/**/*.{js,jsx,ts,tsx}',
-    '<rootDir>/**/*.{test,spec}.{js,jsx,ts,tsx}',
+    '<rootDir>/lib/**/*.{test,spec}.{js,jsx,ts,tsx}',
+    '<rootDir>/app/**/*.{test,spec}.{js,jsx,ts,tsx}',
+    '<rootDir>/components/**/*.{test,spec}.{js,jsx,ts,tsx}',
   ],
   transformIgnorePatterns: [
     '/node_modules/(?!(@testing-library|@babel)/)',

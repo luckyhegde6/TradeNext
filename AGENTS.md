@@ -3,6 +3,10 @@
 ## Overview
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
+## Version History
+- **v1.1.0** - Added Stock Recommendations, User Alerts, Audit Logging, Rate Limiting, Admin Holdings Management
+- **v1.0.0** - Initial release
+
 ## Required Reading for AI Agents
 
 Before making any changes, AI agents MUST read and validate against:
@@ -323,6 +327,53 @@ In `opencode.json`, set:
 }
 ```
 
+### Testing New Features (v1.1.0)
+
+After implementing new features, test the following:
+
+#### Stock Recommendations (/admin/recommendations)
+- [ ] Navigate to recommendations page
+- [ ] Click "Add Recommendation" button
+- [ ] Fill form with: symbol, recommendation type, target price, analysis
+- [ ] Submit form and verify recommendation appears in list
+- [ ] Edit existing recommendation
+- [ ] Delete recommendation
+- [ ] Toggle recommendation active/inactive
+
+#### User Alerts (/portfolio)
+- [ ] Navigate to portfolio page
+- [ ] Scroll to "My Alerts" section
+- [ ] Click "Create Alert" button
+- [ ] Fill alert form: symbol, alert type, title, target price
+- [ ] Submit and verify alert appears
+- [ ] Test "Dismiss" action on alert
+
+#### Audit Logs (/admin/audit)
+- [ ] Navigate to audit page
+- [ ] Verify audit logs are displayed
+- [ ] Filter by action type (API_CALL, NSE_CALL, etc.)
+- [ ] Filter by date range
+- [ ] Test pagination
+
+#### Holdings Management (/admin/holdings)
+- [ ] Navigate to holdings page
+- [ ] Select a user from dropdown
+- [ ] View user's transactions
+- [ ] Add new transaction
+- [ ] Edit existing transaction
+- [ ] Delete transaction
+
+#### Admin Overview (/admin/utils)
+- [ ] Verify NSE API Calls tile is visible
+- [ ] Verify Rate Limited Users tile is visible
+- [ ] Check total calls count displays
+- [ ] View flagged users list
+
+#### Rate Limiting
+- [ ] Test API returns 429 when limit exceeded
+- [ ] Verify Retry-After header is present
+- [ ] Verify X-RateLimit headers are present
+
 ---
 
 ## Project Structure
@@ -330,19 +381,86 @@ In `opencode.json`, set:
 ```
 /
 ├── app/                    # Next.js App Router pages
-│   ├── components/         # React components
-│   │   └── ui/             # Reusable UI components
-│   ├── api/                # API routes
-│   └── [route]/            # Dynamic routes
-├── lib/                    # Business logic
-│   ├── services/           # Service layer
-│   ├── nse/               # NSE API utilities
-│   ├── __tests__/         # Unit tests
-│   └── *.ts               # Utilities (cache, logger, auth)
-├── prisma/                # Database schema
-├── scripts/               # Build/ingestion scripts
-└── public/                # Static assets
+│   ├── admin/             # Admin pages
+│   │   ├── recommendations/  # Stock Recommendations Management
+│   │   ├── audit/            # Audit Log Management
+│   │   └── holdings/         # User Holdings Management
+│   ├── portfolio/          # User Portfolio
+│   ├── components/        # React components
+│   │   └── modals/       # Modal components (incl. UserAlertModal)
+│   ├── api/
+│   │   ├── admin/        # Admin API routes
+│   │   │   ├── recommendations/
+│   │   │   ├── audit/
+│   │   │   ├── holdings/
+│   │   │   └── nse-stats/
+│   │   └── user/         # User API routes
+│   │       ├── alerts/
+│   │       └── recommendations/
+│   └── [route]/          # Dynamic routes
+├── lib/                   # Business logic
+│   ├── services/         # Service layer
+│   ├── nse/             # NSE API utilities
+│   ├── __tests__/       # Unit tests
+│   ├── audit.ts         # Audit logging utilities
+│   └── *.ts             # Utilities (cache, logger, auth)
+├── prisma/               # Database schema
+├── tests/               # Playwright UI tests
+└── public/              # Static assets
 ```
+
+---
+
+## New Features (v1.1.0)
+
+### Stock Recommendations Management
+Admin can create, edit, delete stock recommendations with:
+- Symbol (with autocomplete from DB), Entry Range, Short/Long Term, Intraday ratings
+- Recommendation types: BUY, SELL, HOLD, ACCUMULATE, NEUTRAL
+- Analyst Rating, Profit Range, Target Price
+- Analysis text and Chart Image (stored as base64 in DB)
+- API: `/api/admin/recommendations`
+- Page: `/admin/recommendations`
+
+### User Alerts
+Users can create and manage price alerts:
+- Alert types: price_above, price_below, volume_spike, custom
+- Status tracking: active, triggered, dismissed
+- Today's alerts shown in portfolio
+- API: `/api/user/alerts`
+- Page: `/portfolio` (My Alerts section)
+
+### Audit Logging
+Comprehensive logging of all actions:
+- API_CALL, NSE_CALL, USER_ACTION, PORTFOLIO_ACTION
+- LOGIN, LOGOUT, RATE_LIMIT events
+- Filterable by action type, date range
+- Response time and status tracking
+- API: `/api/admin/audit`
+- Page: `/admin/audit`
+
+### Rate Limiting
+Protects API endpoints from abuse:
+- 10 requests per 60 second window
+- Returns 429 status with Retry-After header
+- Flags users exceeding 2x limit
+- Admin monitoring in Overview page
+- API: `/api/rate-limit`
+
+### Admin Holdings Management
+Admin can manage user holdings:
+- View all user transactions
+- Add/Edit/Delete transactions for any user
+- Filter by user
+- API: `/api/admin/holdings`
+- Page: `/admin/holdings`
+
+### NSE API Monitoring
+Admin dashboard tile showing:
+- Total NSE API calls in 24h
+- Top endpoints by usage
+- Flagged users with rate limit violations
+- Page: `/admin/utils`
 
 ---
 
@@ -354,7 +472,7 @@ In `opencode.json`, set:
 | Language | TypeScript 5.9 |
 | Styling | Tailwind CSS 4.x |
 | Database | Prisma 7 + PostgreSQL/TimescaleDB |
-| Testing | Jest 30 + Testing Library |
+| Testing | Jest 30 + Testing Library + Playwright |
 | HTTP | node-fetch, SWR |
 | Validation | Zod 4.x |
 | Logging | pino (via custom wrapper) |
