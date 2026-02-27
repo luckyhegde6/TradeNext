@@ -1,13 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const DEMO_USER = {
-  email: 'demo@tradenext.in',
-  password: 'demo123',
+  email: process.env.DEMO_EMAIL || 'demo@tradenext.in',
+  password: process.env.DEMO_PASSWORD || '',
 };
 
 const ADMIN_USER = {
-  email: 'admin@tradenext6.app',
-  password: 'admin123',
+  email: process.env.ADMIN_EMAIL || 'admin@tradenext6.app',
+  password: process.env.ADMIN_PASSWORD || '',
 };
 
 async function login(page: Page, email: string, password: string) {
