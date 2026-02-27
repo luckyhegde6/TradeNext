@@ -1,13 +1,25 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import symbolsData from "@/lib/constants/symbols.json";
 
+interface Transaction {
+    id: string;
+    ticker: string;
+    side: string;
+    quantity: number;
+    price: number;
+    tradeDate: string;
+    fees: number | null;
+    notes: string | null;
+}
+
 interface TransactionModalProps {
     portfolioId: string;
     onClose: () => void;
     onUpdate: () => void;
+    editingTransaction?: Transaction | null;
 }
 
-export default function TransactionModal({ portfolioId, onClose, onUpdate }: TransactionModalProps) {
+export default function TransactionModal({ portfolioId, onClose, onUpdate, editingTransaction }: TransactionModalProps) {
     const [ticker, setTicker] = useState("");
     const [searchTerm, setSearchTerm] = useState("");
     const [showDropdown, setShowDropdown] = useState(false);
@@ -21,6 +33,19 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate }: Tra
     const [notes, setNotes] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+
+    useEffect(() => {
+        if (editingTransaction) {
+            setTicker(editingTransaction.ticker);
+            setSearchTerm(editingTransaction.ticker);
+            setSide(editingTransaction.side as "BUY" | "SELL");
+            setQuantity(editingTransaction.quantity.toString());
+            setPrice(editingTransaction.price.toString());
+            setTradeDate(new Date(editingTransaction.tradeDate).toISOString().split('T')[0]);
+            setFees(editingTransaction.fees?.toString() || "");
+            setNotes(editingTransaction.notes || "");
+        }
+    }, [editingTransaction]);
 
     const fetchLivePrice = useCallback(async (symbol: string) => {
         if (!symbol) return;
@@ -80,20 +105,26 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate }: Tra
         setLoading(true);
         setError("");
 
+        const payload = {
+            ticker: ticker.toUpperCase(),
+            side,
+            quantity: parseFloat(quantity),
+            price: parseFloat(price),
+            tradeDate: new Date(tradeDate).toISOString(),
+            fees: fees ? parseFloat(fees) : 0,
+            notes,
+        };
+
         try {
-            const res = await fetch(`/api/portfolio/transactions`, {
-                method: "POST",
+            const url = editingTransaction 
+                ? `/api/user/holdings?id=${editingTransaction.id}` 
+                : '/api/user/holdings';
+            const method = editingTransaction ? 'PUT' : 'POST';
+
+            const res = await fetch(url, {
+                method,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    portfolioId,
-                    ticker: ticker.toUpperCase(),
-                    side,
-                    quantity: parseFloat(quantity),
-                    price: parseFloat(price),
-                    tradeDate: new Date(tradeDate).toISOString(),
-                    fees: fees ? parseFloat(fees) : 0,
-                    notes,
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (res.ok) {
@@ -101,7 +132,7 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate }: Tra
                 onClose();
             } else {
                 const data = await res.json();
-                setError(data.error || "Failed to add transaction");
+                setError(data.error || (editingTransaction ? "Failed to update transaction" : "Failed to add transaction"));
             }
         } catch (err) {
             setError("An unexpected error occurred");

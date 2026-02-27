@@ -430,6 +430,16 @@ Users can create and manage price alerts:
 - API: `/api/user/alerts`
 - Page: `/portfolio` (My Alerts section)
 
+### User Holdings Management
+Users can manage their own holdings:
+- View all their transactions in Transactions tab
+- Add new transactions via modal
+- Edit existing transactions
+- Delete transactions
+- Holdings are automatically recalculated
+- API: `/api/user/holdings`
+- Page: `/portfolio` (Transactions tab)
+
 ### Audit Logging
 Comprehensive logging of all actions:
 - API_CALL, NSE_CALL, USER_ACTION, PORTFOLIO_ACTION
