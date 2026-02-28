@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { withAccelerate } from '@prisma/extension-accelerate';
 
-const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
+const useRemoteDb = process.env.USE_REMOTE_DB === 'true' || !!process.env.DATABASE_REMOTE || !!process.env.ACCELERATE_URL;
 
 let prisma: PrismaClient;
 

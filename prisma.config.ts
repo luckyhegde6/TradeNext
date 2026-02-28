@@ -3,6 +3,10 @@ import { defineConfig, env } from 'prisma/config';
 
 // Get DATABASE_URL with fallback - handle case where it might not be set (e.g., during prisma generate)
 function getDatabaseUrl(): string {
+    // Check for remote database first
+    if (process.env.USE_REMOTE_DB === 'true') {
+        return process.env.DATABASE_REMOTE || process.env.ACCELERATE_URL || env('DATABASE_REMOTE') || env('ACCELERATE_URL') || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+    }
     try {
         return process.env.DATABASE_URL || env('DATABASE_URL') || 'postgresql://postgres:postgres@localhost:5432/tradenext';
     } catch (error) {
