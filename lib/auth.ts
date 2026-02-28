@@ -73,16 +73,31 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, user, trigger, session }) {
+      const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes in ms
+      const tokenExt = token as unknown as { lastActivity?: number; role?: string; id?: string; mobile?: string | null; name?: string };
+      
       if (user) {
-        token.role = user.role;
-        token.id = user.id;
-        token.mobile = user.mobile;
+        tokenExt.role = user.role;
+        tokenExt.id = user.id;
+        tokenExt.mobile = user.mobile ?? null;
+        tokenExt.lastActivity = Date.now();
       }
 
+      // Check idle timeout (15 min)
+      if (tokenExt.lastActivity) {
+        const idleTime = Date.now() - tokenExt.lastActivity;
+        if (idleTime > IDLE_TIMEOUT) {
+          return null; // Force logout due to idle timeout
+        }
+      }
+
+      // Update last activity on each token refresh
+      tokenExt.lastActivity = Date.now();
+
       // Verify user existence in DB on every check to handle DB resets
-      if (token.id) {
+      if (tokenExt.id) {
         const dbUser = await prisma.user.findUnique({
-          where: { id: parseInt(token.id as string) },
+          where: { id: parseInt(tokenExt.id as string) },
           select: { id: true }
         });
 
@@ -92,13 +107,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       if (trigger === "update" && session) {
-        token.name = session.name;
-        token.mobile = session.mobile;
+        tokenExt.name = session.name;
+        tokenExt.mobile = session.mobile;
       }
       return token;
     },
     async session({ session, token }) {
-      if (token && session.user) {
+      // If token is null (expired/timeout), return empty session
+      if (!token) {
+        return {} as typeof session;
+      }
+      
+      if (session.user) {
         session.user.role = token.role as string;
         session.user.id = token.id as string;
         session.user.mobile = token.mobile as string | null;
