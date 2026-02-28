@@ -1,7 +1,7 @@
 [build]
   command = "npm run build"
   publish = ".next"
-  environment = { SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.ai,tests" }
+  environment = { SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.ai,tests", ENVIRONMENT = "production" }
 
 [functions]
   directory = "netlify/functions"
