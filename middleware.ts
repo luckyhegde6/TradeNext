@@ -7,27 +7,15 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
     const isLoggedIn = !!req.auth;
     const { nextUrl } = req;
-    const user = req.auth?.user as any; // Cast to any to access role
-    const isAdmin = user?.role === "admin";
 
     // Protected routes
     const isProtected =
         nextUrl.pathname.startsWith("/portfolio") ||
         nextUrl.pathname.startsWith("/posts/new");
 
-    const isAdminRoute = 
-        nextUrl.pathname.startsWith("/admin") || 
-        nextUrl.pathname.startsWith("/docs") ||
-        nextUrl.pathname.startsWith("/api/admin");
-
     // Redirect to login if accessing protected route while not logged in
-    if ((isProtected || isAdminRoute) && !isLoggedIn) {
+    if (isProtected && !isLoggedIn) {
         return NextResponse.redirect(new URL("/auth/signin?callbackUrl=" + encodeURIComponent(nextUrl.pathname), nextUrl));
-    }
-
-    // Redirect to home if accessing admin route while not admin
-    if (isAdminRoute && !isAdmin) {
-        return NextResponse.redirect(new URL("/", nextUrl));
     }
 
     return NextResponse.next();
