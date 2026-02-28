@@ -208,23 +208,23 @@ export default function AdminRecommendationsPage() {
     switch (rec) {
       case "BUY":
       case "ACCUMULATE":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300";
       case "SELL":
-        return "bg-red-100 text-red-800";
+        return "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300";
       case "HOLD":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300";
     }
   };
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900">Stock Recommendations</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
         <div className="animate-pulse space-y-4">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="bg-gray-200 h-24 rounded-lg"></div>
+            <div key={i} className="bg-gray-200 dark:bg-slate-800 h-24 rounded-lg"></div>
           ))}
         </div>
       </div>
@@ -234,7 +234,7 @@ export default function AdminRecommendationsPage() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Stock Recommendations</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
         <button
           onClick={() => {
             setForm(emptyForm);
@@ -248,55 +248,55 @@ export default function AdminRecommendationsPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{error}</p>
-          <button onClick={() => setError(null)} className="mt-2 text-red-600 hover:text-red-800 text-sm">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-800 dark:text-red-400">{error}</p>
+          <button onClick={() => setError(null)} className="mt-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm">
             Dismiss
           </button>
         </div>
       )}
 
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
-          <h3 className="text-lg leading-6 font-medium text-gray-900">
+      <div className="bg-white dark:bg-slate-900 shadow overflow-hidden sm:rounded-md">
+        <div className="px-4 py-5 sm:px-6 border-b border-gray-200 dark:border-slate-700">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
             Recommendations ({recommendations.length})
           </h3>
         </div>
-        <ul className="divide-y divide-gray-200">
+        <ul className="divide-y divide-gray-200 dark:divide-slate-800">
           {recommendations.map((rec) => (
             <li key={rec.id}>
               <div className="px-4 py-4 sm:px-6">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-1 flex-col">
                     <div className="flex items-center space-x-3">
-                      <p className="text-lg font-bold text-blue-600">{rec.symbol}</p>
+                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{rec.symbol}</p>
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRecommendationColor(rec.recommendation)}`}>
                         {rec.recommendation}
                       </span>
                       {!rec.isActive && (
-                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">
+                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
                           Inactive
                         </span>
                       )}
                     </div>
                     <div className="mt-2 sm:flex sm:justify-between">
-                      <div className="sm:flex space-x-6 text-sm text-gray-500">
+                      <div className="sm:flex space-x-6 text-sm text-gray-500 dark:text-gray-400">
                         {rec.targetPrice && <span>Target: ₹{rec.targetPrice}</span>}
                         {rec.profitRangeMin && rec.profitRangeMax && (
                           <span>Profit: ₹{rec.profitRangeMin} - ₹{rec.profitRangeMax}</span>
                         )}
                         {rec.analystRating && <span>Rating: {rec.analystRating}</span>}
                       </div>
-                      <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                      <div className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
                         <p>{new Date(rec.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                     {rec.analysis && (
-                      <p className="mt-2 text-sm text-gray-600 line-clamp-2">{rec.analysis}</p>
+                      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{rec.analysis}</p>
                     )}
                     {rec.imageUrl && (
                       <div className="mt-2">
-                        <img src={rec.imageUrl} alt="Chart" className="max-w-xs rounded border" />
+                        <img src={rec.imageUrl} alt="Chart" className="max-w-xs rounded border dark:border-slate-600" />
                       </div>
                     )}
                   </div>
@@ -304,21 +304,21 @@ export default function AdminRecommendationsPage() {
                     <button
                       onClick={() => handleToggleActive(rec)}
                       className={`px-3 py-1 rounded text-sm border transition-colors ${rec.isActive
-                          ? "text-orange-600 border-orange-600 hover:bg-orange-50"
-                          : "text-green-600 border-green-600 hover:bg-green-50"
+                          ? "text-orange-600 dark:text-orange-400 border-orange-600 dark:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30"
+                          : "text-green-600 dark:text-green-400 border-green-600 dark:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/30"
                         }`}
                     >
                       {rec.isActive ? "Deactivate" : "Activate"}
                     </button>
                     <button
                       onClick={() => handleEdit(rec)}
-                      className="text-indigo-600 hover:text-indigo-900 border border-indigo-600 px-3 py-1 rounded text-sm transition-colors"
+                      className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 border border-indigo-600 dark:border-indigo-500 px-3 py-1 rounded text-sm transition-colors"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(rec.id)}
-                      className="text-red-600 hover:text-red-900 border border-red-600 px-3 py-1 rounded text-sm transition-colors"
+                      className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 border border-red-600 dark:border-red-500 px-3 py-1 rounded text-sm transition-colors"
                     >
                       Delete
                     </button>
@@ -330,7 +330,7 @@ export default function AdminRecommendationsPage() {
         </ul>
         {recommendations.length === 0 && (
           <div className="px-4 py-8 text-center">
-            <p className="text-gray-500">No recommendations found.</p>
+            <p className="text-gray-500 dark:text-gray-400">No recommendations found.</p>
           </div>
         )}
       </div>
@@ -339,16 +339,16 @@ export default function AdminRecommendationsPage() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-screen items-center justify-center p-4">
             <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setShowModal(false)}></div>
-            <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">
+            <div className="relative bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   {editingId ? "Edit Recommendation" : "Add Recommendation"}
                 </h3>
               </div>
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Symbol *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Symbol *</label>
                     <input
                       type="text"
                       list="symbol-list"
@@ -365,7 +365,7 @@ export default function AdminRecommendationsPage() {
                           }
                         }
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                       required
                     />
                     <datalist id="symbol-list">
@@ -375,11 +375,11 @@ export default function AdminRecommendationsPage() {
                     </datalist>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Recommendation *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recommendation *</label>
                     <select
                       value={form.recommendation}
                       onChange={(e) => setForm({ ...form, recommendation: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     >
                       <option value="BUY">BUY</option>
                       <option value="ACCUMULATE">ACCUMULATE</option>
@@ -392,114 +392,114 @@ export default function AdminRecommendationsPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Entry Range</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Entry Range</label>
                     <input
                       type="text"
                       value={form.entryRange}
                       onChange={(e) => setForm({ ...form, entryRange: e.target.value })}
                       placeholder="e.g., 1450-1500"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Target Price</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Target Price</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.targetPrice}
                       onChange={(e) => setForm({ ...form, targetPrice: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Short Term</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Short Term</label>
                     <input
                       type="text"
                       value={form.shortTerm}
                       onChange={(e) => setForm({ ...form, shortTerm: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Long Term</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Long Term</label>
                     <input
                       type="text"
                       value={form.longTerm}
                       onChange={(e) => setForm({ ...form, longTerm: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Intraday</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Intraday</label>
                     <input
                       type="text"
                       value={form.intraday}
                       onChange={(e) => setForm({ ...form, intraday: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Profit Range Min</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Profit Range Min</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.profitRangeMin}
                       onChange={(e) => setForm({ ...form, profitRangeMin: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Profit Range Max</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Profit Range Max</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.profitRangeMax}
                       onChange={(e) => setForm({ ...form, profitRangeMax: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Analyst Rating</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Analyst Rating</label>
                   <input
                     type="text"
                     value={form.analystRating}
                     onChange={(e) => setForm({ ...form, analystRating: e.target.value })}
                     placeholder="e.g., 4.5/5"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Analysis</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Analysis</label>
                   <textarea
                     value={form.analysis}
                     onChange={(e) => setForm({ ...form, analysis: e.target.value })}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Chart Image</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chart Image</label>
                   <input
                     type="file"
                     ref={fileInputRef}
                     onChange={handleImageUpload}
                     accept="image/*"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
                   />
-                  {imageUploading && <p className="text-sm text-gray-500 mt-1">Uploading...</p>}
+                  {imageUploading && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Uploading...</p>}
                   {form.imageUrl && (
                     <div className="mt-2">
-                      <img src={form.imageUrl} alt="Chart preview" className="max-w-xs rounded border" />
+                      <img src={form.imageUrl} alt="Chart preview" className="max-w-xs rounded border dark:border-slate-600" />
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, imageUrl: "" })}
@@ -515,7 +515,7 @@ export default function AdminRecommendationsPage() {
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors"
+                    className="bg-gray-500 dark:bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors"
                   >
                     Cancel
                   </button>
