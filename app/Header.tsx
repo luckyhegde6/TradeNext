@@ -157,7 +157,7 @@ export default function Header() {
                   Profile
                 </button>
                 <button
-                  onClick={() => signOut({ callbackUrl: '/' })}
+                  onClick={() => signOut({ callbackUrl: '/', redirect: true })}
                   className="hidden sm:inline-flex items-center justify-center px-4 py-2 border border-primary/50 text-sm font-medium rounded-lg text-primary bg-surface hover:bg-primary/5 transition-all shadow-sm"
                 >
                   Sign Out
@@ -247,7 +247,7 @@ export default function Header() {
                   </div>
                 </div>
                 <button
-                  onClick={() => { signOut({ callbackUrl: '/' }); setIsMobileMenuOpen(false); }}
+                  onClick={() => { signOut({ callbackUrl: '/', redirect: true }); setIsMobileMenuOpen(false); }}
                   className="ml-auto bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700"
                 >
                   Sign Out
