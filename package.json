@@ -75,7 +75,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/bcryptjs": "^3.0.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^25.0.9",
+    "@types/node": "^25.3.3",
     "@types/node-cache": "^4.2.5",
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
