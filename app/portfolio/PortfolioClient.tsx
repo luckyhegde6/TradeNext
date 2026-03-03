@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { PortfolioSummary } from '@/lib/services/portfolioService';
 import MetricsCards from '../components/MetricsCards';
 import AllocationChart from '../components/AllocationChart';
+import PnLChart from '../components/PnLChart';
+import SectorAllocationChart from '../components/SectorAllocationChart';
 import HoldingsTable from '../components/HoldingsTable';
 import NSEStockChart from '../components/NSEStockChart';
 import CorporateAnnouncementsWidget from '../components/CorporateAnnouncementsWidget';
@@ -295,6 +297,19 @@ export default function PortfolioClient() {
             </section>
 
             {/* Charts Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* P&L Chart */}
+                <div className="lg:col-span-6">
+                    <PnLChart portfolio={data} />
+                </div>
+
+                {/* Sector Allocation Chart */}
+                <div className="lg:col-span-6">
+                    <SectorAllocationChart holdings={data.holdings} />
+                </div>
+            </div>
+
+            {/* Stock Allocation & Price Chart Row */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Allocation Chart */}
                 <div className="lg:col-span-4">

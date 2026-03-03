@@ -56,6 +56,58 @@ async function main() {
   });
   console.log("Admin user:", admin.email);
 
+  // Create admin portfolio with transactions
+  const adminPortfolio = await prisma.portfolio.upsert({
+    where: { id: `admin-portfolio-${admin.id}` },
+    update: {},
+    create: {
+      id: `admin-portfolio-${admin.id}`,
+      userId: admin.id,
+      name: 'Admin Portfolio',
+      currency: 'INR',
+    },
+  });
+  console.log("Admin portfolio created with ID:", adminPortfolio.id, "for userId:", adminPortfolio.userId);
+
+  // Add admin fund transactions
+  await prisma.fundTransaction.upsert({
+    where: { id: `admin-fund-${adminPortfolio.id}` },
+    update: {},
+    create: {
+      id: `admin-fund-${adminPortfolio.id}`,
+      portfolioId: adminPortfolio.id,
+      type: 'DEPOSIT',
+      amount: 1000000,
+      date: new Date('2024-01-01'),
+      notes: 'Initial admin investment',
+    },
+  });
+
+  // Add admin stock transactions
+  const adminTransactions = [
+    { ticker: 'RELIANCE', side: 'BUY', quantity: 200, price: 2500, tradeDate: new Date('2024-01-10') },
+    { ticker: 'TCS', side: 'BUY', quantity: 100, price: 4000, tradeDate: new Date('2024-02-15') },
+  ];
+
+  for (let i = 0; i < adminTransactions.length; i++) {
+    const t = adminTransactions[i];
+    await prisma.transaction.upsert({
+      where: { id: `admin-txn-${adminPortfolio.id}-${i}` },
+      update: {},
+      create: {
+        id: `admin-txn-${adminPortfolio.id}-${i}`,
+        portfolioId: adminPortfolio.id,
+        ticker: t.ticker,
+        side: t.side,
+        quantity: t.quantity,
+        price: t.price,
+        tradeDate: t.tradeDate,
+        fees: 50,
+      },
+    });
+  }
+  console.log("Admin portfolio created with", adminTransactions.length, "transactions");
+
   // Create demo user with portfolio
   const demoUser = await prisma.user.upsert({
     where: { email: DEMO_EMAIL },
@@ -70,7 +122,7 @@ async function main() {
       mobile: '+919999999999',
     },
   });
-  console.log("Demo user:", demoUser.email);
+  console.log("Demo user:", demoUser.email, "with ID:", demoUser.id);
 
   // Create demo portfolio with transactions
   const portfolio = await prisma.portfolio.upsert({
@@ -83,6 +135,7 @@ async function main() {
       currency: 'INR',
     },
   });
+  console.log("Demo portfolio created with ID:", portfolio.id, "for userId:", portfolio.userId);
 
   // Add fund transactions
   await prisma.fundTransaction.upsert({

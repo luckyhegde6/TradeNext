@@ -342,6 +342,8 @@ model StockRecommendation {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  subscriptions   RecommendationSubscription[]
+
   @@index([symbol])
   @@index([isActive])
   @@map("stock_recommendations")
@@ -365,6 +367,47 @@ model UserAlert {
   @@index([status])
   @@index([createdAt])
   @@map("user_alerts")
+}
+
+model RecommendationSubscription {
+  id                String   @id @default(uuid())
+  userId            Int
+  recommendationId  String
+  createdAt        DateTime @default(now())
+
+  recommendation    StockRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recommendationId])
+  @@index([userId])
+  @@index([recommendationId])
+  @@map("recommendation_subscriptions")
+}
+
+model Watchlist {
+  id          String   @id @default(uuid())
+  userId      Int
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       WatchlistItem[]
+
+  @@index([userId])
+  @@map("watchlists")
+}
+
+model WatchlistItem {
+  id          String   @id @default(uuid())
+  watchlistId String
+  symbol      String
+  addedAt     DateTime @default(now())
+
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, symbol])
+  @@index([watchlistId])
+  @@index([symbol])
+  @@map("watchlist_items")
 }
 
 model AuditLog {
@@ -408,4 +451,20 @@ model RateLimit {
   @@index([userId])
   @@index([isFlagged])
   @@map("rate_limits")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      Int
+  type        String   // alert_triggered | recommendation | system | watchlist
+  title       String
+  message     String
+  link        String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
 }

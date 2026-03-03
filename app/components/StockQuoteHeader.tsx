@@ -5,6 +5,9 @@ import Link from "next/link";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
+import { getChartButton } from "@/lib/charting";
+import { isNSEIndexSymbol } from "@/lib/charting";
+
 interface StockQuoteProps {
     symbol: string;
 }
@@ -51,6 +54,9 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
                             <span>{isPositive ? '+' : ''}{quote.change?.toFixed(2)}</span>
                             <span>({isPositive ? '+' : ''}{quote.pChange?.toFixed(2)}%)</span>
                         </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {getChartButton(symbol, isNSEIndexSymbol(symbol))}
                     </div>
                 </div>
             </div>

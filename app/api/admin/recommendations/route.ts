@@ -7,17 +7,17 @@ export const runtime = "nodejs";
 
 const recommendationSchema = z.object({
   symbol: z.string().min(1),
-  entryRange: z.string().optional(),
-  shortTerm: z.string().optional(),
-  longTerm: z.string().optional(),
-  intraday: z.string().optional(),
+  entryRange: z.string().optional().nullable(),
+  shortTerm: z.string().optional().nullable(),
+  longTerm: z.string().optional().nullable(),
+  intraday: z.string().optional().nullable(),
   recommendation: z.enum(['ACCUMULATE', 'BUY', 'HOLD', 'SELL', 'NEUTRAL']),
-  analystRating: z.string().optional(),
-  profitRangeMin: z.number().optional(),
-  profitRangeMax: z.number().optional(),
-  targetPrice: z.number().optional(),
-  analysis: z.string().optional(),
-  imageUrl: z.string().optional(),
+  analystRating: z.string().optional().nullable(),
+  profitRangeMin: z.number().optional().nullable(),
+  profitRangeMax: z.number().optional().nullable(),
+  targetPrice: z.number().optional().nullable(),
+  analysis: z.string().optional().nullable(),
+  imageUrl: z.string().optional().nullable(),
 });
 
 const updateRecommendationSchema = recommendationSchema.partial();
@@ -48,7 +48,9 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
+    console.log('POST /api/admin/recommendations - body:', JSON.stringify(body));
     const validatedData = recommendationSchema.parse(body);
+    console.log('POST /api/admin/recommendations - validated:', JSON.stringify(validatedData));
 
     const recommendation = await prisma.stockRecommendation.create({
       data: {
@@ -64,7 +66,7 @@ export async function POST(req: Request) {
         targetPrice: validatedData.targetPrice,
         analysis: validatedData.analysis,
         imageUrl: validatedData.imageUrl,
-        createdBy: parseInt(session.user.id as string),
+        createdBy: session.user.id ? parseInt(session.user.id as string, 10) : null,
       },
     });
 
