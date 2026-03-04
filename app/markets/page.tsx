@@ -21,6 +21,8 @@ function Freshness({ meta }: { meta: any }) {
     </div>
   );
 }
+import { getNSEChartUrl } from "@/lib/charting";
+
 const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
     // Refresh interval slightly randomized to avoid thundering herd on client
     const refreshInterval = 15000 + Math.floor(Math.random() * 5000);
@@ -54,8 +56,14 @@ const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
                     </div>
                 </div>
                 <div className="mt-4 text-sm text-blue-600 font-medium flex items-center gap-1 group">
-                    View Chart & Details
-                    <span className="group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    <a 
+                        href={getNSEChartUrl({ symbol: indexKey, isIndex: true })} 
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        View Chart & Details
+                        <span className="group-hover:translate-x-1 transition-transform">→</span>
+                    </a>
                 </div>
             </div>
         </Link>

@@ -1,7 +1,11 @@
 import { signOut } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { createAuditLog } from "@/lib/audit";
 
 export async function GET() {
+  await createAuditLog({
+    action: 'LOGOUT'
+  });
   await signOut({ redirect: false });
   return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"), {
     status: 302,

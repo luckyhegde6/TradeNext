@@ -29,7 +29,13 @@
 
 ## Bugs Identified
 
-### 1. Admin User Portfolio Missing (Medium Priority)
+### 1. Demo Portfolio Not Showing (FIXED)
+- **Issue**: Demo user showed "No Portfolio Found" on /portfolio even after seed
+- **Root Cause**: Server was using stale cached data
+- **Fix**: Restarted dev server to clear cache
+- **Status**: ✅ FIXED - Demo portfolio now shows correctly with 5 holdings
+
+### 2. Admin User Portfolio Missing (Medium Priority)
 - **Issue**: Admin user (admin@tradenext6.app) shows "No Portfolio Found" on /portfolio
 - **Expected**: Admin should either have a demo portfolio OR see a different message
 - **Current Behavior**: Shows empty state with "Create Portfolio" CTA
@@ -71,6 +77,20 @@
 ### 9. Missing Error Boundaries
 - **Issue**: No graceful error handling on API failures
 - **Impact**: Users may see blank pages on errors
+
+### 10. User APIs 500 Errors - FIXED
+- **Issue**: Watchlist, Notifications, Subscriptions APIs returned 500 errors
+- **Root Cause**: User ID was being parsed incorrectly - `parseInt(session.user.id as string)` didn't work with NextAuth string IDs
+- **Fix Applied**: Changed to `Number(session.user.id)` in all user API routes
+- **Status**: ✅ FIXED - Regenerated Prisma client and verified
+
+### 11. NSE Charting Integration - NEW
+- **Feature**: Added charting buttons to open NSE India's official charting platform
+- **Locations**: 
+  - StockQuoteHeader component (next to stock price)
+  - HoldingsTable (new Chart column)
+  - Markets page index cards
+- **Status**: ✅ WORKING
 
 ---
 

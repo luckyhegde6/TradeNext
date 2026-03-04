@@ -20,7 +20,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseInt(session.user.id as string);
+    const userId = Number(session.user.id);
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
     const today = searchParams.get('today');
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseInt(session.user.id as string);
+    const userId = Number(session.user.id);
     const body = await req.json();
     const validatedData = alertSchema.parse(body);
 
@@ -87,7 +87,7 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseInt(session.user.id as string);
+    const userId = Number(session.user.id);
     const body = await req.json();
     const { id, status, currentPrice } = body;
 
@@ -125,7 +125,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseInt(session.user.id as string);
+    const userId = Number(session.user.id);
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 

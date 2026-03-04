@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { Holding } from '@/lib/services/portfolioService';
+import { getChartButton } from "@/lib/charting";
+import { isNSEIndexSymbol } from "@/lib/charting";
 
 interface HoldingsTableProps {
     holdings: Holding[];
@@ -48,13 +50,16 @@ export default function HoldingsTable({ holdings }: HoldingsTableProps) {
                                 Current Value
                             </th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">
-                                P&L
+                                P&#L
                             </th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">
                                 Returns
                             </th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">
                                 Allocation
+                            </th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">
+                                Chart
                             </th>
                         </tr>
                     </thead>
@@ -104,10 +109,29 @@ export default function HoldingsTable({ holdings }: HoldingsTableProps) {
                                         {holding.pnlPercent >= 0 ? '↑' : '↓'} {formatPercent(holding.pnlPercent)}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
-                                    {holding.allocation.toFixed(1)}%
-                                </td>
-                            </tr>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
+                                        {formatCurrency(holding.currentValue)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                        <div className={`font-medium ${holding.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                            {formatCurrency(holding.pnl)}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${holding.pnlPercent >= 0
+                                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                            }`}>
+                                            {holding.pnlPercent >= 0 ? '↑' : '↓'} {formatPercent(holding.pnlPercent)}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
+                                        {holding.allocation.toFixed(1)}%
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                        {getChartButton(holding.ticker, isNSEIndexSymbol(holding.ticker))}
+                                    </td>
+                                </tr>
                         ))}
                     </tbody>
                 </table>

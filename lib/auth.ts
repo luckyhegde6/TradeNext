@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { authConfig } from "./auth.config";
+import { createAuditLog } from "./audit";
 
 declare module "next-auth" {
   interface User {
@@ -74,7 +75,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, user, trigger, session }) {
       const tokenExt = token as unknown as { role?: string; id?: string; mobile?: string | null; name?: string };
-      
+
       if (user) {
         tokenExt.role = user.role;
         tokenExt.id = user.id;
@@ -95,6 +96,26 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.name = (token.name as string | null) || undefined;
       }
       return session;
+    },
+  },
+  events: {
+    async signIn({ user }) {
+      if (user?.id) {
+        await createAuditLog({
+          userId: parseInt(user.id),
+          userEmail: user.email || undefined,
+          action: 'LOGIN',
+        });
+      }
+    },
+    async signOut(message: any) {
+      if (message.session?.user?.id) {
+        await createAuditLog({
+          userId: parseInt(message.session.user.id),
+          userEmail: message.session.user.email || undefined,
+          action: 'LOGOUT',
+        });
+      }
     },
   },
 });

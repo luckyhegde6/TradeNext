@@ -14,6 +14,9 @@ export default function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   interface UserWithRole {
     id: string;
@@ -21,7 +24,7 @@ export default function Header() {
     email?: string | null;
     image?: string | null;
     role?: string;
-    mobile?: string | null; // Added mobile
+    mobile?: string | null;
   }
 
   const user = session?.user as UserWithRole;
@@ -43,6 +46,41 @@ export default function Header() {
       setHasPortfolio(null);
     }
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isLoggedIn]);
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch('/api/user/notifications?unread=true');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await fetch('/api/user/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markAllRead: true }),
+      });
+      setUnreadCount(0);
+      setNotifications(notifications.map(n => ({ ...n, isRead: true })));
+    } catch (err) {
+      console.error('Failed to mark notifications as read:', err);
+    }
+  };
 
   const isActive = (path: string) => pathname === path;
 
@@ -81,6 +119,18 @@ export default function Header() {
                   active={isActive("/alerts")}
                 >
                   Alerts
+                </NavLink>
+                <NavLink
+                  href="/recommendations"
+                  active={isActive("/recommendations")}
+                >
+                  Recommendations
+                </NavLink>
+                <NavLink
+                  href="/watchlist"
+                  active={isActive("/watchlist")}
+                >
+                  Watchlist
                 </NavLink>
               </>
             ) : (
@@ -147,6 +197,63 @@ export default function Header() {
           <div className="hidden md:flex items-center space-x-4">
             {isLoggedIn ? (
               <div className="flex items-center gap-4">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="relative p-2 text-surface-foreground/60 hover:text-surface-foreground transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    {unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
+                  </button>
+                  {showNotifications && (
+                    <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-gray-200 dark:border-slate-700 overflow-hidden z-50">
+                      <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center">
+                        <h3 className="font-semibold text-gray-900 dark:text-white">Notifications</h3>
+                        {unreadCount > 0 && (
+                          <button
+                            onClick={markAllRead}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            Mark all read
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-96 overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <p className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                            No notifications
+                          </p>
+                        ) : (
+                          notifications.map((notification) => (
+                            <a
+                              key={notification.id}
+                              href={notification.link || '#'}
+                              className={`block px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-0 ${!notification.isRead ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                            >
+                              <p className="font-medium text-sm text-gray-900 dark:text-white">{notification.title}</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{notification.message}</p>
+                              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                {new Date(notification.createdAt).toLocaleString()}
+                              </p>
+                            </a>
+                          ))
+                        )}
+                      </div>
+                      <a
+                        href="/notifications"
+                        className="block px-4 py-3 text-center text-sm text-blue-600 dark:text-blue-400 border-t border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800"
+                      >
+                        View all notifications
+                      </a>
+                    </div>
+                  )}
+                </div>
                 <span className="text-sm text-surface-foreground/80">
                   {user?.name || user?.email}
                 </span>

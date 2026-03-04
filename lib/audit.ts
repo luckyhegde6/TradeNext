@@ -1,145 +1,63 @@
-import prisma from "@/lib/prisma";
+import prisma from "./prisma";
+import { auth } from "./auth";
 
-export type AuditAction = 
-  | 'API_CALL' 
-  | 'USER_ACTION' 
-  | 'PORTFOLIO_ACTION' 
-  | 'NSE_CALL' 
-  | 'LOGIN' 
-  | 'LOGOUT' 
-  | 'RATE_LIMIT';
+export type AuditAction =
+  | 'API_CALL'
+  | 'USER_ACTION'
+  | 'PORTFOLIO_ACTION'
+  | 'PORTFOLIO_CREATE'
+  | 'TRANSACTION_CREATE'
+  | 'FUND_TRANSACTION'
+  | 'NSE_CALL'
+  | 'LOGIN'
+  | 'LOGOUT'
+  | 'RATE_LIMIT'
+  | 'WATCHLIST_CREATE'
+  | 'WATCHLIST_DELETE'
+  | 'WATCHLIST_UPDATE'
+  | 'ALERT_CREATE'
+  | 'ALERT_DELETE'
+  | 'ALERT_UPDATE'
+  | 'USER_CREATE'
+  | 'USER_UPDATE'
+  | 'USER_DELETE'
+  | 'ADMIN_UPLOAD'
+  | 'ADMIN_INGEST'
+  | 'SETTINGS_UPDATE';
 
-interface AuditLogData {
+interface AuditLogParams {
   userId?: number;
   userEmail?: string;
   action: AuditAction;
   resource?: string;
   resourceId?: string;
-  method?: string;
-  path?: string;
-  requestBody?: unknown;
-  responseStatus?: number;
-  responseTime?: number;
-  ipAddress?: string;
-  userAgent?: string;
-  metadata?: Record<string, unknown>;
-  nseEndpoint?: string;
+  metadata?: any;
   errorMessage?: string;
 }
 
-export async function createAuditLog(data: AuditLogData): Promise<void> {
+export async function createAuditLog(params: AuditLogParams) {
   try {
-    await prisma.auditLog.create({
+    const session = await auth();
+
+    // Default to session user if not provided
+    const userId = params.userId || (session?.user?.id ? parseInt(session.user.id) : undefined);
+    const userEmail = params.userEmail || session?.user?.email || undefined;
+
+    return await prisma.auditLog.create({
       data: {
-        userId: data.userId,
-        userEmail: data.userEmail,
-        action: data.action,
-        resource: data.resource,
-        resourceId: data.resourceId,
-        method: data.method,
-        path: data.path,
-        requestBody: data.requestBody as any,
-        responseStatus: data.responseStatus,
-        responseTime: data.responseTime,
-        ipAddress: data.ipAddress,
-        userAgent: data.userAgent,
-        metadata: data.metadata as any,
-        nseEndpoint: data.nseEndpoint,
-        errorMessage: data.errorMessage,
+        userId,
+        userEmail,
+        action: params.action as any, // Cast to any to match Prisma enum if necessary, or ensure schema matches
+        resource: params.resource,
+        resourceId: params.resourceId,
+        metadata: params.metadata,
+        errorMessage: params.errorMessage,
       },
     });
   } catch (error) {
-    console.error('Failed to create audit log:', error);
+    // We don't want audit log failures to break the main application flow, 
+    // but we should log the error
+    console.error("Failed to create audit log:", error);
+    return null;
   }
-}
-
-export async function logApiCall(
-  path: string,
-  method: string,
-  userId?: number,
-  userEmail?: string,
-  status?: number,
-  responseTime?: number,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<void> {
-  await createAuditLog({
-    userId,
-    userEmail,
-    action: 'API_CALL',
-    method,
-    path,
-    responseStatus: status,
-    responseTime,
-    ipAddress,
-    userAgent,
-  });
-}
-
-export async function logNseCall(
-  endpoint: string,
-  userId?: number,
-  userEmail?: string,
-  status?: number,
-  responseTime?: number,
-  error?: string
-): Promise<void> {
-  await createAuditLog({
-    userId,
-    userEmail,
-    action: 'NSE_CALL',
-    nseEndpoint: endpoint,
-    responseStatus: status,
-    responseTime,
-    errorMessage: error,
-  });
-}
-
-export async function logUserAction(
-  action: string,
-  resource: string,
-  resourceId?: string,
-  userId?: number,
-  userEmail?: string,
-  metadata?: Record<string, unknown>
-): Promise<void> {
-  await createAuditLog({
-    userId,
-    userEmail,
-    action: 'USER_ACTION',
-    resource,
-    resourceId,
-    metadata,
-  });
-}
-
-export async function logPortfolioAction(
-  action: string,
-  portfolioId: string,
-  userId?: number,
-  userEmail?: string,
-  metadata?: Record<string, unknown>
-): Promise<void> {
-  await createAuditLog({
-    userId,
-    userEmail,
-    action: 'PORTFOLIO_ACTION',
-    resource: 'portfolio',
-    resourceId: portfolioId,
-    metadata,
-  });
-}
-
-export async function logRateLimit(
-  userId: number,
-  userEmail: string,
-  endpoint: string
-): Promise<void> {
-  await createAuditLog({
-    userId,
-    userEmail,
-    action: 'RATE_LIMIT',
-    resource: 'rate_limit',
-    metadata: { endpoint },
-  });
 }

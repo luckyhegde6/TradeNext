@@ -49,3 +49,5 @@ deno.lock
 nul
 
 .swc
+
+.playwright-cli

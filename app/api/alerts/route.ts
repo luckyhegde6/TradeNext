@@ -10,11 +10,12 @@ import {
   AlertType,
   AlertCondition,
 } from "@/lib/services/alertService";
+import { createAuditLog } from "@/lib/audit";
 
 export async function GET(req: NextRequest) {
   try {
     const session = await auth();
-    
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -41,6 +42,14 @@ export async function GET(req: NextRequest) {
 
     if (action === "delete" && alertId) {
       await deleteAlert(alertId, userId);
+
+      await createAuditLog({
+        userId,
+        action: 'ALERT_DELETE',
+        resource: 'Alert',
+        resourceId: alertId
+      });
+
       return NextResponse.json({ success: true });
     }
 
@@ -55,14 +64,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await auth();
-    
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const userId = parseInt(session.user.id);
     const body = await req.json();
-    
+
     const { type, symbol, condition } = body as {
       type: AlertType;
       symbol?: string;
@@ -93,6 +102,15 @@ export async function POST(req: NextRequest) {
     }
 
     const alert = await createAlert(userId, type, symbol, condition);
+
+    await createAuditLog({
+      userId,
+      action: 'ALERT_CREATE',
+      resource: 'Alert',
+      resourceId: alert.id,
+      metadata: { type, symbol, condition }
+    });
+
     return NextResponse.json(alert, { status: 201 });
   } catch (error) {
     console.error("Error creating alert:", error);

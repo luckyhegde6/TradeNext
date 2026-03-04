@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import logger from "@/lib/logger";
 
-export type AlertType = 
+export type AlertType =
   | "price_above"
   | "price_below"
   | "volume_spike"
@@ -37,7 +37,7 @@ export async function createAlert(
   condition: AlertCondition
 ): Promise<Alert> {
   logger.info({ msg: "Creating alert", userId, type, symbol });
-  
+
   const alert = await prisma.alert.create({
     data: {
       userId,
@@ -122,14 +122,56 @@ export async function deleteAlert(alertId: string, userId: number): Promise<void
 
 export async function triggerAlert(alertId: string): Promise<void> {
   logger.info({ msg: "Triggering alert", alertId });
-  
-  await prisma.alert.update({
+
+  const alert = await prisma.alert.update({
     where: { id: alertId },
     data: {
       triggered: true,
       triggeredAt: new Date(),
     },
   });
+
+  // Create a notification record for the user
+  if (alert.userId) {
+    const title = getAlertTitle(alert.type, alert.symbol);
+    const message = getAlertMessage(alert.type, alert.symbol, alert.condition);
+
+    await prisma.notification.create({
+      data: {
+        userId: alert.userId,
+        type: "alert_triggered",
+        title,
+        message,
+        link: alert.symbol ? `/company/${alert.symbol}` : "/alerts",
+      },
+    });
+  }
+}
+
+function getAlertTitle(type: string, symbol?: string | null): string {
+  const symbolPrefix = symbol ? `${symbol}: ` : "";
+  switch (type) {
+    case "price_above": return `${symbolPrefix}Price Target Reached`;
+    case "price_below": return `${symbolPrefix}Price Target Reached`;
+    case "volume_spike": return `${symbolPrefix}Volume Spike Detected`;
+    case "price_jump": return `${symbolPrefix}Significant Price Jump`;
+    case "piotroski_score": return `${symbolPrefix}Piotroski Score Change`;
+    case "portfolio_value": return `Portfolio Value Alert`;
+    default: return `Alert Triggered`;
+  }
+}
+
+function getAlertMessage(type: string, symbol: string | null | undefined, condition: any): string {
+  const cond = condition as AlertCondition;
+  switch (type) {
+    case "price_above": return `${symbol} has crossed above your target price of ${cond.threshold}.`;
+    case "price_below": return `${symbol} has crossed below your target price of ${cond.threshold}.`;
+    case "volume_spike": return `${symbol} is showing unusual volume spike (${cond.threshold || 5}x average).`;
+    case "price_jump": return `${symbol} has jumped by ${cond.changePercent}% in the last period.`;
+    case "piotroski_score": return `The Piotroski F-Score for ${symbol} has changed.`;
+    case "portfolio_value": return `Your portfolio value has changed by more than ${cond.changePercent}%.`;
+    default: return `An alert condition has been met.`;
+  }
 }
 
 export async function checkPriceAlerts(
@@ -213,13 +255,13 @@ export async function checkPortfolioValueAlerts(
 
     if (Math.abs(changePercent) > threshold) {
       await triggerAlert(alert.id);
-      logger.info({ 
-        msg: "Portfolio value alert triggered", 
-        alertId: alert.id, 
-        userId, 
-        currentValue, 
+      logger.info({
+        msg: "Portfolio value alert triggered",
+        alertId: alert.id,
+        userId,
+        currentValue,
         previousValue,
-        changePercent 
+        changePercent
       });
     }
   }

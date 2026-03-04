@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
+import Autocomplete from "@/app/components/ui/Autocomplete";
 import symbolsData from "@/lib/constants/symbols.json";
 
 interface Transaction {
@@ -71,17 +72,9 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
         }
     }, [ticker, isManualPrice, fetchLivePrice]);
 
-    const filteredSymbols = useMemo(() => {
-        if (!searchTerm) return [];
-        const search = searchTerm.toUpperCase();
-        return (symbolsData as { symbol: string; name: string }[])
-            .filter(s => s.symbol.includes(search) || s.name.toUpperCase().includes(search))
-            .slice(0, 50); // Limit results for performance
-    }, [searchTerm]);
-
-    const handleSelectSymbol = (symbol: string) => {
-        setTicker(symbol);
-        setSearchTerm(symbol);
+    const handleSelectSymbol = (selectedSymbol: string) => {
+        setTicker(selectedSymbol);
+        setSearchTerm(selectedSymbol);
         setShowDropdown(false);
         setIsManualPrice(false); // Reset to allow auto-fill for new symbol
         if (error.includes("valid symbol")) setError("");
@@ -116,8 +109,8 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
         };
 
         try {
-            const url = editingTransaction 
-                ? `/api/user/holdings?id=${editingTransaction.id}` 
+            const url = editingTransaction
+                ? `/api/user/holdings?id=${editingTransaction.id}`
                 : '/api/user/holdings';
             const method = editingTransaction ? 'PUT' : 'POST';
 
@@ -162,34 +155,11 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
                     <div className="grid grid-cols-2 gap-4">
                         <div className="relative">
                             <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Ticker</label>
-                            <input
-                                type="text"
-                                value={searchTerm}
-                                onChange={(e) => {
-                                    setSearchTerm(e.target.value);
-                                    setShowDropdown(true);
-                                    if (!e.target.value) setTicker("");
-                                }}
-                                onFocus={() => setShowDropdown(true)}
-                                className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            <Autocomplete
+                                onSelect={handleSelectSymbol}
+                                initialValue={ticker}
                                 placeholder="Search Symbol..."
-                                required
                             />
-                            {showDropdown && filteredSymbols.length > 0 && (
-                                <div className="absolute z-[110] left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-xl">
-                                    {filteredSymbols.map(s => (
-                                        <button
-                                            key={s.symbol}
-                                            type="button"
-                                            onClick={() => handleSelectSymbol(s.symbol)}
-                                            className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 border-b border-gray-100 dark:border-slate-700 last:border-0 transition-colors"
-                                        >
-                                            <div className="font-bold text-sm text-gray-900 dark:text-white">{s.symbol}</div>
-                                            <div className="text-xs text-gray-500 dark:text-slate-400 truncate">{s.name}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Side</label>

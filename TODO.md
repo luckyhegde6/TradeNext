@@ -19,6 +19,11 @@
 | Stock Screener | [x] Complete |
 | Price Alerts | [x] Complete |
 | CSV Import | [x] Complete |
+| User Recommendations | [ ] In Progress |
+| Watchlist | [ ] In Progress |
+| Enhanced Alerts | [ ] Pending |
+| Portfolio Analytics | [ ] Pending |
+| Stock Compare | [ ] Pending |
 
 ## Current Features
 
@@ -34,12 +39,72 @@
 - Price Alerts system
 - CSV/Excel import for transactions
 - Piotroski F-Score (existing)
+- Stock Recommendations Management (admin)
+- User Holdings Management
+- Audit Logging
+- Rate Limiting
+- User Recommendations Page (/recommendations) - [x] Complete
+- Watchlist Feature - [x] Complete
+- **NSE Charting Integration - [x] Complete**
+
+---
+
+## Phase 1: User Recommendations & Watchlist
+
+### User Recommendations Page (/recommendations) - ✅ COMPLETE
+- [x] Display only active recommendations
+- [x] Filter by type (BUY/SELL/HOLD)
+- [x] Subscribe to specific recommendations
+- [x] API endpoint exists at `/api/user/recommendations`
+
+### Watchlist Feature - ✅ COMPLETE
+- [x] CRUD for watchlists (via `/api/user/watchlist`)
+- [x] Add stocks to watchlist from any page
+- [x] Quick price view on watchlist page
+
+### NSE Charting Integration - ✅ COMPLETE
+- [x] Chart button in StockQuoteHeader component
+- [x] Chart column in HoldingsTable
+- [x] Enhanced index chart links in markets page
+- [x] Smooth NSE symbol mapping (stock symbols + `-EQ` suffix)
+- [x] Direct integration with NSE charting platform
+- [x] Mobile-responsive chart buttons
+
+---
+
+## Phase 2: Enhanced Alerts
+
+### Notification System - ⏳ PENDING
+- [ ] In-app notifications
+- [ ] Email notifications
+- [ ] SMS alerts (optional)
+
+### Smart Alerts - ⏳ PENDING
+- [ ] Price target alerts
+- [ ] Percentage change alerts
+- [ ] Volume spike alerts
+
+---
+
+## Phase 3: Portfolio Enhancements
+
+### Advanced Analytics - ⏳ PENDING
+- [ ] P&L visualization
+- [ ] Sector-wise allocation pie chart
+- [ ] Risk metrics (beta, volatility)
+
+### Comparison Tool - ⏳ PENDING
+- [ ] Compare stocks
+- [ ] Compare portfolio vs benchmark (NIFTY 50)
+
+---
 
 ## Engineering Standards
 
 All implementations must follow:
 - `.ai/rules/checklist.md` - Engineering guardrails
 - `AGENTS.md` - Development guide
+- **NSE Charting Integration** - Uses NSE's official charting platform for seamless user experience
 
 ## Commands
 
