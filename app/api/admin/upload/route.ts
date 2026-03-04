@@ -5,6 +5,7 @@ import path from "path";
 import { existsSync } from "fs";
 import { auth } from "@/lib/auth";
 import logger from "@/lib/logger";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,12 @@ export async function POST(req: Request) {
 
         await writeFile(filePath, buffer);
 
+        await createAuditLog({
+            action: 'ADMIN_UPLOAD',
+            resource: 'AdminUpload',
+            metadata: { fileName: uniqueName }
+        });
+
         logger.info({ msg: 'Admin file upload completed', fileName: uniqueName, filePath });
         return NextResponse.json({
             success: true,
@@ -52,7 +59,7 @@ export async function POST(req: Request) {
             meta: {
                 fetchedAt: new Date().toISOString(),
                 stale: false,
-              },
+            },
         });
     } catch (e: unknown) {
         const errorMessage = (e instanceof Error ? e.message : "Upload failed");

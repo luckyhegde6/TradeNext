@@ -6,13 +6,13 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const symbolsParam = searchParams.get("symbols");
-    
+
     if (!symbolsParam) {
       return NextResponse.json({ error: "Symbols parameter is required" }, { status: 400 });
     }
 
     const symbols = symbolsParam.split(",").map(s => s.trim().toUpperCase()).filter(s => s);
-    
+
     if (symbols.length === 0) {
       return NextResponse.json({ error: "At least one symbol is required" }, { status: 400 });
     }
@@ -27,13 +27,13 @@ export async function GET(req: Request) {
       symbols.map(async (symbol) => {
         try {
           const response = await fetch(`${baseUrl}/api/nse/stock/${encodeURIComponent(symbol)}/quote`);
-          
+
           if (!response.ok) {
             return null;
           }
-          
+
           const data = await response.json();
-          
+
           if (!data || data.error) {
             return null;
           }
@@ -57,14 +57,14 @@ export async function GET(req: Request) {
             week52Low: parseFloat(data.yearLow || "0"),
           };
         } catch (error) {
-          console.error(`Error fetching quote for ${symbol}:`, error);
+          console.error("Error fetching quote for symbol:", symbol, error);
           return null;
         }
       })
     );
 
     const validResults = results.filter(r => r !== null);
-    
+
     if (validResults.length === 0) {
       return NextResponse.json({ error: "No valid stock data found" }, { status: 404 });
     }

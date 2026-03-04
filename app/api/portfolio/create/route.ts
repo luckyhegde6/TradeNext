@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/prisma';
+import { createAuditLog } from '@/lib/audit';
 
 export async function POST(req: Request) {
     try {
@@ -35,6 +36,14 @@ export async function POST(req: Request) {
                 userId: targetUserId,
                 currency: 'INR',
             }
+        });
+
+        await createAuditLog({
+            userId: targetUserId,
+            action: 'PORTFOLIO_CREATE',
+            resource: 'Portfolio',
+            resourceId: portfolio.id,
+            metadata: { name }
         });
 
         return NextResponse.json(portfolio);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,14 @@ export async function POST(req: Request) {
       },
     });
 
+    await createAuditLog({
+      userId,
+      action: 'WATCHLIST_CREATE',
+      resource: 'Watchlist',
+      resourceId: watchlist.id,
+      metadata: { name }
+    });
+
     return NextResponse.json(watchlist, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -94,6 +103,14 @@ export async function PUT(req: Request) {
       },
     });
 
+    await createAuditLog({
+      userId,
+      action: 'WATCHLIST_UPDATE',
+      resource: 'Watchlist',
+      resourceId: id,
+      metadata: { name }
+    });
+
     return NextResponse.json(watchlist);
   } catch (error) {
     console.error("User watchlist PUT error:", error);
@@ -118,6 +135,13 @@ export async function DELETE(req: Request) {
 
     await prisma.watchlist.delete({
       where: { id, userId },
+    });
+
+    await createAuditLog({
+      userId,
+      action: 'WATCHLIST_DELETE',
+      resource: 'Watchlist',
+      resourceId: id,
     });
 
     return NextResponse.json({ success: true });

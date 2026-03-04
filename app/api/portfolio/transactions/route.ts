@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import symbolsData from "@/lib/constants/symbols.json";
 import { invalidatePortfolioCache } from '@/lib/services/portfolioService';
+import { createAuditLog } from '@/lib/audit';
 
 export async function POST(req: Request) {
     try {
@@ -45,6 +46,14 @@ export async function POST(req: Request) {
 
         // Invalidate cache on change
         invalidatePortfolioCache(portfolio.userId);
+
+        await createAuditLog({
+            userId: portfolio.userId,
+            action: 'TRANSACTION_CREATE',
+            resource: 'Transaction',
+            resourceId: transaction.id,
+            metadata: { ticker, side, quantity, price }
+        });
 
         return NextResponse.json(transaction);
     } catch (err: any) {

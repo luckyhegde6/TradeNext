@@ -4,6 +4,7 @@ import csv from "csv-parser";
 import { Readable } from "stream";
 import { auth } from "@/lib/auth";
 import logger from "@/lib/logger";
+import { createAuditLog } from "@/lib/audit";
 
 export const maxDuration = 60; // Allow longer timeout
 
@@ -50,6 +51,7 @@ export async function POST() {
         }
 
         // Upsert logic
+        let count = 0;
         for (const row of results) {
             // NSE CSV headers strictly case-sensitive? usually yes.
             // Expected headers based on user description/standard NSE:
@@ -80,7 +82,14 @@ export async function POST() {
                     attachment: attachment || "",
                 },
             });
+            count++;
         }
+
+        await createAuditLog({
+            action: 'ADMIN_INGEST',
+            resource: 'Announcements',
+            metadata: { count }
+        });
 
         logger.info({ msg: 'Admin announcements ingest completed', count: results.length });
         return NextResponse.json({ success: true, count: results.length });

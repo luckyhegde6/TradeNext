@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ async function getSymbolsFromDB(): Promise<string[]> {
   });
 
   const tickerList = symbols.map(s => s.ticker);
-  
+
   symbolsCache = {
     data: tickerList,
     expiresAt: Date.now() + CACHE_DURATION,
@@ -66,6 +67,12 @@ export async function POST(req: Request) {
     symbolsCache = null;
 
     const allSymbols = await getSymbolsFromDB();
+
+    await createAuditLog({
+      action: 'ADMIN_INGEST',
+      resource: 'SymbolsCache',
+      metadata: { total: allSymbols.length }
+    });
 
     return NextResponse.json({
       symbols: allSymbols,

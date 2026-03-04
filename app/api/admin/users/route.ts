@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -97,6 +98,13 @@ export async function POST(req: Request) {
                 isBlocked: true,
                 createdAt: true
             }
+        });
+
+        await createAuditLog({
+            action: 'USER_CREATE',
+            resource: 'User',
+            resourceId: user.id.toString(),
+            metadata: { email: user.email, role: user.role }
         });
 
         return NextResponse.json(user, { status: 201 });

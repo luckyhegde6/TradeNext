@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -80,6 +81,14 @@ export async function POST(
       },
     });
 
+    await createAuditLog({
+      userId,
+      action: 'WATCHLIST_UPDATE',
+      resource: 'WatchlistItem',
+      resourceId: item.id,
+      metadata: { symbol: symbol.toUpperCase(), watchlistId }
+    });
+
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -125,6 +134,13 @@ export async function DELETE(
     } else {
       return NextResponse.json({ error: "itemId or symbol is required" }, { status: 400 });
     }
+
+    await createAuditLog({
+      userId,
+      action: 'WATCHLIST_UPDATE',
+      resource: 'WatchlistItem',
+      metadata: { watchlistId, itemId, symbol: symbol?.toUpperCase() }
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
