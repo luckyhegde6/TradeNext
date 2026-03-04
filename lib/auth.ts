@@ -108,11 +108,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         });
       }
     },
-    async signOut({ session }) {
-      if (session?.user?.id) {
+    async signOut(message: any) {
+      if (message.session?.user?.id) {
         await createAuditLog({
-          userId: parseInt(session.user.id),
-          userEmail: session.user.email,
+          userId: parseInt(message.session.user.id),
+          userEmail: message.session.user.email || undefined,
           action: 'LOGOUT',
         });
       }
