@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import Autocomplete from "@/app/components/ui/Autocomplete";
 
 interface Alert {
   id: string;
@@ -154,13 +155,9 @@ export default function AlertsPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-1">Stock Symbol</label>
-                <input
-                  type="text"
+                <Autocomplete
+                  onSelect={(symbol: string) => setFormData({ ...formData, symbol })}
                   placeholder="e.g., RELIANCE"
-                  className="w-full p-2 border border-border rounded bg-background"
-                  value={formData.symbol}
-                  onChange={(e) => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
-                  required
                 />
               </div>
 

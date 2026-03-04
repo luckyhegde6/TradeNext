@@ -468,3 +468,18 @@ model Notification {
   @@index([createdAt])
   @@map("notifications")
 }
+
+model Symbol {
+  id          Int      @id @default(autoincrement())
+  symbol      String   @unique
+  companyName String
+  series      String?
+  industry    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("symbols")
+  @@index([symbol])
+  @@index([companyName])
+}

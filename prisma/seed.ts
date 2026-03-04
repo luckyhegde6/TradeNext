@@ -3,6 +3,8 @@ import { hash } from 'bcryptjs';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { withAccelerate } from '@prisma/extension-accelerate';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const useRemoteDb = process.env.USE_REMOTE_DB === 'true' || !!process.env.DATABASE_REMOTE || !!process.env.ACCELERATE_URL;
 
@@ -197,6 +199,36 @@ async function main() {
     });
   }
   console.log("Additional users seeded");
+
+  // Seed symbols from JSON
+  console.log("Seeding symbols from JSON...");
+  try {
+    const symbolsPath = path.join(process.cwd(), 'lib', 'constants', 'symbols.json');
+    if (fs.existsSync(symbolsPath)) {
+      const symbolsRaw = fs.readFileSync(symbolsPath, 'utf8');
+      const symbolsData = JSON.parse(symbolsRaw);
+      console.log(`Found ${symbolsData.length} symbols to seed.`);
+
+      // Seed in batches to avoid overwhelming the database
+      const batchSize = 100;
+      for (let i = 0; i < symbolsData.length; i += batchSize) {
+        const batch = symbolsData.slice(i, i + batchSize);
+        await Promise.all(batch.map((s: { symbol: string, name: string }) =>
+          prisma.symbol.upsert({
+            where: { symbol: s.symbol },
+            update: { companyName: s.name },
+            create: { symbol: s.symbol, companyName: s.name }
+          })
+        ));
+        if (i % 1000 === 0) console.log(`Processed ${i} symbols...`);
+      }
+      console.log("Symbols seeded successfully.");
+    } else {
+      console.warn("symbols.json not found at", symbolsPath);
+    }
+  } catch (err) {
+    console.error("Error seeding symbols:", err);
+  }
 
   console.log("\n=== Login Credentials ===");
   console.log("Demo:  ", DEMO_EMAIL, "/", "***");

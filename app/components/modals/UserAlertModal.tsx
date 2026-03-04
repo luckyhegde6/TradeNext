@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Autocomplete from "@/app/components/ui/Autocomplete";
 
 interface UserAlertModalProps {
     onClose: () => void;
@@ -8,8 +9,8 @@ interface UserAlertModalProps {
 }
 
 export default function UserAlertModal({ onClose, onUpdate }: UserAlertModalProps) {
+    const [symbol, setSymbol] = useState("");
     const [form, setForm] = useState({
-        symbol: "",
         alertType: "price_above",
         title: "",
         message: "",
@@ -25,7 +26,7 @@ export default function UserAlertModal({ onClose, onUpdate }: UserAlertModalProp
 
         try {
             const payload = {
-                symbol: form.symbol || null,
+                symbol: symbol || null,
                 alertType: form.alertType,
                 title: form.title,
                 message: form.message || null,
@@ -67,14 +68,14 @@ export default function UserAlertModal({ onClose, onUpdate }: UserAlertModalProp
                             </div>
                         )}
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Symbol (Optional)</label>
-                            <input
-                                type="text"
-                                value={form.symbol}
-                                onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })}
-                                placeholder="e.g., RELIANCE"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                                Symbol
+                            </label>
+                            <Autocomplete
+                                onSelect={(selectedSymbol: string) => setSymbol(selectedSymbol)}
+                                initialValue={symbol}
+                                placeholder="Search symbol (e.g. RELIANCE)"
                             />
                         </div>
 

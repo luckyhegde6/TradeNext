@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import Autocomplete from "@/app/components/ui/Autocomplete";
 
 interface WatchlistItem {
   id: string;
@@ -402,13 +403,10 @@ export default function WatchlistPage() {
                 Add Symbol to Watchlist
               </h3>
               <form onSubmit={(e) => handleAddSymbol(showAddModal, e)}>
-                <input
-                  type="text"
-                  value={newSymbol}
-                  onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                <Autocomplete
+                  onSelect={(symbol: string) => setNewSymbol(symbol)}
                   placeholder="Enter stock symbol (e.g., RELIANCE)"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white mb-4"
-                  autoFocus
+                  className="mb-4"
                 />
                 <div className="flex justify-end gap-3">
                   <button

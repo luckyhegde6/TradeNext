@@ -31,12 +31,10 @@ export function isNSEIndexSymbol(symbol: string): boolean {
   return indices.some(idx => symbol.includes(idx));
 }
 
+import { ChartBarIcon } from '@heroicons/react/24/outline';
+
 export function getChartIcon(): React.JSX.Element {
-  return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-    </svg>
-  );
+  return <ChartBarIcon className="w-5 h-5" />;
 }
 
 export function getChartButton(symbol: string, isIndex = false): React.JSX.Element {
