@@ -194,7 +194,7 @@ export default function AdminRecommendationsPage() {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedIds.size} recommendation(s)?`)) return;
-    
+
     try {
       await Promise.all(
         Array.from(selectedIds).map((id) =>
@@ -210,7 +210,7 @@ export default function AdminRecommendationsPage() {
 
   const handleBulkToggleActive = async (activate: boolean) => {
     if (selectedIds.size === 0) return;
-    
+
     try {
       const results = await Promise.all(
         Array.from(selectedIds).map((id) =>
@@ -221,12 +221,12 @@ export default function AdminRecommendationsPage() {
           })
         )
       );
-      
+
       const hasError = results.some(r => !r.ok);
       if (hasError) {
         throw new Error("Some updates failed");
       }
-      
+
       setSelectedIds(new Set());
       fetchRecommendations();
     } catch (err) {
@@ -241,12 +241,12 @@ export default function AdminRecommendationsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rec.id, isActive: !rec.isActive }),
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to update");
       }
-      
+
       fetchRecommendations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update");
@@ -427,85 +427,104 @@ export default function AdminRecommendationsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
-        <button
-          onClick={() => {
-            setForm(emptyForm);
-            setEditingId(null);
-            setShowModal(true);
-          }}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Add Recommendation
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Active</p>
-          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.active}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Buy</p>
-          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.buy}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Sell</p>
-          <p className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.sell}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Hold</p>
-          <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.hold}</p>
-        </div>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
-          <p className="text-red-800 dark:text-red-400">{error}</p>
-          <button onClick={() => setError(null)} className="mt-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm">
-            Dismiss
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b dark:border-slate-800 pb-6 gap-4">
+          <div>
+            <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">Stock Recommendations</h1>
+            <p className="text-gray-500 dark:text-slate-400 mt-1 font-medium">Manage expert stock picks and technical analysis.</p>
+          </div>
+          <button
+            onClick={() => {
+              setForm(emptyForm);
+              setEditingId(null);
+              setShowModal(true);
+            }}
+            className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg active:scale-95 flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>
+            Add Recommendation
           </button>
         </div>
-      )}
 
-      <div className="bg-white dark:bg-slate-900 shadow overflow-hidden sm:rounded-md">
-        <div className="px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-slate-700 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-            <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
-              Recommendations ({filteredRecommendations.length})
-            </h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all group">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1">Total</h3>
+            <p className="text-2xl font-black text-gray-900 dark:text-white">{stats.total}</p>
+            <div className="h-1 w-8 bg-gray-400 rounded-full mt-3 group-hover:w-full transition-all duration-500"></div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all group">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1">Active</h3>
+            <p className="text-2xl font-black text-green-600 dark:text-green-400">{stats.active}</p>
+            <div className="h-1 w-8 bg-green-500 rounded-full mt-3 group-hover:w-full transition-all duration-500"></div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all group">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1">Buy</h3>
+            <p className="text-2xl font-black text-blue-600 dark:text-blue-400">{stats.buy}</p>
+            <div className="h-1 w-8 bg-blue-500 rounded-full mt-3 group-hover:w-full transition-all duration-500"></div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all group">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1">Sell</h3>
+            <p className="text-2xl font-black text-red-600 dark:text-red-400">{stats.sell}</p>
+            <div className="h-1 w-8 bg-red-500 rounded-full mt-3 group-hover:w-full transition-all duration-500"></div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all group">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1">Hold</h3>
+            <p className="text-2xl font-black text-yellow-600 dark:text-yellow-400">{stats.hold}</p>
+            <div className="h-1 w-8 bg-yellow-500 rounded-full mt-3 group-hover:w-full transition-all duration-500"></div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
+            <p className="text-red-800 dark:text-red-400">{error}</p>
+            <button onClick={() => setError(null)} className="mt-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <div>
+              <h2 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2">
+                <span className="w-2 h-6 bg-blue-600 rounded-full"></span>
+                Recommendations ({filteredRecommendations.length})
+              </h2>
+            </div>
             <button
               onClick={exportToCSV}
-              className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 text-sm"
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-bold text-sm bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-xl transition-all"
             >
               Export CSV
             </button>
           </div>
-          
-          <div className="flex flex-col sm:flex-row gap-4">
-            <input
-              type="text"
-              placeholder="Search by symbol or analysis..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
-            />
+
+          <div className="px-6 py-4 border-b border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="Search by symbol or analysis..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-500/50 rounded-xl text-gray-900 dark:text-white font-medium focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
+              />
+              <svg className="h-5 w-5 text-gray-400 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
             <select
               value={filterType}
               onChange={(e) => {
                 setFilterType(e.target.value);
                 setCurrentPage(1);
               }}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+              className="px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-500/50 rounded-xl text-gray-900 dark:text-white font-bold transition-all outline-none"
             >
               <option value="all">All Types</option>
               <option value="BUY">BUY</option>
@@ -521,7 +540,7 @@ export default function AdminRecommendationsPage() {
                 setSortField(field);
                 setSortOrder(order);
               }}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+              className="px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-500/50 rounded-xl text-gray-900 dark:text-white font-bold transition-all outline-none"
             >
               <option value="createdAt-desc">Newest First</option>
               <option value="createdAt-asc">Oldest First</option>
@@ -561,87 +580,88 @@ export default function AdminRecommendationsPage() {
           )}
         </div>
 
-        <ul className="divide-y divide-gray-200 dark:divide-slate-800">
-          <li className="px-4 py-3 bg-gray-50 dark:bg-slate-800/50">
+        <ul className="divide-y divide-gray-100 dark:divide-slate-800">
+          <li className="px-6 py-4 bg-gray-50/30 dark:bg-slate-800/20">
             <div className="flex items-center">
               <input
                 type="checkbox"
                 checked={selectedIds.size === filteredRecommendations.length && filteredRecommendations.length > 0}
                 onChange={toggleSelectAll}
-                className="h-4 w-4 text-blue-600 border-gray-300 dark:border-slate-600 rounded"
+                className="h-5 w-5 text-blue-600 border-gray-300 dark:border-slate-700 rounded-lg accent-blue-600"
               />
-              <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">Select All</span>
+              <span className="ml-3 text-sm font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest">Select All Items</span>
             </div>
           </li>
           {paginatedRecommendations.map((rec) => (
-            <li key={rec.id}>
-              <div className="px-4 py-4 sm:px-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
+            <li key={rec.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/10 transition-colors">
+              <div className="px-6 py-6">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-4">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(rec.id)}
                       onChange={() => toggleSelect(rec.id)}
-                      className="h-4 w-4 text-blue-600 border-gray-300 dark:border-slate-600 rounded mr-3"
+                      className="h-5 w-5 text-blue-600 border-gray-300 dark:border-slate-700 rounded-lg accent-blue-600 mt-1"
                     />
-                    <div className="flex flex-1 flex-col">
-                      <div className="flex items-center space-x-3">
-                        <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{rec.symbol}</p>
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRecommendationColor(rec.recommendation)}`}>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-3">
+                        <p className="text-xl font-black text-blue-600 dark:text-blue-400 tracking-tight">{rec.symbol}</p>
+                        <span className={`px-2.5 py-1 text-[10px] font-black rounded-full uppercase tracking-tighter border ${getRecommendationColor(rec.recommendation)}`}>
                           {rec.recommendation}
                         </span>
                         {!rec.isActive && (
-                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
+                          <span className="px-2.5 py-1 text-[10px] font-black rounded-full border border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-500 uppercase tracking-tighter">
                             Inactive
                           </span>
                         )}
                       </div>
-                      <div className="mt-2 sm:flex sm:justify-between">
-                        <div className="sm:flex space-x-6 text-sm text-gray-500 dark:text-gray-400">
-                          {rec.targetPrice && <span>Target: ₹{rec.targetPrice}</span>}
-                          {rec.profitRangeMin && rec.profitRangeMax && (
-                            <span>Profit: ₹{rec.profitRangeMin} - ₹{rec.profitRangeMax}</span>
-                          )}
-                          {rec.analystRating && <span>Rating: {rec.analystRating}</span>}
-                        </div>
-                        <div className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
-                          <p>{new Date(rec.createdAt).toLocaleDateString()}</p>
-                        </div>
+                      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                        {rec.targetPrice && <span className="font-bold text-gray-900 dark:text-white">Target: <span className="text-blue-600 dark:text-blue-400">₹{rec.targetPrice}</span></span>}
+                        {rec.profitRangeMin && rec.profitRangeMax && (
+                          <span className="font-bold text-gray-900 dark:text-white">Profit: <span className="text-green-600 dark:text-green-400">₹{rec.profitRangeMin} - ₹{rec.profitRangeMax}</span></span>
+                        )}
+                        {rec.analystRating && <span className="font-bold text-gray-700 dark:text-slate-400">Rating: {rec.analystRating}</span>}
+                        <span className="font-mono text-gray-400 dark:text-slate-600 italic">{new Date(rec.createdAt).toLocaleDateString()}</span>
                       </div>
                       {rec.analysis && (
-                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{rec.analysis}</p>
+                        <p className="mt-3 text-sm text-gray-600 dark:text-slate-400 leading-relaxed max-w-2xl line-clamp-2">{rec.analysis}</p>
                       )}
                       {rec.imageUrl && (
-                        <div className="mt-2">
-                          <img 
-                            src={rec.imageUrl} 
-                            alt="Chart" 
-                            className="max-w-xs rounded border dark:border-slate-600 cursor-pointer hover:opacity-80"
-                            onClick={() => openImageModal(rec.imageUrl!)}
-                          />
+                        <div className="mt-4">
+                          <div className="relative group/img overflow-hidden rounded-2xl border-2 border-gray-100 dark:border-slate-800 shadow-xl max-w-xs transition-transform hover:scale-[1.02]">
+                            <img
+                              src={rec.imageUrl}
+                              alt="Chart"
+                              className="w-full h-auto cursor-pointer"
+                              onClick={() => openImageModal(rec.imageUrl!)}
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                              <span className="text-white font-black text-xs uppercase tracking-widest">View Full Chart</span>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center space-x-3 ml-4">
+                  <div className="flex flex-col sm:flex-row items-center gap-3 ml-4">
                     <button
                       onClick={() => handleToggleActive(rec)}
-                      className={`px-3 py-1 rounded text-sm border transition-colors ${rec.isActive
-                          ? "text-orange-600 dark:text-orange-400 border-orange-600 dark:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30"
-                          : "text-green-600 dark:text-green-400 border-green-600 dark:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/30"
+                      className={`min-w-[100px] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border-2 transition-all ${rec.isActive
+                        ? "text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-900/50 hover:bg-orange-600 hover:text-white"
+                        : "text-green-600 dark:text-green-400 border-green-200 dark:border-green-900/50 hover:bg-green-600 hover:text-white"
                         }`}
                     >
                       {rec.isActive ? "Deactivate" : "Activate"}
                     </button>
                     <button
                       onClick={() => handleEdit(rec)}
-                      className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 border border-indigo-600 dark:border-indigo-500 px-3 py-1 rounded text-sm transition-colors"
+                      className="min-w-[80px] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border-2 border-blue-100 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-600 hover:text-white transition-all"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(rec.id)}
-                      className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 border border-red-600 dark:border-red-500 px-3 py-1 rounded text-sm transition-colors"
+                      className="min-w-[80px] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-600 hover:text-white transition-all"
                     >
                       Delete
                     </button>
@@ -659,15 +679,15 @@ export default function AdminRecommendationsPage() {
         )}
 
         {totalPages > 1 && (
-          <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-slate-700">
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredRecommendations.length)} of {filteredRecommendations.length}
+          <div className="px-6 py-5 flex items-center justify-between border-t border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/30">
+            <div className="text-sm font-bold text-gray-500 dark:text-slate-500">
+              Showing <span className="text-gray-900 dark:text-white">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="text-gray-900 dark:text-white">{Math.min(currentPage * ITEMS_PER_PAGE, filteredRecommendations.length)}</span> of <span className="text-gray-900 dark:text-white">{filteredRecommendations.length}</span>
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-2">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 rounded border border-gray-300 dark:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-slate-800"
+                className="px-4 py-2 rounded-xl border-2 border-gray-100 dark:border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-800 transition-all font-bold text-sm"
               >
                 Previous
               </button>
@@ -675,11 +695,10 @@ export default function AdminRecommendationsPage() {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded border ${
-                    page === currentPage
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "border-gray-300 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  }`}
+                  className={`w-10 h-10 rounded-xl border-2 transition-all font-black text-sm ${page === currentPage
+                      ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/30"
+                      : "border-gray-100 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 text-gray-500 dark:text-slate-500"
+                    }`}
                 >
                   {page}
                 </button>
@@ -687,7 +706,7 @@ export default function AdminRecommendationsPage() {
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 rounded border border-gray-300 dark:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-slate-800"
+                className="px-4 py-2 rounded-xl border-2 border-gray-100 dark:border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-800 transition-all font-bold text-sm"
               >
                 Next
               </button>
@@ -699,17 +718,20 @@ export default function AdminRecommendationsPage() {
       {showModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setShowModal(false)}></div>
-            <div className="relative bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {editingId ? "Edit Recommendation" : "Add Recommendation"}
+            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity" onClick={() => setShowModal(false)}></div>
+            <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden border border-gray-100 dark:border-slate-800 animate-in fade-in zoom-in duration-300 flex flex-col">
+              <div className="px-8 py-6 border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50 flex justify-between items-center shrink-0">
+                <h3 className="text-2xl font-black text-gray-900 dark:text-white">
+                  {editingId ? "Edit Recommendation" : "New Recommendation"}
                 </h3>
+                <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
               </div>
-              <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Symbol *</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Symbol *</label>
                     <input
                       type="text"
                       list="symbol-list"
@@ -718,15 +740,7 @@ export default function AdminRecommendationsPage() {
                         setForm({ ...form, symbol: e.target.value.toUpperCase() });
                         setSymbolQuery(e.target.value);
                       }}
-                      onBlur={() => {
-                        if (symbolQuery && !symbols.includes(symbolQuery.toUpperCase())) {
-                          const match = symbols.find(s => s.toLowerCase().startsWith(symbolQuery.toLowerCase()));
-                          if (match) {
-                            setForm({ ...form, symbol: match });
-                          }
-                        }
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                       required
                     />
                     <datalist id="symbol-list">
@@ -736,11 +750,11 @@ export default function AdminRecommendationsPage() {
                     </datalist>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recommendation *</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Rating *</label>
                     <select
                       value={form.recommendation}
                       onChange={(e) => setForm({ ...form, recommendation: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     >
                       <option value="BUY">BUY</option>
                       <option value="ACCUMULATE">ACCUMULATE</option>
@@ -751,128 +765,126 @@ export default function AdminRecommendationsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Entry Range</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Entry Range</label>
                     <input
                       type="text"
                       value={form.entryRange}
                       onChange={(e) => setForm({ ...form, entryRange: e.target.value })}
                       placeholder="e.g., 1450-1500"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Target Price</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Target Price</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.targetPrice}
                       onChange={(e) => setForm({ ...form, targetPrice: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Short Term</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1 text-xs">Short Term</label>
                     <input
                       type="text"
                       value={form.shortTerm}
                       onChange={(e) => setForm({ ...form, shortTerm: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Long Term</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1 text-xs">Long Term</label>
                     <input
                       type="text"
                       value={form.longTerm}
                       onChange={(e) => setForm({ ...form, longTerm: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Intraday</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1 text-xs">Intraday</label>
                     <input
                       type="text"
                       value={form.intraday}
                       onChange={(e) => setForm({ ...form, intraday: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Profit Range Min</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Profit Range Min</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.profitRangeMin}
                       onChange={(e) => setForm({ ...form, profitRangeMin: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Profit Range Max</label>
+                    <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Profit Range Max</label>
                     <input
                       type="number"
                       step="0.01"
                       value={form.profitRangeMax}
                       onChange={(e) => setForm({ ...form, profitRangeMax: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Analyst Rating</label>
-                  <input
-                    type="text"
-                    value={form.analystRating}
-                    onChange={(e) => setForm({ ...form, analystRating: e.target.value })}
-                    placeholder="e.g., 4.5/5"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Analysis</label>
+                  <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-2 ml-1">Technical Analysis</label>
                   <textarea
                     value={form.analysis}
                     onChange={(e) => setForm({ ...form, analysis: e.target.value })}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-gray-200 dark:border-slate-700 rounded-xl text-gray-900 dark:text-white font-bold focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chart Image</label>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleImageUpload}
-                    accept="image/*"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
-                  />
-                  {imageUploading && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Uploading...</p>}
+                <div className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-2xl border-2 border-dashed border-gray-200 dark:border-slate-700">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-slate-300 mb-3">Chart Visualization</label>
+                  <div className="flex items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 bg-white dark:bg-slate-700 border-2 border-gray-200 dark:border-slate-600 rounded-xl font-bold text-sm shadow-sm hover:border-blue-500 transition-all"
+                    >
+                      Choose File
+                    </button>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleImageUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    {imageUploading && <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>}
+                  </div>
                   {form.imageUrl && (
-                    <div className="mt-2">
-                      <img src={form.imageUrl} alt="Chart preview" className="max-w-xs rounded border dark:border-slate-600" />
+                    <div className="mt-4 relative group w-fit">
+                      <img src={form.imageUrl} alt="Chart preview" className="max-w-[200px] h-auto rounded-xl border-2 border-gray-100 dark:border-slate-700 shadow-lg" />
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, imageUrl: "" })}
-                        className="text-sm text-red-600 hover:underline mt-1"
+                        className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1.5 shadow-lg hover:bg-red-700 transition-all opacity-0 group-hover:opacity-100"
                       >
-                        Remove image
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>
                     </div>
                   )}
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4">
+                <div className="pt-4 flex gap-3 sticky bottom-0 bg-white dark:bg-slate-900 pb-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -880,14 +892,14 @@ export default function AdminRecommendationsPage() {
                       setEditingId(null);
                       setForm(emptyForm);
                     }}
-                    className="bg-gray-500 dark:bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors"
+                    className="flex-1 px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-slate-700 transition-all active:scale-95"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    className="flex-1 px-6 py-4 bg-blue-600 text-white rounded-xl font-black hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50"
                   >
                     {saving ? "Saving..." : editingId ? "Update" : "Create"}
                   </button>
@@ -899,16 +911,16 @@ export default function AdminRecommendationsPage() {
       )}
 
       {showImageModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
+        <div className="fixed inset-0 z-[100] overflow-y-auto">
           <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-75" onClick={() => setShowImageModal(false)}></div>
-            <div className="relative">
-              <img src={selectedImage} alt="Chart preview" className="max-w-full max-h-[90vh] rounded-lg" />
+            <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md transition-opacity" onClick={() => setShowImageModal(false)}></div>
+            <div className="relative animate-in zoom-in duration-300">
+              <img src={selectedImage} alt="Chart preview" className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl border-2 border-slate-800" />
               <button
                 onClick={() => setShowImageModal(false)}
-                className="absolute top-2 right-2 bg-white dark:bg-slate-800 rounded-full p-2 hover:bg-gray-100 dark:hover:bg-slate-700"
+                className="absolute -top-4 -right-4 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-full p-3 shadow-2xl hover:scale-110 transition-transform border border-gray-100 dark:border-slate-700"
               >
-                ✕
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
           </div>

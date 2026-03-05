@@ -30,14 +30,14 @@ export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { 
     }
 
     return (
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 h-[600px] flex flex-col">
-            <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 rounded-t-lg">
-                <h3 className="font-bold text-lg text-gray-900 dark:text-white flex items-center">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950">
+                <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
                     📢 Corporate Announcements
                 </h3>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar max-h-[500px]">
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 max-h-80">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 {announcements?.map((item: any, index: number) => {
                     const symbol = item.symbol;
@@ -48,8 +48,8 @@ export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { 
                     const dt = item.dt || item.seq_id || index;
 
                     return (
-                        <div key={`${symbol}-${dt}-${index}`} className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors border-gray-100 dark:border-slate-700">
-                            <div className="flex justify-between items-start">
+                        <div key={`${symbol}-${dt}-${index}`} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <div className="flex justify-between items-start mb-1">
                                 <span className="font-bold text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded">
                                     {symbol}
                                 </span>
@@ -78,11 +78,11 @@ export default function CorporateAnnouncementsWidget({ symbol = "NIFTY 50" }: { 
                 })}
 
                 {!announcements?.length && (
-                    <div className="p-4 text-center text-gray-500">No recent announcements found.</div>
+                    <div className="p-6 text-center text-gray-400 text-sm">No recent announcements found.</div>
                 )}
             </div>
 
-            <div className="p-3 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 rounded-b-lg text-center">
+            <div className="px-4 py-3 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 text-center">
                 <Link href="/markets" className="text-sm text-blue-600 font-medium hover:underline">View All Market Data</Link>
             </div>
         </div>

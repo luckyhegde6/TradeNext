@@ -1,7 +1,9 @@
 "use client";
 
 import useSWR from "swr";
+import Link from "next/link";
 import { ArrowUpIcon, ArrowDownIcon } from "@heroicons/react/24/solid";
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -57,7 +59,16 @@ export default function IndexDetailsHeader({ symbol = "NIFTY 50" }: { symbol?: s
         <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-gray-200 dark:border-slate-800 p-6 mb-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{symbol}</h1>
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{symbol}</h1>
+                        <Link
+                            href={`/markets/${encodeURIComponent(symbol)}`}
+                            title="Open full chart"
+                            className="p-1.5 text-gray-400 hover:text-primary dark:hover:text-blue-400 hover:bg-primary/5 rounded-lg transition-all"
+                        >
+                            <ArrowTopRightOnSquareIcon className="h-5 w-5" />
+                        </Link>
+                    </div>
                     <div className="flex items-baseline gap-4">
                         <span className="text-5xl font-extrabold text-gray-900 dark:text-white">
                             {safeNumber(data.lastPrice)}

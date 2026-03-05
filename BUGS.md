@@ -84,13 +84,12 @@
 - **Fix Applied**: Changed to `Number(session.user.id)` in all user API routes
 - **Status**: ✅ FIXED - Regenerated Prisma client and verified
 
-### 11. NSE Charting Integration - NEW
-- **Feature**: Added charting buttons to open NSE India's official charting platform
-- **Locations**: 
-  - StockQuoteHeader component (next to stock price)
-  - HoldingsTable (new Chart column)
-  - Markets page index cards
-- **Status**: ✅ WORKING
+### 11. NSE Charting Integration (ENHANCED)
+- **Feature**: Added native multi-timeframe charts (1D, 1M, 3M, 6M, 1Y) for indices.
+- **Implementation**:
+  - Backend support in `lib/index-service.ts` with timeframe-specific caching.
+  - Frontend UI in `HomeChart.tsx` with range selection and responsive height.
+- **Status**: ✅ FULLY INTEGRATED
 
 ---
 
@@ -135,12 +134,12 @@
 
 ## UX Observations
 
-### Strengths
-1. Clean, professional UI with consistent styling
+1. Clean, professional UI with consistent styling and dark mode support
 2. Real-time market data integration working well
 3. Portfolio P&L calculations appear accurate
-4. Role-based access control properly implemented
+4. Role-Based Access Control properly implemented
 5. Admin dashboard provides useful overview metrics
+6. Full responsiveness across mobile, tablet, and desktop
 
 ### Areas for Improvement
 1. Add loading skeletons instead of spinners

@@ -6,6 +6,18 @@ import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 import logger from "@/lib/logger";
 import type { IndexQuote } from "@prisma/client";
 
+const INDEX_MAPPING: Record<string, string> = {
+    'NIFTY 50': 'NIFTY 50',
+    'NIFTY BANK': 'NIFTY BANK',
+    'NIFTY IT': 'NIFTY IT',
+    'NIFTY NEXT 50': 'NIFTY NEXT 50',
+    'NIFTY MIDCAP 50': 'NIFTY MIDCAP 50',
+    'NIFTY SMALLCAP 100': 'NIFTY SMALLCAP 100',
+    'INDIA VIX': 'INDIA VIX',
+    'NIFTY AUTO': 'NIFTY AUTO',
+    'NIFTY PHARMA': 'NIFTY PHARMA',
+};
+
 // Helper to get the target "trading day" for chart
 function getTargetDate() {
     const now = new Date();
@@ -27,70 +39,82 @@ function parseNseDate(dateStr: string): Date {
     return new Date(dateStr);
 }
 
-export async function getIndexChartData(indexName: string) {
-    const cacheKey = `nse:index:${indexName}:chart:1D`;
-    const targetDate = getTargetDate();
-    const startOfDay = new Date(targetDate); startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(targetDate); endOfDay.setHours(23, 59, 59, 999);
+export async function getIndexChartData(indexName: string, timeframe: string = '1D') {
+    const cacheKey = `nse:index:${indexName}:chart:${timeframe}`;
 
-    let dbCount = 0;
-    try {
-        const countPromise = prisma.indexPoint.count({
-            where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } }
-        });
-        const timeoutPromise = new Promise<number>((_, reject) =>
-            setTimeout(() => reject(new Error('Database count timeout')), 3000)
-        );
-        dbCount = await Promise.race([countPromise, timeoutPromise]);
-    } catch (dbError) {
-        console.warn(`Database count query failed for ${indexName}:`, dbError instanceof Error ? dbError.message : dbError);
-        dbCount = 0; // Fallback to fetching from NSE
+    // For 1D data, we can try to get from DB first
+    if (timeframe === '1D') {
+        const targetDate = getTargetDate();
+        const startOfDay = new Date(targetDate); startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(targetDate); endOfDay.setHours(23, 59, 59, 999);
+
+        let dbCount = 0;
+        try {
+            const countPromise = prisma.indexPoint.count({
+                where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } }
+            });
+            const timeoutPromise = new Promise<number>((_, reject) =>
+                setTimeout(() => reject(new Error('Database count timeout')), 3000)
+            );
+            dbCount = await Promise.race([countPromise, timeoutPromise]);
+        } catch (dbError) {
+            console.warn(`Database count query failed for ${indexName}:`, dbError instanceof Error ? dbError.message : dbError);
+            dbCount = 0;
+        }
+
+        if (dbCount > 10) {
+            const points = await prisma.indexPoint.findMany({
+                where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } },
+                orderBy: { time: 'asc' }
+            });
+            const grapthData = points.map(p => [p.time.getTime(), Number(p.close)]);
+            return { grapthData };
+        }
     }
 
-    if (dbCount > 10) {
-        const points = await prisma.indexPoint.findMany({
-            where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } },
-            orderBy: { time: 'asc' }
-        });
-        const grapthData = points.map(p => [p.time.getTime(), Number(p.close)]);
-        return { grapthData };
-    }
-
+    // Check cache
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    const qs = `?functionName=getIndexChart&&index=${encodeURIComponent(indexName)}&flag=1D`;
+    // Fetch from NSE
+    const nseSymbol = INDEX_MAPPING[indexName] || indexName;
+    const qs = `?functionName=getGraphChart&&type=${encodeURIComponent(nseSymbol)}&flag=${timeframe}`;
     try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
+        const rawData = await nseFetch("/api/NextApi/apiClient", qs) as any;
 
         const grapthData = rawData?.data?.grapthData || rawData?.grapthData || [];
         const normalizedData = { grapthData };
-        cache.set(cacheKey, normalizedData, 3600);
 
-        (async () => {
-            try {
-                const points = grapthData;
-                if (Array.isArray(points) && points.length > 0) {
+        // Cache: 1 minute for intraday, 1 hour for historical
+        const ttl = timeframe === '1D' ? 60 : 3600;
+        cache.set(cacheKey, normalizedData, ttl);
+
+        // Hydroate DB only for 1D intraday data
+        if (timeframe === '1D' && Array.isArray(grapthData) && grapthData.length > 0) {
+            (async () => {
+                try {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const records = points.map((p: any) => ({
+                    const records = grapthData.map((p: any) => ({
                         indexName,
                         time: new Date(p[0]),
                         close: p[1],
                     }));
                     await prisma.indexPoint.createMany({ data: records, skipDuplicates: true });
+                } catch (err) {
+                    console.error("Error hydrating index points:", err);
                 }
-            } catch (err) {
-                console.error("Error hydrating index points:", err);
-            }
-        })();
+            })();
+        }
 
         return normalizedData;
     } catch (e) {
-        console.error("Failed to fetch index chart:", e);
-        // Return empty chart data instead of throwing
-        console.warn(`Chart data not available for ${indexName}, returning empty data`);
-        return { grapthData: [] };
+        console.error(
+            "Failed to fetch index chart for index %s with timeframe %s:",
+            indexName,
+            timeframe,
+            e
+        ); return { grapthData: [] };
     }
 }
 
@@ -109,7 +133,10 @@ export async function getIndexDetails(indexName: string, enablePolling: boolean 
             const now = Date.now();
 
             // If market is closed, DB data is likely the last available data and thus "fresh"
-            if (!isMarketOpen() || (now - lastUpdate) < 120000) {
+            // However, if we are using a remote DB (Prisma Accelerate), we might want to be more careful
+            const isStale = (now - lastUpdate) > (process.env.USE_REMOTE_DB === 'true' ? 60000 : 120000);
+
+            if (!isStale || (!isMarketOpen() && (now - lastUpdate) < 3600000)) {
                 logger.debug({ msg: 'Using DB data for index details', indexName, marketOpen: isMarketOpen() });
                 return dbQuote;
             }

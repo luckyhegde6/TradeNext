@@ -1,5 +1,4 @@
 import prisma from "./prisma";
-import { auth } from "./auth";
 
 export type AuditAction =
   | 'API_CALL'
@@ -33,21 +32,40 @@ interface AuditLogParams {
   resourceId?: string;
   metadata?: any;
   errorMessage?: string;
+  session?: any; // New optional session parameter
 }
 
 export async function createAuditLog(params: AuditLogParams) {
   try {
-    const session = await auth();
+    let { userId, userEmail, session } = params;
 
-    // Default to session user if not provided
-    const userId = params.userId || (session?.user?.id ? parseInt(session.user.id) : undefined);
-    const userEmail = params.userEmail || session?.user?.email || undefined;
+    // Use provided session if available
+    if (session?.user) {
+      userId = userId || (session.user.id ? parseInt(session.user.id) : undefined);
+      userEmail = userEmail || session.user.email || undefined;
+    }
+    // Otherwise try to get session ONLY if not already provided
+    // and if auth is available (to avoid circular dependency during init)
+    else {
+      try {
+        // Fallback for other routes where session isn't passed explicitly
+        // We import it dynamically to avoid top-level circular dependency
+        const { auth } = await import("./auth");
+        const currentSession = await auth();
+        if (currentSession?.user) {
+          userId = userId || (currentSession.user.id ? parseInt(currentSession.user.id) : undefined);
+          userEmail = userEmail || currentSession.user.email || undefined;
+        }
+      } catch (authErr) {
+        // Auth might fail or be unavailable in some contexts (like during signOut event)
+      }
+    }
 
     return await prisma.auditLog.create({
       data: {
         userId,
         userEmail,
-        action: params.action as any, // Cast to any to match Prisma enum if necessary, or ensure schema matches
+        action: params.action as any,
         resource: params.resource,
         resourceId: params.resourceId,
         metadata: params.metadata,
@@ -55,8 +73,6 @@ export async function createAuditLog(params: AuditLogParams) {
       },
     });
   } catch (error) {
-    // We don't want audit log failures to break the main application flow, 
-    // but we should log the error
     console.error("Failed to create audit log:", error);
     return null;
   }
