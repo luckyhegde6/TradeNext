@@ -109,8 +109,12 @@ export async function getIndexChartData(indexName: string, timeframe: string = '
 
         return normalizedData;
     } catch (e) {
-        console.error(`Failed to fetch index chart for ${indexName} (${timeframe}):`, e);
-        return { grapthData: [] };
+        console.error(
+            "Failed to fetch index chart for index %s with timeframe %s:",
+            indexName,
+            timeframe,
+            e
+        ); return { grapthData: [] };
     }
 }
 
