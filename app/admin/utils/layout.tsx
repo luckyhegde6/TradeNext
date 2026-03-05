@@ -16,6 +16,7 @@ const navItems = [
     { name: "Workers", href: "/admin/utils/workers" },
     { name: "Cron Config", href: "/admin/utils/cron" },
     { name: "Announcements", href: "/admin/utils/announcements" },
+    { name: "NSE Sync", href: "/admin/utils/nse-sync" },
 ];
 
 export default function AdminUtilsLayout({
@@ -28,10 +29,10 @@ export default function AdminUtilsLayout({
     return (
         <div className="flex min-h-[calc(100vh-4rem)]">
             {/* Sidebar */}
-            <aside className="w-64 bg-white border-r border-gray-200 hidden md:block">
+            <aside className="w-64 bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800 hidden md:block transition-colors duration-300">
                 <div className="h-full flex flex-col pt-5 pb-4 overflow-y-auto">
                     <div className="px-6 mb-6">
-                        <h2 className="text-lg font-bold text-gray-900">Admin Utils</h2>
+                        <h2 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">Admin Utils</h2>
                     </div>
                     <nav className="flex-1 px-4 space-y-1">
                         {navItems.map((item) => {
@@ -40,9 +41,9 @@ export default function AdminUtilsLayout({
                                 <Link
                                     key={item.name}
                                     href={item.href}
-                                    className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors ${isActive
-                                        ? "bg-blue-50 text-blue-600"
-                                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                                    className={`group flex items-center px-3 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 ${isActive
+                                        ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                                        : "text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800/50 hover:text-gray-900 dark:hover:text-white"
                                         }`}
                                 >
                                     {item.name}
@@ -54,7 +55,7 @@ export default function AdminUtilsLayout({
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 overflow-auto bg-gray-50 p-8">
+            <main className="flex-1 overflow-auto bg-gray-50/50 dark:bg-[#020617] p-8 transition-colors duration-300">
                 {children}
             </main>
         </div>

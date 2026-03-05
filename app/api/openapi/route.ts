@@ -424,7 +424,49 @@ const openapi = {
                 }
             }
         },
-
+        '/api/nse/index/{index}/chart': {
+            get: {
+                summary: 'Get index chart data (multi-timeframe)',
+                tags: ['Market Data'],
+                parameters: [
+                    { name: 'index', in: 'path', required: true, schema: { type: 'string' } },
+                    {
+                        name: 'timeframe',
+                        in: 'query',
+                        schema: {
+                            type: 'string',
+                            enum: ['1D', '1M', '3M', '6M', '1Y'],
+                            default: '1D'
+                        },
+                        description: 'Chart timeframe'
+                    }
+                ],
+                responses: {
+                    '200': {
+                        description: 'Index chart data points',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        grapthData: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'array',
+                                                items: { type: 'number' },
+                                                minItems: 2,
+                                                maxItems: 2,
+                                                description: '[timestamp, price]'
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         '/api/nse/index/{index}/heatmap': {
             get: {
                 summary: 'Get index constituents heatmap',

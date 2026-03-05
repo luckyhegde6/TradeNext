@@ -111,8 +111,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signOut(message: any) {
       if (message.session?.user?.id) {
         await createAuditLog({
-          userId: parseInt(message.session.user.id),
-          userEmail: message.session.user.email || undefined,
+          session: message.session,
           action: 'LOGOUT',
         });
       }

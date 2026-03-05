@@ -166,7 +166,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2026.03.04] - 2026-03-04
 
 ### Added
-- Initial release features
+- Native multi-timeframe Index Charts (1D, 1M, 3M, 6M, 1Y) with NSE API integration.
+- Responsive Breadcrumbs component for user and admin layouts.
+- Timeframe-specific caching for market data (1m for intraday, 1h for historical).
+
+### Changed
+- Refactored Header for full responsiveness (mobile/tablet/desktop) with premium styling.
+- Updated HomeChart with range selection and responsive height adjustments.
+- Enhanced lib/index-service.ts for multi-timeframe support.
+
+### Fixed
+- Breadcrumbs integration in RootLayout.
+- Dark mode theme support across navigation components.
+- Type safety and linting issues in Header.tsx.
 
 ## [Unreleased]
 

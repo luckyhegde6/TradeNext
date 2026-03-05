@@ -91,26 +91,32 @@ export default function AdminAlertsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-6">Alert Management</h1>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <div className="border-b dark:border-slate-800 pb-6">
+          <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">Alert Management</h1>
+          <p className="text-gray-500 dark:text-slate-400 mt-1 font-medium">Monitor and manage real-time user price notifications.</p>
+        </div>
 
         {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-card border border-border rounded-lg p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Total Alerts</h3>
-              <p className="text-2xl font-bold">{stats.total}</p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all group">
+              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-1">Total Alerts</h3>
+              <p className="text-3xl font-black text-gray-900 dark:text-white">{stats.total}</p>
+              <div className="h-1 w-12 bg-blue-500 rounded-full mt-4 group-hover:w-full transition-all duration-500"></div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Active</h3>
-              <p className="text-2xl font-bold text-green-500">{stats.active}</p>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all group">
+              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-1">Active</h3>
+              <p className="text-3xl font-black text-green-600 dark:text-green-400">{stats.active}</p>
+              <div className="h-1 w-12 bg-green-500 rounded-full mt-4 group-hover:w-full transition-all duration-500"></div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Triggered</h3>
-              <p className="text-2xl font-bold text-yellow-500">{stats.triggered}</p>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all group">
+              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-1">Triggered</h3>
+              <p className="text-3xl font-black text-yellow-600 dark:text-yellow-400">{stats.triggered}</p>
+              <div className="h-1 w-12 bg-yellow-500 rounded-full mt-4 group-hover:w-full transition-all duration-500"></div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">By Type</h3>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl p-6 shadow-xl hover:shadow-2xl transition-all group">
+              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-1">By Type</h3>
               <div className="text-sm mt-1">
                 {stats.byType.map(t => (
                   <div key={t.type} className="flex justify-between">
@@ -123,25 +129,28 @@ export default function AdminAlertsPage() {
           </div>
         )}
 
-        <div className="bg-card border border-border rounded-lg">
-          <div className="p-4 border-b border-border flex justify-between items-center">
-            <h2 className="text-xl font-semibold">User Alerts</h2>
-            <div className="flex gap-2">
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="p-6 border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50 flex justify-between items-center">
+            <h2 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="w-2 h-6 bg-blue-600 rounded-full"></span>
+              User Alerts
+            </h2>
+            <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
               <button
                 onClick={() => setFilter('all')}
-                className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-primary text-white' : 'bg-muted'}`}
+                className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${filter === 'all' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200'}`}
               >
                 All
               </button>
               <button
                 onClick={() => setFilter('active')}
-                className={`px-3 py-1 rounded ${filter === 'active' ? 'bg-primary text-white' : 'bg-muted'}`}
+                className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${filter === 'active' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200'}`}
               >
                 Active
               </button>
               <button
                 onClick={() => setFilter('triggered')}
-                className={`px-3 py-1 rounded ${filter === 'triggered' ? 'bg-primary text-white' : 'bg-muted'}`}
+                className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${filter === 'triggered' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200'}`}
               >
                 Triggered
               </button>
@@ -155,56 +164,56 @@ export default function AdminAlertsPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-muted">
+                <thead className="bg-gray-50/50 dark:bg-slate-800/50">
                   <tr>
-                    <th className="p-3 text-left text-sm font-medium">User</th>
-                    <th className="p-3 text-left text-sm font-medium">Type</th>
-                    <th className="p-3 text-left text-sm font-medium">Symbol</th>
-                    <th className="p-3 text-left text-sm font-medium">Condition</th>
-                    <th className="p-3 text-left text-sm font-medium">Status</th>
-                    <th className="p-3 text-left text-sm font-medium">Created</th>
-                    <th className="p-3 text-left text-sm font-medium">Triggered</th>
-                    <th className="p-3 text-left text-sm font-medium">Actions</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">User</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Type</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Symbol</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Condition</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Created</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Triggered</th>
+                    <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAlerts.map(alert => (
-                    <tr key={alert.id} className="border-t border-border">
-                      <td className="p-3">
-                        <div className="text-sm font-medium">{alert.user?.name || 'Unknown'}</div>
-                        <div className="text-xs text-muted-foreground">{alert.user?.email}</div>
+                    <tr key={alert.id} className="border-t border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">{alert.user?.name || 'Unknown'}</div>
+                        <div className="text-xs font-medium text-gray-500 dark:text-slate-500">{alert.user?.email}</div>
                       </td>
-                      <td className="p-3 text-sm">
-                        <span className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
+                      <td className="px-6 py-4 text-sm">
+                        <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-full text-[10px] font-black uppercase tracking-tighter">
                           {getAlertTypeLabel(alert.type)}
                         </span>
                       </td>
-                      <td className="p-3 text-sm font-medium">{alert.symbol || '-'}</td>
-                      <td className="p-3 text-sm">
+                      <td className="px-6 py-4 text-sm font-black text-blue-600 dark:text-blue-400">{alert.symbol || '-'}</td>
+                      <td className="px-6 py-4 text-sm font-bold text-gray-700 dark:text-slate-300">
                         {alert.condition.threshold && `Target: ₹${alert.condition.threshold}`}
                         {alert.condition.changePercent && `${alert.condition.changePercent}%`}
                       </td>
-                      <td className="p-3">
+                      <td className="px-6 py-4">
                         {alert.triggered ? (
-                          <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">
+                          <span className="px-2.5 py-1 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800 rounded-full text-[10px] font-black uppercase tracking-tighter">
                             Triggered
                           </span>
                         ) : (
-                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
+                          <span className="px-2.5 py-1 bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-800 rounded-full text-[10px] font-black uppercase tracking-tighter">
                             Active
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-sm text-muted-foreground">
+                      <td className="px-6 py-4 text-xs font-mono italic text-gray-500 dark:text-slate-500">
                         {new Date(alert.createdAt).toLocaleDateString()}
                       </td>
-                      <td className="p-3 text-sm text-muted-foreground">
+                      <td className="px-6 py-4 text-xs font-mono italic text-gray-500 dark:text-slate-500">
                         {alert.triggeredAt ? new Date(alert.triggeredAt).toLocaleDateString() : '-'}
                       </td>
-                      <td className="p-3">
+                      <td className="px-6 py-4 text-right">
                         <button
                           onClick={() => deleteAlert(alert.id)}
-                          className="text-red-500 hover:text-red-700 text-sm"
+                          className="text-red-500 hover:text-red-700 dark:hover:text-red-400 text-sm font-bold transition-colors"
                         >
                           Delete
                         </button>
