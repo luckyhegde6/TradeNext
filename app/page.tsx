@@ -50,9 +50,10 @@ export default async function Home() {
       {/* ── HERO / Chart Section ── */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4">
         {/* Page title */}
-        <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white">
-            Market Intelligence
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white sm:text-5xl md:text-6xl">
+            <span className="block xl:inline">Market Intelligence by</span>{' '}
+            <span className="block text-blue-600 dark:text-blue-400">TradeNext</span>
           </h1>
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
             Live indices, charts &amp; corporate events
