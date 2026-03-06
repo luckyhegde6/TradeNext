@@ -3,6 +3,7 @@ import MarqueeBanner from "@/app/components/MarqueeBanner";
 import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
+import StockSearchBar from "@/app/components/StockSearchBar";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
@@ -58,6 +59,7 @@ export default async function Home() {
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
             Live indices, charts &amp; corporate events
           </p>
+          <StockSearchBar />
         </div>
 
         {/* Full-width chart — hero element */}

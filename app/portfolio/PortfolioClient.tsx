@@ -387,7 +387,7 @@ export default function PortfolioClient() {
                             holdings={data.holdings} 
                             onEditHolding={(holding) => {
                                 setEditingTransaction({
-                                    id: '',
+                                    id: holding.ticker + '-' + Date.now(),
                                     ticker: holding.ticker,
                                     side: 'BUY',
                                     quantity: holding.quantity,

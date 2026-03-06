@@ -487,3 +487,50 @@ model Symbol {
   @@index([symbol])
   @@index([companyName])
 }
+
+model BlockDeal {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  clientName      String
+  buySell         String
+  quantityTraded  Int
+  tradePrice      Float
+  remarks         String?
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("block_deals")
+}
+
+model BulkDeal {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  clientName      String
+  buySell         String
+  quantityTraded  Int
+  tradePrice      Float
+  remarks         String?
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("bulk_deals")
+}
+
+model ShortSelling {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  quantity        Int
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("short_selling")
+}
