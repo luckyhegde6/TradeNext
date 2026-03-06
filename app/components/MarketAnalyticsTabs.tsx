@@ -25,7 +25,10 @@ const TABS = [
   { key: "corporate-events", label: "Corp Events", api: "/api/nse/corporate-events" },
   { key: "corporate-actions", label: "Dividends / Splits / Bonus", api: "/api/nse/corporate-actions" },
   { key: "insider-trading", label: "Insider Trading", api: "/api/nse/insider-trading" },
-  { key: "deals", label: "Bulk / Large Deals", api: "/api/nse/deals" },
+  { key: "block_deals", label: "Block Deals", api: "/api/nse/deals", dealType: "block_deal" },
+  { key: "bulk_deals", label: "Bulk Deals", api: "/api/nse/deals", dealType: "bulk_deal" },
+  { key: "short_selling", label: "Short Selling", api: "/api/nse/deals", dealType: "short_selling" },
+  { key: "deals", label: "Bulk / Large Deals (NSE)", api: "/api/nse/deals" },
   { key: "active", label: "Most Active", api: "/api/nse/most-active" },
   { key: "gainers", label: "Top Gainers", api: "/api/nse/gainers" },
   { key: "losers", label: "Top Losers", api: "/api/nse/losers" },
@@ -292,6 +295,18 @@ export default function MarketAnalyticsTabs() {
 
             return (
               <BulkDealsTable data={transformedDeals} meta={meta} />
+            );
+          })()}
+
+          {/* Handle Block Deals - from database */}
+          {(active.key === "block_deals" || active.key === "bulk_deals" || active.key === "short_selling") && (() => {
+            const dealType = (active as any).dealType || active.key;
+            return (
+              <BulkDealsTable 
+                data={[]} 
+                meta={{ fetchedAt: new Date().toISOString() }} 
+                dealType={dealType}
+              />
             );
           })()}
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { invalidatePortfolioCache } from "@/lib/services/portfolioService";
 
 export const runtime = "nodejs";
 
@@ -87,6 +88,8 @@ export async function POST(req: Request) {
       },
     });
 
+    invalidatePortfolioCache(userId);
+
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -135,6 +138,8 @@ export async function PUT(req: Request) {
       },
     });
 
+    invalidatePortfolioCache(userId);
+
     return NextResponse.json(transaction);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -178,6 +183,8 @@ export async function DELETE(req: Request) {
     await prisma.transaction.delete({
       where: { id },
     });
+
+    invalidatePortfolioCache(userId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,39 +1,64 @@
 import { Metadata } from "next";
-import Form from "next/form";
+import { redirect } from "next/navigation";
+import prisma from "@/lib/prisma";
+import { createAuditLog } from "@/lib/audit";
 
 export const metadata: Metadata = {
   title: "Contact Us - TradeNext",
   description: "Get in touch with the TradeNext team. We&apos;re here to help with your trading and market data needs.",
 };
 
-export default function ContactPage() {
-  async function submitContactForm(formData: FormData) {
-    "use server";
+async function getAdminUser() {
+  const admin = await prisma.user.findFirst({
+    where: { role: "admin" },
+    select: { id: true },
+  });
+  return admin;
+}
 
-    const name = formData.get("name") as string;
-    const email = formData.get("email") as string;
-    const subject = formData.get("subject") as string;
-    const message = formData.get("message") as string;
-    const newsletter = formData.get("newsletter") === "on";
+async function submitContactForm(formData: FormData) {
+  "use server";
 
-    // Log the form submission (in production, you'd send this to an email service or database)
-    console.log("Contact form submission:", {
-      name,
-      email,
-      subject,
-      message,
-      newsletter,
+  const name = formData.get("name") as string;
+  const email = formData.get("email") as string;
+  const subject = formData.get("subject") as string;
+  const message = formData.get("message") as string;
+  const newsletter = formData.get("newsletter") === "on";
+
+  const admin = await getAdminUser();
+
+  if (admin) {
+    await prisma.notification.create({
+      data: {
+        userId: admin.id,
+        type: "contact_message",
+        title: `New Contact: ${subject}`,
+        message: `From: ${name} (${email})\n\nSubject: ${subject}\n\nMessage: ${message}\n\nNewsletter: ${newsletter ? "Yes" : "No"}`,
+        link: "/admin/utils/tasks",
+      },
     });
 
-    // In production, you could:
-    // 1. Send email via a service like SendGrid, Resend, or Netlify Emails
-    // 2. Store in database
-    // 3. Submit to Netlify Forms API programmatically
-
-    // For now, we'll just return success
-    // You can add redirect or success handling here if needed
+    await createAuditLog({
+      userId: admin.id,
+      action: "CONTACT_MESSAGE_RECEIVED",
+      resource: "Contact",
+      resourceId: email,
+      metadata: { name, email, subject, newsletter }
+    });
   }
 
+  console.log("Contact form submission:", {
+    name,
+    email,
+    subject,
+    message,
+    newsletter,
+  });
+
+  redirect("/contact?success=true");
+}
+
+export default function ContactPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       {/* Hero Section */}
@@ -106,7 +131,7 @@ export default function ContactPage() {
               Send us a Message
             </h2>
 
-            <Form
+            <form
               action={submitContactForm}
               className="space-y-6"
             >
@@ -191,7 +216,7 @@ export default function ContactPage() {
               >
                 Send Message
               </button>
-            </Form>
+            </form>
           </div>
         </div>
       </section>

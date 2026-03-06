@@ -7,6 +7,7 @@ import {
   markAllAlertsSeen,
   deleteAlert,
   getAlertCount,
+  updateAlert,
   AlertType,
   AlertCondition,
 } from "@/lib/services/alertService";
@@ -115,5 +116,62 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Error creating alert:", error);
     return NextResponse.json({ error: "Failed to create alert" }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action");
+    const alertId = url.searchParams.get("id");
+
+    if (action !== "update" || !alertId) {
+      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    }
+
+    const body = await req.json();
+    const { type, symbol, condition } = body as {
+      type: AlertType;
+      symbol?: string;
+      condition: AlertCondition;
+    };
+
+    const validTypes: AlertType[] = [
+      "price_above",
+      "price_below",
+      "volume_spike",
+      "price_jump",
+      "piotroski_score",
+      "portfolio_value",
+    ];
+
+    if (type && !validTypes.includes(type)) {
+      return NextResponse.json(
+        { error: `Invalid alert type. Must be one of: ${validTypes.join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    const alert = await updateAlert(alertId, userId, type, symbol, condition);
+
+    await createAuditLog({
+      userId,
+      action: 'ALERT_UPDATE',
+      resource: 'Alert',
+      resourceId: alertId,
+      metadata: { type, symbol, condition }
+    });
+
+    return NextResponse.json(alert);
+  } catch (error) {
+    console.error("Error updating alert:", error);
+    return NextResponse.json({ error: "Failed to update alert" }, { status: 500 });
   }
 }
