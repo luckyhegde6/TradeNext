@@ -31,13 +31,16 @@ interface StockRecommendation {
 interface UserAlert {
     id: string;
     symbol: string | null;
-    alertType: string;
-    title: string;
-    message: string | null;
-    targetPrice: number | null;
-    currentPrice: number | null;
-    status: string;
-    triggeredAt: string | null;
+    type: string;
+    condition?: string;
+    title?: string;
+    message?: string | null;
+    targetPrice?: number | null;
+    currentPrice?: number | null;
+    triggered?: boolean;
+    seen?: boolean;
+    status?: string;
+    triggeredAt?: string | null;
     createdAt: string;
 }
 
@@ -79,7 +82,7 @@ export default function PortfolioClient() {
     const fetchPortfolioData = async () => {
         try {
             setLoading(true);
-            const response = await fetch('/api/portfolio');
+            const response = await fetch('/api/portfolio?refresh=true');
             if (!response.ok) throw new Error('Failed to fetch portfolio data');
             const portfolioData = await response.json();
             setData(portfolioData);
@@ -113,7 +116,7 @@ export default function PortfolioClient() {
     const fetchAlerts = async () => {
         try {
             setLoadingAlerts(true);
-            const response = await fetch('/api/user/alerts?today=true');
+            const response = await fetch('/api/alerts');
             if (response.ok) {
                 const data = await response.json();
                 setAlerts(data);
@@ -166,10 +169,8 @@ export default function PortfolioClient() {
 
     const handleDismissAlert = async (alertId: string) => {
         try {
-            await fetch(`/api/user/alerts?id=${alertId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: 'dismissed' }),
+            await fetch(`/api/alerts?action=markSeen&id=${alertId}`, {
+                method: 'POST',
             });
             fetchAlerts();
         } catch (err) {
@@ -194,13 +195,15 @@ export default function PortfolioClient() {
     const getAlertStatusColor = (status: string) => {
         switch (status) {
             case 'triggered':
-                return 'bg-red-100 text-red-700';
+                return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
             case 'active':
-                return 'bg-green-100 text-green-700';
+                return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+            case 'seen':
+                return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
             case 'dismissed':
-                return 'bg-gray-100 text-gray-700';
+                return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
             default:
-                return 'bg-gray-100 text-gray-700';
+                return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
         }
     };
 
@@ -367,8 +370,36 @@ export default function PortfolioClient() {
                     )}
                 </div>
 
-                {activeTab === 'holdings' ? (
-                    <HoldingsTable holdings={data.holdings} />
+{activeTab === 'holdings' ? (
+                    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 overflow-hidden">
+                        <div className="p-4 border-b border-gray-200 dark:border-slate-800 flex justify-between items-center">
+                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                Holdings ({data.holdings.length})
+                            </h2>
+                            <button
+                                onClick={() => { setEditingTransaction(null); setIsTransactionModalOpen(true); }}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold"
+                            >
+                                + Add Transaction
+                            </button>
+                        </div>
+                        <HoldingsTable 
+                            holdings={data.holdings} 
+                            onEditHolding={(holding) => {
+                                setEditingTransaction({
+                                    id: '',
+                                    ticker: holding.ticker,
+                                    side: 'BUY',
+                                    quantity: holding.quantity,
+                                    price: holding.currentPrice,
+                                    tradeDate: new Date().toISOString(),
+                                    fees: null,
+                                    notes: null
+                                });
+                                setIsTransactionModalOpen(true);
+                            }}
+                        />
+                    </div>
                 ) : (
                     <div className="overflow-x-auto">
                         {loadingTransactions ? (
@@ -407,10 +438,10 @@ export default function PortfolioClient() {
                                                 {txn.quantity}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
-                                                ₹{txn.price.toFixed(2)}
+                                                ₹{Number(txn.price).toFixed(2)}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900 dark:text-white">
-                                                ₹{(txn.quantity * txn.price).toFixed(2)}
+                                                ₹{(txn.quantity * Number(txn.price)).toFixed(2)}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-slate-400">
                                                 {txn.notes || '-'}
@@ -517,7 +548,7 @@ export default function PortfolioClient() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                     <div>
                         <h2 className="text-2xl font-bold text-surface-foreground mb-2">My Alerts</h2>
-                        <p className="text-surface-foreground/60">Price alerts and notifications for today</p>
+                        <p className="text-surface-foreground/60">Price alerts and notifications</p>
                     </div>
                     <div className="flex gap-3">
                         <button 
@@ -546,7 +577,10 @@ export default function PortfolioClient() {
                     </div>
                 ) : alerts.length > 0 ? (
                     <div className="space-y-4">
-                        {alerts.slice(0, 5).map((alert) => (
+                        {alerts.slice(0, 5).map((alert) => {
+                            const alertStatus = alert.triggered ? 'triggered' : alert.seen ? 'seen' : 'active';
+                            const alertType = alert.type || alert.condition || 'custom';
+                            return (
                             <div key={alert.id} className="bg-surface border border-border rounded-xl p-4 hover:shadow-md transition-all">
                                 <div className="flex justify-between items-start">
                                     <div className="flex-1">
@@ -554,14 +588,16 @@ export default function PortfolioClient() {
                                             {alert.symbol && (
                                                 <span className="font-bold text-surface-foreground">{alert.symbol}</span>
                                             )}
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${getAlertStatusColor(alert.status)}`}>
-                                                {alert.status}
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${getAlertStatusColor(alertStatus)}`}>
+                                                {alertStatus}
                                             </span>
                                             <span className="text-xs text-surface-foreground/60">
-                                                {alert.alertType.replace('_', ' ')}
+                                                {alertType.replace('_', ' ')}
                                             </span>
                                         </div>
-                                        <h4 className="font-semibold text-surface-foreground mb-1">{alert.title}</h4>
+                                        {alert.title && (
+                                            <h4 className="font-semibold text-surface-foreground mb-1">{alert.title}</h4>
+                                        )}
                                         {alert.message && (
                                             <p className="text-sm text-surface-foreground/70 mb-2">{alert.message}</p>
                                         )}
@@ -573,7 +609,7 @@ export default function PortfolioClient() {
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
-                                        {alert.status === 'active' && (
+                                        {alertStatus === 'active' && (
                                             <button
                                                 onClick={() => handleDismissAlert(alert.id)}
                                                 className="text-xs text-surface-foreground/60 hover:text-surface-foreground px-2 py-1"
@@ -584,7 +620,7 @@ export default function PortfolioClient() {
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        );})}
                     </div>
                 ) : (
                     <div className="text-center py-8 text-surface-foreground/60">

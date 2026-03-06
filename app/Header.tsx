@@ -38,7 +38,7 @@ export default function Header() {
   }
 
   const user = session?.user as UserWithRole;
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role?.toLowerCase() === "admin";
 
   useEffect(() => {
     if (isLoggedIn) {

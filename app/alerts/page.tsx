@@ -31,6 +31,7 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingAlert, setEditingAlert] = useState<Alert | null>(null);
   const [formData, setFormData] = useState({
     type: 'price_above',
     symbol: '',
@@ -83,6 +84,45 @@ export default function AlertsPage() {
     }
   };
 
+  const updateAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAlert) return;
+
+    try {
+      const condition: Record<string, number> = {};
+      if (formData.threshold) condition.threshold = parseFloat(formData.threshold);
+      if (formData.changePercent) condition.changePercent = parseFloat(formData.changePercent);
+
+      const res = await fetch(`/api/alerts?action=update&id=${editingAlert.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: formData.type,
+          symbol: formData.symbol.toUpperCase(),
+          condition,
+        }),
+      });
+
+      if (res.ok) {
+        setEditingAlert(null);
+        setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
+        fetchAlerts();
+      }
+    } catch (error) {
+      console.error('Failed to update alert:', error);
+    }
+  };
+
+  const handleEdit = (alert: Alert) => {
+    setEditingAlert(alert);
+    setFormData({
+      type: alert.type,
+      symbol: alert.symbol || '',
+      threshold: alert.condition.threshold?.toString() || '',
+      changePercent: alert.condition.changePercent?.toString() || '',
+    });
+  };
+
   const deleteAlert = async (id: string) => {
     try {
       await fetch(`/api/alerts?action=delete&id=${id}`, { method: 'DELETE' });
@@ -103,6 +143,12 @@ export default function AlertsPage() {
 
   const getAlertTypeLabel = (type: string) => {
     return ALERT_TYPES.find(t => t.value === type)?.label || type;
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingAlert(null);
+    setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
   };
 
   if (!session) {
@@ -134,10 +180,10 @@ export default function AlertsPage() {
           </div>
         </div>
 
-        {showForm && (
+        {(showForm || editingAlert) && (
           <div className="bg-card border border-border rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">New Alert</h2>
-            <form onSubmit={createAlert} className="space-y-4">
+            <h2 className="text-xl font-semibold mb-4">{editingAlert ? 'Edit Alert' : 'New Alert'}</h2>
+            <form onSubmit={editingAlert ? updateAlert : createAlert} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Alert Type</label>
                 <select
@@ -158,6 +204,7 @@ export default function AlertsPage() {
                 <Autocomplete
                   onSelect={(symbol: string) => setFormData({ ...formData, symbol })}
                   placeholder="e.g., RELIANCE"
+                  initialValue={formData.symbol}
                 />
               </div>
 
@@ -193,12 +240,21 @@ export default function AlertsPage() {
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="w-full py-2 bg-primary text-white rounded hover:bg-primary/90"
-              >
-                Create Alert
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-primary text-white rounded hover:bg-primary/90"
+                >
+                  {editingAlert ? 'Update Alert' : 'Create Alert'}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeForm}
+                  className="px-4 py-2 border border-border rounded hover:bg-muted"
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           </div>
         )}
@@ -235,12 +291,20 @@ export default function AlertsPage() {
                       {alert.triggeredAt && ` • Triggered: ${new Date(alert.triggeredAt).toLocaleDateString()}`}
                     </div>
                   </div>
-                  <button
-                    onClick={() => deleteAlert(alert.id)}
-                    className="text-red-500 hover:text-red-700 text-sm"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEdit(alert)}
+                      className="text-blue-500 hover:text-blue-700 text-sm"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteAlert(alert.id)}
+                      className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

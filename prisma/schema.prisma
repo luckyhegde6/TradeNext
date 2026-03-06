@@ -454,17 +454,21 @@ model RateLimit {
 }
 
 model Notification {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   userId      Int
-  type        String   // alert_triggered | recommendation | system | watchlist
+  type        String    // alert_triggered | recommendation | system | watchlist | contact_message
   title       String
   message     String
   link        String?
-  isRead      Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  isRead      Boolean   @default(false)
+  isAddressed Boolean   @default(false)
+  addressedAt DateTime?
+  addressedBy Int?
+  createdAt   DateTime  @default(now())
 
   @@index([userId])
   @@index([isRead])
+  @@index([isAddressed])
   @@index([createdAt])
   @@map("notifications")
 }

@@ -143,7 +143,9 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
                     </svg>
                 </button>
 
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Add Transaction</h2>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+                        {editingTransaction?.id ? 'Edit Transaction' : 'Add Transaction'}
+                    </h2>
 
                 {error && (
                     <div className="mb-4 p-3 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-sm">
@@ -240,7 +242,7 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
                         />
                     </div>
 
-                    <div className="flex gap-3 pt-4">
+<div className="flex gap-3 pt-4">
                         <button
                             type="button"
                             onClick={onClose}
@@ -254,7 +256,7 @@ export default function TransactionModal({ portfolioId, onClose, onUpdate, editi
                             className={`flex-1 py-3 px-4 font-semibold rounded-lg transition-all shadow-lg active:scale-95 disabled:opacity-50 ${side === 'BUY' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-red-600 text-white hover:bg-red-700'
                                 }`}
                         >
-                            {loading ? "Processing..." : `Add ${side} Transaction`}
+                            {loading ? "Processing..." : editingTransaction?.id ? `Update ${side}` : `Add ${side} Transaction`}
                         </button>
                     </div>
                 </form>
