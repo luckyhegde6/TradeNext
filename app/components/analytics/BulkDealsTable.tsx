@@ -18,11 +18,19 @@ type BulkDeal = {
   price: number | string;
   tradePrice?: number;
   buySell?: string;
+  dealType?: 'bulk' | 'block';
 };
 
 type Meta = {
   fetchedAt: string;
   stale?: boolean;
+};
+
+type Column<T> = {
+  key: keyof T;
+  label: string;
+  align?: "left" | "right";
+  render?: (value: unknown, row: T) => React.ReactNode;
 };
 
 type DealType = "block_deal" | "bulk_deal" | "short_selling";
@@ -53,17 +61,19 @@ export function BulkDealsTable({
   data,
   meta,
   dealType = "bulk_deal",
+  defaultSource,
 }: {
   data: BulkDeal[];
   meta?: Meta;
   dealType?: DealType;
+  defaultSource?: "nse" | "db";
 }) {
-  const [timeRange, setTimeRange] = useState("1M");
+  const [timeRange, setTimeRange] = useState("1Y");
   const [customDate, setCustomDate] = useState("");
   const [showCustom, setShowCustom] = useState(false);
   const [dbData, setDbData] = useState<BulkDeal[]>([]);
   const [loadingDb, setLoadingDb] = useState(false);
-  const [source, setSource] = useState<"nse" | "db">("db");
+  const [source, setSource] = useState<"nse" | "db">(defaultSource || (meta?.asOnDate ? "nse" : "db"));
   
   const { query, setQuery, filtered } = useFilter(
     source === "db" ? dbData : data,
@@ -82,34 +92,42 @@ export function BulkDealsTable({
     if (source === "db") {
       fetchDbData();
     }
-  }, [timeRange, customDate, dealType]);
+  }, [timeRange, customDate, dealType, source]);
 
-  const fetchDbData = async () => {
-    setLoadingDb(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("dealType", dealType);
-      
-      if (showCustom && customDate) {
-        params.set("date", customDate);
-      } else if (timeRange !== "all") {
-        const range = TIME_RANGES.find(r => r.key === timeRange);
-        if (range) {
-          const startDate = new Date();
-          startDate.setDate(startDate.getDate() - range.days);
-          params.set("date", startDate.toISOString().split("T")[0]);
+   // Auto-switch to NSE source when NSE data is received (for NSE tab)
+   useEffect(() => {
+     if (data.length > 0 && (data[0] as any).dealType && source === "db") {
+       setSource("nse");
+     }
+   }, [data]);
+
+    const fetchDbData = async () => {
+      setLoadingDb(true);
+      try {
+        const params = new URLSearchParams();
+        params.set("source", "db"); // Explicitly request database source
+        params.set("dealType", dealType);
+        
+        if (showCustom && customDate) {
+          params.set("fromDate", customDate);
+        } else if (timeRange !== "all") {
+          const range = TIME_RANGES.find(r => r.key === timeRange);
+          if (range) {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - range.days);
+            params.set("fromDate", startDate.toISOString().split("T")[0]);
+          }
         }
+        
+        const response = await fetch(`/api/deals?${params}`);
+        const result = await response.json();
+        setDbData(result.data || []);
+      } catch (err) {
+        console.error("Failed to fetch DB data:", err);
+      } finally {
+        setLoadingDb(false);
       }
-      
-      const response = await fetch(`/api/admin/ingest/deals?${params}`);
-      const result = await response.json();
-      setDbData(result.data || []);
-    } catch (err) {
-      console.error("Failed to fetch DB data:", err);
-    } finally {
-      setLoadingDb(false);
-    }
-  };
+    };
 
   const handleTimeRange = (range: string) => {
     if (range === "Custom") {
@@ -140,6 +158,36 @@ export function BulkDealsTable({
   return (
     <div className="space-y-3">
       {meta && <Freshness meta={meta} />}
+
+      {/* Summary Stats Tiles (for combined NSE data) */}
+      {source === "nse" && data.length > 0 && (data[0] as any).dealType && (() => {
+        const bulk = data.filter(d => (d as any).dealType === 'bulk');
+        const block = data.filter(d => (d as any).dealType === 'block');
+        const bulkBuy = bulk.filter(d => d.buySell === 'BUY').length;
+        const bulkSell = bulk.filter(d => d.buySell === 'SELL').length;
+        const blockBuy = block.filter(d => d.buySell === 'BUY').length;
+        const blockSell = block.filter(d => d.buySell === 'SELL').length;
+        
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="text-sm text-gray-600 dark:text-gray-300 font-medium">Bulk Deals</div>
+              <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{bulk.length}</div>
+              <div className="text-xs text-gray-500 mt-1">BUY: {bulkBuy} | SELL: {bulkSell}</div>
+            </div>
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+              <div className="text-sm text-gray-600 dark:text-gray-300 font-medium">Block Deals</div>
+              <div className="text-3xl font-bold text-green-600 dark:text-green-400">{block.length}</div>
+              <div className="text-xs text-gray-500 mt-1">BUY: {blockBuy} | SELL: {blockSell}</div>
+            </div>
+            <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+              <div className="text-sm text-gray-600 dark:text-gray-300 font-medium">Total Transactions</div>
+              <div className="text-3xl font-bold text-purple-600 dark:text-purple-400">{data.length}</div>
+              <div className="text-xs text-gray-500 mt-1">Combined Bulk + Block</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Source Toggle */}
       <div className="flex flex-wrap items-center gap-4 mb-4">
@@ -238,71 +286,85 @@ export function BulkDealsTable({
         <div className="text-center py-8 text-gray-500">Loading data...</div>
       ) : source === "db" && dbData.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
-          No {dealType.replace("_", " ")} data found. 
-          <a href="/admin/utils/ingest-csv" className="text-blue-600 hover:underline ml-1">
-            Upload CSV to import data
-          </a>
+          No {dealType.replace("_", " ")} data available. Try fetching from NSE Live.
         </div>
       ) : (
         <PaginatedDataTable<BulkDeal>
           data={filtered}
           itemsPerPage={20}
-          columns={[
-            ...(dealType !== "short_selling" ? [{
-              key: "date",
-              label: "Date",
-              render: (v) => v ? new Date(v).toLocaleDateString("en-GB") : "-",
-            }] : []),
-            {
-              key: "symbol",
-              label: "Symbol",
-              render: (v, row) => (
-                <Link
-                  href={`/company/${v}`}
-                  className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
-                >
-                  {v}
-                </Link>
-              ),
-            },
-            {
-              key: "securityName",
-              label: "Security Name",
-              render: (v) => v || "-",
-            },
-            ...(dealType !== "short_selling" ? [{
-              key: "clientName",
-              label: "Client",
-              render: (v, row) => v || row.client_name || row.client || "-",
-            }] : []),
-            ...(dealType !== "short_selling" ? [{
-              key: "buySell",
-              label: "Type",
-              render: (v) => (
-                <span className={v === "BUY" ? "text-green-600 font-medium" : v === "SELL" ? "text-red-600 font-medium" : ""}>
-                  {v || "-"}
-                </span>
-              ),
-            }] : []),
-            {
-              key: "quantity",
-              label: "Quantity",
-              align: "right",
-              render: (v) => {
-                const qty = Number(v || row.quantityTraded || 0);
-                return qty?.toLocaleString("en-IN") || "0";
-              },
-            },
-            ...(dealType !== "short_selling" ? [{
-              key: "price",
-              label: "Price",
-              align: "right",
-              render: (v, row) => {
-                const p = Number(v || row.tradePrice || 0);
-                return p ? `₹${p.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "-";
-              },
-            }] : []),
-          ]}
+          columns={
+            ((): Column<BulkDeal>[] => {
+              const cols: Column<BulkDeal>[] = [];
+
+              if (dealType !== "short_selling") {
+                cols.push({
+                  key: "date",
+                  label: "Date",
+                  render: (v: unknown) => v ? new Date(v as string).toLocaleDateString("en-GB") : "-",
+                });
+              }
+
+              cols.push({
+                key: "symbol",
+                label: "Symbol",
+                render: (v, row) => (
+                  <Link
+                    href={`/company/${v}`}
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
+                  >
+                    {v as string}
+                  </Link>
+                ),
+              });
+
+              cols.push({
+                key: "securityName",
+                label: "Security Name",
+                render: (v: unknown): React.ReactNode => v ? String(v) : "-",
+              });
+
+              if (dealType !== "short_selling") {
+                cols.push({
+                  key: "clientName",
+                  label: "Client",
+                  render: (v: unknown, row: BulkDeal): React.ReactNode => (v ? String(v) : row.client_name ? String(row.client_name) : row.client ? String(row.client) : "-"),
+                });
+                cols.push({
+                  key: "buySell",
+                  label: "Type",
+                  render: (v: unknown): React.ReactNode => (
+                    <span className={v === "BUY" ? "text-green-600 font-medium" : v === "SELL" ? "text-red-600 font-medium" : ""}>
+                      {v ? String(v) : "-"}
+                    </span>
+                  ),
+                });
+              }
+
+              cols.push({
+                key: "quantity",
+                label: "Quantity",
+                align: "right",
+                render: (v, row) => {
+                  const qty = Number(v || row.quantityTraded || 0);
+                  return qty?.toLocaleString("en-IN") || "0";
+                },
+              });
+
+              if (dealType !== "short_selling") {
+                cols.push({
+                  key: "price",
+                  label: "Price",
+                  align: "right",
+                  render: (v, row) => {
+                    const p = Number(v || row.tradePrice || 0);
+                    return p ? `₹${p.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "-";
+                  },
+                });
+              }
+
+              return cols;
+            })()
+          }
         />
       )}
     </div>

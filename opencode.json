@@ -1,42 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Ollama",
-      "options": {
-        "baseURL": "http://localhost:11434/v1"
-      },
-      "models": {
-        "coder": {
-          "name": "qwen3-coder",
-          "description": "Primary coding model for refactoring, writing code, debugging",
-          "temperature": false
-        },
-        "assistant": {
-          "name": "qwen2.5:3b",
-          "description": "Fast general chat model for quick answers and summaries",
-          "temperature": true
-        },
-        "reasoner": {
-          "name": "deepseek-r1:7b",
-          "description": "Complex reasoning, system design, algorithm thinking",
-          "temperature": false
-        },
-        "planner": {
-          "name": "deepseek-r1:1.5b",
-          "description": "Lightweight reasoning for task planning and step generation",
-          "temperature": false
-        },
-        "vision": {
-          "name": "deepseek-ocr:3b",
-          "description": "OCR and document extraction model",
-          "temperature": false
-        }
-      }
-    }
-  },
-  "server": {
+  "instructions": [
+    "./README.md",
+    "./AGENTS.md",
+    "./TODO.md",
+    "./.agents/rules/README.md",
+    "./.agents/rules/checklist.md"
+  ],
+    "server": {
     "port": 4096,
     "mdns": true
   },
@@ -54,6 +25,61 @@
     "opencode-helicone-session",
     "opencode-wakatime"
   ],
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "qwen3.5:9b": {
+          "name": "coder",
+          "description": "Primary coding model for refactoring, writing code, debugging",
+          "variants": {
+            "high": {
+              "reasoningEffort": "high",
+              "textVerbosity": "low",
+              "reasoningSummary": "auto"
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "textVerbosity": "low",
+              "reasoningSummary": "auto"
+            }
+          }
+        },
+        "deepseek-r1:1.5": {
+          "name": "assistant",
+          "description": "Fast general chat model for quick answers and summaries",
+          "variants": {
+            "thinking": {
+              "reasoningEffort": "high",
+              "textVerbosity": "low"
+            },
+            "fast": {
+              "disabled": false
+            }
+          }
+        },
+        "qwen3:8b": {
+          "name": "planner",
+          "description": "Complex reasoning, system design, algorithm thinking",
+          "options": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        },
+        "functiongemma": {
+          "name": "subagent",
+          "description": "subagent extraction model",
+          "temperature": false
+        }
+      }
+    }
+  },
   "mcp": {
     "context7": {
       "type": "remote",
@@ -65,28 +91,52 @@
       "url": "https://mcp.grep.app",
       "enabled": true
     },
-    "Prisma-Remote": {
-      "type": "remote",
-      "url": "https://mcp.prisma.io/mcp",
-      "enabled": false
-    },
-    "Prisma": {
+    "filesystem": {
       "type": "local",
       "command": [
         "npx",
         "-y",
-        "prisma",
-        "mcp"
+        "@modelcontextprotocol/server-filesystem",
+        "."
       ],
-      "enabled": false
+      "enabled": true
     },
     "playwright": {
       "type": "local",
       "command": [
         "npx",
+        "-y",
         "@playwright/mcp@latest"
       ],
       "enabled": true
+    },
+    "docker": {
+      "type": "local",
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "--init",
+        "mcp/docker"
+      ],
+      "enabled": false
+    },
+    "prisma": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "prisma",
+        "--prisma-json",
+        "mcp"
+      ],
+      "enabled": false
+    },
+    "Prisma-Remote": {
+      "type": "remote",
+      "url": "https://mcp.prisma.io/mcp",
+      "enabled": false
     },
     "sequential-thinking": {
       "type": "local",
@@ -105,14 +155,181 @@
         "@modelcontextprotocol/server-memory"
       ],
       "enabled": true
+    },
+    "netlify": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@netlify/mcp"
+      ],
+      "enabled": false
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Main agent for building features and implementing changes",
+      "mode": "primary",
+      "prompt": "## Operational Rules\n\n### Before Execution\n1. **Analyze the input** - Understand the full scope of the request\n2. **Ask clarifications** - If anything is unclear, ask the user specific questions\n3. **Gather requirements** - Get all necessary inputs from user before proceeding\n4. **Create plan/todo** - Break down the work into actionable steps\n5. **Ask permissions** - Explicitly request permission before proceeding with each major step\n\n### Execution Flow\n1. Execute tasks in a logical flow, one step at a time\n2. After implementation, write comprehensive tests when required\n3. Verify tests pass before considering the task complete\n\n### Dev Server Management\n1. **Check if dev server is running** - Use `netstat` or check common ports (3000, 3001)\n2. **Start if needed** - If not running, ask permission then start with `npm run dev`\n3. **Track what you start** - Keep track of any processes you spawn\n4. **Clean up properly** - Only kill processes YOU started, never kill other processes\n5. **Never kill OpenCode** - Do NOT kill any process running on port 4096 (OpenCode web UI)\n\n### Sensitive Operations - ALWAYS ASK PERMISSION\nBefore proceeding, explicitly ask user permission for:\n- **Database modifications** - Any Prisma migrations, schema changes, data modifications\n- **Environment files** - Any changes to .env, .env.local, .env.production\n- **Package installations** - Running npm install, adding new dependencies\n- **Auth/Admin changes** - Modifications to authentication, authorization, admin routes\n- **Production deployments** - Any changes that affect production systems\n\n### Process Killing Rules\n- Only kill processes YOU started during this session\n- Check port 3000, 3001, 4000 for Next.js dev server\n- NEVER kill: port 4096 (OpenCode), database ports, other system services\n- Ask before killing any process, ## Test Requirements\n- Write comprehensive tests for new functionality\n- Place tests in `lib/__tests__/` or `app/components/*/__tests__/`\n- Run tests with `npm run test`\n- Ensure all tests pass before finishing\n\n### UI/UX Testing with Playwright\nAfter making any UI/UX changes, ALWAYS test using Playwright MCP:\n\n1. **Start dev server** (if not running):\n   ```bash\n   npm run local   # Full local dev with cross-platform support\n   # Or use: npm run dev:only-host followed by npm run dev\n   ```\n\n2. **Use Playwright MCP** to test:\n   - Navigate to the login page\n   - Login with demo credentials:\n     - Email: demo@tradenext.in\n     - Password: demo123\n   - Verify UI changes render correctly\n   - Check responsive behavior\n   - Test dark/light mode if applicable\n   - Test form submissions and interactions\n\n3. **Verify with Playwright**:\n   - Page loads without errors\n   - Components render correctly\n   - Interactive elements work (buttons, forms, modals)\n   - No console errors\n\n4. **Cleanup**: Only kill processes you started (port 3000/3001), never kill port 4096 (OpenCode)\n\n### Documentation Updates (MANDATORY before commit)\nAfter completing any implementation, ALWAYS update documentation:\n\n1. **AGENTS.md** - Update for any:\n   - New API endpoints or routes\n   - New commands/scripts added\n   - Changes to build/test process\n   - New dependencies or requirements\n   - Updated configuration\n\n2. **README.md** - Update for major changes:\n   - New features or capabilities\n   - Changed tech stack\n   - New installation/setup steps\n   - Changed credentials or environment variables\n   - Breaking changes\n\n3. **Version History** - Update AGENTS.md version history with:\n   - Date of change\n   - Brief description of what changed\n   - New features added\n\nUse `/pre-commit-check` command before committing to verify documentation is current.",
+      "tools": {
+        "Read": true,
+        "Write": true,
+        "Edit": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "WebFetch": true,
+        "WebSearch": true,
+        "CodeSearch": true,
+        "context7_resolve-library-id": true,
+        "context7_query-docs": true,
+        "gh_grep_searchGitHub": true,
+        "TodoWrite": true
+      }
+    },
+    "plan": {
+      "description": "Implementation planning specialist - analyzes requirements without making changes",
+      "mode": "primary",
+      "prompt": "Create detailed implementation plans with risk assessment\n Break down features into manageable tasks\n Consider checklist rules in planning \n ## Planning Rules\n\n### Analysis Phase\n1. **Understand the request** - Read and analyze the full requirement\n2. **Ask questions** - If anything is unclear, ask clarifying questions BEFORE creating a plan\n3. **Gather inputs** - Understand what inputs/data you'll need\n\n### Plan Structure\n1. Break down into sequential steps\n2. Identify dependencies between tasks\n3. Note any risks or considerations\n4. Include testing approach\n5. Consider rollback strategy for risky changes\n\n### Permission Assessment\n- Identify which tasks will need explicit user permission\n- Flag: database changes, env modifications, package installs, auth/admin work",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "WebFetch": true,
+        "WebSearch": true,
+        "CodeSearch": true,
+        "Write": false,
+        "Edit": false,
+        "Bash": false,
+        "todowrite": true
+      }
+    },
+    "review": {
+      "description": "Code review specialist - analyzes code quality and security",
+      "mode": "subagent",
+      "prompt": "## Review Process\n\n### Analysis First\n1. Read and understand the code thoroughly\n2. Ask clarifying questions if requirements are unclear\n3. Check against checklist rules\n\n### Security Focus\n- Flag any database access patterns\n- Check for auth/admin vulnerabilities\n- Look for exposed secrets\n- Verify input validation\n\n### Permissions for Fixes\n- If you identify issues, do NOT auto-fix\n- Present findings to user\n- Ask permission before suggesting/executing fixes",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Write": false,
+        "Edit": false,
+        "Bash": false
+      }
+    },
+    "tdd": {
+      "description": "Test-driven development guide - writes tests first then implements",
+      "mode": "subagent",
+      "prompt": "## TDD Workflow\n\n### Phase 1: Understand & Question\n1. Fully understand the requirement\n2. Ask clarifying questions if needed\n3. Get all necessary inputs before starting\n\n### Phase 2: Write Failing Test\n1. Write test that describes expected behavior\n2. Run test to verify it fails\n3. Do NOT proceed until test fails as expected\n\n### Phase 3: Implement\n1. Write minimal code to pass the test\n2. Run tests to verify pass\n3. Refactor while keeping tests green\n\n### Phase 4: Verify\n1. Run full test suite\n2. Check for any regressions\n3. Ask permission before finishing\n\n### Dev Server\n- Check if running, start if needed\n- Only kill processes you started\n- Never kill port 4096",
+      "tools": {
+        "Read": true,
+        "Write": false,
+        "Edit": false,
+        "Glob": true,
+        "Grep": true,
+        "Bash": false
+      }
+    },
+    "explore": {
+      "description": "Fast agent for exploring codebases - read-only analysis",
+      "mode": "subagent",
+      "prompt": "Explore the codebase to find information\n Use Glob and Grep to locate files and code patterns\n Ask clarifying questions if the search query is unclear\n Provide clear answers with file paths and relevant code snippets",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "WebFetch": true,
+        "WebSearch": true,
+        "CodeSearch": true,
+        "Write": false,
+        "Edit": false,
+        "Bash": false
+      }
+    }
+  },
+  "command": {
+    "tdd": {
+      "description": "Run TDD workflow - write tests first then implement",
+      "template": "./.agents/commands/tdd.md",
+      "agent": "tdd"
+    },
+    "code-review": {
+      "description": "Review code quality, security and maintainability",
+      "template": "./.agents/commands/code-review.md",
+      "agent": "review"
+    },
+    "build-fix": {
+      "description": "Fix build and TypeScript errors",
+      "template": "./.agents/commands/build-fix.md"
+    },
+    "plan": {
+      "description": "Create detailed implementation plan",
+      "template": "./.agents/commands/plan.md",
+      "agent": "plan"
+    },
+    "pre-commit-check": {
+      "description": "Check changes before commit and update documentation",
+      "agent": "build",
+      "template": "./.agents/commands/plan.md",
+      "prompt": "You are a documentation checker. Before the user commits code, verify documentation is up to date:\n\n## Tasks\n\n1. Check git diff to see what files changed\n2. Analyze if changes require AGENTS.md updates:\n   - New API endpoints added?\n   - New commands or features?\n   - Changes to build/test commands?\n   - New environment variables?\n3. Analyze if changes require README.md updates:\n   - New features added?\n   - Changed tech stack?\n   - New installation steps?\n   - Changed credentials?\n4. Report findings to user with specific update suggestions\n\n## Important\n- Do NOT make changes - only report what needs updating\n- Be specific about which sections need changes\n- Use git diff to see actual changes"
     }
   },
   "permission": {
-    "skill": {
+    "*": "allow",
+    "edit": {
       "*": "allow",
-      "pr-review": "allow",
-      "internal-*": "deny",
-      "experimental-*": "ask"
+      "prisma/**": "ask",
+      ".env*": "ask",
+      "package.json": "ask"
+    },
+    "bash": {
+      "*": "ask",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "grep *": "allow",
+      "rg *": "allow",
+      "npm run test *": "allow",
+      "npm run lint *": "allow",
+      "npm install *": "ask",
+      "npx prisma *": "ask",
+      "rm -rf *": "deny"
+    },
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "webfetch": "allow",
+    "websearch": "allow",
+    "codesearch": "allow",
+    "skill": {
+      "*": "allow"
+    },
+    "external_directory": {
+      "*": "ask"
+    },
+    "doom_loop": "ask"
+  },
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      ".next/**",
+      "dist/**",
+      ".git/**",
+      "*.log",
+      ".env*"
+    ]
+  },
+  "formatter": {
+    "prettier": {
+      "disabled": false
     }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
   }
 }

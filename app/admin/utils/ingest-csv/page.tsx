@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import Link from "next/link";
 
 interface DealData {
     id: number;
@@ -18,6 +20,7 @@ interface DealData {
 
 export default function IngestCsvPage() {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [file, setFile] = useState<File | null>(null);
     const [fileName, setFileName] = useState("");
     const fileInputRef = useState<HTMLInputElement | null>(null);
@@ -31,6 +34,22 @@ export default function IngestCsvPage() {
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [totalCount, setTotalCount] = useState(0);
     const [dragActive, setDragActive] = useState(false);
+
+    // Check if user is admin
+    useEffect(() => {
+        if (status === "loading") return;
+        if (!session || session.user.role !== "admin") {
+            router.push("/");
+        }
+    }, [session, status, router]);
+
+    if (status === "loading" || !session || session.user.role !== "admin") {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-gray-500">Checking permissions...</div>
+            </div>
+        );
+    }
 
     useEffect(() => {
         if (dealType) {

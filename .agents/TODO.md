@@ -34,4 +34,4 @@ This file contains the implementation checklist for TradeNext features.
 
 ---
 
-See `.ai/rules/checklist.md` for engineering guardrails.
+See `.agents/rules/checklist.md` for engineering guardrails.

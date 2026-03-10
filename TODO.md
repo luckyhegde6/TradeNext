@@ -1,6 +1,6 @@
 # TradeNext Implementation TODO
 
-> **Reference:** See `.ai/TODO.md` for detailed implementation checklist
+> **Reference:** See `.agents/TODO.md` for detailed implementation checklist
 
 ## Quick Reference
 
@@ -38,14 +38,30 @@
 - Stock Screener with filters
 - Price Alerts system
 - CSV/Excel import for transactions
-- Piotroski F-Score (existing)
+- Piotroski F-Score
 - Stock Recommendations Management (admin)
 - User Holdings Management
 - Audit Logging
 - Rate Limiting
-- User Recommendations Page (/recommendations) - [x] Complete
-- Watchlist Feature - [x] Complete
-- **NSE Charting Integration - [x] Complete**
+- User Recommendations Page (/recommendations)
+- Watchlist Feature
+- NSE Charting Integration
+- **Enhanced Corporate Actions (v1.4.0)**:
+  - Dividend per share and yield display
+  - Clickable type filter tiles
+  - Search by symbol/company
+  - Pagination with smart navigation
+  - Enhanced upcoming table with expand/collapse
+  - Better date formatting with day of week
+  - Type badges with icons (💰✂️🎁📈🔄)
+  - Urgency-based row highlighting
+  - DataTable sorting for all analytics tables
+  - Fixed Advance/Decline counts display
+- **Development Checks** (`scripts/dev-checks/`):
+  - `check-db.js` - Database connection and users
+  - `check-schema.js` - Schema verification
+  - `check-deals.js` - Deals data check
+  - `test-auth.js` - Authentication testing
 
 ---
 
@@ -102,7 +118,7 @@
 ## Engineering Standards
 
 All implementations must follow:
-- `.ai/rules/checklist.md` - Engineering guardrails
+- `.agents/rules/checklist.md` - Engineering guardrails
 - `AGENTS.md` - Development guide
 - **NSE Charting Integration** - Uses NSE's official charting platform for seamless user experience
 

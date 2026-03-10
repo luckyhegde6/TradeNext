@@ -86,27 +86,104 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
 
     try {
         for (const action of actions) {
-            const actionDate = new Date(action.exDate);
-            if (isNaN(actionDate.getTime())) continue;
+            // Determine action type from subject
+            const subject = action.subject?.toUpperCase() || "";
+            let actionType = "CORPORATE_ACTION";
+            
+            if (subject.includes("DIVIDEND") || subject.includes("CASH")) {
+                actionType = "DIVIDEND";
+            } else if (subject.includes("SPLIT") || subject.includes("DIV")) {
+                actionType = "SPLIT";
+            } else if (subject.includes("BONUS")) {
+                actionType = "BONUS";
+            } else if (subject.includes("RIGHTS")) {
+                actionType = "RIGHTS";
+            } else if (subject.includes("BUYBACK")) {
+                actionType = "BUYBACK";
+            }
 
+            const exDate = action.exDate ? new Date(action.exDate) : null;
+            const recDate = action.recDate ? new Date(action.recDate) : null;
+
+            if (!exDate || isNaN(exDate.getTime())) continue;
+
+            // Parse dividend amount from subject (e.g., "Rs 2.50 per share" or "Rs 12.50")
+            let dividendPerShare: number | undefined = undefined;
+            
+            if (actionType === "DIVIDEND") {
+                const dividendMatch = subject.match(/Rs\s*([\d.]+)/i);
+                if (dividendMatch) {
+                    dividendPerShare = parseFloat(dividendMatch[1]);
+                }
+            }
+
+            // Parse old and new face value for splits
+            let oldFV: string | undefined = undefined;
+            let newFV: string | undefined = undefined;
+            
+            if (actionType === "SPLIT" && action.faceVal) {
+                // Parse face value split (e.g., "10 to 2")
+                const fvMatch = action.faceVal.match(/(\d+)\s*to\s*(\d+)/i);
+                if (fvMatch) {
+                    oldFV = fvMatch[1];
+                    newFV = fvMatch[2];
+                } else {
+                    // If no "to", assume it's already in new format
+                    newFV = action.faceVal;
+                }
+            }
+
+            // Parse bonus ratio
+            let ratio: string | undefined = undefined;
+            if (actionType === "BONUS") {
+                const ratioMatch = action.faceVal?.match(/(\d+:\d+)/i) || subject.match(/(\d+:\d+)/i);
+                if (ratioMatch) {
+                    ratio = ratioMatch[1];
+                }
+            }
+
+            // Check if exists and update or create
             const existing = await prisma.corporateAction.findFirst({
                 where: {
-                    symbol: symbol,
-                    exDate: actionDate,
-                    actionType: action.subject
+                    symbol: symbol.toUpperCase(),
+                    exDate: exDate,
+                    actionType: actionType
                 }
             });
 
-            if (!existing) {
+            if (existing) {
+                await prisma.corporateAction.update({
+                    where: { id: existing.id },
+                    data: {
+                        companyName: action.comp || action.symbol || symbol,
+                        series: action.series || "EQ",
+                        subject: action.subject,
+                        recordDate: recDate || undefined,
+                        faceValue: action.faceVal || undefined,
+                        oldFV: oldFV,
+                        newFV: newFV,
+                        ratio: ratio,
+                        dividendPerShare: dividendPerShare,
+                        isin: action.isin || undefined,
+                        updatedAt: new Date()
+                    }
+                });
+            } else {
                 await prisma.corporateAction.create({
                     data: {
-                        symbol: symbol,
-                        companyName: action.symbol || action.comp || symbol,
+                        symbol: symbol.toUpperCase(),
+                        companyName: action.comp || action.symbol || symbol,
+                        series: action.series || "EQ",
                         subject: action.subject,
-                        exDate: actionDate,
-                        recDate: action.recDate ? new Date(action.recDate) : null,
-                        faceValue: action.faceVal,
-                        actionType: 'CORPORATE_ACTION'
+                        actionType: actionType,
+                        exDate: exDate,
+                        recordDate: recDate || undefined,
+                        faceValue: action.faceVal || undefined,
+                        oldFV: oldFV,
+                        newFV: newFV,
+                        ratio: ratio,
+                        dividendPerShare: dividendPerShare,
+                        isin: action.isin || undefined
                     }
                 });
             }

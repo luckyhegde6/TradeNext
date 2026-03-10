@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { DataTable } from "./DataTable";
 
-type Column<T> = {
+export type Column<T> = {
   key: keyof T;
   label: string;
   align?: "left" | "right";
