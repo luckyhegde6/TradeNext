@@ -23,8 +23,6 @@ async function testAuth() {
       return;
     }
 
-    console.log("Stored password hash:", user.password.substring(0, 20) + "...");
-
     const isMatch = await compare(password, user.password);
     console.log("Password comparison result:", isMatch ? "✅ MATCH" : "❌ NO MATCH");
 
