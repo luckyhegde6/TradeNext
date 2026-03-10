@@ -73,6 +73,7 @@ RELIANCE,2025-11-28,2400,2450,2390,2440,2200000,2425`;
       // Arrange
       const mockClient = {
         query: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);
@@ -89,7 +90,7 @@ RELIANCE,2025-11-28,2400,2450,2390,2440,2200000,2425`;
       // Verify transaction handling
       expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
       expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
-      expect(mockClient.query).toHaveBeenCalledTimes(4); // BEGIN + 3 upserts + COMMIT
+      expect(mockClient.query).toHaveBeenCalledTimes(5); // BEGIN + 3 upserts + COMMIT
 
       // Verify each upsert query
       const calls = mockClient.query.mock.calls;
@@ -135,6 +136,7 @@ RELIANCE,2025-11-28,2400,2450,2390,2440,2200000,2425`;
       // Arrange
       const mockClient = {
         query: jest.fn().mockRejectedValue(new Error('DB constraint violation')),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);
@@ -158,6 +160,7 @@ RELIANCE,2025-11-28,2400,2450,2390,2440,2200000,2425`;
       // Arrange
       const mockClient = {
         query: jest.fn(),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);
@@ -194,6 +197,7 @@ TCS,2025-11-28,3600,3625,3580,3610,1250000,3605`;
 
       const mockClient = {
         query: jest.fn(),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);
@@ -228,6 +232,7 @@ TCS,2025-11-28,3600,3625,3580,3610,1250000`;
 
       const mockClient = {
         query: jest.fn(),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);
@@ -241,9 +246,9 @@ TCS,2025-11-28,3600,3625,3580,3610,1250000`;
       expect(result.status).toBe('ok');
       expect(result.rows).toBe(1);
 
-      // Verify vwap is null (9th parameter, index 8)
+      // Verify vwap is null (8th parameter, index 7)
       const calls = mockClient.query.mock.calls;
-      expect(calls[1][1][8]).toBeNull();
+      expect(calls[1][1][7]).toBeNull();
     });
 
     it('should sanitize whitespace in symbol', async () => {
@@ -253,6 +258,7 @@ TCS,2025-11-28,3600,3625,3580,3610,1250000`;
 
       const mockClient = {
         query: jest.fn(),
+        release: jest.fn(),
       };
       mockPoolQuery.connect = jest.fn().mockResolvedValue(mockClient);
       mockExistsSync.mockReturnValue(true);

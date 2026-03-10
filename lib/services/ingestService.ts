@@ -12,9 +12,7 @@ export interface IngestResult {
 export async function runIngestion(csvPath?: string): Promise<IngestResult> {
     try {
         const filePath =
-            csvPath ||
-            process.env.INGEST_CSV_PATH ||
-            path.join(process.cwd(), 'api', 'sample_nse.csv');
+            csvPath ?? path.join(process.cwd(), 'api', 'sample_nse.csv');
 
         if (!fs.existsSync(filePath)) {
             return { status: 'error', error: 'CSV not found', rows: 0 };
@@ -23,11 +21,10 @@ export async function runIngestion(csvPath?: string): Promise<IngestResult> {
         const csv = fs.readFileSync(filePath, 'utf8');
         const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true });
 
-        // Use a single DB transaction via raw pg client for upserts (faster for batch)
         const client = await poolQuery.connect();
-        await client.query('BEGIN');
-
         try {
+            await client.query('BEGIN');
+
             for (const row of records as Record<string, string>[]) {
                 const ticker = (row.SYMBOL || row.symbol || row.Symbol || '').trim();
                 const trade_date = row.DATE || row.date || row.Date;
@@ -51,6 +48,7 @@ export async function runIngestion(csvPath?: string): Promise<IngestResult> {
                 `;
                 await client.query(q, [ticker, trade_date, open, high, low, close, volume, vwap]);
             }
+
             await client.query('COMMIT');
         } catch (err) {
             await client.query('ROLLBACK');
