@@ -51,3 +51,5 @@ nul
 .swc
 
 .playwright-cli
+
+*.log

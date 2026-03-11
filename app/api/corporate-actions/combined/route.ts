@@ -58,6 +58,39 @@ function parsePurpose(purpose: string): {
   return { actionType, dividendAmount, ratio };
 }
 
+// Parse full corporate action from NSE response item
+function parseCorporateActionFromNse(item: any): any | null {
+  const parsed = parsePurpose(item.PURPOSE || item.purpose || '');
+  const exDate = parseNseDate(item['EX-DATE'] || item.exDate || "");
+  if (!exDate) return null; // require exDate
+
+  const dividendAmount = parsed.dividendAmount || null;
+  
+  // Compute dividend yield if we have dividend and face value info
+  let dividendYield: number | null = null;
+  if (dividendAmount && item['FACE VALUE']) {
+    const faceValue = parseFloat(item['FACE VALUE'].replace(/,/g, ''));
+    if (faceValue > 0) {
+      dividendYield = (dividendAmount / faceValue) * 100;
+    }
+  }
+
+  return {
+    symbol: item.SYMBOL || item.symbol || "",
+    companyName: item['COMPANY NAME'] || item.companyName || "",
+    series: item.SERIES || item.series || null,
+    subject: item.PURPOSE || item.purpose || "",
+    actionType: parsed.actionType,
+    exDate: exDate,
+    recordDate: parseNseDate(item['RECORD DATE'] || item.recordDate || ""),
+    faceValue: item['FACE VALUE'] || item.faceValue || null,
+    ratio: parsed.ratio,
+    dividendPerShare: dividendAmount,
+    dividendYield: dividendYield,
+    source: 'nse',
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -68,17 +101,18 @@ export async function GET(req: Request) {
     const toDate = url.searchParams.get("toDate");
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
-   const page = pageParam ? parseInt(pageParam, 10) : undefined;
-   const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+    const page = pageParam ? parseInt(pageParam, 10) : undefined;
+    const limit = limitParam ? parseInt(limitParam, 10) : undefined;
 
     const includeAdmin = sourceParam === "all" || sourceParam === "admin";
     const includeNse = sourceParam === "all" || sourceParam === "nse";
 
-    let adminActions: any[] = [];
-    let nseActions: any[] = [];
+    // Strategy: Always query DB first (which includes both admin uploaded and previously synced NSE data)
+    // If DB is empty or filters require fresh data, sync from NSE in background and return cached/DB data
+    let allActions: any[] = [];
 
-    // Fetch admin-uploaded from DB
-    if (includeAdmin) {
+    // Build base where clause for DB query
+    const buildDbWhere = (sourceFilter?: string) => {
       const where: any = {};
       if (actionType) where.actionType = actionType;
       if (symbol) where.symbol = { contains: symbol.toUpperCase() };
@@ -91,123 +125,227 @@ export async function GET(req: Request) {
           where.exDate.lte = endDate;
         }
       }
+      if (sourceFilter) where.source = sourceFilter;
+      return where;
+    };
 
-      adminActions = await prisma.corporateAction.findMany({
-        where,
-        select: {
-          id: true,
-          symbol: true,
-          companyName: true,
-          series: true,
-          subject: true,
-          actionType: true,
-          exDate: true,
-          recordDate: true,
-          faceValue: true,
-          ratio: true,
-          dividendPerShare: true,
-          source: true,
-        },
-      });
+    // Fetch from DB (admin + previously synced NSE)
+    const dbWhere = buildDbWhere(sourceParam === "all" ? undefined : sourceParam);
+    const dbActions = await prisma.corporateAction.findMany({
+      where: dbWhere,
+      orderBy: [
+        { exDate: 'desc' },
+        { createdAt: 'desc' }
+      ],
+      select: {
+        id: true,
+        symbol: true,
+        companyName: true,
+        series: true,
+        subject: true,
+        actionType: true,
+        exDate: true,
+        recordDate: true,
+        effectiveDate: true,
+        faceValue: true,
+        oldFV: true,
+        newFV: true,
+        ratio: true,
+        dividendPerShare: true,
+        dividendYield: true,
+        isin: true,
+        bookClosureStartDate: true,
+        bookClosureEndDate: true,
+        announcementDate: true,
+        source: true,
+      },
+    });
+
+    // If we have sufficient DB data, return it (cached response)
+    if (dbActions.length > 0) {
+      const formattedDb = dbActions.map(a => ({
+        ...a,
+        exDate: a.exDate?.toISOString(),
+        recordDate: a.recordDate?.toISOString(),
+        effectiveDate: a.effectiveDate?.toISOString(),
+        bookClosureStartDate: a.bookClosureStartDate?.toISOString(),
+        bookClosureEndDate: a.bookClosureEndDate?.toISOString(),
+        announcementDate: a.announcementDate?.toISOString(),
+      }));
+      
+      // Apply pagination if requested
+      if (page !== undefined && limit !== undefined) {
+        const total = formattedDb.length;
+        const totalPages = Math.ceil(total / limit);
+        const offset = (page - 1) * limit;
+        const paginated = formattedDb.slice(offset, offset + limit);
+        
+        return NextResponse.json({ 
+          data: paginated, 
+          total, 
+          page, 
+          totalPages, 
+          limit,
+          source: 'db'
+        });
+      }
+
+      return NextResponse.json({ data: formattedDb, source: 'db' });
     }
 
-    // Fetch from NSE
+    // DB empty or no matching records - Fetch from NSE, populate DB, and return
     if (includeNse) {
       try {
         const nseData = await nseFetch("/api/corporates-corporateActions?index=equities") as any[];
         if (Array.isArray(nseData)) {
-          nseActions = nseData.map(item => {
-            const parsed = parsePurpose(item.PURPOSE || item.purpose || '');
-            const exDate = parseNseDate(item['EX-DATE'] || item.exDate || "");
-            // Apply filters
-            if (actionType && parsed.actionType !== actionType) return null;
-            if (symbol && !(item.SYMBOL || item.symbol)?.toUpperCase().includes(symbol.toUpperCase())) return null;
-            if (fromDate || toDate) {
-              if (!exDate) return null;
-              const exDt = new Date(exDate);
-              if (fromDate && exDt < new Date(fromDate)) return null;
-              if (toDate) {
-                const toDt = new Date(toDate);
-                toDt.setHours(23, 59, 59, 999);
-                if (exDt > toDt) return null;
-              }
+          const parsedNse = nseData
+            .map(item => parseCorporateActionFromNse(item))
+            .filter(Boolean);
+
+          // Bulk insert into DB for caching (ignore duplicates via onConflict)
+          if (parsedNse.length > 0) {
+            // Use raw SQL upsert to avoid duplicate key errors (assuming unique constraint on symbol+actionType+exDate)
+            // For simplicity, we'll insert many and ignore errors
+            try {
+              await prisma.$executeRaw`
+                INSERT INTO "CorporateAction" (symbol, "companyName", series, subject, "actionType", "exDate", "recordDate", "effectiveDate", "faceValue", ratio, "dividendPerShare", "dividendYield", source, "createdAt", "updatedAt")
+                SELECT 
+                  s.symbol,
+                  s."companyName",
+                  s.series,
+                  s.subject,
+                  s."actionType",
+                  s."exDate"::timestamptz,
+                  s."recordDate"::timestamptz,
+                  s."effectiveDate"::timestamptz,
+                  s."faceValue",
+                  s.ratio,
+                  s."dividendPerShare",
+                  s."dividendYield",
+                  s.source,
+                  NOW(),
+                  NOW()
+                FROM (VALUES ${prisma.join(
+                  parsedNse.map((a: any) => [
+                    a.symbol,
+                    a.companyName,
+                    a.series || null,
+                    a.subject,
+                    a.actionType,
+                    a.exDate,
+                    a.recordDate || null,
+                    null, // effectiveDate
+                    a.faceValue || null,
+                    a.ratio || null,
+                    a.dividendPerShare || null,
+                    a.dividendYield || null,
+                    a.source,
+                  ]),
+                  (tx: any) => [
+                    tx.String, // symbol
+                    tx.String, // companyName
+                    tx.String, // series
+                    tx.String, // subject
+                    tx.String, // actionType
+                    tx.DateTime, // exDate
+                    tx.DateTime, // recordDate
+                    tx.DateTime, // effectiveDate
+                    tx.String, // faceValue
+                    tx.String, // ratio
+                    tx.Float, // dividendPerShare
+                    tx.Float, // dividendYield
+                    tx.String, // source
+                  ]
+                )}) AS s(symbol, "companyName", series, subject, "actionType", "exDate", "recordDate", "effectiveDate", "faceValue", ratio, "dividendPerShare", "dividendYield", source)
+                ON CONFLICT (symbol, "actionType", "exDate") DO UPDATE SET
+                  "companyName" = EXCLUDED."companyName",
+                  series = EXCLUDED.series,
+                  subject = EXCLUDED.subject,
+                  "recordDate" = EXCLUDED."recordDate",
+                  "faceValue" = EXCLUDED."faceValue",
+                  ratio = EXCLUDED.ratio,
+                  "dividendPerShare" = EXCLUDED."dividendPerShare",
+                  "dividendYield" = EXCLUDED."dividendYield",
+                  source = EXCLUDED.source,
+                  "updatedAt" = NOW();
+              `;
+            } catch (dbErr) {
+              logger.warn({ msg: "Failed to bulk insert NSE corporate actions", error: dbErr });
+              // Continue anyway - we can still return the NSE data directly
             }
-            return {
-              id: null,
-              symbol: item.SYMBOL || item.symbol || "",
-              companyName: item['COMPANY NAME'] || item.companyName || "",
-              series: item.SERIES || item.series || null,
-              subject: item.PURPOSE || item.purpose || "",
-              actionType: parsed.actionType,
-              exDate: exDate,
-              recordDate: parseNseDate(item['RECORD DATE'] || item.recordDate || ""),
-              faceValue: item['FACE VALUE'] || item.faceValue || null,
-              ratio: parsed.ratio,
-              dividendPerShare: parsed.dividendAmount || null,
-              source: 'nse',
-            };
-          }).filter(Boolean) as any[];
+          }
+
+          // Re-query DB to get the freshly synced data (with our filters applied again)
+          const syncedDb = await prisma.corporateAction.findMany({
+            where: buildDbWhere(sourceParam === "all" ? undefined : sourceParam),
+            orderBy: [
+              { exDate: 'desc' },
+              { createdAt: 'desc' }
+            ],
+            select: {
+              id: true,
+              symbol: true,
+              companyName: true,
+              series: true,
+              subject: true,
+              actionType: true,
+              exDate: true,
+              recordDate: true,
+              effectiveDate: true,
+              faceValue: true,
+              oldFV: true,
+              newFV: true,
+              ratio: true,
+              dividendPerShare: true,
+              dividendYield: true,
+              isin: true,
+              bookClosureStartDate: true,
+              bookClosureEndDate: true,
+              announcementDate: true,
+              source: true,
+            },
+          });
+
+          const formattedSynced = syncedDb.map(a => ({
+            ...a,
+            exDate: a.exDate?.toISOString(),
+            recordDate: a.recordDate?.toISOString(),
+            effectiveDate: a.effectiveDate?.toISOString(),
+            bookClosureStartDate: a.bookClosureStartDate?.toISOString(),
+            bookClosureEndDate: a.bookClosureEndDate?.toISOString(),
+            announcementDate: a.announcementDate?.toISOString(),
+          }));
+
+          // Pagination
+          if (page !== undefined && limit !== undefined) {
+            const total = formattedSynced.length;
+            const totalPages = Math.ceil(total / limit);
+            const offset = (page - 1) * limit;
+            const paginated = formattedSynced.slice(offset, offset + limit);
+            
+            return NextResponse.json({ 
+              data: paginated, 
+              total, 
+              page, 
+              totalPages, 
+              limit,
+              source: 'db-synced'
+            });
+          }
+
+          return NextResponse.json({ data: formattedSynced, source: 'db-synced' });
         }
-      } catch (e) {
-        logger.warn({ msg: "Failed to fetch NSE corporate actions for combined", error: e });
+      } catch (nseErr) {
+        logger.warn({ msg: "Failed to fetch NSE corporate actions for hydration", error: nseErr });
       }
     }
 
-    // Merge and sort by exDate descending
-    const combined = [...adminActions, ...nseActions].sort((a, b) => {
-      const dateA = a.exDate ? new Date(a.exDate).getTime() : 0;
-      const dateB = b.exDate ? new Date(b.exDate).getTime() : 0;
-      return dateB - dateA;
+    // If we reach here, NSE sync failed or not allowed
+    return NextResponse.json({ 
+      data: [], 
+      message: "No corporate actions available. Use admin upload to populate." 
     });
 
-    // Remove duplicates and ensure valid symbols
-    const seen = new Set<string>();
-    const uniqueCombined = combined.filter(item => {
-      // Skip items without valid symbol
-      if (!item.symbol || typeof item.symbol !== 'string' || item.symbol.trim() === '') {
-        return false;
-      }
-      // Exclude "OTHER" type as it's not a meaningful corporate action
-      if (item.actionType === 'OTHER') return false;
-      if (!item.exDate) return false; // require exDate
-      const dateKey = new Date(item.exDate).toISOString().split('T')[0];
-      const key = `${item.symbol}-${item.actionType}-${dateKey}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    // Enrich with current price and compute dividend yield (simplified - price lookup disabled for now)
-    const enrichedCombined = uniqueCombined.map(item => ({
-      ...item,
-      currentPrice: null,
-      dividendYield: null,
-    }));
-
-    // Apply pagination only if both page and limit are provided
-    let responseData = enrichedCombined;
-    if (page !== undefined && limit !== undefined) {
-      const total = enrichedCombined.length;
-      const totalPages = Math.ceil(total / limit);
-      const offset = (page - 1) * limit;
-      responseData = enrichedCombined.slice(offset, offset + limit);
-      
-      logger.info({ msg: "Combined corporate actions", adminCount: adminActions.length, nseCount: nseActions.length, uniqueTotal: enrichedCombined.length, page, limit, returned: responseData.length });
-      
-      return NextResponse.json({ 
-        data: responseData, 
-        total, 
-        page, 
-        totalPages, 
-        limit 
-      });
-    } else {
-      // Return all data without pagination metadata
-      logger.info({ msg: "Combined corporate actions", adminCount: adminActions.length, nseCount: nseActions.length, uniqueTotal: enrichedCombined.length });
-      return NextResponse.json({ data: enrichedCombined });
-    }
-
-     return NextResponse.json({ data: enrichedCombined });
   } catch (e) {
     logger.error({ msg: "Failed to fetch combined corporate actions", error: e });
     return NextResponse.json({ error: "Failed to fetch corporate actions" }, { status: 500 });
