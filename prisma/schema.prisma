@@ -450,21 +450,23 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-model RateLimit {
-  id              String   @id @default(uuid())
-  userId          Int
-  endpoint        String
-  requestCount    Int      @default(0)
-  windowStart     DateTime @default(now())
-  isFlagged       Boolean  @default(false)
-  lastRequestAt   DateTime @default(now())
+model AdminAnnouncement {
+  id              Int      @id @default(autoincrement())
+  title           String
+  message         String
+  type            String   // info | warning | error | success
+  target          String   // all | user | admin
+  isActive        Boolean  @default(true)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  link            String?
+  createdBy       Int
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([userId, endpoint])
-  @@index([userId])
-  @@index([isFlagged])
-  @@map("rate_limits")
+  @@index([isActive, startsAt, endsAt])
+  @@index([target])
+  @@map("admin_announcements")
 }
 
 model Notification {

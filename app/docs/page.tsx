@@ -105,28 +105,40 @@ export default function DocsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">TradeNext API Documentation</h1>
-          <p className="text-gray-600 mb-4">
-            Enter your JWT token below to test authenticated API endpoints. Only admin users can access this documentation.
-          </p>
-          <div className="flex gap-4">
-            <input
-              type="text"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter JWT token..."
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              onClick={handleAuthorize}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-            >
-              Authorize
-            </button>
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">TradeNext API Documentation</h1>
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h3 className="font-bold text-blue-900 mb-2">How to get your JWT token:</h3>
+              <ol className="list-decimal list-inside text-sm text-blue-800 space-y-1">
+                <li>Sign in to TradeNext with your admin account</li>
+                <li>Open browser Developer Tools (F12)</li>
+                <li>Go to <strong>Network</strong> tab</li>
+                <li>Refresh the page or make any request</li>
+                <li>Click on any request to TradeNext API</li>
+                <li>In the request headers, find <code className="bg-blue-100 px-1 rounded">Authorization</code> header - it will look like: <code className="bg-blue-100 px-1 rounded">Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</code></li>
+                <li>Copy the entire token (including "Bearer " prefix) or just the token part</li>
+              </ol>
+            </div>
+            <p className="text-gray-600 mb-4">
+              Enter your JWT token below to test authenticated API endpoints. Only admin users can access this documentation.
+            </p>
+            <div className="flex gap-4">
+              <input
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Enter JWT token (e.g., eyJ...) or full 'Bearer ...'"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleAuthorize}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Authorize
+              </button>
+            </div>
+            {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
-          {error && <p className="text-red-500 mt-2">{error}</p>}
-        </div>
         <div id="swagger" />
       </div>
     </div>
