@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       userId: adminId,
       action: "ADMIN_ANNOUNCEMENT_CREATE",
       resource: "AdminAnnouncement",
-      resourceId: announcement.id,
+      resourceId: announcement.id.toString(),
       metadata: { title, type, target },
     });
 
@@ -131,7 +131,7 @@ export async function PUT(req: NextRequest) {
       userId: adminId,
       action: action === "toggleActive" ? "ADMIN_ANNOUNCEMENT_TOGGLE" : "ADMIN_ANNOUNCEMENT_UPDATE",
       resource: "AdminAnnouncement",
-      resourceId: id,
+      resourceId: id.toString(),
       metadata: updatePayload,
     });
 
@@ -165,7 +165,8 @@ export async function DELETE(req: NextRequest) {
       userId: adminId,
       action: "ADMIN_ANNOUNCEMENT_DELETE",
       resource: "AdminAnnouncement",
-      resourceId: Number(id),
+      resourceId: id,
+      metadata: { id },
     });
 
     return NextResponse.json({ success: true });

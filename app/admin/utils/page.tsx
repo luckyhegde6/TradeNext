@@ -74,40 +74,32 @@ interface NseStats {
 export default function AdminOverviewPage() {
     const [stats, setStats] = useState<Stats | null>(null);
     const [activeUsers, setActiveUsers] = useState<ActiveUsers | null>(null);
-    const [nseStats, setNseStats] = useState<NseStats | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const [statsRes, activeUsersRes, nseStatsRes] = await Promise.all([
-                    fetch('/api/admin/stats'),
-                    fetch('/api/admin/active-users'),
-                    fetch('/api/admin/nse-stats?hours=24')
-                ]);
+     const fetchStats = async () => {
+         try {
+             const [statsRes, activeUsersRes] = await Promise.all([
+                 fetch('/api/admin/stats'),
+                 fetch('/api/admin/active-users'),
+             ]);
 
-                if (!statsRes.ok || !activeUsersRes.ok) {
-                    throw new Error('Failed to fetch admin data');
-                }
+             if (!statsRes.ok || !activeUsersRes.ok) {
+                 throw new Error('Failed to fetch admin data');
+             }
 
-                const statsData = await statsRes.json();
-                const activeUsersData = await activeUsersRes.json();
+             const statsData = await statsRes.json();
+             const activeUsersData = await activeUsersRes.json();
 
-                let nseData = null;
-                if (nseStatsRes.ok) {
-                    nseData = await nseStatsRes.json();
-                }
-
-                setStats(statsData);
-                setActiveUsers(activeUsersData);
-                setNseStats(nseData);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Unknown error');
-            } finally {
-                setLoading(false);
-            }
-        };
+              setStats(statsData);
+              setActiveUsers(activeUsersData);
+         } catch (err) {
+             setError(err instanceof Error ? err.message : 'Unknown error');
+         } finally {
+             setLoading(false);
+         }
+     };
 
         fetchStats();
     }, []);

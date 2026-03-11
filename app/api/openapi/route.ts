@@ -1107,15 +1107,6 @@ const openapi = {
             }
         },
 
-        // ==================== RATE LIMIT ====================
-        '/api/rate-limit': {
-            get: {
-                summary: 'Get rate limit status',
-                tags: ['System'],
-                responses: { '200': { description: 'Rate limit info' } }
-            }
-        },
-
         // ==================== JOBS ====================
         '/api/jobs/{jobId}': {
             get: {
@@ -1258,17 +1249,6 @@ const openapi = {
                 tags: ['Admin - Stats'],
                 security: securityAdmin,
                 responses: { '200': { description: 'System stats' } }
-            }
-        },
-        '/api/admin/nse-stats': {
-            get: {
-                summary: 'Get NSE API usage statistics',
-                tags: ['Admin - Stats'],
-                security: securityAdmin,
-                parameters: [
-                    { name: 'hours', in: 'query', schema: { type: 'integer', default: 24 } }
-                ],
-                responses: { '200': { description: 'NSE stats' } }
             }
         },
 

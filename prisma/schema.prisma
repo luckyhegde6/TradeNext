@@ -448,7 +448,24 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@index([resource])
-  @@map("audit_logs")
+   @@map("audit_logs")
+}
+
+model RateLimit {
+  id              String   @id @default(uuid())
+  userId          Int
+  endpoint        String
+  requestCount    Int      @default(0)
+  windowStart     DateTime @default(now())
+  isFlagged       Boolean  @default(false)
+  lastRequestAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@index([isFlagged])
+  @@map("rate_limits")
 }
 
 model AdminAnnouncement {

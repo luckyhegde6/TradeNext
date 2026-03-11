@@ -27,8 +27,8 @@ export default function AdminAnnouncementsPage() {
   const [formData, setFormData] = useState({
     title: "",
     message: "",
-    type: "info" as const,
-    target: "all" as const,
+    type: "info" as "info" | "warning" | "error" | "success",
+    target: "all" as "all" | "user" | "admin",
     isActive: true,
     startsAt: "",
     endsAt: "",
