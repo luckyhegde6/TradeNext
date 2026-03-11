@@ -504,8 +504,8 @@ function parseTradePrice(priceStr: string): number {
     const parsePurpose = (purpose: string): { actionType: string; dividendAmount?: number; ratio?: string } => {
       const p = purpose.toLowerCase();
       let actionType = 'OTHER';
-      let dividendAmount: number = undefined;
-      let ratio: string = undefined;
+      let dividendAmount: number | undefined = undefined;
+      let ratio: string | undefined = undefined;
 
       if (p.includes('dividend') || p.includes('interest payment')) {
         actionType = p.includes('interest') ? 'INTEREST' : 'DIVIDEND';

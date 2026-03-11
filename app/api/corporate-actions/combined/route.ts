@@ -1,11 +1,8 @@
 // app/api/corporate-actions/combined/route.ts
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { nseFetch } from "@/lib/nse-client";
 import logger from "@/lib/logger";
-import { poolQuery } from "@/lib/db/server";
 
 function parseNseDate(dateStr: string): string | null {
   if (!dateStr || dateStr === "-") return null;
@@ -31,8 +28,8 @@ function parsePurpose(purpose: string): {
 } {
   const p = purpose.toLowerCase();
   let actionType = 'OTHER';
-  let dividendAmount: number = undefined;
-  let ratio: string = undefined;
+  let dividendAmount: number | undefined = undefined;
+  let ratio: string | undefined = undefined;
 
   if (p.includes('dividend') || p.includes('interest payment')) {
     actionType = p.includes('interest') ? 'INTEREST' : 'DIVIDEND';

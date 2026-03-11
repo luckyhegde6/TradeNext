@@ -73,7 +73,7 @@ export function BulkDealsTable({
   const [showCustom, setShowCustom] = useState(false);
   const [dbData, setDbData] = useState<BulkDeal[]>([]);
   const [loadingDb, setLoadingDb] = useState(false);
-  const [source, setSource] = useState<"nse" | "db">(defaultSource || (meta?.asOnDate ? "nse" : "db"));
+  const [source, setSource] = useState<"nse" | "db">(defaultSource || "nse");
   
   const { query, setQuery, filtered } = useFilter(
     source === "db" ? dbData : data,

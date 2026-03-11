@@ -21,7 +21,7 @@ interface NSEEndpointResponse {
     count: { Advances: number; Declines: number; Unchanged: number; Total: number };
     data: any[];
   };
-  unchanged?: {
+  Unchange?: {
     count: { Advances: number; Declines: number; Unchanged: number; Total: number };
     data: any[];
   };
@@ -29,7 +29,7 @@ interface NSEEndpointResponse {
 
 async function fetchCategoryData(
   endpoint: string,
-  responseKey: "advance" | "decline" | "unchanged",
+  responseKey: "advance" | "decline" | "Unchange",
   identifier: "Advances" | "Declines" | "Unchanged"
 ): Promise<{ data: StockData[]; count: number }> {
   try {

@@ -46,7 +46,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, created: createdActions.length });
   } catch (e) {
     logger.error({ msg: "Failed to upload corporate actions", error: e });
-    return NextResponse.json({ error: "Upload failed", details: e.message }, { status: 500 });
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: "Upload failed", details: errorMessage }, { status: 500 });
   }
 }
 
@@ -107,7 +108,8 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: true, deleted: result.count });
   } catch (e) {
     logger.error({ msg: "Failed to delete corporate actions", error: e });
-    return NextResponse.json({ error: "Delete failed", details: e.message }, { status: 500 });
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: "Delete failed", details: errorMessage }, { status: 500 });
   }
 }
 
@@ -177,8 +179,8 @@ function parsePurpose(purpose: string): {
 } {
   const p = purpose.toLowerCase();
   let actionType = 'OTHER';
-  let dividendAmount: number = undefined;
-  let ratio: string = undefined;
+  let dividendAmount: number | undefined = undefined;
+  let ratio: string | undefined = undefined;
 
   if (p.includes('dividend') || p.includes('interest payment')) {
     actionType = p.includes('interest') ? 'INTEREST' : 'DIVIDEND';

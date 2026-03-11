@@ -36,29 +36,29 @@ export function DataTable<T extends Record<string, any>>({
     if (av == null) return asc ? 1 : -1;
     if (bv == null) return asc ? -1 : 1;
 
-    // Compare based on type
-    if (typeof av === 'number' && typeof bv === 'number') {
-      return asc ? av - bv : bv - av;
-    }
-    
-    // For strings (including symbols), use localeCompare
-    if (typeof av === 'string' && typeof bv === 'string') {
-      return asc 
-        ? av.localeCompare(bv)
-        : bv.localeCompare(av);
-    }
-    
-    // For dates (ISO strings or Date objects)
-    if (av instanceof Date || bv instanceof Date) {
-      const aTime = new Date(av).getTime();
-      const bTime = new Date(bv).getTime();
-      return asc ? aTime - bTime : bTime - aTime;
-    }
-    
-    // Fallback: convert to string and compare
-    const aStr = String(av);
-    const bStr = String(bv);
-    return asc ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+     // Compare based on type
+     if (typeof av === 'number' && typeof bv === 'number') {
+       return asc ? av - bv : bv - av;
+     }
+     
+     // For dates (ISO strings or Date objects) - try to parse as dates
+     const aTime = new Date(av as any).getTime();
+     const bTime = new Date(bv as any).getTime();
+     if (!isNaN(aTime) && !isNaN(bTime)) {
+       return asc ? aTime - bTime : bTime - aTime;
+     }
+     
+     // For strings (including symbols), use localeCompare
+     if (typeof av === 'string' && typeof bv === 'string') {
+       return asc 
+         ? av.localeCompare(bv)
+         : bv.localeCompare(av);
+     }
+     
+     // Fallback: convert to string and compare
+     const aStr = String(av);
+     const bStr = String(bv);
+     return asc ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
   });
 
   return (
