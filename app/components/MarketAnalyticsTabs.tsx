@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 
 import { TableSkeleton } from "@/app/components/TableSkeleton";
@@ -23,9 +23,12 @@ const TABS = [
   { key: "corporate-info", label: "Corporate Info", api: "/api/nse/corporate-info" },
   { key: "corporate-announcements", label: "Corporate Announcements", api: "/api/nse/corporate-announcements" },
   { key: "corporate-events", label: "Corp Events", api: "/api/nse/corporate-events" },
-  { key: "corporate-actions", label: "Dividends / Splits / Bonus", api: "/api/nse/corporate-actions" },
+  { key: "corporate-actions", label: "Dividends / Splits / Bonus", api: "/api/corporate-actions/combined" },
   { key: "insider-trading", label: "Insider Trading", api: "/api/nse/insider-trading" },
-  { key: "deals", label: "Bulk / Large Deals", api: "/api/nse/deals" },
+  { key: "block_deals", label: "Block Deals", api: "/api/nse/deals?dealType=block_deal", dealType: "block_deal", defaultSource: "nse" },
+  { key: "bulk_deals", label: "Bulk Deals", api: "/api/nse/deals?dealType=bulk_deal", dealType: "bulk_deal", defaultSource: "nse" },
+  { key: "short_selling", label: "Short Selling", api: "/api/nse/deals?dealType=short_selling", dealType: "short_selling", defaultSource: "nse" },
+  { key: "deals", label: "Bulk / Large Deals (NSE)", api: "/api/nse/deals", defaultSource: "nse" },
   { key: "active", label: "Most Active", api: "/api/nse/most-active" },
   { key: "gainers", label: "Top Gainers", api: "/api/nse/gainers" },
   { key: "losers", label: "Top Losers", api: "/api/nse/losers" },
@@ -33,10 +36,56 @@ const TABS = [
 
 export default function MarketAnalyticsTabs() {
   const [active, setActive] = useState(TABS[0]);
+  
+  // Advance-decline specific state
+  const [advanceParams, setAdvanceParams] = useState<{
+    page?: number;
+    limit?: number;
+    filter?: string;
+    sortBy?: string;
+    sortOrder?: string;
+  }>({});
 
-  const { data, error, isLoading } = useSWR(active.api, fetcher, {
+  // Build API URL for advance-decline with query params
+  const advanceApiUrl = useMemo(() => {
+    if (active.key !== "advance") return active.api;
+    const params = new URLSearchParams();
+    if (advanceParams.page) params.set("page", advanceParams.page.toString());
+    if (advanceParams.limit) params.set("limit", advanceParams.limit.toString());
+    if (advanceParams.filter) params.set("filter", advanceParams.filter);
+    if (advanceParams.sortBy) params.set("sortBy", advanceParams.sortBy);
+    if (advanceParams.sortOrder) params.set("sortOrder", advanceParams.sortOrder);
+    const query = params.toString();
+    return `${active.api}${query ? `?${query}` : ""}`;
+  }, [active, advanceParams]);
+
+  const { data, error, isLoading } = useSWR(active.key === "advance" ? advanceApiUrl : active.api, fetcher, {
     refreshInterval: 20000,
   });
+
+  // Handler for page changes from AdvanceDeclineCards
+  const handleAdvancePageChange = (newPage: number) => {
+    setAdvanceParams((prev) => ({ ...prev, page: newPage }));
+  };
+
+  // Handler for filter changes from AdvanceDeclineCards
+  const handleAdvanceFilterChange = (filter: string | null) => {
+    setAdvanceParams((prev) => ({ 
+      ...prev, 
+      filter: filter || undefined, 
+      page: 1 // Reset to page 1 on filter change
+    }));
+  };
+
+  // Handler for sort changes from AdvanceDeclineCards
+  const handleAdvanceSortChange = (sortBy: string, sortOrder: string) => {
+    setAdvanceParams((prev) => ({ 
+      ...prev, 
+      sortBy, 
+      sortOrder,
+      page: 1 // Reset to page 1 on sort change
+    }));
+  };
 
   return (
     <div className="space-y-4">
@@ -64,35 +113,29 @@ export default function MarketAnalyticsTabs() {
         <>
           {/* Handle advance-decline data structure */}
           {active.key === "advance" && (() => {
-            if (!data || !data.advance || !data.advance.count) {
+            if (!data || !data.data) {
               return <p className="text-gray-500">No advance/decline data available</p>;
             }
 
             const meta = data.meta || { fetchedAt: data.timestamp || new Date().toISOString() };
-            const countData = data.advance.count;
-
-            // Transform count object to array format expected by AdvanceDeclineCards
-            const advanceDeclineData = [
-              { identifier: "Advances", count: countData.Advances || 0 },
-              { identifier: "Unchange", count: countData.Unchange || 0 },
-              { identifier: "Declines", count: countData.Declines || 0 },
-              { identifier: "Total", count: countData.Total || 0 },
-            ];
-
-            // Transform stocks data from advance.data array
-            const stocksData = (data.advance.data || []).map((stock: any) => ({
-              symbol: stock.symbol || "",
-              lastPrice: Number(stock.lastPrice || 0),
-              pchange: Number(stock.pchange || stock.pChange || 0),
-              change: Number(stock.change || 0),
-              previousClose: Number(stock.previousClose || 0),
-            }));
+            const summary = data.summary || {
+              Advances: 0,
+              Declines: 0,
+              Unchanged: 0,
+              Total: 0,
+            };
 
             return (
               <AdvanceDeclineCards
-                data={advanceDeclineData}
+                data={data.data}
                 meta={meta}
-                stocksData={stocksData}
+                summary={summary}
+                page={data.page}
+                totalPages={data.totalPages}
+                total={data.total}
+                onPageChange={handleAdvancePageChange}
+                onFilterChange={handleAdvanceFilterChange}
+                onSortChange={handleAdvanceSortChange}
               />
             );
           })()}
@@ -212,18 +255,23 @@ export default function MarketAnalyticsTabs() {
               return <p className="text-gray-500">No corporate actions available</p>;
             }
 
-            const transformedActions = actionsData.map((item: any) => ({
-              symbol: item.symbol || "",
-              companyName: item.companyName || "",
-              series: item.series || "",
-              subject: item.subject || "",
-              exDate: item.exDate || "",
-              recDate: item.recDate || "",
-              faceValue: item.faceValue || "",
-              type: item.type || "",
-              isUpcoming: item.isUpcoming || false,
-              currentPrice: item.currentPrice ? Number(item.currentPrice) : null,
-            }));
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+             const transformedActions = actionsData.map((item: any) => ({
+               symbol: item.symbol || "",
+               companyName: item.companyName || "",
+               series: item.series || "",
+               subject: item.subject || "",
+               exDate: item.exDate || "",
+               recDate: item.recordDate || "",
+               faceValue: item.faceValue || "",
+               type: item.actionType || "",
+               dividendPerShare: item.dividendPerShare ?? null,
+               dividendYield: item.dividendYield ?? null,
+               currentPrice: item.currentPrice ?? null,
+               isUpcoming: item.exDate ? new Date(item.exDate) >= today : false,
+             }));
 
             return <CorporateActionsTable data={transformedActions} />;
           })()}
@@ -279,19 +327,37 @@ export default function MarketAnalyticsTabs() {
               return <p className="text-gray-500">No deals data available</p>;
             }
 
-            // Data is already normalized by the API route
+            // Data from NSE includes dealType; preserve it for stats
             const transformedDeals = data.data.map((item: any) => ({
               symbol: item.symbol || "",
               clientName: item.clientName || "",
               quantity: Number(item.quantity || 0),
               price: Number(item.price || 0),
               buySell: item.buySell || "",
+              dealType: item.dealType,
             }));
 
             const meta = data.meta || { fetchedAt: new Date().toISOString() };
 
             return (
               <BulkDealsTable data={transformedDeals} meta={meta} />
+            );
+          })()}
+
+          {/* Handle Block Deals - from NSE API with database fallback */}
+          {(active.key === "block_deals" || active.key === "bulk_deals" || active.key === "short_selling") && (() => {
+            const dealType = (active as any).dealType || active.key;
+            
+            // For these specific tabs, we fetch from NSE API and pass as NSE data
+            // The BulkDealsTable will show NSE data by default and allow switching to DB
+            const nseData = Array.isArray(data) ? data : (data?.data || []);
+            
+            return (
+              <BulkDealsTable 
+                data={nseData}
+                meta={data?.meta || { fetchedAt: new Date().toISOString() }}
+                dealType={dealType}
+              />
             );
           })()}
 

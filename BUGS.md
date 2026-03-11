@@ -151,6 +151,45 @@
 
 ---
 
+## New Bugs - March 2026
+
+### 12. NSE Large Deals API Returns Empty Data (Open - High Priority)
+- **Date**: 2026-03-09
+- **Issue**: `/api/nse/deals` returns 0 records from NSE API
+- **Root Cause**: NSE API format may have changed or requires different parameters
+- **Steps to Reproduce**:
+  1. Go to `/markets/analytics`
+  2. Click "Bulk Deals" or "Block Deals"
+  3. Click "NSE Live" toggle
+  4. Observe empty table with 0 records
+- **Expected**: Data should display from NSE API
+- **Actual**: Empty table
+
+### 13. BulkDealsTable TypeScript Errors (Open - Medium Priority)
+- **Date**: 2026-03-09
+- **Issue**: Type errors in `app/components/analytics/BulkDealsTable.tsx`
+- **Errors**:
+  - `Type 'string' is not assignable to type 'keyof BulkDeal'`
+  - `Parameter 'v' implicitly has an 'any' type`
+  - `Parameter 'row' implicitly has an 'any' type`
+  - `Cannot find name 'row'`
+
+### 14. Admin CSV Upload Page Access Control (FIXED)
+- **Date**: 2026-03-09
+- **Issue**: Non-admin users could access `/admin/utils/ingest-csv`
+- **Fix Applied**: Added NextAuth session check - redirects non-admin users
+- **Status**: ✅ FIXED
+
+### 15. Public API Exposing Admin Endpoint (FIXED)
+- **Date**: 2026-03-09
+- **Issue**: BulkDealsTable called `/api/admin/ingest/deals` exposing admin API
+- **Fix Applied**: 
+  - Created new public `/api/deals` endpoint
+  - Updated BulkDealsTable to use public endpoint
+- **Status**: ✅ FIXED
+
+---
+
 ## Recommended Analytics & Portfolio Features
 
 See PRD.md for detailed feature recommendations.

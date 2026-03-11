@@ -8,6 +8,7 @@ type Column<T> = {
   label: string;
   align?: "left" | "right";
   render?: (value: any, row: T) => React.ReactNode;
+  sortable?: boolean;
 };
 
 export function DataTable<T extends Record<string, any>>({
@@ -26,9 +27,38 @@ export function DataTable<T extends Record<string, any>>({
 
   const sorted = [...data].sort((a, b) => {
     if (!sortKey) return 0;
+    
     const av = a[sortKey];
     const bv = b[sortKey];
-    return asc ? av - bv : bv - av;
+
+    // Handle null/undefined
+    if (av == null && bv == null) return 0;
+    if (av == null) return asc ? 1 : -1;
+    if (bv == null) return asc ? -1 : 1;
+
+     // Compare based on type
+     if (typeof av === 'number' && typeof bv === 'number') {
+       return asc ? av - bv : bv - av;
+     }
+     
+     // For dates (ISO strings or Date objects) - try to parse as dates
+     const aTime = new Date(av as any).getTime();
+     const bTime = new Date(bv as any).getTime();
+     if (!isNaN(aTime) && !isNaN(bTime)) {
+       return asc ? aTime - bTime : bTime - aTime;
+     }
+     
+     // For strings (including symbols), use localeCompare
+     if (typeof av === 'string' && typeof bv === 'string') {
+       return asc 
+         ? av.localeCompare(bv)
+         : bv.localeCompare(av);
+     }
+     
+     // Fallback: convert to string and compare
+     const aStr = String(av);
+     const bStr = String(bv);
+     return asc ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
   });
 
   return (
@@ -36,21 +66,35 @@ export function DataTable<T extends Record<string, any>>({
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 dark:bg-slate-900">
           <tr>
-            {columns.map(col => (
-              <th
-                key={String(col.key)}
-                className={clsx(
-                  "px-4 py-3 font-semibold cursor-pointer select-none",
-                  col.align === "right" && "text-right"
-                )}
-                onClick={() => {
-                  setAsc(sortKey === col.key ? !asc : false);
-                  setSortKey(col.key);
-                }}
-              >
-                {col.label}
-              </th>
-            ))}
+            {columns.map(col => {
+              const isSorted = sortKey === col.key;
+              return (
+                <th
+                  key={String(col.key)}
+                  className={clsx(
+                    "px-4 py-3 font-semibold cursor-pointer select-none whitespace-nowrap",
+                    col.align === "right" ? "text-right" : "text-left"
+                  )}
+                  onClick={() => {
+                    if (isSorted) {
+                      setAsc(!asc);
+                    } else {
+                      setAsc(false);
+                      setSortKey(col.key);
+                    }
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {isSorted && (
+                      <span className="text-blue-600 dark:text-blue-500 text-xs ml-0.5" aria-label={asc ? "Sorted ascending" : "Sorted descending"}>
+                        {asc ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
 

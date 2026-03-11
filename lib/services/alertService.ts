@@ -120,14 +120,55 @@ export async function deleteAlert(alertId: string, userId: number): Promise<void
   });
 }
 
+export async function updateAlert(
+  alertId: string,
+  userId: number,
+  type: AlertType,
+  symbol: string | undefined,
+  condition: AlertCondition
+): Promise<Alert> {
+  logger.info({ msg: "Updating alert", alertId, userId, type, symbol });
+
+  const alert = await prisma.alert.updateMany({
+    where: { id: alertId, userId },
+    data: {
+      type,
+      symbol,
+      condition: condition as Prisma.InputJsonValue,
+    },
+  });
+
+  const updated = await prisma.alert.findUnique({
+    where: { id: alertId },
+  });
+
+  if (!updated) {
+    throw new Error("Alert not found");
+  }
+
+  return {
+    id: updated.id,
+    userId: updated.userId ?? undefined,
+    type: updated.type as AlertType,
+    symbol: updated.symbol ?? undefined,
+    condition: updated.condition as unknown as AlertCondition,
+    triggered: updated.triggered,
+    triggeredAt: updated.triggeredAt ?? undefined,
+    seen: updated.seen,
+    createdAt: updated.createdAt,
+  };
+}
+
 export async function triggerAlert(alertId: string): Promise<void> {
   logger.info({ msg: "Triggering alert", alertId });
 
+  const triggerTime = new Date();
+  
   const alert = await prisma.alert.update({
     where: { id: alertId },
     data: {
       triggered: true,
-      triggeredAt: new Date(),
+      triggeredAt: triggerTime,
     },
   });
 
@@ -135,13 +176,14 @@ export async function triggerAlert(alertId: string): Promise<void> {
   if (alert.userId) {
     const title = getAlertTitle(alert.type, alert.symbol);
     const message = getAlertMessage(alert.type, alert.symbol, alert.condition);
+    const timeStr = triggerTime.toLocaleString();
 
     await prisma.notification.create({
       data: {
         userId: alert.userId,
         type: "alert_triggered",
         title,
-        message,
+        message: `${message} (Triggered: ${timeStr})`,
         link: alert.symbol ? `/company/${alert.symbol}` : "/alerts",
       },
     });

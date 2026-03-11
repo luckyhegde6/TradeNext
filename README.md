@@ -13,6 +13,15 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
 - **User Management**: Secure signup with email verification, role-based access control (Admin/User)
 - **Portfolio Engine**: Real-time P&L tracking, transaction history, cost-basis analysis
 - **Market Intelligence**: Comprehensive NSE data (quotes, charts, corporate actions)
+- **Corporate Actions Management**: Admin upload via CSV/manual, NSE live integration, combined view with historical data and filtering
+  - **Dividend Tracking**: Dividend per share display with computed yield percentages
+  - **Enhanced UX**: Clickable type filters, search by symbol/company, pagination, sortable columns
+  - **Date Formatting**: Supports both ISO and DD-MMM-YYYY formats with day-of-week display
+- **Technical Analysis**: Piotroski F-Score, technical indicators (RSI, MACD, Bollinger Bands, SMA, EMA)
+- **Stock Screening**: Advanced filtering with multiple criteria
+- **Alert System**: Price alerts and recommendation subscriptions
+- **Watchlist**: Quick price tracking and management
+- **Data Import**: CSV/Excel transaction import
 - **Docker-ready**: Local development with PostgreSQL/TimescaleDB + Redis
 
 ## Quick Start
@@ -40,7 +49,7 @@ Visit http://localhost:3000
 
 | User | Email | Password |
 |------|-------|----------|
-| Demo | demo@tradenext.in | demo123 |
+| Demo | demo@tradenext6.app | demo123 |
 | Admin | admin@tradenext6.app | admin123 |
 
 Admin credentials can be configured via environment variables:
@@ -83,7 +92,13 @@ npx prisma studio        # Open Prisma Studio
 
 # Linting
 npm run lint             # Run ESLint
-```
+
+# Development Checks
+# These scripts are in scripts/dev-checks/
+node scripts/dev-checks/check-db.js      # Check database connection and users
+node scripts/dev-checks/check-schema.js  # Verify database schema
+node scripts/dev-checks/check-deals.js   # Check deals data (Block, Bulk, Short Selling)
+node scripts/dev-checks/test-auth.js     # Test authentication (demo user)
 
 ## OpenCode Integration
 
@@ -137,7 +152,8 @@ This provides accurate Prisma 7 knowledge for:
 │   └── __tests__/         # Unit tests
 ├── prisma/                # Database schema + seed
 ├── scripts/               # Build/ingestion scripts
-└── .ai/                  # AI agent configuration
+│   └── dev-checks/       # Development verification scripts
+└── .agents/              # AI agent configuration
 ```
 
 ## Environment Variables

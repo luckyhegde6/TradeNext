@@ -5,7 +5,7 @@ This folder contains AI agent configuration files for TradeNext - a Next.js 16 s
 ## Structure
 
 ```
-.ai/
+.agents/
 ├── rules/           # Coding rules and guidelines
 ├── commands/       # Slash commands for AI agents
 ├── agents/         # Specialized subagents
@@ -18,8 +18,8 @@ This folder contains AI agent configuration files for TradeNext - a Next.js 16 s
 ## Quick Commands
 
 - Read `AGENTS.md` for complete development guide
-- Read `.ai/rules/` for coding standards
-- Use `.ai/commands/` for specific workflows
+- Read `.agents/rules/` for coding standards
+- Use `.agents/commands/` for specific workflows
 
 ## Prisma Integration
 

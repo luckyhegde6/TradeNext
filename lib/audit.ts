@@ -22,7 +22,12 @@ export type AuditAction =
   | 'USER_DELETE'
   | 'ADMIN_UPLOAD'
   | 'ADMIN_INGEST'
-  | 'SETTINGS_UPDATE';
+  | 'SETTINGS_UPDATE'
+  | 'CONTACT_MESSAGE_RECEIVED'
+  | 'NOTIFICATION_MARK_READ'
+  | 'NOTIFICATION_ADDRESSED'
+  | 'NOTIFICATIONS_MARK_ALL_READ'
+  | 'NOTIFICATION_DELETE';
 
 interface AuditLogParams {
   userId?: number;

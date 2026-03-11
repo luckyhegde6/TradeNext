@@ -368,7 +368,51 @@ export async function getCorporateAnnouncements(symbol: string): Promise<Corpora
 }
 
 /**
- * Get corporate actions
+ * Get corporate actions from database with pagination
+ */
+export async function getCorpActionsFromDB(options: {
+    symbol?: string;
+    actionType?: string;
+    page?: number;
+    limit?: number;
+}): Promise<{
+    data: unknown[];
+    total: number;
+    page: number;
+    totalPages: number
+}> {
+    const { symbol, actionType, page = 1, limit = 20 } = options;
+
+    const where: Record<string, unknown> = {};
+    
+    if (symbol) {
+        where.symbol = symbol.toUpperCase();
+    }
+    
+    if (actionType && actionType !== "all") {
+        where.actionType = actionType;
+    }
+
+    const [data, total] = await Promise.all([
+        prisma.corporateAction.findMany({
+            where,
+            orderBy: { exDate: "desc" },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.corporateAction.count({ where })
+    ]);
+
+    return {
+        data,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+    };
+}
+
+/**
+ * Get corporate actions from NSE API
  */
 export async function getCorpActions(symbol: string): Promise<CorpActionDTO[]> {
     const config = nseCache.corporate(symbol, "actions");

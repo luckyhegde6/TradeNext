@@ -99,19 +99,33 @@ model DailyPrice {
 }
 
 model CorporateAction {
-  id          Int      @id @default(autoincrement())
-  symbol      String
-  companyName String
-  series      String?
-  subject     String
-  exDate      DateTime?
-  recDate     DateTime?
-  faceValue   String?
-  actionType  String
-  createdAt   DateTime @default(now())
-  
+  id              Int      @id @default(autoincrement())
+  symbol          String
+  companyName     String
+  series          String?  // EQ, GS, etc.
+  subject         String?  // Original purpose text
+  actionType      String   // DIVIDEND, SPLIT, BONUS, RIGHTS, BUYBACK, INTEREST
+  exDate          DateTime?
+  recordDate      DateTime?
+  effectiveDate   DateTime?
+  faceValue       String?  // Original face value
+  oldFV           String?  // Old face value for splits (e.g., "10")
+  newFV           String?  // New face value for splits (e.g., "2")
+  ratio           String?  // e.g., "1:1" for bonus, "5:14" for rights
+  dividendPerShare Decimal? @db.Decimal(30,6)
+  dividendYield   Decimal? @db.Decimal(30,6)
+  isin            String?
+  bookClosureStartDate DateTime?
+  bookClosureEndDate   DateTime?
+  announcementDate DateTime? // Date of announcement
+  source          String   @default("admin") // "admin" or "nse"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
   @@index([symbol])
   @@index([exDate])
+  @@index([actionType])
+  @@index([source])
   @@map("corporate_actions")
 }
 
@@ -454,17 +468,21 @@ model RateLimit {
 }
 
 model Notification {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   userId      Int
-  type        String   // alert_triggered | recommendation | system | watchlist
+  type        String    // alert_triggered | recommendation | system | watchlist | contact_message
   title       String
   message     String
   link        String?
-  isRead      Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  isRead      Boolean   @default(false)
+  isAddressed Boolean   @default(false)
+  addressedAt DateTime?
+  addressedBy Int?
+  createdAt   DateTime  @default(now())
 
   @@index([userId])
   @@index([isRead])
+  @@index([isAddressed])
   @@index([createdAt])
   @@map("notifications")
 }
@@ -482,4 +500,51 @@ model Symbol {
   @@map("symbols")
   @@index([symbol])
   @@index([companyName])
+}
+
+model BlockDeal {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  clientName      String
+  buySell         String
+  quantityTraded  Int
+  tradePrice      Float
+  remarks         String?
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("block_deals")
+}
+
+model BulkDeal {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  clientName      String
+  buySell         String
+  quantityTraded  Int
+  tradePrice      Float
+  remarks         String?
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("bulk_deals")
+}
+
+model ShortSelling {
+  id              Int      @id @default(autoincrement())
+  date            DateTime
+  symbol          String
+  securityName    String
+  quantity        Int
+  importedAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([symbol])
+  @@map("short_selling")
 }

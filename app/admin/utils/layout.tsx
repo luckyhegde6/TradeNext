@@ -10,6 +10,7 @@ const navItems = [
     { name: "Recommendations", href: "/admin/recommendations" },
     { name: "Holdings", href: "/admin/holdings" },
     { name: "Audit Logs", href: "/admin/audit" },
+    { name: "Tasks", href: "/admin/utils/tasks" },
     { name: "Docs", href: "/docs" },
     { name: "Ingest ZIP", href: "/admin/utils/ingest-zip" },
     { name: "Ingest CSV", href: "/admin/utils/ingest-csv" },
