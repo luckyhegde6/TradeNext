@@ -126,6 +126,7 @@ model CorporateAction {
   @@index([exDate])
   @@index([actionType])
   @@index([source])
+  @@unique([symbol, actionType, exDate])
   @@map("corporate_actions")
 }
 
