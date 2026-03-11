@@ -126,6 +126,7 @@ model CorporateAction {
   @@index([exDate])
   @@index([actionType])
   @@index([source])
+  @@unique([symbol, actionType, exDate])
   @@map("corporate_actions")
 }
 
@@ -447,7 +448,7 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@index([resource])
-  @@map("audit_logs")
+   @@map("audit_logs")
 }
 
 model RateLimit {
@@ -465,6 +466,25 @@ model RateLimit {
   @@index([userId])
   @@index([isFlagged])
   @@map("rate_limits")
+}
+
+model AdminAnnouncement {
+  id              Int      @id @default(autoincrement())
+  title           String
+  message         String
+  type            String   // info | warning | error | success
+  target          String   // all | user | admin
+  isActive        Boolean  @default(true)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  link            String?
+  createdBy       Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive, startsAt, endsAt])
+  @@index([target])
+  @@map("admin_announcements")
 }
 
 model Notification {
