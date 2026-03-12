@@ -4,11 +4,94 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.6.1** - Bug Fixes & Financial Results UI (March 13, 2026). Fixed Corporate Actions Dividend/Yield columns showing "-". Added Financial Results tab with NSE-format table (quarters as columns, metrics as rows). Fixed audit logs to show Method, Path, Status, Speed columns. Added Stock List Sync to admin panel.
+- **v1.6.0** - Historical Data Sync (March 13, 2026). Added admin panel for syncing historical NSE data with custom date ranges. New endpoints for corporate actions, announcements, events, results, and insider trading.
+- **v1.5.0** - Live site tested (March 13, 2026). All core features working: Authentication, Portfolio, Markets, Analytics (13 tabs), Corporate Actions, Alerts, Watchlist, Screener, News, Community, Admin Panel. Bug: Corporate Actions Price/Yield columns show "-" instead of values.
 - **v1.4.0** - Enhanced Corporate Actions with dividend yield, filtering, pagination, search, improved UX, and date formatting fixes. Added DataTable sorting for all market analytics tables.
 - **v1.3.0** - Added Corporate Actions Management (Dividends, Splits, Bonus, Rights, Buybacks) with admin upload, NSE live integration, and combined view
 - **v1.2.0** - Added Analytics Service, Alert Service, Demo User Seeding, Portfolio Analytics API
 - **v1.1.0** - Added Stock Recommendations, User Alerts, Audit Logging, Rate Limiting, Admin Holdings Management
 - **v1.0.0** - Initial release
+
+---
+
+## New Features (v1.6.1)
+
+### Bug Fixes
+- **Corporate Actions Dividend/Yield**: Fixed columns showing "-" instead of actual values. Dividend amounts and yield percentages now display correctly (e.g., ₹6 with 600.00% yield for RSYSTEMS, ₹2 with 20.00% yield for IOC)
+- **Audit Logs**: Added Method, Path, Status, Speed columns to show detailed request information
+
+### Financial Results Tab
+Added new "Financial Results" tab in Analytics with NSE-format table:
+- **Quarters as Columns**: Shows up to 5 quarters horizontally (like NSE website)
+- **Metrics as Rows**: Revenue from Operations, Other Income, Total Income, Total Expenses, PBT, Tax, Net Profit, EPS, Depreciation, Finance Costs
+- **Search with Autocomplete**: Enter stock symbol (e.g., ITC, RELIANCE, TCS) to view financial comparison
+- **Period Information**: Shows Quarterly/Annual, Audited/Unaudited labels
+
+### Stock List Sync
+Added Stock List Sync feature to admin panel:
+- Sync stocks from NIFTY TOTAL MARKET index
+- TOTAL tile for one-click complete market sync
+- Auto-fetch from NSE when autocomplete is empty
+
+---
+
+## New Features (v1.6.0)
+
+### Historical Data Sync from NSE
+
+The admin panel now supports fetching and syncing historical data from NSE India with custom date ranges:
+
+**NSE API Endpoints:**
+| Data Type | Daily URL | Historical URL |
+|-----------|-----------|----------------|
+| Corporate Actions | `api/corporates-corporateActions?index=equities` | `api/corporates-corporateActions?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Corporate Announcements | `api/corporate-announcements?index=equities` | `api/corporate-announcements?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Event Calendar | `api/event-calendar?` | `api/event-calendar?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Financial Results | `api/corporates-financial-results?index=equities&period=Quarterly` | N/A |
+| Insider Trading | `api/cmsNote?url=corporate-filings-insider-trading` | `api/corporates-pit?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+
+**Admin Panel Features:**
+- Date range selector (DD-MM-YYYY format)
+- Multi-select data types to sync
+- Optional symbol filter for announcements
+- Batch sync for multiple data types at once
+- Records saved to database for offline access
+
+**API Routes:**
+- `GET /api/admin/nse/historical` - Fetch historical data
+- `POST /api/admin/nse/historical` - Batch sync with multiple data types
+
+**CSV Import:**
+The ingest CSV page now supports additional data types:
+- Block Deals
+- Bulk Deals
+- Short Selling
+- Corporate Actions (with CSV format: SYMBOL, COMPANY NAME, SERIES, PURPOSE, FACE VALUE, EX-DATE, RECORD DATE, etc.)
+- Corporate Announcements
+
+---
+
+## Tested Features (v1.5.0)
+
+### Live Site: https://tradenext6.netlify.app/
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Authentication | ✅ | Demo: demo@tradenext6.app / demo123 |
+| Portfolio | ✅ | Holdings: RELIANCE (200 qty), TCS (100 qty), Total: ₹5,22,780 |
+| Markets | ✅ | NIFTY 50, BANK, IT, MIDCAP, SMALLCAP, AUTO, PHARMA |
+| Analytics | ✅ | 13 tabs: Advances/Declines, Corporate Info, Announcements, Corp Events, Dividends/Splits/Bonus, Insider Trading, Block Deals, Bulk Deals, Short Selling, Bulk/Large Deals, Most Active, Top Gainers, Top Losers |
+| Corporate Actions | ✅ | Type filters (10 Dividend, 2 Bonus), search, pagination |
+| News | ✅ | 28 articles, India/Global filters |
+| Stock Screener | ✅ | 17 stocks, filters: sector, price range, P/E, volume, % change |
+| Admin Panel | ✅ | Overview, Users (7), Alerts, Recommendations, Holdings, Audit Logs |
+| Watchlist | ✅ UI | Empty state (expected) |
+| Alerts | ✅ UI | Empty state (expected) |
+
+### Known Bugs
+- **Corporate Actions - Price Column**: Shows "-" instead of actual stock prices
+- **Corporate Actions - Yield Column**: Shows "-" instead of computed dividend yield percentages
 
 ---
 

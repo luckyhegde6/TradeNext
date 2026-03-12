@@ -25,6 +25,7 @@ const TABS = [
   { key: "corporate-events", label: "Corp Events", api: "/api/nse/corporate-events" },
   { key: "corporate-actions", label: "Dividends / Splits / Bonus", api: "/api/corporate-actions/combined" },
   { key: "insider-trading", label: "Insider Trading", api: "/api/nse/insider-trading" },
+  { key: "results-comparison", label: "Financial Results", api: null }, // Custom tab - no default API
   { key: "block_deals", label: "Block Deals", api: "/api/nse/deals?dealType=block_deal", dealType: "block_deal", defaultSource: "nse" },
   { key: "bulk_deals", label: "Bulk Deals", api: "/api/nse/deals?dealType=bulk_deal", dealType: "bulk_deal", defaultSource: "nse" },
   { key: "short_selling", label: "Short Selling", api: "/api/nse/deals?dealType=short_selling", dealType: "short_selling", defaultSource: "nse" },
@@ -300,8 +301,13 @@ export default function MarketAnalyticsTabs() {
               currentPrice: item.currentPrice ? Number(item.currentPrice) : null,
             }));
 
-            return <InsiderTradingTable data={transformedInsider} />;
+            return <InsiderTradingTable data={transformedInsider} />
           })()}
+
+          {/* Handle Financial Results Comparison */}
+          {active.key === "results-comparison" && (
+            <FinancialResultsComparison />
+          )}
 
           {/* Handle corporate events */}
           {active.key === "corporate-events" && (() => {
@@ -417,6 +423,261 @@ export default function MarketAnalyticsTabs() {
             );
           })()}
         </>
+      )}
+    </div>
+  );
+}
+
+// Financial Results Comparison Component
+function FinancialResultsComparison() {
+  const [searchInput, setSearchInput] = useState("");
+  const [suggestions, setSuggestions] = useState<{ symbol: string; name: string }[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [resultsData, setResultsData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch stock suggestions
+  const fetchSuggestions = async (query: string) => {
+    if (query.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/symbols/search?q=${encodeURIComponent(query)}&limit=10`);
+      const data = await res.json();
+      setSuggestions(data.symbols || []);
+    } catch {
+      setSuggestions([]);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    fetchSuggestions(value);
+    setShowSuggestions(true);
+  };
+
+  const handleSelectSuggestion = (symbol: string) => {
+    setSearchInput(symbol);
+    setShowSuggestions(false);
+    handleSearch(symbol);
+  };
+
+  const handleSearch = async (symbol?: string) => {
+    const searchSymbol = symbol || searchInput.trim().toUpperCase();
+    if (!searchSymbol) return;
+
+    setLoading(true);
+    setError(null);
+    setResultsData(null);
+
+    try {
+      const response = await fetch(`/api/admin/nse/results-comparison?symbol=${encodeURIComponent(searchSymbol)}`);
+      const data = await response.json();
+      
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setResultsData(data);
+      }
+    } catch (err) {
+      setError("Failed to fetch financial results");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setShowSuggestions(false);
+    handleSearch();
+  };
+
+  // Format numbers in Lakhs (NSE format)
+  const formatLakhs = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "-";
+    return `₹${(value / 100000).toFixed(2)} Lakhs`;
+  };
+
+  // Format numbers in Crores
+  const formatCrore = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "-";
+    return `₹${(value / 10000000).toFixed(2)} Cr`;
+  };
+
+  // Format EPS
+  const formatEps = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "-";
+    return `₹${value.toFixed(2)}`;
+  };
+
+  // Format percentage
+  const formatPercent = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "-";
+    return `${value.toFixed(2)}%`;
+  };
+
+  // Get period label from API data
+  const getPeriodLabel = (period: string) => {
+    if (!period) return "-";
+    // If it's a date range, extract just the end date or format it
+    return period;
+  };
+
+  // Transpose data: quarters as columns, metrics as rows
+  const getTransposedData = (data: any[]) => {
+    if (!data || !Array.isArray(data) || data.length === 0) return null;
+    
+    const metrics = [
+      { key: 'revenue', label: 'Revenue from Operations', format: formatLakhs, highlight: true },
+      { key: 'otherIncome', label: 'Other Income', format: formatLakhs },
+      { key: 'totalIncome', label: 'Total Income', format: formatLakhs, bold: true },
+      { key: 'totalExpenses', label: 'Total Expenses', format: formatLakhs },
+      { key: 'profitBeforeTax', label: 'Profit Before Tax (PBT)', format: formatLakhs, bold: true, highlight: true },
+      { key: 'tax', label: 'Tax Expenses', format: formatLakhs },
+      { key: 'profit', label: 'Net Profit', format: formatLakhs, bold: true, highlight: true, isProfit: true },
+      { key: 'basicEps', label: 'Basic EPS (₹)', format: formatEps, bold: true },
+      { key: 'dilutedEps', label: 'Diluted EPS (₹)', format: formatEps },
+      { key: 'depreciation', label: 'Depreciation & Amortisation', format: formatLakhs },
+      { key: 'interest', label: 'Finance Costs', format: formatLakhs },
+    ];
+
+    return { metrics, quarters: data };
+  };
+
+  const transposedData = resultsData?.data ? getTransposedData(resultsData.data) : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Search Form with Autocomplete */}
+      <div className="relative">
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={handleInputChange}
+              onFocus={() => searchInput && setShowSuggestions(true)}
+              placeholder="Enter stock symbol (e.g., ITC, RELIANCE, TCS)"
+              className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              autoComplete="off"
+            />
+            {/* Autocomplete Suggestions */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.symbol}
+                    type="button"
+                    onClick={() => handleSelectSuggestion(s.symbol)}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-slate-700 flex justify-between items-center"
+                  >
+                    <span className="font-medium text-blue-600 dark:text-blue-400">{s.symbol}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 truncate ml-2">{s.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="submit"
+            disabled={loading || !searchInput.trim()}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+          >
+            {loading ? "Loading..." : "Search"}
+          </button>
+        </form>
+      </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-red-600 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading && (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      )}
+
+      {/* Results Data */}
+      {resultsData && !loading && (
+        <div className="space-y-4">
+          {/* Company Info */}
+          {resultsData.symbol && (
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <h3 className="text-xl font-bold text-blue-900 dark:text-blue-300">
+                {resultsData.symbol}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{resultsData.companyName}</p>
+            </div>
+          )}
+
+          {/* Financial Data Table - NSE Format: Quarters as columns, Metrics as rows */}
+          {transposedData ? (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-slate-800">
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-bold text-white uppercase tracking-wider sticky left-0 bg-slate-800 dark:bg-slate-900 z-10">
+                      Parameter (₹ in Lakhs)
+                    </th>
+                    {transposedData.quarters.slice(0, 5).map((quarter: any, idx: number) => (
+                      <th key={idx} className="px-3 py-3 text-center text-xs font-bold text-white uppercase tracking-wider min-w-[120px]">
+                        <div>{quarter.periodType === 'Annual' ? 'FY' : 'Q'}{quarter.period?.match(/\d{2}$/)?.[0] || idx + 1}</div>
+                        <div className="text-[10px] font-normal opacity-75">{quarter.periodType}</div>
+                        <div className="text-[9px] font-normal opacity-60">{quarter.resultType}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
+                  {transposedData.metrics.map((metric: any, rowIdx: number) => (
+                    <tr key={metric.key} className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 ${metric.bold ? 'bg-slate-50 dark:bg-slate-800/30' : ''}`}>
+                      <td className={`px-3 py-2.5 text-sm font-medium sticky left-0 z-10 ${metric.bold ? 'text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'} ${metric.highlight ? 'bg-white dark:bg-slate-900' : ''}`}>
+                        {metric.label}
+                      </td>
+                      {transposedData.quarters.slice(0, 5).map((quarter: any, colIdx: number) => {
+                        const value = quarter[metric.key];
+                        const formatted = metric.format(value);
+                        const isNegative = metric.isProfit && value !== null && value !== undefined && value < 0;
+                        
+                        return (
+                          <td key={colIdx} className={`px-3 py-2.5 text-sm text-center font-mono ${metric.bold ? 'font-semibold' : ''} ${metric.highlight ? (isNegative ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400') : 'text-gray-700 dark:text-gray-300'}`}>
+                            {formatted}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              
+              {/* Note about data source */}
+              <div className="p-3 bg-gray-50 dark:bg-slate-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
+                * All values are in ₹ Lakhs as per NSE financial results data
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-500 text-center py-4">No financial data available for this symbol</p>
+          )}
+        </div>
+      )}
+
+      {/* Initial State */}
+      {!resultsData && !loading && !error && (
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+          <svg className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p className="text-lg">Enter a stock symbol to view financial results comparison</p>
+          <p className="text-sm mt-2">Example: ITC, RELIANCE, TCS, HINDUNILVR, HDFCBANK</p>
+        </div>
       )}
     </div>
   );

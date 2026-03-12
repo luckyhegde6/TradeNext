@@ -51,16 +51,17 @@ function formatExDate(dateStr: string): { text: string; highlight: boolean; labe
 
 // Get type icon
 function getTypeIcon(type: string): string {
-  switch (type) {
-    case "Dividend":
+  const t = type?.toUpperCase() || "";
+  switch (t) {
+    case "DIVIDEND":
       return "💰";
-    case "Split":
+    case "SPLIT":
       return "✂️";
-    case "Bonus":
+    case "BONUS":
       return "🎁";
-    case "Rights":
+    case "RIGHTS":
       return "📈";
-    case "Buyback":
+    case "BUYBACK":
       return "🔄";
     default:
       return "📌";
@@ -132,17 +133,18 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
   const total = filteredData.length;
 
   const getTypeColor = (type: string) => {
-    switch (type) {
-      case "Dividend":
+    const t = type?.toUpperCase() || "";
+    switch (t) {
+      case "DIVIDEND":
         return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
-      case "Split":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800";
-      case "Bonus":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800";
-      case "Rights":
+      case "SPLIT":
+        return "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400 border-pink-200 dark:border-pink-800";
+      case "BONUS":
         return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800";
-      case "Buyback":
-        return "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400 border-teal-200 dark:border-teal-800";
+      case "RIGHTS":
+        return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800";
+      case "BUYBACK":
+        return "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400 border-gray-200 dark:border-gray-800";
     }
@@ -202,7 +204,7 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
         <td className="px-4 py-3 whitespace-nowrap">
           <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full border ${getTypeColor(action.type)}`}>
             <span>{getTypeIcon(action.type)}</span>
-            <span>{action.type}</span>
+            <span>{action.type?.replace('_', ' ')}</span>
           </span>
         </td>
         
@@ -255,7 +257,7 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
         
         {/* Record Date */}
         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-          {action.recDate ? formatDateWithDay(action.recDate) : "-"}
+          {action.recDate && action.recDate.trim() ? formatDateWithDay(action.recDate) : "-"}
         </td>
         
         {/* Face Value */}
@@ -527,7 +529,7 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full border ${getTypeColor(action.type)}`}>
                         {getTypeIcon(action.type)}
-                        {action.type}
+                        {action.type?.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
@@ -552,7 +554,7 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
                       {formatDateWithDay(action.exDate)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                      {action.recDate ? formatDateWithDay(action.recDate) : "-"}
+                      {action.recDate && action.recDate.trim() ? formatDateWithDay(action.recDate) : "-"}
                     </td>
                   </tr>
                 ))}

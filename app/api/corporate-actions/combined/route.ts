@@ -151,6 +151,9 @@ export async function GET(req: Request) {
       bookClosureStartDate: a.bookClosureStartDate?.toISOString(),
       bookClosureEndDate: a.bookClosureEndDate?.toISOString(),
       announcementDate: a.announcementDate?.toISOString(),
+      // Convert Decimal to number
+      dividendPerShare: a.dividendPerShare ? Number(a.dividendPerShare) : null,
+      dividendYield: a.dividendYield ? Number(a.dividendYield) : null,
     }));
 
     // Apply pagination if requested

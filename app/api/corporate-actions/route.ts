@@ -71,7 +71,7 @@ export async function GET(req: Request) {
       },
     });
 
-    // Format dates as ISO strings
+    // Format dates as ISO strings and convert Decimal to number
     const formatted = actions.map(a => ({
       ...a,
       exDate: a.exDate?.toISOString(),
@@ -80,6 +80,9 @@ export async function GET(req: Request) {
       bookClosureStartDate: a.bookClosureStartDate?.toISOString(),
       bookClosureEndDate: a.bookClosureEndDate?.toISOString(),
       announcementDate: a.announcementDate?.toISOString(),
+      // Convert Decimal to number
+      dividendPerShare: a.dividendPerShare ? Number(a.dividendPerShare) : null,
+      dividendYield: a.dividendYield ? Number(a.dividendYield) : null,
     }));
 
     logger.info({ msg: 'Fetched corporate actions', count: formatted.length, filters: { actionType, symbol, source } });
