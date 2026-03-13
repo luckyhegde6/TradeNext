@@ -116,18 +116,14 @@ export default function Header() {
       localStorage.removeItem('nextauth-expires');
       setLocalUser(null);
       
-      // Call the signOut API to clear server-side session
-      const response = await fetch('/api/auth/signout', {
-        method: 'POST',
-      });
-      
-      console.log('Header: SignOut API response', response.status);
-      
-      // Also call the signOut from next-auth to clear cookies properly
+      // Use signOut with redirect: false to avoid race conditions
       await signOut({ 
         callbackUrl: '/',
-        redirect: true,
+        redirect: false,
       });
+      
+      // Force a hard redirect to home page to clear any cached state
+      window.location.href = '/';
     } catch (error) {
       console.error('Header: SignOut error', error);
       // Force redirect to home even if there's an error
