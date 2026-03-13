@@ -56,22 +56,26 @@ export default function CalendarPage() {
   const [filterType, setFilterType] = useState<string>("all");
 
   // Fetch corporate actions
-  const { data: actionsData, isLoading: actionsLoading } = useSWR<{ data: CorporateAction[] }>(
+  const { data: actionsData, isLoading: actionsLoading } = useSWR(
     "/api/corporate-actions/combined?limit=5000",
     fetcher,
     { refreshInterval: 60000 }
   );
 
   // Fetch corporate events
-  const { data: eventsData, isLoading: eventsLoading } = useSWR<{ data: CorporateEvent[] }>(
+  const { data: eventsData, isLoading: eventsLoading } = useSWR(
     "/api/nse/corporate-events",
     fetcher,
     { refreshInterval: 60000 }
   );
 
   // Get raw arrays from response objects
-  const actions = actionsData?.data || actionsData || [];
-  const events = eventsData?.data || eventsData || [];
+  const actions: CorporateAction[] = Array.isArray(actionsData) 
+    ? actionsData 
+    : (actionsData as any)?.data || [];
+  const events: CorporateEvent[] = Array.isArray(eventsData) 
+    ? eventsData 
+    : (eventsData as any)?.data || [];
 
   // Get days in month
   const daysInMonth = useMemo(() => {

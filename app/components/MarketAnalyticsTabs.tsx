@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -36,7 +36,8 @@ const TABS = [
   { key: "losers", label: "Top Losers", api: "/api/nse/losers" },
 ];
 
-export default function MarketAnalyticsTabs() {
+// Inner component that uses useSearchParams
+function MarketAnalyticsTabsContent() {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   
@@ -707,5 +708,14 @@ function FinancialResultsComparison() {
         </div>
       )}
     </div>
+  );
+}
+
+// Wrapper component with Suspense boundary
+export default function MarketAnalyticsTabs() {
+  return (
+    <Suspense fallback={<div className="p-4">Loading...</div>}>
+      <MarketAnalyticsTabsContent />
+    </Suspense>
   );
 }
