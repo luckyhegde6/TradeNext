@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -8,6 +8,7 @@ import Link from "next/link";
 function SignInForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { update } = useSession();
     const callbackUrl = searchParams.get("callbackUrl") || "/";
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -31,6 +32,8 @@ function SignInForm() {
                     setError("Invalid email or password");
                 }
             } else {
+                // Refresh the session to ensure client-side state is updated
+                await update();
                 router.push(callbackUrl);
             }
         } catch {
