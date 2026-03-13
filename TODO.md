@@ -19,15 +19,130 @@
 | Stock Screener | [x] Complete |
 | Price Alerts | [x] Complete |
 | CSV Import | [x] Complete |
-| User Recommendations | [ ] In Progress |
-| Watchlist | [ ] In Progress |
+| User Recommendations | [x] Complete |
+| Watchlist | [x] Complete |
+| Historical Data Sync (v1.6.0) | [x] Complete |
+| Financial Results Tab (v1.6.1) | [x] Complete |
+| Bug Fixes - Corp Actions Yield (v1.6.1) | [x] Complete |
+| Stock List Sync (v1.6.1) | [x] Complete |
+| Cron Config (v1.7.0) | [x] Complete |
+| Background Workers (v1.7.0) | [x] Complete |
+| Calendar View (v1.7.0) | [x] Complete |
+| TradingView Integration (v1.7.0) | [x] Complete |
+| Worker Logging (v1.7.0) | [x] Complete |
 | Enhanced Alerts | [ ] Pending |
 | Portfolio Analytics | [ ] Pending |
 | Stock Compare | [ ] Pending |
 
-## Current Features
+## v1.7.0 - Cron Jobs, Workers & Calendar
 
-### Completed
+### Completed Features (March 13, 2026)
+- **Cron Config Management** (`/admin/utils/cron`):
+  - Create, edit, delete cron jobs
+  - Task types: Stock Sync, Corporate Actions, Alert Check, Screener, Recommendations, Market Data
+  - Quick presets: Every 5/15 minutes, hourly, daily (6/9 AM, 6 PM), weekly, monthly
+  - Status tracking: Total jobs, active jobs, total runs, failures
+
+- **Background Workers** (`/admin/utils/workers`):
+  - Task queue with priority (1-10) and retry logic
+  - Task types: stock_sync, corp_actions, alert_check, screener, recommendations, market_data, cleanup
+  - Three tabs: Tasks, Workers, Logs
+  - Status: Pending, Running, Completed, Failed counts
+
+- **Worker Logging**:
+  - File-based logging in `worker_logs/` directory
+  - Timestamped log files for each worker run
+  - Added to `.gitignore` - not committed
+
+- **Calendar View** (`/markets/calendar`):
+  - Month view with corporate actions mapped to dates
+  - Filter by type: Dividend, Bonus, Split, Rights, Buyback, Events
+  - Navigation: Previous/Next month, Today button
+
+- **TradingView Integration**:
+  - Dashboard chart shows "Open in TradingView" link
+  - Direct link: `https://in.tradingview.com/chart/?symbol=NSE:{SYMBOL}`
+
+- **Financial Results Tab Fix**:
+  - Fixed URL parameter handling for `?tab=financial-results`
+  - Now correctly renders FinancialResultsComparison component
+
+### Tested Features (March 13, 2026)
+- ✅ Cron Config page loads with form and stats
+- ✅ Workers page with Tasks/Workers/Logs tabs
+- ✅ Calendar page with month navigation and filters
+- ✅ TradingView link visible on dashboard
+- ✅ Financial Results tab works with URL parameter
+
+## v1.6.1 - Bug Fixes & Financial Results UI
+
+### Completed Features (March 13, 2026)
+- **Fixed Corporate Actions Dividend/Yield Display**:
+  - Fixed columns showing "-" instead of actual values
+  - Dividend amounts now display (e.g., ₹6, ₹2, ₹1.25)
+  - Yield percentages now compute correctly (e.g., 600.00%, 20.00%, 25.00%)
+
+- **Financial Results Tab**:
+  - New tab in Analytics with NSE-format table
+  - Quarters displayed as columns (up to 5 quarters)
+  - Metrics as rows: Revenue from Operations, Other Income, Total Income, Total Expenses, PBT, Tax, Net Profit, Basic EPS, Diluted EPS, Depreciation, Finance Costs
+  - Search with autocomplete
+  - Period type labels (Quarterly/Annual, Audited/Unaudited)
+
+- **Stock List Sync**:
+  - New API: `/api/admin/nse/stocks`
+  - Sync from NIFTY TOTAL MARKET index
+  - TOTAL tile for one-click complete market sync
+  - Auto-fetch from NSE when autocomplete is empty
+
+- **Audit Logs Enhancement**:
+  - Added Method, Path, Status, Speed columns
+
+### Tested Features (March 13, 2026)
+- ✅ Corporate Actions shows dividend ₹ and yield % correctly
+- ✅ Financial Results table shows quarters as columns
+- ✅ Search autocomplete works for financial results
+- ✅ All 14 Analytics tabs working
+
+## v1.6.0 - Historical Data Sync
+
+### Completed Features
+- Updated NSE API endpoints in `lib/index-service.ts`:
+  - `getCorporateActionsHistorical()` - Fetches corporate actions with date range support
+  - `getCorporateAnnouncements()` - Fetches announcements with optional symbol/date filters
+  - `getEventCalendar()` - Fetches event calendar data
+  - `getCorporateResults()` - Fetches quarterly financial results
+  - `getInsiderTrading()` - Fetches insider trading data (daily + historical)
+  
+- Admin API Route: `/api/admin/nse/historical`
+  - GET: Fetch data with query params (type, fromDate, toDate, symbol)
+  - POST: Batch sync with multiple data types
+
+- Admin Panel UI (`/admin/utils/nse-sync`)
+  - Date range selector (DD-MM-YYYY format)
+  - Multi-select data types (corporate_actions, announcements, events, results, insider)
+  - Optional symbol filter
+  - Real-time sync progress and results
+
+- CSV Import (`/admin/utils/ingest-csv`)
+  - Added support for: Block Deals, Bulk Deals, Short Selling
+  - Added: Corporate Actions CSV upload
+  - Added: Corporate Announcements CSV upload
+
+### NSE API Endpoints (Updated)
+| Data Type | Daily URL | Historical URL |
+|-----------|-----------|----------------|
+| Corporate Actions | `api/corporates-corporateActions?index=equities` | `api/corporates-corporateActions?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Corporate Announcements | `api/corporate-announcements?index=equities` | `api/corporate-announcements?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Event Calendar | `api/event-calendar?` | `api/event-calendar?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+| Financial Results | `api/corporates-financial-results?index=equities&period=Quarterly` | N/A |
+| Insider Trading | `api/cmsNote?url=corporate-filings-insider-trading` | `api/corporates-pit?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` |
+
+---
+
+## Tested Features (March 2026)
+
+### Completed - All Working
 - NextAuth.js with role-based access (admin/user)
 - Prisma 7 with PostgreSQL/TimescaleDB
 - Portfolio management with transactions
@@ -62,29 +177,44 @@
   - `check-schema.js` - Schema verification
   - `check-deals.js` - Deals data check
   - `test-auth.js` - Authentication testing
+- **Analytics Tabs (13 total)**:
+  - Advances / Declines
+  - Corporate Info
+  - Corporate Announcements
+  - Corp Events
+  - Dividends / Splits / Bonus
+  - Insider Trading
+  - Block Deals
+  - Bulk Deals
+  - Short Selling
+  - Bulk / Large Deals (NSE)
+  - Most Active
+  - Top Gainers
+  - Top Losers
+- **Admin Panel**:
+  - Overview (system health, DB response, user stats)
+  - Users Management (7 users, CRUD operations)
+  - Alerts Management
+  - Recommendations Management
+  - Holdings Management
+  - Audit Logs
+  - Tasks
+  - Ingest ZIP/CSV
+  - Workers
+  - Cron Config
+  - Announcements
+  - NSE Sync
 
 ---
 
-## Phase 1: User Recommendations & Watchlist
+## Known Issues / Bugs to Fix
 
-### User Recommendations Page (/recommendations) - ✅ COMPLETE
-- [x] Display only active recommendations
-- [x] Filter by type (BUY/SELL/HOLD)
-- [x] Subscribe to specific recommendations
-- [x] API endpoint exists at `/api/user/recommendations`
+### High Priority
+1. **Corporate Actions - Price Column Empty**: The "Price (₹)" column in Corporate Actions table shows "-" instead of actual stock prices
+2. **Corporate Actions - Dividend Yield Not Computed**: The "Yield" column shows "-" instead of computed dividend yield percentages
 
-### Watchlist Feature - ✅ COMPLETE
-- [x] CRUD for watchlists (via `/api/user/watchlist`)
-- [x] Add stocks to watchlist from any page
-- [x] Quick price view on watchlist page
-
-### NSE Charting Integration - ✅ COMPLETE
-- [x] Chart button in StockQuoteHeader component
-- [x] Chart column in HoldingsTable
-- [x] Enhanced index chart links in markets page
-- [x] Smooth NSE symbol mapping (stock symbols + `-EQ` suffix)
-- [x] Direct integration with NSE charting platform
-- [x] Mobile-responsive chart buttons
+### Low Priority
+1. **Loading States**: Some pages show "Loading..." before data loads - could benefit from skeleton loaders
 
 ---
 

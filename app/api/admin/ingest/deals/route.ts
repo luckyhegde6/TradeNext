@@ -20,6 +20,20 @@ interface ParsedRow {
     trade_price_wght_avg_price?: string;
     tradePrice?: string;
     remarks?: string;
+    // Corporate Actions fields
+    purpose?: string;
+    company_name?: string;
+    ex_date?: string;
+    record_date?: string;
+    book_closure_start_date?: string;
+    book_closure_end_date?: string;
+    face_value?: string;
+    facevalue?: string;
+    // Announcements fields
+    subject?: string;
+    details?: string;
+    broadcast_date?: string;
+    attachment?: string;
 }
 
 function parseCSV(content: string): ParsedRow[] {
@@ -100,7 +114,17 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "File and deal type required" }, { status: 400 });
         }
 
-        const allowedTypes = ["block_deal", "bulk_deal", "short_selling"];
+        const allowedTypes = [
+            "block_deal", 
+            "bulk_deal", 
+            "short_selling",
+            "corporate_actions",
+            "announcements",
+            "events",
+            "results",
+            "insider"
+        ];
+        
         if (!allowedTypes.includes(dealType)) {
             return NextResponse.json({ error: "Invalid deal type" }, { status: 400 });
         }
@@ -173,7 +197,57 @@ export async function POST(req: Request) {
                     console.error("Error inserting short selling:", e);
                 }
             }
+        } else if (dealType === "corporate_actions") {
+            // Parse corporate actions CSV - format: SYMBOL, COMPANY NAME, SERIES, PURPOSE, FACE VALUE, EX-DATE, RECORD DATE, etc.
+            for (const row of rows) {
+                try {
+                    const purpose = row.purpose || row.subject || "";
+                    const actionType = purpose.toLowerCase().includes('dividend') ? 'DIVIDEND' :
+                                     purpose.toLowerCase().includes('bonus') ? 'BONUS' :
+                                     purpose.toLowerCase().includes('split') ? 'SPLIT' :
+                                     purpose.toLowerCase().includes('rights') ? 'RIGHTS' :
+                                     purpose.toLowerCase().includes('buyback') ? 'BUYBACK' : 'OTHER';
+                    
+                    await prisma.corporateAction.create({
+                        data: {
+                            symbol: row.symbol?.trim() || "",
+                            companyName: row.company_name?.trim() || "",
+                            actionType,
+                            subject: purpose,
+                            exDate: row.ex_date ? parseDate(row.ex_date) : new Date(),
+                            recordDate: row.record_date ? parseDate(row.record_date) : null,
+                            bookClosureStartDate: row.book_closure_start_date ? parseDate(row.book_closure_start_date) : null,
+                            bookClosureEndDate: row.book_closure_end_date ? parseDate(row.book_closure_end_date) : null,
+                            faceValue: String(parsePrice(row.face_value || row.facevalue || "0")),
+                            source: 'CSV_UPLOAD',
+                        },
+                    });
+                    insertedCount++;
+                } catch (e) {
+                    console.error("Error inserting corporate action:", e);
+                }
+            }
+        } else if (dealType === "announcements") {
+            // Parse announcements CSV
+            for (const row of rows) {
+                try {
+                    await prisma.corporateAnnouncement.create({
+                        data: {
+                            symbol: row.symbol?.trim() || "",
+                            companyName: row.company_name?.trim() || "",
+                            subject: row.subject?.trim() || "",
+                            details: row.details?.trim() || "",
+                            broadcastDateTime: row.broadcast_date ? parseDate(row.broadcast_date) : new Date(),
+                            attachment: row.attachment?.trim() || null,
+                        },
+                    });
+                    insertedCount++;
+                } catch (e) {
+                    console.error("Error inserting announcement:", e);
+                }
+            }
         }
+        // Events, Results, and Insider can be added similarly based on the CSV format
 
         return NextResponse.json({ 
             success: true, 

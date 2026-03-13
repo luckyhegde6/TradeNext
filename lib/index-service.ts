@@ -517,3 +517,347 @@ export async function getAdvanceDecline(indexName: string) {
         };
     }
 }
+
+// =============================================================================
+// Historical Data Fetching Functions (New v1.6.0)
+// =============================================================================
+
+/**
+ * Get corporate actions from NSE with date range support
+ * Daily: https://www.nseindia.com/api/corporates-corporateActions?index=equities
+ * Historical: https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=13-03-2025&to_date=13-03-2026
+ */
+export async function getCorporateActionsHistorical(fromDate?: string, toDate?: string) {
+    const cacheKey = `nse:corpActions:historical:${fromDate || 'daily'}:${toDate || 'daily'}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        let url = "https://www.nseindia.com/api/corporates-corporateActions?index=equities";
+        
+        // Add date range if provided
+        if (fromDate && toDate) {
+            url = `https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=${fromDate}&to_date=${toDate}`;
+        }
+
+        logger.info({ msg: 'Fetching corporate actions from NSE', fromDate, toDate, url: url.split('?')[1] });
+        
+        const data = await nseFetch(url) as any;
+        const actions = Array.isArray(data) ? data : (data?.data || []);
+
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, actions, ttl);
+
+        logger.info({ msg: 'Corporate actions fetched', count: actions.length, fromDate, toDate });
+        return actions;
+    } catch (e) {
+        logger.error({ msg: 'Corporate actions historical fetch error', fromDate, toDate, error: e });
+        return [];
+    }
+}
+
+/**
+ * Get corporate announcements from NSE
+ * API: https://www.nseindia.com/api/corporate-announcements?index=equities
+ */
+export async function getCorporateAnnouncements(symbol?: string, fromDate?: string, toDate?: string) {
+    const cacheKey = `nse:announcements:${symbol || 'all'}:${fromDate || 'daily'}:${toDate || 'daily'}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        let url = "https://www.nseindia.com/api/corporate-announcements?index=equities";
+        
+        // Add filters if provided
+        const params = new URLSearchParams();
+        if (symbol) params.set('symbol', symbol);
+        if (fromDate) params.set('from_date', fromDate);
+        if (toDate) params.set('to_date', toDate);
+        
+        if (params.toString()) {
+            url += '&' + params.toString();
+        }
+
+        logger.info({ msg: 'Fetching corporate announcements from NSE', symbol, fromDate, toDate });
+        
+        const data = await nseFetch(url) as any;
+        const announcements = Array.isArray(data) ? data : (data?.data || []);
+
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, announcements, ttl);
+
+        logger.info({ msg: 'Corporate announcements fetched', count: announcements.length, symbol, fromDate, toDate });
+        return announcements;
+    } catch (e) {
+        logger.error({ msg: 'Corporate announcements fetch error', symbol, fromDate, toDate, error: e });
+        return [];
+    }
+}
+
+/**
+ * Get event calendar from NSE
+ * Daily: https://www.nseindia.com/api/event-calendar?
+ * Historical: https://www.nseindia.com/api/event-calendar?index=equities&from_date=13-03-2025&to_date=13-03-2026
+ */
+export async function getEventCalendar(fromDate?: string, toDate?: string) {
+    const cacheKey = `nse:eventCalendar:${fromDate || 'daily'}:${toDate || 'daily'}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        let url = "https://www.nseindia.com/api/event-calendar?";
+        
+        // Add date range if provided
+        if (fromDate && toDate) {
+            url = `https://www.nseindia.com/api/event-calendar?index=equities&from_date=${fromDate}&to_date=${toDate}`;
+        }
+
+        logger.info({ msg: 'Fetching event calendar from NSE', fromDate, toDate });
+        
+        const data = await nseFetch(url) as any;
+        const events = Array.isArray(data) ? data : (data?.data || []);
+
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, events, ttl);
+
+        logger.info({ msg: 'Event calendar fetched', count: events.length, fromDate, toDate });
+        return events;
+    } catch (e) {
+        logger.error({ msg: 'Event calendar fetch error', fromDate, toDate, error: e });
+        return [];
+    }
+}
+
+/**
+ * Get corporate financial results from NSE
+ * API: https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly
+ */
+export async function getCorporateResults(period: string = "Quarterly") {
+    const cacheKey = `nse:corporateResults:${period}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        const url = `https://www.nseindia.com/api/corporates-financial-results?index=equities&period=${period}`;
+        
+        logger.info({ msg: 'Fetching corporate results from NSE', period });
+        
+        const data = await nseFetch(url) as any;
+        const results = Array.isArray(data) ? data : (data?.data || []);
+
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, results, ttl);
+
+        logger.info({ msg: 'Corporate results fetched', count: results.length, period });
+        return results;
+    } catch (e) {
+        logger.error({ msg: 'Corporate results fetch error', period, error: e });
+        return [];
+    }
+}
+
+/**
+ * Get insider trading data from NSE
+ * Daily: https://www.nseindia.com/api/cmsNote?url=corporate-filings-insider-trading
+ * Historical: https://www.nseindia.com/api/corporates-pit?index=equities&from_date=13-03-2025&to_date=13-03-2026
+ */
+export async function getInsiderTrading(fromDate?: string, toDate?: string) {
+    const cacheKey = `nse:insiderTrading:${fromDate || 'daily'}:${toDate || 'daily'}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        let url: string;
+        
+        if (fromDate && toDate) {
+            // Historical data
+            url = `https://www.nseindia.com/api/corporates-pit?index=equities&from_date=${fromDate}&to_date=${toDate}`;
+        } else {
+            // Daily data
+            url = "https://www.nseindia.com/api/cmsNote?url=corporate-filings-insider-trading";
+        }
+
+        logger.info({ msg: 'Fetching insider trading from NSE', fromDate, toDate });
+        
+        const data = await nseFetch(url) as any;
+        const insiderData = Array.isArray(data) ? data : (data?.data || []);
+
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, insiderData, ttl);
+
+        logger.info({ msg: 'Insider trading data fetched', count: insiderData.length, fromDate, toDate });
+        return insiderData;
+    } catch (e) {
+        logger.error({ msg: 'Insider trading fetch error', fromDate, toDate, error: e });
+        return [];
+    }
+}
+
+/**
+ * Get financial results comparison for a specific stock from NSE
+ * API: https://www.nseindia.com/api/results-comparision?index=equities&symbol=ITC&issuer=ITC%20Limited
+ */
+export async function getFinancialResultsComparison(symbol: string, issuerName?: string) {
+    const cacheKey = `nse:resultsComparison:${symbol}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        const params = new URLSearchParams({
+            index: 'equities',
+            symbol: symbol
+        });
+        
+        if (issuerName) {
+            params.set('issuer', issuerName);
+        }
+        
+        const url = `https://www.nseindia.com/api/results-comparision?${params.toString()}`;
+        
+        logger.info({ msg: 'Fetching financial results comparison from NSE', symbol, issuerName });
+        
+        const data = await nseFetch(url) as any;
+        
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, data, ttl);
+
+        logger.info({ msg: 'Financial results comparison fetched', symbol });
+        return data;
+    } catch (e) {
+        logger.error({ msg: 'Financial results comparison fetch error', symbol, issuerName, error: e });
+        return null;
+    }
+}
+
+/**
+ * Get list of stocks from NSE equity master
+ * API: https://www.nseindia.com/api/equity-master
+ */
+export async function getEquityMaster() {
+    const cacheKey = `nse:equityMaster`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        const url = `https://www.nseindia.com/api/equity-master`;
+        
+        logger.info({ msg: 'Fetching equity master from NSE' });
+        
+        const data = await nseFetch(url) as any;
+        
+        // Cache for 24 hours
+        const ttl = 86400;
+        staticCache.set(cacheKey, data, ttl);
+
+        logger.info({ msg: 'Equity master fetched' });
+        return data;
+    } catch (e) {
+        logger.error({ msg: 'Equity master fetch error', error: e });
+        return null;
+    }
+}
+
+/**
+ * Get list of stocks from NSE index (e.g., NIFTY TOTAL MARKET)
+ * API: https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20TOTAL%20MARKET
+ */
+export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
+    const cacheKey = `nse:indexStocks:${indexName.replace(/\s+/g, '_')}`;
+    const cached = staticCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        const encodedIndex = encodeURIComponent(indexName);
+        const url = `https://www.nseindia.com/api/equity-stockIndices?index=${encodedIndex}`;
+        
+        logger.info({ msg: 'Fetching index stocks from NSE', index: indexName });
+        
+        const data = await nseFetch(url) as any;
+        
+        // Response format: { name, advance, timestamp, data: [...] }
+        // The first item in data array is the index itself, rest are stocks
+        const stocksData = data?.data || [];
+        
+        // Filter out the index itself (first item has symbol matching indexName)
+        const stocks = stocksData.filter((item: any) => 
+            item.symbol && item.symbol !== indexName && item.series === 'EQ'
+        );
+        
+        // Cache for 1 hour
+        const ttl = 3600;
+        staticCache.set(cacheKey, stocks, ttl);
+
+        logger.info({ msg: 'Index stocks fetched', index: indexName, count: stocks.length });
+        return stocks;
+    } catch (e) {
+        logger.error({ msg: 'Index stocks fetch error', index: indexName, error: e });
+        return null;
+    }
+}
+
+/**
+ * Sync stocks from NSE to local database
+ */
+export async function syncStocksToDatabase(indexName?: string) {
+    try {
+        let stocks: any[] = [];
+        
+        if (indexName) {
+            // Fetch from specific index - getIndexStocks now returns just the stocks array
+            const indexData = await getIndexStocks(indexName);
+            stocks = Array.isArray(indexData) ? indexData : [];
+        } else {
+            // Fetch equity master
+            const masterData = await getEquityMaster();
+            stocks = masterData?.data || [];
+        }
+        
+        if (stocks.length === 0) {
+            return { success: false, message: "No stocks found from NSE" };
+        }
+
+        let synced = 0;
+        let errors = 0;
+
+        for (const stock of stocks) {
+            try {
+                const symbol = stock.symbol || stock.SYMBOL;
+                if (!symbol) continue;
+
+                // Company name can be in meta.companyName or directly in the object
+                const companyName = stock.meta?.companyName || stock.companyName || stock.company_name || stock.issuerName || "";
+
+                await prisma.symbol.upsert({
+                    where: { symbol },
+                    update: {
+                        companyName,
+                        series: stock.series || stock.SERIES || "EQ",
+                        isActive: true,
+                        updatedAt: new Date()
+                    },
+                    create: {
+                        symbol,
+                        companyName,
+                        series: stock.series || stock.SERIES || "EQ",
+                        isActive: true,
+                    }
+                });
+                synced++;
+            } catch (e) {
+                errors++;
+            }
+        }
+
+        logger.info({ msg: 'Stocks synced to database', indexName, synced, errors });
+        return { success: true, synced, errors, total: stocks.length };
+    } catch (e) {
+        logger.error({ msg: 'Stock sync error', error: e });
+        return { success: false, message: String(e) };
+    }
+}

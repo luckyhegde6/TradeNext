@@ -73,12 +73,20 @@ export async function GET(req: Request) {
         faceValue: true,
         ratio: true,
         dividendPerShare: true,
+        dividendYield: true,
         source: true,
         createdAt: true,
       },
     });
 
-    return NextResponse.json(actions);
+    // Convert Decimal to number
+    const formatted = actions.map(a => ({
+      ...a,
+      dividendPerShare: a.dividendPerShare ? Number(a.dividendPerShare) : null,
+      dividendYield: a.dividendYield ? Number(a.dividendYield) : null,
+    }));
+
+    return NextResponse.json(formatted);
   } catch (e) {
     logger.error({ msg: "Failed to fetch corporate actions", error: e });
     return NextResponse.json({ error: "Failed to fetch corporate actions" }, { status: 500 });
@@ -113,6 +121,70 @@ export async function DELETE(req: Request) {
   }
 }
 
+// PATCH: Backfill dividend data for existing records
+export async function PATCH(req: Request) {
+  try {
+    const session = await auth();
+    if (!session?.user?.role || session.user.role !== "admin") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    const body = await req.json();
+    const { action } = body;
+
+    if (action === 'backfillDividends') {
+      // Get all DIVIDEND actions that don't have dividendPerShare or dividendYield
+      const actions = await prisma.corporateAction.findMany({
+        where: {
+          actionType: 'DIVIDEND',
+          OR: [
+            { dividendPerShare: null },
+            { dividendYield: null }
+          ]
+        }
+      });
+
+      let updated = 0;
+      for (const act of actions) {
+        // Parse dividend amount from subject
+        const subject = act.subject || '';
+        const dividendMatch = subject.match(/Rs\s*([\d.]+)/i);
+        
+        if (dividendMatch) {
+          const dividendAmount = parseFloat(dividendMatch[1]);
+          let dividendYieldVal: number | null = null;
+
+          // Calculate dividend yield based on face value
+          if (dividendAmount && act.faceValue) {
+            const faceValNum = parseFloat(String(act.faceValue).replace(/,/g, ''));
+            if (faceValNum > 0) {
+              dividendYieldVal = (dividendAmount / faceValNum) * 100;
+            }
+          }
+
+          await prisma.corporateAction.update({
+            where: { id: act.id },
+            data: {
+              dividendPerShare: dividendAmount,
+              dividendYield: dividendYieldVal
+            }
+          });
+          updated++;
+        }
+      }
+
+      logger.info({ msg: "Dividend data backfilled", updated, admin: session.user.email });
+      return NextResponse.json({ success: true, updated });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (e) {
+    logger.error({ msg: "Failed to backfill dividend data", error: e });
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: "Backfill failed", details: errorMessage }, { status: 500 });
+  }
+}
+
 // Helper to create a single corporate action with type detection
 async function createCorporateAction(rec: any): Promise<any> {
   // CSV columns from NSE: SYMBOL, COMPANY NAME, SERIES, PURPOSE, FACE VALUE, EX-DATE, RECORD DATE, BOOK CLOSURE START DATE, BOOK CLOSURE END DATE
@@ -127,7 +199,7 @@ async function createCorporateAction(rec: any): Promise<any> {
   const bookClosureEnd = parseDate(rec['BOOK CLOSURE END DATE'] || rec.bookClosureEndDate);
 
   // Parse purpose to determine actionType and extract numeric values
-  const { actionType, dividendAmount, ratio } = parsePurpose(purpose);
+  const { actionType, dividendAmount, dividendYield, ratio } = parsePurpose(purpose, faceValue);
 
   // Build the data object with all fields
   const data = {
@@ -144,7 +216,7 @@ async function createCorporateAction(rec: any): Promise<any> {
     newFV: null,
     ratio,
     dividendPerShare: dividendAmount || null,
-    dividendYield: null,
+    dividendYield: dividendYield || null,
     isin: rec.ISIN || rec.isin || null,
     bookClosureStartDate: bookClosureStart,
     bookClosureEndDate: bookClosureEnd,
@@ -172,20 +244,32 @@ function parseDate(dateStr: string): Date | null {
   }
 }
 
-function parsePurpose(purpose: string): {
+function parsePurpose(purpose: string, faceValue: string | null): {
   actionType: string;
   dividendAmount?: number;
+  dividendYield?: number;
   ratio?: string;
 } {
   const p = purpose.toLowerCase();
   let actionType = 'OTHER';
   let dividendAmount: number | undefined = undefined;
+  let dividendYield: number | undefined = undefined;
   let ratio: string | undefined = undefined;
 
   if (p.includes('dividend') || p.includes('interest payment')) {
     actionType = p.includes('interest') ? 'INTEREST' : 'DIVIDEND';
     const match = purpose.match(/Rs\s*([\d,.]+)\s*Per Share/i);
-    if (match) dividendAmount = parseFloat(match[1].replace(/,/g, ''));
+    if (match) {
+      dividendAmount = parseFloat(match[1].replace(/,/g, ''));
+      
+      // Calculate dividend yield based on face value
+      if (dividendAmount && faceValue) {
+        const faceValNum = parseFloat(String(faceValue).replace(/,/g, ''));
+        if (faceValNum > 0) {
+          dividendYield = (dividendAmount / faceValNum) * 100;
+        }
+      }
+    }
   } else if (p.includes('bonus')) {
     actionType = 'BONUS';
     const match = purpose.match(/bonus\s+(\d+:\d+)/i);
@@ -200,5 +284,5 @@ function parsePurpose(purpose: string): {
     actionType = 'BUYBACK';
   }
 
-  return { actionType, dividendAmount, ratio };
+  return { actionType, dividendAmount, dividendYield, ratio };
 }

@@ -53,3 +53,6 @@ nul
 .playwright-cli
 
 *.log
+
+# Worker logs
+worker_logs/

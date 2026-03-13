@@ -6,7 +6,13 @@ import {
     TrashIcon,
     ArrowPathIcon,
     CheckCircleIcon,
-    ExclamationCircleIcon
+    ExclamationCircleIcon,
+    CalendarIcon,
+    DocumentTextIcon,
+    ChartBarIcon,
+    ClipboardDocumentListIcon,
+    UserGroupIcon,
+    BuildingLibraryIcon,
 } from "@heroicons/react/24/outline";
 
 interface SyncResult {
@@ -17,18 +23,78 @@ interface SyncResult {
     symbols: { symbol: string; status: string }[];
 }
 
+interface HistoricalSyncResult {
+    success: boolean;
+    type: string;
+    fromDate: string;
+    toDate: string;
+    recordsFetched: number;
+    recordsSaved: number;
+    duration: number;
+    message: string;
+}
+
 interface IndexStatus {
     name: string;
     dbPrice: string;
     nseStatus: string;
 }
 
+type DataType = 'corporate_actions' | 'announcements' | 'events' | 'results' | 'insider';
+
 export default function NSESyncPage() {
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [historicalSyncing, setHistoricalSyncing] = useState(false);
+    const [stockSyncing, setStockSyncing] = useState(false);
     const [status, setStatus] = useState<any>(null);
     const [result, setResult] = useState<SyncResult | null>(null);
+    const [historicalResult, setHistoricalResult] = useState<HistoricalSyncResult | null>(null);
+    const [stockSyncResult, setStockSyncResult] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
+    
+    // Stock sync state
+    const [stockIndices, setStockIndices] = useState<{ name: string; url: string }[]>([]);
+    const [selectedIndices, setSelectedIndices] = useState<string[]>([]);
+    
+    // Historical sync state
+    const [fromDate, setFromDate] = useState<string>("");
+    const [toDate, setToDate] = useState<string>("");
+    const [selectedTypes, setSelectedTypes] = useState<DataType[]>([]);
+    const [symbolFilter, setSymbolFilter] = useState<string>("");
+
+    const dataTypes: { id: DataType; label: string; icon: React.ReactNode; description: string }[] = [
+        { 
+            id: 'corporate_actions', 
+            label: 'Corporate Actions', 
+            icon: <ClipboardDocumentListIcon className="w-5 h-5" />,
+            description: 'Dividends, Splits, Bonus, Rights, Buybacks'
+        },
+        { 
+            id: 'announcements', 
+            label: 'Corporate Announcements', 
+            icon: <DocumentTextIcon className="w-5 h-5" />,
+            description: 'Board meetings, results, closures'
+        },
+        { 
+            id: 'events', 
+            label: 'Event Calendar', 
+            icon: <CalendarIcon className="w-5 h-5" />,
+            description: 'Earnings, dividends, AGMs'
+        },
+        { 
+            id: 'results', 
+            label: 'Financial Results', 
+            icon: <ChartBarIcon className="w-5 h-5" />,
+            description: 'Quarterly, annual results'
+        },
+        { 
+            id: 'insider', 
+            label: 'Insider Trading', 
+            icon: <UserGroupIcon className="w-5 h-5" />,
+            description: 'Promoter, stakeholder changes'
+        },
+    ];
 
     const fetchStatus = async () => {
         setLoading(true);
@@ -63,6 +129,45 @@ export default function NSESyncPage() {
         }
     };
 
+    const handleHistoricalSync = async () => {
+        if (!fromDate || !toDate) {
+            setError("Please select both from and to dates");
+            return;
+        }
+
+        if (selectedTypes.length === 0) {
+            setError("Please select at least one data type to sync");
+            return;
+        }
+
+        if (!confirm(`Sync historical data from ${fromDate} to ${toDate} for ${selectedTypes.length} data type(s)?`)) return;
+
+        setHistoricalSyncing(true);
+        setHistoricalResult(null);
+        setError(null);
+
+        try {
+            const res = await fetch("/api/admin/nse/historical", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    types: selectedTypes,
+                    fromDate,
+                    toDate,
+                    symbol: symbolFilter || undefined
+                })
+            });
+            
+            if (!res.ok) throw new Error("Historical sync failed");
+            const data = await res.json();
+            setHistoricalResult(data);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Historical sync failed");
+        } finally {
+            setHistoricalSyncing(false);
+        }
+    };
+
     const handleClearCache = async (type: string) => {
         try {
             const res = await fetch(`/api/cache?action=clear-${type}`);
@@ -72,8 +177,81 @@ export default function NSESyncPage() {
         }
     };
 
+    const toggleDataType = (type: DataType) => {
+        setSelectedTypes(prev => 
+            prev.includes(type) 
+                ? prev.filter(t => t !== type)
+                : [...prev, type]
+        );
+    };
+
+    const fetchStockIndices = async () => {
+        try {
+            const res = await fetch("/api/admin/nse/stocks?action=list");
+            const data = await res.json();
+            setStockIndices(data.indices || []);
+        } catch (err) {
+            console.error("Failed to fetch stock indices:", err);
+        }
+    };
+
+    const handleStockSync = async () => {
+        if (selectedIndices.length === 0) {
+            setError("Please select at least one index to sync");
+            return;
+        }
+
+        if (!confirm(`Sync stocks from ${selectedIndices.length} index(es)?`)) return;
+
+        setStockSyncing(true);
+        setStockSyncResult(null);
+        setError(null);
+
+        try {
+            const res = await fetch("/api/admin/nse/stocks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ indices: selectedIndices })
+            });
+            
+            if (!res.ok) throw new Error("Stock sync failed");
+            const data = await res.json();
+            setStockSyncResult(data);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Stock sync failed");
+        } finally {
+            setStockSyncing(false);
+        }
+    };
+
+    const toggleIndex = (indexName: string) => {
+        setSelectedIndices(prev => 
+            prev.includes(indexName) 
+                ? prev.filter(i => i !== indexName)
+                : [...prev, indexName]
+        );
+    };
+
+    // Set default dates (last 1 year)
+    useEffect(() => {
+        const today = new Date();
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(today.getFullYear() - 1);
+        
+        const formatDate = (d: Date) => {
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}-${month}-${year}`;
+        };
+        
+        setToDate(formatDate(today));
+        setFromDate(formatDate(oneYearAgo));
+    }, []);
+
     useEffect(() => {
         fetchStatus();
+        fetchStockIndices();
     }, []);
 
     return (
@@ -188,6 +366,270 @@ export default function NSESyncPage() {
                     </div>
                 </div>
             )}
+
+            {/* Historical Sync Section */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden">
+                <div className="px-8 py-6 border-b border-gray-100 dark:border-slate-800 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800/40 dark:to-slate-800/40">
+                    <div className="flex items-center">
+                        <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center mr-3">
+                            <CalendarIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        </div>
+                        <h2 className="font-black text-gray-900 dark:text-white uppercase tracking-widest text-sm">Historical Data Sync</h2>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-slate-400 mt-2">
+                        Fetch and sync historical data from NSE by specifying a date range. This updates the database with past corporate actions, announcements, and more.
+                    </p>
+                </div>
+                
+                <div className="p-8 space-y-6">
+                    {/* Date Range Selection */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                                From Date (DD-MM-YYYY)
+                            </label>
+                            <input
+                                type="text"
+                                value={fromDate}
+                                onChange={(e) => setFromDate(e.target.value)}
+                                placeholder="13-03-2025"
+                                className="w-full px-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                                To Date (DD-MM-YYYY)
+                            </label>
+                            <input
+                                type="text"
+                                value={toDate}
+                                onChange={(e) => setToDate(e.target.value)}
+                                placeholder="13-03-2026"
+                                className="w-full px-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                                Symbol (Optional)
+                            </label>
+                            <input
+                                type="text"
+                                value={symbolFilter}
+                                onChange={(e) => setSymbolFilter(e.target.value)}
+                                placeholder="RELIANCE"
+                                className="w-full px-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Data Type Selection */}
+                    <div>
+                        <label className="block text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                            Select Data Types to Sync
+                        </label>
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                            {dataTypes.map((type) => (
+                                <button
+                                    key={type.id}
+                                    onClick={() => toggleDataType(type.id)}
+                                    className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                        selectedTypes.includes(type.id)
+                                            ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                                            : 'border-gray-200 dark:border-slate-700 hover:border-indigo-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center mb-2">
+                                        <span className={`${selectedTypes.includes(type.id) ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>
+                                            {type.icon}
+                                        </span>
+                                        {selectedTypes.includes(type.id) && (
+                                            <CheckCircleIcon className="w-4 h-4 text-indigo-600 ml-auto" />
+                                        )}
+                                    </div>
+                                    <div className="text-xs font-bold text-gray-900 dark:text-white">{type.label}</div>
+                                    <div className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">{type.description}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Sync Button */}
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleHistoricalSync}
+                            disabled={historicalSyncing || selectedTypes.length === 0 || !fromDate || !toDate}
+                            className={`flex items-center space-x-2 px-6 py-3 rounded-xl text-white font-black text-sm tracking-wide transition-all ${
+                                historicalSyncing || selectedTypes.length === 0 || !fromDate || !toDate
+                                    ? "bg-gray-400 cursor-not-allowed"
+                                    : "bg-indigo-600 hover:bg-indigo-700"
+                            }`}
+                        >
+                            {historicalSyncing ? (
+                                <ArrowPathIcon className="w-5 h-5 animate-spin" />
+                            ) : (
+                                <CloudArrowUpIcon className="w-5 h-5" />
+                            )}
+                            <span>{historicalSyncing ? "SYNCING..." : "SYNC HISTORICAL DATA"}</span>
+                        </button>
+                        
+                        <span className="text-xs text-gray-500 dark:text-slate-400">
+                            {selectedTypes.length > 0 
+                                ? `${selectedTypes.length} type(s) selected` 
+                                : 'Select at least one data type'}
+                        </span>
+                    </div>
+
+                    {/* Historical Sync Result */}
+                    {historicalResult && (
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center">
+                                    <CheckCircleIcon className="w-5 h-5 text-emerald-600 mr-2" />
+                                    <span className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
+                                        {historicalResult.message}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                                    {historicalResult.duration}ms
+                                </span>
+                            </div>
+                            <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+                                Records fetched: {historicalResult.recordsFetched} | Saved to DB: {historicalResult.recordsSaved}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Stock List Sync Section */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden">
+                <div className="px-8 py-6 border-b border-gray-100 dark:border-slate-800 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-slate-800/40 dark:to-slate-800/40">
+                    <div className="flex items-center">
+                        <div className="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center mr-3">
+                            <BuildingLibraryIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <h2 className="font-black text-gray-900 dark:text-white uppercase tracking-widest text-sm">Stock List Sync</h2>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-slate-400 mt-2">
+                        Fetch and sync stock symbols from NSE indices to populate the autocomplete database. This enables symbol search functionality across the platform.
+                    </p>
+                </div>
+                
+                <div className="p-8 space-y-6">
+                    {/* Quick TOTAL Sync */}
+                    <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-6">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center">
+                                <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/40 rounded-xl flex items-center justify-center mr-4">
+                                    <BuildingLibraryIcon className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-black text-amber-900 dark:text-amber-300">Sync Complete Market Data</h3>
+                                    <p className="text-sm text-amber-700 dark:text-amber-400">Fetches all stocks from NIFTY TOTAL MARKET (~2000+ stocks)</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    if (!confirm("Sync ALL stocks from NIFTY TOTAL MARKET? This will populate the entire stock database.")) return;
+                                    setStockSyncing(true);
+                                    setStockSyncResult(null);
+                                    setError(null);
+                                    try {
+                                        const res = await fetch("/api/admin/nse/stocks?action=sync&index=NIFTY%20TOTAL%20MARKET");
+                                        const data = await res.json();
+                                        setStockSyncResult(data);
+                                    } catch (err) {
+                                        setError(err instanceof Error ? err.message : "Stock sync failed");
+                                    } finally {
+                                        setStockSyncing(false);
+                                    }
+                                }}
+                                disabled={stockSyncing}
+                                className="px-6 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold rounded-xl transition-all"
+                            >
+                                {stockSyncing ? (
+                                    <span className="flex items-center">
+                                        <ArrowPathIcon className="w-5 h-5 animate-spin mr-2" />
+                                        SYNCING...
+                                    </span>
+                                ) : (
+                                    "SYNC TOTAL MARKET"
+                                )}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Index Selection */}
+                    <div>
+                        <label className="block text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                            Or Select Individual Indices
+                        </label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {stockIndices.map((idx) => (
+                                <button
+                                    key={idx.url}
+                                    onClick={() => toggleIndex(idx.url)}
+                                    className={`p-3 rounded-xl border-2 transition-all text-left ${
+                                        selectedIndices.includes(idx.url)
+                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                                            : 'border-gray-200 dark:border-slate-700 hover:border-emerald-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold text-gray-900 dark:text-white">{idx.name}</span>
+                                        {selectedIndices.includes(idx.url) && (
+                                            <CheckCircleIcon className="w-4 h-4 text-emerald-600" />
+                                        )}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Sync Button */}
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleStockSync}
+                            disabled={stockSyncing || selectedIndices.length === 0}
+                            className={`flex items-center space-x-2 px-6 py-3 rounded-xl text-white font-black text-sm tracking-wide transition-all ${
+                                stockSyncing || selectedIndices.length === 0
+                                    ? "bg-gray-400 cursor-not-allowed"
+                                    : "bg-emerald-600 hover:bg-emerald-700"
+                            }`}
+                        >
+                            {stockSyncing ? (
+                                <ArrowPathIcon className="w-5 h-5 animate-spin" />
+                            ) : (
+                                <BuildingLibraryIcon className="w-5 h-5" />
+                            )}
+                            <span>{stockSyncing ? "SYNCING STOCKS..." : "SYNC STOCK LIST"}</span>
+                        </button>
+                        
+                        <span className="text-xs text-gray-500 dark:text-slate-400">
+                            {selectedIndices.length > 0 
+                                ? `${selectedIndices.length} index(es) selected` 
+                                : 'Select at least one index'}
+                        </span>
+                    </div>
+
+                    {/* Stock Sync Result */}
+                    {stockSyncResult && (
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center">
+                                    <CheckCircleIcon className="w-5 h-5 text-emerald-600 mr-2" />
+                                    <span className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
+                                        Stock sync completed
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+                                Total synced: {stockSyncResult.totalSynced || 0} | Errors: {stockSyncResult.totalErrors || 0}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Status Card */}

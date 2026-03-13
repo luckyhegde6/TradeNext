@@ -514,6 +514,8 @@ model Symbol {
   series      String?
   industry    String?
   isActive    Boolean  @default(true)
+  lastPrice   Decimal? @db.Decimal(30,6)
+  lastUpdated DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -567,4 +569,156 @@ model ShortSelling {
   @@index([date])
   @@index([symbol])
   @@map("short_selling")
+}
+
+// ============================================
+// Task Scheduling & Worker Models
+// ============================================
+
+model CronJob {
+  id            String    @id @default(uuid())
+  name          String
+  description   String?
+  taskType     String    // stock_sync | corp_actions | alert_check | screener | recommendations
+  cronExpression String
+  isActive      Boolean   @default(true)
+  lastRun       DateTime?
+  nextRun       DateTime?
+  runCount      Int       @default(0)
+  successCount  Int       @default(0)
+  failureCount  Int       @default(0)
+  config        Json?     // Additional config for the task
+  createdBy     Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([taskType])
+  @@index([isActive])
+  @@map("cron_jobs")
+}
+
+model WorkerTask {
+  id            String    @id @default(uuid())
+  name          String
+  taskType      String    // alert_check | screener | recommendations | data_sync | cleanup
+  status        String    @default("pending") // pending | running | completed | failed | cancelled
+  priority      Int       @default(5) // 1-10, higher = more urgent
+  payload       Json?     // Task-specific data
+  result        Json?     // Result of the task execution
+  error         String?   // Error message if failed
+  startedAt     DateTime?
+  completedAt   DateTime?
+  retryCount    Int       @default(0)
+  maxRetries   Int       @default(3)
+  createdBy     Int?
+  assignedTo    String?   // Worker node identifier
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([taskType])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("worker_tasks")
+}
+
+model WorkerStatus {
+  id              String    @id @default(uuid())
+  workerId        String    @unique // Unique worker identifier
+  workerName      String?
+  status          String    @default("idle") // idle | busy | offline
+  currentTaskId   String?
+  tasksCompleted  Int       @default(0)
+  tasksFailed     Int       @default(0)
+  lastHeartbeat  DateTime  @default(now())
+  cpuUsage        Float?
+  memoryUsage    Float?
+  createdAt      DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("worker_status")
+}
+
+// ============================================
+// Enhanced Symbol with Daily Snapshot
+// ============================================
+
+model StockSnapshot {
+  id              String    @id @default(uuid())
+  symbol          String
+  companyName     String?
+  lastPrice       Decimal?  @db.Decimal(30,6)
+  change          Decimal?  @db.Decimal(30,6)
+  pChange         Decimal?  @db.Decimal(30,6)
+  open            Decimal?  @db.Decimal(30,6)
+  high            Decimal?  @db.Decimal(30,6)
+  low             Decimal?  @db.Decimal(30,6)
+  previousClose   Decimal?  @db.Decimal(30,6)
+  volume          BigInt?
+  value           Decimal?  @db.Decimal(30,6)
+  yearHigh        Decimal?  @db.Decimal(30,6)
+  yearLow         Decimal?  @db.Decimal(30,6)
+  pe              Decimal?  @db.Decimal(30,6)
+  pb              Decimal?  @db.Decimal(30,6)
+  dividendYield   Decimal?  @db.Decimal(30,6)
+  sector          String?
+  industry        String?
+  marketCap       Decimal?  @db.Decimal(30,6)
+  capturedAt      DateTime  @default(now())
+
+  @@unique([symbol, capturedAt])
+  @@index([symbol])
+  @@index([capturedAt])
+  @@map("stock_snapshots")
+}
+
+// ============================================
+// Screener Models
+// ============================================
+
+model ScreenerConfig {
+  id              String    @id @default(uuid())
+  name            String
+  description     String?
+  filters         Json      // Filter criteria
+  isDefault       Boolean   @default(false)
+  isPublic       Boolean   @default(true)
+  userId          Int?
+  lastRun         DateTime?
+  lastResultCount Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("screener_configs")
+}
+
+model ScreenerResult {
+  id              String    @id @default(uuid())
+  configId        String
+  symbol          String
+  companyName     String?
+  lastPrice       Decimal?  @db.Decimal(30,6)
+  change          Decimal?  @db.Decimal(30,6)
+  pChange         Decimal?  @db.Decimal(30,6)
+  volume          BigInt?
+  avgVolume       BigInt?
+  marketCap       Decimal?  @db.Decimal(30,6)
+  peRatio         Decimal?  @db.Decimal(30,6)
+  pbRatio         Decimal?  @db.Decimal(30,6)
+  roe             Decimal?  @db.Decimal(30,6)
+  debtToEquity    Decimal?  @db.Decimal(30,6)
+  eps             Decimal?  @db.Decimal(30,6)
+  bookValue       Decimal?  @db.Decimal(30,6)
+  dividendYield   Decimal?  @db.Decimal(30,6)
+  sector          String?
+  industry        String?
+  technicalRating String?
+  analystRating   String?
+  createdAt       DateTime  @default(now())
+
+  @@index([configId])
+  @@index([symbol])
+  @@index([createdAt])
+  @@map("screener_results")
 }

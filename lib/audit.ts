@@ -39,6 +39,11 @@ interface AuditLogParams {
   action: AuditAction;
   resource?: string;
   resourceId?: string;
+  method?: string;
+  path?: string;
+  responseStatus?: number;
+  responseTime?: number;
+  nseEndpoint?: string;
   metadata?: any;
   errorMessage?: string;
   session?: any; // New optional session parameter
@@ -77,6 +82,11 @@ export async function createAuditLog(params: AuditLogParams) {
         action: params.action as any,
         resource: params.resource,
         resourceId: params.resourceId,
+        method: params.method,
+        path: params.path,
+        responseStatus: params.responseStatus,
+        responseTime: params.responseTime,
+        nseEndpoint: params.nseEndpoint,
         metadata: params.metadata,
         errorMessage: params.errorMessage,
       },

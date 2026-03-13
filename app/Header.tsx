@@ -134,6 +134,9 @@ export default function Header() {
             <NavLink href="/markets/analytics" active={isActive("/markets/analytics")}>
               Analytics
             </NavLink>
+            <NavLink href="/markets/calendar" active={isActive("/markets/calendar")}>
+              Calendar
+            </NavLink>
             <NavLink href="/news" active={isActive("/news")}>
               News
             </NavLink>

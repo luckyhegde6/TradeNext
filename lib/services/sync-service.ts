@@ -109,11 +109,21 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
 
             // Parse dividend amount from subject (e.g., "Rs 2.50 per share" or "Rs 12.50")
             let dividendPerShare: number | undefined = undefined;
+            let dividendYield: number | undefined = undefined;
             
             if (actionType === "DIVIDEND") {
                 const dividendMatch = subject.match(/Rs\s*([\d.]+)/i);
                 if (dividendMatch) {
                     dividendPerShare = parseFloat(dividendMatch[1]);
+                    
+                    // Calculate dividend yield based on face value
+                    // dividendYield = (dividendPerShare / faceValue) * 100
+                    if (dividendPerShare && action.faceVal) {
+                        const faceValNum = parseFloat(action.faceVal.replace(/,/g, ''));
+                        if (faceValNum > 0) {
+                            dividendYield = (dividendPerShare / faceValNum) * 100;
+                        }
+                    }
                 }
             }
 
@@ -164,6 +174,7 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
                         newFV: newFV,
                         ratio: ratio,
                         dividendPerShare: dividendPerShare,
+                        dividendYield: dividendYield,
                         isin: action.isin || undefined,
                         updatedAt: new Date()
                     }
@@ -183,6 +194,7 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
                         newFV: newFV,
                         ratio: ratio,
                         dividendPerShare: dividendPerShare,
+                        dividendYield: dividendYield,
                         isin: action.isin || undefined
                     }
                 });
