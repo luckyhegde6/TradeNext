@@ -4,28 +4,32 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.6.1 (Tested: March 13, 2026)
+## Latest Update - v1.7.0 (Tested: March 13, 2026)
 
 ### What's New
-- **Bug Fixes**: Fixed Corporate Actions Dividend/Yield columns (was showing "-")
-- **Financial Results Tab**: New NSE-format table with quarters as columns, metrics as rows
-- **Stock List Sync**: Admin can sync stocks from NIFTY TOTAL MARKET index
-- **Audit Logs**: Added Method, Path, Status, Speed columns
+- **Cron Config**: Schedule automated tasks at `/admin/utils/cron`
+- **Background Workers**: Async task queue at `/admin/utils/workers`
+- **Calendar View**: Corporate actions calendar at `/markets/calendar`
+- **TradingView Integration**: Open charts in TradingView directly from dashboard
 
 ### Tested Features (March 2026)
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Authentication | ✅ Working | Demo: demo@tradenext6.app / demo123 |
+| Admin | ✅ Working | Admin: admin@tradenext6.app / admin123 |
 | Portfolio | ✅ Working | Holdings (RELIANCE, TCS), P&L tracking |
 | Markets Overview | ✅ Working | NIFTY 50, BANK, IT, MIDCAP, SMALLCAP, AUTO, PHARMA |
 | Analytics | ✅ Working | 14 tabs including Financial Results |
-| Corporate Actions | ✅ Working | Dividend (₹) and Yield (%) now display correctly |
+| Corporate Actions | ✅ Working | Dividend (₹) and Yield (%) display correctly |
+| Calendar | ✅ Working | Month view with corporate actions |
+| Cron Config | ✅ Working | Create and manage scheduled tasks |
+| Workers | ✅ Working | Task queue with priority and retries |
 | News | ✅ Working | 28 articles, India/Global filters |
 | Stock Screener | ✅ Working | 17 stocks, multiple filters |
-| Admin Panel | ✅ Working | Users, Overview, Utils, NSE Sync |
 | Watchlist | ✅ UI Ready | Empty state (expected) |
 | Alerts | ✅ UI Ready | Empty state (expected) |
 | Financial Results | ✅ Working | NSE format (quarters as columns) |
+| TradingView | ✅ Working | Links on dashboard charts |
 
 ## Overview
 

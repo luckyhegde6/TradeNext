@@ -25,9 +25,54 @@
 | Financial Results Tab (v1.6.1) | [x] Complete |
 | Bug Fixes - Corp Actions Yield (v1.6.1) | [x] Complete |
 | Stock List Sync (v1.6.1) | [x] Complete |
+| Cron Config (v1.7.0) | [x] Complete |
+| Background Workers (v1.7.0) | [x] Complete |
+| Calendar View (v1.7.0) | [x] Complete |
+| TradingView Integration (v1.7.0) | [x] Complete |
+| Worker Logging (v1.7.0) | [x] Complete |
 | Enhanced Alerts | [ ] Pending |
 | Portfolio Analytics | [ ] Pending |
 | Stock Compare | [ ] Pending |
+
+## v1.7.0 - Cron Jobs, Workers & Calendar
+
+### Completed Features (March 13, 2026)
+- **Cron Config Management** (`/admin/utils/cron`):
+  - Create, edit, delete cron jobs
+  - Task types: Stock Sync, Corporate Actions, Alert Check, Screener, Recommendations, Market Data
+  - Quick presets: Every 5/15 minutes, hourly, daily (6/9 AM, 6 PM), weekly, monthly
+  - Status tracking: Total jobs, active jobs, total runs, failures
+
+- **Background Workers** (`/admin/utils/workers`):
+  - Task queue with priority (1-10) and retry logic
+  - Task types: stock_sync, corp_actions, alert_check, screener, recommendations, market_data, cleanup
+  - Three tabs: Tasks, Workers, Logs
+  - Status: Pending, Running, Completed, Failed counts
+
+- **Worker Logging**:
+  - File-based logging in `worker_logs/` directory
+  - Timestamped log files for each worker run
+  - Added to `.gitignore` - not committed
+
+- **Calendar View** (`/markets/calendar`):
+  - Month view with corporate actions mapped to dates
+  - Filter by type: Dividend, Bonus, Split, Rights, Buyback, Events
+  - Navigation: Previous/Next month, Today button
+
+- **TradingView Integration**:
+  - Dashboard chart shows "Open in TradingView" link
+  - Direct link: `https://in.tradingview.com/chart/?symbol=NSE:{SYMBOL}`
+
+- **Financial Results Tab Fix**:
+  - Fixed URL parameter handling for `?tab=financial-results`
+  - Now correctly renders FinancialResultsComparison component
+
+### Tested Features (March 13, 2026)
+- ✅ Cron Config page loads with form and stats
+- ✅ Workers page with Tasks/Workers/Logs tabs
+- ✅ Calendar page with month navigation and filters
+- ✅ TradingView link visible on dashboard
+- ✅ Financial Results tab works with URL parameter
 
 ## v1.6.1 - Bug Fixes & Financial Results UI
 

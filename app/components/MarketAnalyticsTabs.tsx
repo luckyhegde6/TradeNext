@@ -1,7 +1,8 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { TableSkeleton } from "@/app/components/TableSkeleton";
@@ -36,7 +37,33 @@ const TABS = [
 ];
 
 export default function MarketAnalyticsTabs() {
-  const [active, setActive] = useState(TABS[0]);
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  
+  // Find the tab from URL param or default to first tab
+  const getInitialTab = () => {
+    if (tabParam) {
+      // Handle aliases - financial-results -> results-comparison
+      const aliasMap: Record<string, string> = {
+        "financial-results": "results-comparison",
+      };
+      const resolvedKey = aliasMap[tabParam] || tabParam;
+      const found = TABS.find(t => t.key === resolvedKey);
+      if (found) return found;
+    }
+    return TABS[0];
+  };
+  
+  const [active, setActive] = useState(getInitialTab);
+  
+  // Update active tab when URL param changes
+  useEffect(() => {
+    const found = TABS.find(t => t.key === tabParam || 
+      (tabParam === "financial-results" && t.key === "results-comparison"));
+    if (found && found.key !== active.key) {
+      setActive(found);
+    }
+  }, [tabParam]);
   
   // Advance-decline specific state
   const [advanceParams, setAdvanceParams] = useState<{

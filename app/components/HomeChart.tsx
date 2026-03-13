@@ -240,6 +240,19 @@ export default function HomeChart({ symbol: initialSymbol = "NIFTY 50" }: { symb
                     >
                         <ArrowTopRightOnSquareIcon className="h-5 w-5" />
                     </Link>
+                    
+                    {/* Open in TradingView */}
+                    <a
+                        href={`https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(selectedSymbol)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open in TradingView"
+                        className="p-2 text-gray-400 hover:text-green-500 dark:hover:text-green-400 hover:bg-green-500/5 rounded-lg transition-all"
+                    >
+                        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M15.337 3.415c-.152-.114-.345-.113-.495.003a.622.622 0 00-.202.481v6.924c0 .173.068.34.188.462l3.829 3.829c.128.128.296.197.468.197.171 0 .339-.069.467-.197l3.83-3.83a.622.622 0 00.187-.46V7.418c0-.172-.068-.34-.187-.46l-3.83-3.828a.617.617 0 00-.432-.178.617.617 0 00-.433.178l-3.83 3.829zm-3.83 5.858v2.576l2.576 2.576-2.576 2.576v2.573l4.073-4.073 4.073-4.073-4.073-4.073-4.073 4.073z"/>
+                        </svg>
+                    </a>
 
                     {isLoading && (
                         <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent" />
