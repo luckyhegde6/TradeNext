@@ -58,7 +58,7 @@ export async function getIndexChartData(indexName: string, timeframe: string = '
             );
             dbCount = await Promise.race([countPromise, timeoutPromise]);
         } catch (dbError) {
-            console.warn(`Database count query failed for ${indexName}:`, dbError instanceof Error ? dbError.message : dbError);
+            logger.warn(`Database count query failed for ${indexName}:`, dbError instanceof Error ? dbError.message : dbError);
             dbCount = 0;
         }
 
@@ -102,14 +102,14 @@ export async function getIndexChartData(indexName: string, timeframe: string = '
                     }));
                     await prisma.indexPoint.createMany({ data: records, skipDuplicates: true });
                 } catch (err) {
-                    console.error("Error hydrating index points:", err);
+                    logger.error("Error hydrating index points:", err);
                 }
             })();
         }
 
         return normalizedData;
     } catch (e) {
-        console.error(
+logger.error(
             "Failed to fetch index chart for index %s with timeframe %s:",
             indexName,
             timeframe,
@@ -403,9 +403,9 @@ export async function getIndexCorporateActions(indexName: string) {
     } catch (e) {
         // Log specific error types
         if (e instanceof Error && e.message.includes('404')) {
-            console.warn(`Corporate actions not available for ${indexName} (API returned 404)`);
+logger.warn(`Corporate actions not available for ${indexName} (API returned 404)`);
         } else {
-            console.error("Corporate actions fetch error", e);
+            logger.error("Corporate actions fetch error", e);
         }
         return [];
     }
@@ -458,13 +458,13 @@ export async function getIndexAnnouncements(indexName: string) {
                     }
                 }
             } catch (err) {
-                console.warn("Announcements DB Error (continuing without saving to DB):", err);
+logger.warn("Announcements DB Error (continuing without saving to DB):", err);
             }
         })();
 
         return sorted;
     } catch (e) {
-        console.error("Announcements fetch error", e);
+        logger.error("Announcements fetch error", e);
         return [];
     }
 }
@@ -480,7 +480,7 @@ export async function getAdvanceDecline(indexName: string) {
 
     const qs = `?functionName=getAdvanceDecline&&index=${encodeURIComponent(indexName)}`;
     try {
-        console.log(`[Index Service] Fetching advance/decline for ${indexName}`);
+logger.info({ msg: `[Index Service] Fetching advance/decline for ${indexName}` });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const data = rawData?.data?.[0] || {};
@@ -497,13 +497,13 @@ export async function getAdvanceDecline(indexName: string) {
             totalTurnover: data.total_top_turnover || 0,
         };
 
-        console.log(`[Index Service] Advance/Decline result:`, result);
+        logger.debug({ msg: `[Index Service] Advance/Decline result:`, result });
 
         const ttl = isMarketOpen() ? 300 : Math.floor(getRecommendedTTL(300000) / 1000);
         cache.set(cacheKey, result, ttl);
         return result;
     } catch (e) {
-        console.error(`[Index Service] Error fetching advance/decline for ${indexName}:`, e);
+        logger.error({ msg: `[Index Service] Error fetching advance/decline for ${indexName}:`, error: e instanceof Error ? e.message : String(e) });
         return {
             indexName,
             advances: 0,

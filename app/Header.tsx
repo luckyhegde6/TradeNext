@@ -19,11 +19,14 @@ import {
 
 export default function Header() {
   const pathname = usePathname();
-  const { data: session, status } = useSession();
+  const { data: session, status, update } = useSession();
   const [localUser, setLocalUser] = useState<any>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
-  // Check localStorage for fallback user data
+  // Check localStorage for fallback user data - but not during logout
   useEffect(() => {
+    if (isLoggingOut) return; // Don't read localStorage during logout
+    
     const storedUser = localStorage.getItem('nextauth-user');
     if (storedUser) {
       try {
@@ -32,9 +35,9 @@ export default function Header() {
         console.error('Failed to parse stored user', e);
       }
     }
-  }, []);
+  }, [isLoggingOut]);
   
-  const isLoggedIn = status === "authenticated" || !!localUser;
+  const isLoggedIn = status === "authenticated" || (!!localUser && !isLoggingOut);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
@@ -42,8 +45,10 @@ export default function Header() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Fetch session from API on mount and sync to localStorage
+  // Fetch session from API on mount and sync to localStorage - but not during logout
   useEffect(() => {
+    if (isLoggingOut) return; // Don't sync during logout
+    
     const syncSession = async () => {
       try {
         const res = await fetch('/api/auth/session');
@@ -52,13 +57,18 @@ export default function Header() {
           localStorage.setItem('nextauth-user', JSON.stringify(data.user));
           localStorage.setItem('nextauth-expires', data.expires);
           setLocalUser(data.user);
+        } else {
+          // No user in session - clear localStorage
+          localStorage.removeItem('nextauth-user');
+          localStorage.removeItem('nextauth-expires');
+          setLocalUser(null);
         }
       } catch (err) {
         console.error('Failed to sync session:', err);
       }
     };
     syncSession();
-  }, []);
+  }, [isLoggingOut]);
 
   interface UserWithRole {
     id: string;
@@ -111,16 +121,19 @@ export default function Header() {
   const handleSignOut = async () => {
     console.log('Header: handleSignOut called');
     try {
-      // Clear localStorage first
+      // Mark as logging out to prevent re-sync
+      setIsLoggingOut(true);
+      
+      // Clear localStorage immediately
       localStorage.removeItem('nextauth-user');
       localStorage.removeItem('nextauth-expires');
       setLocalUser(null);
       
-      // Use signOut with redirect: false to avoid race conditions
-      await signOut({ 
-        callbackUrl: '/',
-        redirect: false,
-      });
+      // Call the signOut API endpoint to clear server-side session
+      await fetch('/api/auth/signout', { method: 'POST' });
+      
+      // Update the session to clear it
+      await update(null);
       
       // Force a hard redirect to home page to clear any cached state
       window.location.href = '/';
