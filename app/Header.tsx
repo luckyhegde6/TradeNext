@@ -109,12 +109,30 @@ export default function Header() {
   };
 
   const handleSignOut = async () => {
-    // Clear localStorage first
-    localStorage.removeItem('nextauth-user');
-    localStorage.removeItem('nextauth-expires');
-    setLocalUser(null);
-    // Then call signOut
-    await signOut({ callbackUrl: '/' });
+    console.log('Header: handleSignOut called');
+    try {
+      // Clear localStorage first
+      localStorage.removeItem('nextauth-user');
+      localStorage.removeItem('nextauth-expires');
+      setLocalUser(null);
+      
+      // Call the signOut API to clear server-side session
+      const response = await fetch('/api/auth/signout', {
+        method: 'POST',
+      });
+      
+      console.log('Header: SignOut API response', response.status);
+      
+      // Also call the signOut from next-auth to clear cookies properly
+      await signOut({ 
+        callbackUrl: '/',
+        redirect: true,
+      });
+    } catch (error) {
+      console.error('Header: SignOut error', error);
+      // Force redirect to home even if there's an error
+      window.location.href = '/';
+    }
   };
 
   const isActive = (path: string) => pathname === path;
