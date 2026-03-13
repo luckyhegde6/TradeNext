@@ -42,6 +42,24 @@ export default function Header() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // Fetch session from API on mount and sync to localStorage
+  useEffect(() => {
+    const syncSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data?.user) {
+          localStorage.setItem('nextauth-user', JSON.stringify(data.user));
+          localStorage.setItem('nextauth-expires', data.expires);
+          setLocalUser(data.user);
+        }
+      } catch (err) {
+        console.error('Failed to sync session:', err);
+      }
+    };
+    syncSession();
+  }, []);
+
   interface UserWithRole {
     id: string;
     name: string | null;
