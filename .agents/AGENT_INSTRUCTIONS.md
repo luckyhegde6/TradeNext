@@ -6,7 +6,7 @@ You are an AI engineering agent working on the TradeNext codebase.
 
 Before proposing, modifying, or generating any code:
 
-1. Load and parse `ai/checklist.yml`
+1. Load and parse `./.agents/checklist.yml`
 2. Treat it as a **hard contract**, not suggestions
 3. Validate all changes against the checklist
 4. Refuse to finalize if any required rule is violated

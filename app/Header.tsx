@@ -20,7 +20,21 @@ import {
 export default function Header() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
-  const isLoggedIn = status === "authenticated";
+  const [localUser, setLocalUser] = useState<any>(null);
+  
+  // Check localStorage for fallback user data
+  useEffect(() => {
+    const storedUser = localStorage.getItem('nextauth-user');
+    if (storedUser) {
+      try {
+        setLocalUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Failed to parse stored user', e);
+      }
+    }
+  }, []);
+  
+  const isLoggedIn = status === "authenticated" || !!localUser;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
@@ -37,7 +51,9 @@ export default function Header() {
     mobile?: string | null;
   }
 
-  const user = session?.user as UserWithRole;
+  // Use session user or localStorage user
+  const sessionUser = session?.user as UserWithRole | undefined;
+  const user = sessionUser || localUser;
   const isAdmin = user?.role?.toLowerCase() === "admin";
 
   useEffect(() => {
@@ -72,6 +88,15 @@ export default function Header() {
     } catch (err) {
       console.error('Error marking notifications as read:', err);
     }
+  };
+
+  const handleSignOut = async () => {
+    // Clear localStorage first
+    localStorage.removeItem('nextauth-user');
+    localStorage.removeItem('nextauth-expires');
+    setLocalUser(null);
+    // Then call signOut
+    await signOut({ callbackUrl: '/' });
   };
 
   const isActive = (path: string) => pathname === path;
@@ -244,7 +269,7 @@ export default function Header() {
                     {user?.name?.[0] || 'U'}
                   </button>
                   <button
-                    onClick={() => window.location.href = '/api/auth/signout'}
+                    onClick={() => handleSignOut()}
                     className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors group"
                     title="Sign Out"
                   >
