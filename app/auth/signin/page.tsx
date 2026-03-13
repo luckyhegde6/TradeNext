@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -8,6 +8,7 @@ import Link from "next/link";
 function SignInForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { update, data: session } = useSession();
     const callbackUrl = searchParams.get("callbackUrl") || "/";
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -31,6 +32,14 @@ function SignInForm() {
                     setError("Invalid email or password");
                 }
             } else {
+                // Fetch session and store in localStorage as fallback
+                const sessionRes = await fetch('/api/auth/session');
+                const sessionData = await sessionRes.json();
+                if (sessionData?.user) {
+                    localStorage.setItem('nextauth-user', JSON.stringify(sessionData.user));
+                    localStorage.setItem('nextauth-expires', sessionData.expires);
+                }
+                await update();
                 router.push(callbackUrl);
             }
         } catch {

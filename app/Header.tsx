@@ -20,13 +20,45 @@ import {
 export default function Header() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
-  const isLoggedIn = status === "authenticated";
+  const [localUser, setLocalUser] = useState<any>(null);
+  
+  // Check localStorage for fallback user data
+  useEffect(() => {
+    const storedUser = localStorage.getItem('nextauth-user');
+    if (storedUser) {
+      try {
+        setLocalUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Failed to parse stored user', e);
+      }
+    }
+  }, []);
+  
+  const isLoggedIn = status === "authenticated" || !!localUser;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // Fetch session from API on mount and sync to localStorage
+  useEffect(() => {
+    const syncSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data?.user) {
+          localStorage.setItem('nextauth-user', JSON.stringify(data.user));
+          localStorage.setItem('nextauth-expires', data.expires);
+          setLocalUser(data.user);
+        }
+      } catch (err) {
+        console.error('Failed to sync session:', err);
+      }
+    };
+    syncSession();
+  }, []);
 
   interface UserWithRole {
     id: string;
@@ -37,7 +69,9 @@ export default function Header() {
     mobile?: string | null;
   }
 
-  const user = session?.user as UserWithRole;
+  // Use session user or localStorage user
+  const sessionUser = session?.user as UserWithRole | undefined;
+  const user = sessionUser || localUser;
   const isAdmin = user?.role?.toLowerCase() === "admin";
 
   useEffect(() => {
@@ -71,6 +105,33 @@ export default function Header() {
       setNotifications(notifications.map(n => ({ ...n, isRead: true })));
     } catch (err) {
       console.error('Error marking notifications as read:', err);
+    }
+  };
+
+  const handleSignOut = async () => {
+    console.log('Header: handleSignOut called');
+    try {
+      // Clear localStorage first
+      localStorage.removeItem('nextauth-user');
+      localStorage.removeItem('nextauth-expires');
+      setLocalUser(null);
+      
+      // Call the signOut API to clear server-side session
+      const response = await fetch('/api/auth/signout', {
+        method: 'POST',
+      });
+      
+      console.log('Header: SignOut API response', response.status);
+      
+      // Also call the signOut from next-auth to clear cookies properly
+      await signOut({ 
+        callbackUrl: '/',
+        redirect: true,
+      });
+    } catch (error) {
+      console.error('Header: SignOut error', error);
+      // Force redirect to home even if there's an error
+      window.location.href = '/';
     }
   };
 
@@ -244,7 +305,7 @@ export default function Header() {
                     {user?.name?.[0] || 'U'}
                   </button>
                   <button
-                    onClick={() => window.location.href = '/api/auth/signout'}
+                    onClick={() => handleSignOut()}
                     className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors group"
                     title="Sign Out"
                   >
