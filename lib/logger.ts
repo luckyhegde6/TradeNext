@@ -28,8 +28,16 @@ interface LogEntry {
   args?: any[];
 }
 
-// Server logs directory
+// Server logs directory - use /tmp on serverless platforms
 const getLogsDir = (): string => {
+  // Check if we're on a serverless platform (Netlify/Vercel)
+  const isServerless = process.env.NETLIFY || process.env.VERCEL;
+  
+  if (isServerless) {
+    // Use /tmp which is writable on serverless
+    return '/tmp/server_logs';
+  }
+  
   const cwd = process.cwd();
   return isServer ? path.join(cwd, 'server_logs') : '';
 };
@@ -37,29 +45,45 @@ const getLogsDir = (): string => {
 // Export for use in other files
 export const LOGS_DIR = ''; // Will be computed dynamically
 
+// Track if logs directory is available
+let logsDirAvailable = true;
+
 // Ensure logs directory exists
 function ensureLogsDir() {
-  if (!isServer || !fs) return;
-  const logsDir = getLogsDir();
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
+  if (!isServer || !fs || !logsDirAvailable) return;
+  
+  try {
+    const logsDir = getLogsDir();
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+  } catch (error) {
+    // Directory creation failed - disable file logging
+    logsDirAvailable = false;
+    console.warn('[Logger] File logging disabled - could not create logs directory');
   }
 }
 
 // Get today's log file path
 function getTodayLogPath(): string {
-  if (!isServer || !fs || !path) return '';
-  const today = new Date();
-  const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
-  const yearMonth = dateStr.substring(0, 7); // YYYY-MM
+  if (!isServer || !fs || !path || !logsDirAvailable) return '';
   
-  const logsDir = getLogsDir();
-  const yearMonthDir = path.join(logsDir, yearMonth);
-  if (!fs.existsSync(yearMonthDir)) {
-    fs.mkdirSync(yearMonthDir, { recursive: true });
+  try {
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+    const yearMonth = dateStr.substring(0, 7); // YYYY-MM
+    
+    const logsDir = getLogsDir();
+    const yearMonthDir = path.join(logsDir, yearMonth);
+    if (!fs.existsSync(yearMonthDir)) {
+      fs.mkdirSync(yearMonthDir, { recursive: true });
+    }
+    
+    return path.join(yearMonthDir, `${dateStr}.log`);
+  } catch (error) {
+    logsDirAvailable = false;
+    return '';
   }
-  
-  return path.join(yearMonthDir, `${dateStr}.log`);
 }
 
 // Get list of available log files
@@ -181,7 +205,7 @@ function formatLogEntry(level: LogLevel, message: string | object, ...args: any[
 
 // Write to file
 function writeToFile(entry: string) {
-  if (!isServer || !fs) return;
+  if (!isServer || !fs || !logsDirAvailable) return;
   try {
     ensureLogsDir();
     const filePath = getTodayLogPath();
@@ -189,7 +213,8 @@ function writeToFile(entry: string) {
       fs.appendFileSync(filePath, entry + '\n', 'utf-8');
     }
   } catch (error) {
-    console.error('Error writing to log file:', error);
+    // Silently fail - don't log to console in production
+    logsDirAvailable = false;
   }
 }
 
@@ -401,22 +426,23 @@ export function logHttpRequest(
     logs.pop();
   }
   
-  // Also write to file in readable format
-  const now = new Date();
-  const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
-  const statusColor = status >= 400 ? '❌' : status >= 300 ? '⚠️' : '✅';
-  
-  const logLine = `${timestamp} | ${statusColor} ${method.padEnd(6)} | ${status} | ${responseTime}ms | ${url}`;
-  
-  if (isServer && fs) {
+  // Also write to file in readable format (only if available)
+  if (isServer && fs && logsDirAvailable) {
     try {
+      const now = new Date();
+      const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
+      const statusColor = status >= 400 ? '❌' : status >= 300 ? '⚠️' : '✅';
+      
+      const logLine = `${timestamp} | ${statusColor} ${method.padEnd(6)} | ${status} | ${responseTime}ms | ${url}`;
+      
       ensureLogsDir();
       const filePath = getTodayLogPath();
       if (filePath) {
         fs.appendFileSync(filePath, logLine + '\n', 'utf-8');
       }
     } catch (e) {
-      console.error('Error writing HTTP log to file:', e);
+      // Silently fail - disable file logging
+      logsDirAvailable = false;
     }
   }
 }
