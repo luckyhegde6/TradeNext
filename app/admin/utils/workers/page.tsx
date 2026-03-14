@@ -57,6 +57,7 @@ export default function WorkersPage() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "running" | "completed" | "failed">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "cron" | "async" | "regular">("all");
   const [activeTab, setActiveTab] = useState<"tasks" | "workers" | "logs">("tasks");
   
   // Logs state
@@ -130,8 +131,10 @@ export default function WorkersPage() {
 
   const fetchData = async () => {
     try {
+      const statusParam = filter === "all" ? "" : filter;
+      const categoryParam = categoryFilter === "all" ? "" : categoryFilter;
       const [tasksRes, workersRes] = await Promise.all([
-        fetch(`/api/admin/workers?status=${filter === "all" ? "" : filter}&limit=50`),
+        fetch(`/api/admin/workers?status=${statusParam}&taskCategory=${categoryParam}&limit=50`),
         fetch("/api/admin/workers/status"),
       ]);
 
@@ -408,6 +411,23 @@ export default function WorkersPage() {
           )}
         </div>
         )}
+
+        {/* Category Filter */}
+        <div className="flex gap-2 mb-6">
+          {(["all", "cron", "async", "regular"] as const).map((category) => (
+            <button
+              key={category}
+              onClick={() => setCategoryFilter(category)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                categoryFilter === category
+                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                  : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400 hover:bg-gray-200"
+              }`}
+            >
+              {category === "all" ? "All Categories" : category.charAt(0).toUpperCase() + category.slice(1)}
+            </button>
+          ))}
+        </div>
 
         {/* Stats - Only show for tasks tab */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">

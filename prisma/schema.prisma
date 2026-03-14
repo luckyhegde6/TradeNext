@@ -601,6 +601,7 @@ model WorkerTask {
   id            String    @id @default(uuid())
   name          String
   taskType      String    // alert_check | screener | recommendations | data_sync | cleanup
+  taskCategory  String    @default("regular") // cron | async | regular
   status        String    @default("pending") // pending | running | completed | failed | cancelled
   priority      Int       @default(5) // 1-10, higher = more urgent
   payload       Json?     // Task-specific data
@@ -612,11 +613,13 @@ model WorkerTask {
   maxRetries   Int       @default(3)
   createdBy     Int?
   assignedTo    String?   // Worker node identifier
+  cronJobId     String?   // Reference to CronJob if created from cron
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([status])
   @@index([taskType])
+  @@index([taskCategory])
   @@index([priority])
   @@index([createdAt])
   @@map("worker_tasks")

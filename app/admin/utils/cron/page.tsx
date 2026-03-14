@@ -128,17 +128,19 @@ export default function CronConfigPage() {
     }
   };
 
-  const handleRunNow = async (job: CronJob) => {
+const handleRunNow = async (job: CronJob) => {
     if (!confirm(`Run "${job.name}" now?`)) return;
 
     try {
-      // Create a manual task for this cron job
+      // Create a manual task for this cron job with category = cron
       await fetch("/api/admin/workers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: `Manual: ${job.name}`,
+          name: `Cron: ${job.name}`,
           taskType: job.taskType,
+          taskCategory: "cron",
+          cronJobId: job.id,
           payload: job.config,
           priority: 10,
         }),

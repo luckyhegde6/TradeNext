@@ -10,10 +10,12 @@ export const runtime = "nodejs";
 // Worker task validation schema
 const workerTaskSchema = z.object({
   name: z.string().min(1),
-  taskType: z.enum(["alert_check", "screener", "recommendations", "data_sync", "cleanup", "stock_sync"]),
+  taskType: z.enum(["alert_check", "screener", "recommendations", "data_sync", "cleanup", "stock_sync", "csv_processing", "historical_sync"]),
+  taskCategory: z.enum(["cron", "async", "regular"]).optional(),
   priority: z.number().min(1).max(10).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   maxRetries: z.number().min(0).max(10).optional(),
+  cronJobId: z.string().optional(),
 });
 
 // GET - List worker tasks
@@ -27,11 +29,13 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
     const taskType = searchParams.get("taskType");
+    const taskCategory = searchParams.get("taskCategory");
     const limit = parseInt(searchParams.get("limit") || "50");
 
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
     if (taskType) where.taskType = taskType;
+    if (taskCategory) where.taskCategory = taskCategory;
 
     const tasks = await prisma.workerTask.findMany({
       where,
@@ -39,13 +43,19 @@ export async function GET(req: Request) {
       take: limit,
     });
 
-    // Get queue stats
+    // Get queue stats by category
+    const statsByCategory = await prisma.workerTask.groupBy({
+      by: ["taskCategory", "status"],
+      _count: true,
+    });
+
+    // Get overall stats
     const stats = await prisma.workerTask.groupBy({
       by: ["status"],
       _count: true,
     });
 
-    return NextResponse.json({ tasks, stats });
+    return NextResponse.json({ tasks, stats, statsByCategory });
   } catch (error) {
     logger.error({ msg: "Failed to fetch worker tasks", error });
     return NextResponse.json({ error: "Failed to fetch worker tasks" }, { status: 500 });
@@ -67,14 +77,16 @@ export async function POST(req: Request) {
       data: {
         name: validated.name,
         taskType: validated.taskType,
+        taskCategory: validated.taskCategory ?? "regular",
         priority: validated.priority ?? 5,
         maxRetries: validated.maxRetries ?? 3,
         payload: (validated.payload as never) ?? undefined,
         createdBy: session.user.id ? parseInt(session.user.id) : null,
+        cronJobId: validated.cronJobId,
       },
     });
 
-    logger.info({ msg: "Worker task created", taskId: task.id, taskType: task.taskType });
+    logger.info({ msg: "Worker task created", taskId: task.id, taskType: task.taskType, taskCategory: task.taskCategory });
     return NextResponse.json(task, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
