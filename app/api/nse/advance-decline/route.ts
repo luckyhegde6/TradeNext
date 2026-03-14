@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { nseFetch } from "@/lib/nse-client";
 import logger from "@/lib/logger";
+import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
 
 interface StockData {
   symbol: string;
@@ -62,47 +63,68 @@ async function fetchCategoryData(
   }
 }
 
+/**
+ * Fetch all advance-decline data from NSE
+ */
+async function fetchAdvanceDeclineFromNse(): Promise<any> {
+  const [advancesRes, declinesRes, unchangedRes] = await Promise.all([
+    fetchCategoryData("/api/live-analysis-advance", "advance", "Advances"),
+    fetchCategoryData("/api/live-analysis-decline", "decline", "Declines"),
+    fetchCategoryData("/api/live-analysis-unchanged", "Unchange", "Unchanged"),
+  ]);
+
+  const fullStocks: StockData[] = [
+    ...advancesRes.data,
+    ...declinesRes.data,
+    ...unchangedRes.data,
+  ];
+
+  const summary = {
+    Advances: advancesRes.count,
+    Declines: declinesRes.count,
+    Unchanged: unchangedRes.count,
+    Total: advancesRes.count + declinesRes.count + unchangedRes.count,
+  };
+
+  return {
+    stocks: fullStocks,
+    summary,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
+    const url = req.url ? new URL(req.url) : new URL('http://localhost');
     const page = parseInt(url.searchParams.get("page") || "1", 10);
     const limit = parseInt(url.searchParams.get("limit") || "100", 10);
     const filter = url.searchParams.get("filter"); // "Advances", "Declines", "Unchanged"
     const sortBy = url.searchParams.get("sortBy") || "symbol";
     const sortOrder = url.searchParams.get("sortOrder") || "asc";
+    const forceRefresh = url.searchParams.get("forceRefresh") === "true";
 
-    // Fetch all three categories in parallel
-    const [advancesRes, declinesRes, unchangedRes] = await Promise.all([
-      fetchCategoryData("/api/live-analysis-advance", "advance", "Advances"),
-      fetchCategoryData("/api/live-analysis-decline", "decline", "Declines"),
-      fetchCategoryData("/api/live-analysis-unchanged", "Unchange", "Unchanged"),
-    ]);
+    let advDecResult;
+    
+    if (forceRefresh) {
+      advDecResult = await forceRefreshCache(fetchAdvanceDeclineFromNse, "advance_decline");
+    } else {
+      advDecResult = await getOrFetchNseData(fetchAdvanceDeclineFromNse, {
+        dataType: "advance_decline",
+        ttlSecondsOpen: 60,
+        ttlSecondsClosed: 600
+      });
+    }
 
-    // Combine all data
-    const fullStocks: StockData[] = [
-      ...advancesRes.data,
-      ...declinesRes.data,
-      ...unchangedRes.data,
-    ];
-
-    // Build summary from counts returned by each endpoint
-    const summary = {
-      Advances: advancesRes.count,
-      Declines: declinesRes.count,
-      Unchanged: unchangedRes.count,
-      Total: advancesRes.count + declinesRes.count + unchangedRes.count,
-    };
-
-    logger.info({ msg: "Combined advance-decline data", totalStocks: fullStocks.length, summary });
+    const { stocks: fullStocks, summary, fetchedAt } = advDecResult.data as any;
 
     // Apply filter
     let filteredStocks = fullStocks;
     if (filter && ["Advances", "Declines", "Unchanged"].includes(filter)) {
-      filteredStocks = fullStocks.filter((item) => item.identifier === filter);
+      filteredStocks = fullStocks.filter((item: StockData) => item.identifier === filter);
     }
 
     // Apply sorting
-    filteredStocks.sort((a, b) => {
+    filteredStocks.sort((a: StockData, b: StockData) => {
       let aVal: number | string = a[sortBy as keyof StockData];
       let bVal: number | string = b[sortBy as keyof StockData];
       if (typeof aVal === "string") {
@@ -119,6 +141,12 @@ export async function GET(req: Request) {
     const offset = (page - 1) * limit;
     const paginatedData = filteredStocks.slice(offset, offset + limit);
 
+    logger.info({ 
+      msg: "Advance-Decline: Serving from cache", 
+      source: advDecResult.source,
+      totalStocks: fullStocks.length
+    });
+
     return NextResponse.json({
       data: paginatedData,
       summary,
@@ -126,7 +154,9 @@ export async function GET(req: Request) {
       page,
       totalPages,
       limit,
-      meta: { fetchedAt: new Date().toISOString() },
+      source: advDecResult.source,
+      lastSyncedAt: advDecResult.lastSyncedAt?.toISOString(),
+      meta: { fetchedAt },
     });
   } catch (e) {
     logger.error({ msg: "Failed to fetch advance-decline", error: e });

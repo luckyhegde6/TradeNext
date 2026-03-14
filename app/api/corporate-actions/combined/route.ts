@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { nseFetch } from "@/lib/nse-client";
+import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
 
 function parseNseDate(dateStr: string): string | null {
   if (!dateStr || dateStr === "-") return null;
@@ -86,6 +88,68 @@ function parseCorporateActionFromNse(item: any): any | null {
   };
 }
 
+/**
+ * Fetch corporate actions from NSE
+ */
+async function fetchCorporateActionsFromNse(): Promise<any[]> {
+  const data = await nseFetch("https://www.nseindia.com/api/corporates-corporateActions?index=equities") as any;
+  const actions = Array.isArray(data) ? data : (data?.data || []);
+  return actions.map(parseCorporateActionFromNse).filter(Boolean);
+}
+
+/**
+ * Hydrate corporate actions to database with deduplication
+ */
+async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
+  let hydrated = 0;
+  
+  for (const action of actions) {
+    if (!action.symbol || !action.exDate) continue;
+    
+    try {
+      await prisma.corporateAction.upsert({
+        where: {
+          symbol_exDate: {
+            symbol: action.symbol,
+            exDate: new Date(action.exDate)
+          }
+        },
+        create: {
+          symbol: action.symbol,
+          companyName: action.companyName || "",
+          series: action.series,
+          subject: action.subject || "",
+          actionType: action.actionType || "OTHER",
+          exDate: new Date(action.exDate),
+          recordDate: action.recordDate ? new Date(action.recordDate) : null,
+          faceValue: action.faceValue,
+          ratio: action.ratio,
+          dividendPerShare: action.dividendAmount,
+          dividendYield: action.dividendYield,
+          source: 'nse'
+        },
+        update: {
+          companyName: action.companyName || "",
+          series: action.series,
+          subject: action.subject || "",
+          actionType: action.actionType || "OTHER",
+          recordDate: action.recordDate ? new Date(action.recordDate) : null,
+          faceValue: action.faceValue,
+          ratio: action.ratio,
+          dividendPerShare: action.dividendAmount,
+          dividendYield: action.dividendYield,
+          source: 'nse'
+        }
+      });
+      hydrated++;
+    } catch (err) {
+      logger.warn({ msg: "CorporateAction upsert error", symbol: action.symbol, error: err });
+    }
+  }
+  
+  return hydrated;
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -96,8 +160,40 @@ export async function GET(req: Request) {
     const toDate = url.searchParams.get("toDate");
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
+    const forceRefresh = url.searchParams.get("forceRefresh") === "true";
     const page = pageParam ? parseInt(pageParam, 10) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+
+    // Check if we should force refresh
+    let cacheResult;
+    const dataType: DataType = "corporate_actions";
+    
+    if (forceRefresh) {
+      logger.info({ msg: "CorporateActions: Force refresh requested" });
+      cacheResult = await forceRefreshCache(
+        fetchCorporateActionsFromNse,
+        dataType
+      );
+    } else {
+      // Use smart caching - fetch from NSE only if needed
+      cacheResult = await getOrFetchNseData(
+        fetchCorporateActionsFromNse,
+        {
+          dataType,
+          ttlSecondsOpen: 300,   // 5 minutes when market is open
+          ttlSecondsClosed: 3600 // 1 hour when market is closed
+        }
+      );
+    }
+    
+    // Hydrate to database in background (fire and forget)
+    if (cacheResult.source === "nse") {
+      hydrateCorporateActionsToDb(cacheResult.data as any[]).then(count => {
+        logger.info({ msg: "CorporateActions: Hydrated to DB", count });
+      }).catch(err => {
+        logger.error({ msg: "CorporateActions: DB hydration error", error: err });
+      });
+    }
 
     // Build where clause for DB query
     const where: any = {};
@@ -113,6 +209,7 @@ export async function GET(req: Request) {
       }
     }
 
+    // Always serve from DB for queryable results
     const actions = await prisma.corporateAction.findMany({
       where,
       orderBy: [
@@ -169,11 +266,18 @@ export async function GET(req: Request) {
         page, 
         totalPages, 
         limit,
-        source: 'db'
+        source: cacheResult.source,
+        lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
+        cached: !cacheResult.needsRefresh
       });
     }
 
-    return NextResponse.json({ data: formatted, source: 'db' });
+    return NextResponse.json({ 
+      data: formatted, 
+      source: cacheResult.source,
+      lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
+      cached: !cacheResult.needsRefresh
+    });
 
   } catch (e) {
     logger.error({ msg: "Failed to fetch combined corporate actions", error: e });

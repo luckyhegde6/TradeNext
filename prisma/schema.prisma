@@ -725,3 +725,27 @@ model ScreenerResult {
   @@index([createdAt])
   @@map("screener_results")
 }
+
+// Market Cache - stores cached NSE data with smart refresh logic
+model MarketCache {
+  id              String    @id @default(uuid())
+  cacheKey        String    @unique // Unique key for the cached data (e.g., "corporate_actions", "announcements_NIFTY50")
+  dataType        String    // Type of data: "corporate_actions", "announcements", "insider_trading", "deals", "gainers", "losers", "most_active", etc.
+  indexName       String?   // Optional index filter (e.g., "NIFTY 50", "NIFTY BANK")
+  data            Json      // The actual cached data
+  recordCount     Int       @default(0) // Number of records cached
+  nseLastModified DateTime? // Last modified timestamp from NSE response
+  lastSyncedAt    DateTime  @default(now()) // When we last synced from NSE
+  nextSyncAt      DateTime? // When the next sync is due (based on market hours)
+  marketStatus    String    @default("closed") // "open" | "closed" | "pre_market"
+  syncStatus      String    @default("idle") // "idle" | "syncing" | "error"
+  syncError       String?   // Error message if sync failed
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([dataType])
+  @@index([indexName])
+  @@index([lastSyncedAt])
+  @@index([nextSyncAt])
+  @@map("market_cache")
+}
