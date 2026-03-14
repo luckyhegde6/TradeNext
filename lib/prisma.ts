@@ -6,6 +6,16 @@ import logger from './logger';
 
 const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
 
+logger.info({ 
+  msg: "Prisma: Initializing", 
+  useRemoteDb, 
+  nodeEnv: process.env.NODE_ENV,
+  hasDatabaseUrl: !!process.env.DATABASE_URL,
+  hasDatabaseRemote: !!process.env.DATABASE_REMOTE,
+  hasAccelerateUrl: !!process.env.ACCELERATE_URL,
+  databaseUrlPreview: process.env.DATABASE_URL?.substring(0, 25) + '...'
+});
+
 let prismaClient: PrismaClient;
 
 // Helper to check if a URL is a Prisma Accelerate URL
@@ -55,10 +65,12 @@ if (useRemoteDb) {
     const accelerateUrl = process.env.ACCELERATE_URL || process.env.DATABASE_REMOTE;
     
     if (accelerateUrl) {
-      logger.info({ msg: "Prisma: Falling back to Accelerate", hasUrl: true });
+      logger.info({ msg: "Prisma: Using Accelerate", hasUrl: !!accelerateUrl, urlPreview: accelerateUrl?.substring(0, 30) + '...' });
+      // For Prisma Accelerate, set the URL in env and use $extends
+      // The URL should be passed via DATABASE_URL or as datasourceUrl
       process.env.DATABASE_URL = accelerateUrl;
       prismaClient = new PrismaClient({
-        accelerateUrl: process.env.DATABASE_URL,
+        log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
       }).$extends(withAccelerate()) as unknown as PrismaClient;
     } else {
       // Fall back to local

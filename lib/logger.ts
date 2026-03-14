@@ -278,9 +278,6 @@ interface Logger {
 
 // Create logger
 const createLogger = (): Logger => {
-  // Check if we're in development or production
-  const isDev = process.env.NODE_ENV === 'development';
-  
   const formatMessage = (level: string, message: string | object, ...args: any[]) => {
     const now = new Date();
     const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
@@ -316,10 +313,8 @@ const createLogger = (): Logger => {
     info: (message, ...args) => {
       const entry = formatLogEntry('info', message, ...args);
       writeToFile(entry);
-      
-      if (isDev) {
-        console.log(...formatMessage('INFO', message, ...args));
-      }
+      // Always log to console in both dev and production
+      console.log(...formatMessage('INFO', message, ...args));
     },
     
     warn: (message, ...args) => {
@@ -355,10 +350,8 @@ const createLogger = (): Logger => {
     debug: (message, ...args) => {
       const entry = formatLogEntry('debug', message, ...args);
       writeToFile(entry);
-      
-      if (isDev) {
-        console.debug(...formatMessage('DEBUG', message, ...args));
-      }
+      // Always log to console in both dev and production
+      console.debug(...formatMessage('DEBUG', message, ...args));
     },
     
     // NSE API tracking helper
