@@ -107,28 +107,40 @@ export async function getPortfolioAnalytics(
   today.setHours(0, 0, 0, 0);
 
   const tickers = Array.from(holdingsMap.keys());
-  const prices = await prisma.dailyPrice.findMany({
-    where: {
-      ticker: { in: tickers },
-      tradeDate: { gte: today },
-    },
-  });
+
+  // Parallelize price queries with select clauses
+  const [prices, previousPrices] = await Promise.all([
+    prisma.dailyPrice.findMany({
+      where: {
+        ticker: { in: tickers },
+        tradeDate: { gte: today },
+      },
+      select: {
+        ticker: true,
+        close: true,
+        open: true,
+      },
+    }),
+    prisma.dailyPrice.findMany({
+      where: {
+        ticker: { in: tickers },
+        tradeDate: {
+          lt: today,
+          gte: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000),
+        },
+      },
+      select: {
+        ticker: true,
+        close: true,
+      },
+      orderBy: { tradeDate: "desc" },
+    })
+  ]);
 
   const priceMap = new Map<string, { close: number; open: number }>();
   for (const p of prices) {
     priceMap.set(p.ticker, { close: Number(p.close), open: Number(p.open) });
   }
-
-  const previousPrices = await prisma.dailyPrice.findMany({
-    where: {
-      ticker: { in: tickers },
-      tradeDate: {
-        lt: today,
-        gte: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000),
-      },
-    },
-    orderBy: { tradeDate: "desc" },
-  });
 
   const prevPriceMap = new Map<string, number>();
   for (const p of previousPrices) {

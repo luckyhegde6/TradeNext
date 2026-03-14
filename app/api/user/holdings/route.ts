@@ -65,27 +65,30 @@ export async function POST(req: Request) {
     const body = await req.json();
     const validatedData = createTransactionSchema.parse(body);
 
-    let portfolio = await prisma.portfolio.findFirst({
-      where: { userId },
-    });
-
-    if (!portfolio) {
-      portfolio = await prisma.portfolio.create({
-        data: { userId, name: "My Portfolio" },
+    // Use transaction to ensure atomicity
+    const transaction = await prisma.$transaction(async (tx) => {
+      let portfolio = await tx.portfolio.findFirst({
+        where: { userId },
       });
-    }
 
-    const transaction = await prisma.transaction.create({
-      data: {
-        portfolioId: portfolio.id,
-        ticker: validatedData.ticker.toUpperCase(),
-        side: validatedData.side,
-        quantity: validatedData.quantity,
-        price: validatedData.price,
-        tradeDate: validatedData.tradeDate,
-        fees: validatedData.fees,
-        notes: validatedData.notes,
-      },
+      if (!portfolio) {
+        portfolio = await tx.portfolio.create({
+          data: { userId, name: "My Portfolio" },
+        });
+      }
+
+      return await tx.transaction.create({
+        data: {
+          portfolioId: portfolio.id,
+          ticker: validatedData.ticker.toUpperCase(),
+          side: validatedData.side,
+          quantity: validatedData.quantity,
+          price: validatedData.price,
+          tradeDate: validatedData.tradeDate,
+          fees: validatedData.fees,
+          notes: validatedData.notes,
+        },
+      });
     });
 
     invalidatePortfolioCache(userId);
