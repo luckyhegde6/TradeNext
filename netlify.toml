@@ -1,13 +1,7 @@
 [build]
   command = "npx prisma generate && npm run quickbuild"
   publish = ".next"
-  environment = { 
-    SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,tests,.agents/README.md,opencode.json", 
-    ENVIRONMENT = "production", 
-    USE_REMOTE_DB = "true", 
-    NODE_ENV = "production",
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/tradenext"
-  }
+  environment = { SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,tests,.agents/README.md,opencode.json", ENVIRONMENT = "production", USE_REMOTE_DB = "true", NODE_ENV = "production" }
 
 [functions]
   directory = "netlify/functions"
