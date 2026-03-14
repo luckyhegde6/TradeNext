@@ -21,17 +21,26 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // User stats (safe queries)
-        const totalUsers = await prisma.user.count().catch(() => 0);
-        const adminUsers = await prisma.user.count({ where: { role: 'admin' } }).catch(() => 0);
-        const regularUsers = await prisma.user.count({ where: { role: 'user' } }).catch(() => 0);
-
-        // Recent users (last 30 days)
+        // Calculate date before parallel queries
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const recentUsers = await prisma.user.count({
-            where: { createdAt: { gte: thirtyDaysAgo } }
-        }).catch(() => 0);
+
+        // Parallelize independent queries for better performance
+        const [
+            totalUsers,
+            adminUsers,
+            regularUsers,
+            recentUsers,
+            totalPortfolios,
+            portfoliosWithTransactions
+        ] = await Promise.all([
+            prisma.user.count().catch(() => 0),
+            prisma.user.count({ where: { role: 'admin' } }).catch(() => 0),
+            prisma.user.count({ where: { role: 'user' } }).catch(() => 0),
+            prisma.user.count({ where: { createdAt: { gte: thirtyDaysAgo } } }).catch(() => 0),
+            prisma.portfolio.count().catch(() => 0),
+            prisma.portfolio.count({ where: { transactions: { some: {} } } }).catch(() => 0)
+        ]);
 
         // DB health check
         let dbResponseTime = 0;
@@ -52,12 +61,6 @@ export async function GET(req: Request) {
             dbResponseTime = -1; // Indicate DB issue
             dbVersion = 'Connection Error';
         }
-
-        // Portfolio stats (safe queries)
-        const totalPortfolios = await prisma.portfolio.count().catch(() => 0);
-        const portfoliosWithTransactions = await prisma.portfolio.count({
-            where: { transactions: { some: {} } }
-        }).catch(() => 0);
 
         // Ingest file status (check recent ingest records)
         let recentIngests: any[] = [];

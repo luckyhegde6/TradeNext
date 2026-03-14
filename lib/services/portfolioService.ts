@@ -98,16 +98,20 @@ export async function getPortfolioData(userId: number): Promise<PortfolioSummary
 
     const tickers = Array.from(holdingsMap.keys());
 
-    // Fetch latest prices from DailyPrice as baseline/fallback
+    // Fetch latest prices from DailyPrice as baseline/fallback - only select needed fields
     const dbPrices = await prisma.dailyPrice.findMany({
       where: {
         ticker: { in: tickers },
+      },
+      select: {
+        ticker: true,
+        close: true,
       },
       orderBy: { tradeDate: 'desc' },
       distinct: ['ticker'],
     });
 
-    const dbPriceMap = new Map<string, number>(dbPrices.map((p: any) => [p.ticker, Number(p.close || 0)]));
+    const dbPriceMap = new Map<string, number>(dbPrices.map((p) => [p.ticker, Number(p.close || 0)]));
 
     // Optimized Parallel Enrichment with NSE Real-time Data
     const enrichedHoldings: Holding[] = await Promise.all(tickers.map(async (ticker: string) => {
