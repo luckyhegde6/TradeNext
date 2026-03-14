@@ -33,6 +33,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   portfolios Portfolio[] 
+  sessions UserSession[]
 }
 
 model Post {
@@ -823,4 +824,29 @@ model AnomalyAlert {
   @@index([isResolved])
   @@index([createdAt])
   @@map("anomaly_alerts")
+}
+
+// ============================================
+// Session Management - Track User Sessions
+// ============================================
+
+model UserSession {
+  id              String    @id @default(uuid())
+  userId          Int
+  sessionToken    String    @unique // Encrypted session token
+  ipAddress       String?   // IP address of the session
+  userAgent       String?   // Browser/User agent
+  deviceInfo      String?   // Device information (browser, OS)
+  location        String?   // Approximate location
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime  // When this session expires
+  lastActiveAt    DateTime  @default(now()) // Last activity timestamp
+  createdAt       DateTime  @default(now())
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }

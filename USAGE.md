@@ -48,7 +48,7 @@ npx prisma db seed
 ```
 
 This creates:
-- Demo user: `demo@tradenext.in` / `demo123`
+- Demo user: `demo@tradenext6.app` / `demo123`
 - Admin user: `admin@tradenext6.app` / `admin123`
 
 ## 6. Start Development Server
@@ -63,7 +63,7 @@ Visit http://localhost:3000
 
 | Role | Email | Password |
 |------|-------|----------|
-| Demo | demo@tradenext.in | demo123 |
+| Demo | demo@tradenext6.app | demo123 |
 | Admin | admin@tradenext6.app | admin123 |
 
 ## Running Tests

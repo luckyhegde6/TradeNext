@@ -4,7 +4,12 @@ import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { authConfig } from "./auth.config";
 import { createAuditLog } from "./audit";
+import { createUserSession, invalidateSession } from "./services/sessionService";
 import logger from "./logger";
+import { cookies } from "next/headers";
+
+// Set runtime to nodejs since we use cookies API
+export const runtime = 'nodejs';
 
 declare module "next-auth" {
   interface User {
@@ -22,6 +27,31 @@ declare module "next-auth" {
       role: string;
     };
   }
+}
+
+// Helper to get request info
+async function getRequestInfo() {
+  const cookieStore = await cookies();
+  const headers = cookieStore.getAll();
+  
+  // Get user agent and IP from headers (if available)
+  const userAgent = headers.find(h => h.name === 'user-agent')?.value || 'Unknown';
+  const ipAddress = headers.find(h => h.name === 'x-forwarded-for')?.value?.split(',')[0] || 
+                    headers.find(h => h.name === 'x-real-ip')?.value || 
+                    '127.0.0.1';
+  
+  // Parse device info
+  let deviceInfo = 'Unknown';
+  if (userAgent.includes('Chrome')) deviceInfo = 'Chrome';
+  else if (userAgent.includes('Firefox')) deviceInfo = 'Firefox';
+  else if (userAgent.includes('Safari')) deviceInfo = 'Safari';
+  else if (userAgent.includes('Edge')) deviceInfo = 'Edge';
+  
+  if (userAgent.includes('Mobile')) deviceInfo += ' (Mobile)';
+  else if (userAgent.includes('Tablet')) deviceInfo += ' (Tablet)';
+  else deviceInfo += ' (Desktop)';
+  
+  return { userAgent, ipAddress, deviceInfo };
 }
 
 
@@ -117,8 +147,54 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
   events: {
-    async signIn({ user }) {
-      logger.info({ msg: "Auth: SignIn event", userId: user?.id, email: user?.email });
+    async signIn({ user, account, profile }) {
+      logger.info({ 
+        msg: "Auth: User signed in", 
+        userId: user?.id, 
+        email: user?.email,
+        provider: account?.provider 
+      });
+
+      // Create session in database
+      if (user?.id) {
+        try {
+          // Try to get request info, but don't fail if we can't
+          let ipAddress = 'unknown';
+          let userAgent = 'unknown';
+          let deviceInfo = 'Desktop';
+          
+          try {
+            const { userAgent: ua, ipAddress: ip, deviceInfo: di } = await getRequestInfo();
+            ipAddress = ip;
+            userAgent = ua;
+            deviceInfo = di;
+          } catch (e) {
+            // Request info not available, use defaults
+          }
+          
+          await createUserSession({
+            userId: parseInt(user.id),
+            ipAddress,
+            userAgent,
+            deviceInfo,
+          });
+          
+          logger.info({ 
+            msg: "Auth: Session created in database", 
+            userId: user.id,
+            ipAddress
+          });
+        } catch (error) {
+          logger.error({ 
+            msg: "Auth: Failed to create session in DB", 
+            userId: user.id,
+            error: error instanceof Error ? error.message : String(error) 
+          });
+          // Continue with login even if session creation fails
+        }
+      }
+
+      // Create audit log
       if (user?.id) {
         try {
           await createAuditLog({
@@ -133,6 +209,27 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async signOut(message: any) {
       logger.info({ msg: "Auth: SignOut event", session: message.session?.user?.email });
+      
+      // Invalidate session in database
+      if (message.token?.sub) {
+        try {
+          // Get the session token from the cookie if available
+          const cookieStore = await cookies();
+          const sessionToken = cookieStore.get('next-auth.session-token')?.value;
+          
+          if (sessionToken) {
+            await invalidateSession(sessionToken);
+            logger.info({ msg: "Auth: Session invalidated in DB", userId: message.token.sub });
+          }
+        } catch (error) {
+          logger.error({ 
+            msg: "Auth: Failed to invalidate session", 
+            error: error instanceof Error ? error.message : String(error) 
+          });
+        }
+      }
+
+      // Create audit log
       try {
         if (message.session?.user?.id) {
           await createAuditLog({

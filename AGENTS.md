@@ -4,6 +4,7 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.8.0** - Security Enhancements (March 14, 2026). Fixed localStorage exposure - user data no longer stored in localStorage. Added httpOnly, secure, sameSite:strict cookies for session management. Added CSRF token validation. Added database-backed session tracking with admin session management page at /admin/sessions. Admin can view active user sessions, invalidate specific sessions, or invalidate all sessions for a user.
 - **v1.7.0** - Cron Jobs, Workers & Calendar (March 13, 2026). Added Cron Config management for scheduled tasks. Added Background Workers system with task queue. Added Corporate Actions Calendar view at /markets/calendar. Added TradingView integration links. Added file-based worker logging system.
 - **v1.6.1** - Bug Fixes & Financial Results UI (March 13, 2026). Fixed Corporate Actions Dividend/Yield columns showing "-". Added Financial Results tab with NSE-format table (quarters as columns, metrics as rows). Fixed audit logs to show Method, Path, Status, Speed columns. Added Stock List Sync to admin panel.
 - **v1.6.0** - Historical Data Sync (March 13, 2026). Added admin panel for syncing historical NSE data with custom date ranges. New endpoints for corporate actions, announcements, events, results, and insider trading.
@@ -13,6 +14,50 @@ TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and
 - **v1.2.0** - Added Analytics Service, Alert Service, Demo User Seeding, Portfolio Analytics API
 - **v1.1.0** - Added Stock Recommendations, User Alerts, Audit Logging, Rate Limiting, Admin Holdings Management
 - **v1.0.0** - Initial release
+
+---
+
+## New Features (v1.8.0)
+
+### Security Enhancements
+
+#### Fixed localStorage Exposure
+- User data (name, email, role, id, mobile) is no longer stored in localStorage
+- Session data is now handled entirely via httpOnly cookies
+- Prevents XSS attacks from accessing sensitive user data
+
+#### Cookie Security
+- All session cookies now use `httpOnly: true`, `secure: true`, `sameSite: "strict"`
+- CSRF token protection enabled via NextAuth's built-in mechanism
+- JWT-based session with configurable max age (30 days)
+
+#### Database Session Tracking
+- Added `UserSession` model to Prisma schema for tracking active user sessions
+- Sessions stored with: userId, ipAddress, userAgent, deviceInfo, location, expiresAt
+- Automatic session creation on login, invalidation on logout
+
+#### Admin Session Management
+- New admin page at `/admin/sessions`
+- View all active sessions across the platform
+- Filter sessions by user ID
+- Invalidate individual sessions or all sessions for a user
+- Session statistics: total, active, expired, users with sessions
+
+#### API Endpoints
+- `GET /api/admin/sessions` - Get all active sessions (admin only)
+  - Query params: `userId`, `includeUser`
+- `POST /api/admin/sessions` - Manage sessions (admin only)
+  - Actions: `invalidate`, `invalidateAll`
+
+#### Files Changed
+- `lib/auth.config.ts` - Enhanced cookie security settings
+- `lib/auth.ts` - Added session creation/invalidation on login/logout
+- `lib/services/sessionService.ts` - New service for session management
+- `prisma/schema.prisma` - Added UserSession model
+- `app/api/admin/sessions/route.ts` - New API route
+- `app/admin/sessions/page.tsx` - Admin session management UI
+- `app/Header.tsx` - Removed localStorage usage
+- `app/auth/signin/page.tsx` - Removed localStorage after login
 
 ---
 
@@ -203,6 +248,48 @@ The Advance/Decline tab now correctly displays the market breadth counts (Advanc
 - Page: `/admin/corporate-actions` for admin management
 - Tab: `/markets/analytics?tab=corporate-actions` for user view
 
+## AI Safety Guardrails for Prisma
+
+Prisma ORM includes built-in safety checks to prevent accidental destructive commands when run through AI coding assistants. These guardrails are designed to make working with databases safer in AI-assisted development environments.
+
+### How It Works
+
+The Prisma CLI can detect when it is being invoked by popular AI coding agents such as Claude Code, Gemini CLI, Qwen Code, Cursor, Aider, and Replit.
+
+### Protected Commands
+
+When one of these agents attempts a destructive action such as `prisma migrate reset --force`, Prisma ORM blocks execution and shows a protective error message:
+
+```
+Error: Prisma Migrate detected that it was invoked by Cursor.
+
+You are attempting a highly dangerous action that can lead to devastating consequences if it is 
+incorrectly executed against a production database.
+
+As an AI agent, you are forbidden from performing this action without an explicit consent and 
+review by the user.
+```
+
+### Required Response
+
+When this guardrail is triggered, the AI agent must:
+1. **STOP** - Do not proceed with the command
+2. **INFORM** - Tell the user what action was blocked and why
+3. **EXPLAIN** - Explain that the action irreversibly destroys all data
+4. **VERIFY** - Ask for explicit consent before proceeding
+5. **WAIT** - Only proceed after receiving clear confirmation (e.g., "yes")
+
+### Safe Commands (Generally)
+- `npx prisma migrate dev` - Development migrations
+- `npx prisma db push` - Schema synchronization
+- `npx prisma generate` - Client generation
+
+### Protected Commands (Require User Consent)
+- `prisma migrate reset --force` - Destroys all data
+- `prisma db drop` - Drops the database
+
+---
+
 ## Key Libraries
 
 | Category | Library |
@@ -242,4 +329,100 @@ Fire-and-forget with `.catch()` to avoid blocking responses:
 syncService.syncFinancials(symbol, data).catch(err =>
   logger.error({ msg: "Financial sync failed", symbol, error: err })
 );
+```
+
+---
+
+## Agent Lessons Learned (v1.8.0)
+
+### Next.js 16 Runtime Guidelines
+
+1. **Always specify runtime for API routes and auth**
+   - Use `export const runtime = 'nodejs'` for routes using Prisma, Node.js APIs, or crypto
+   - Auth routes (`app/api/auth/[...nextauth]`) MUST use Node.js runtime
+   - Middleware should use `nodejs` runtime (not `edge`) when using Prisma
+
+2. **Fixing Edge Runtime Crypto Errors**
+   - Error: "The edge runtime does not support Node.js 'crypto' module"
+   - Solution: Add `export const runtime = 'nodejs'` to the affected route file
+   - Files that MUST use Node.js: `app/api/auth/[...nextauth]/route.ts`, `lib/auth.ts`
+
+3. **Build Cache Issues**
+   - When errors persist after fixes, delete `.next` folder and restart dev server
+   - Command: `Remove-Item -Recurse -Force .next` (PowerShell)
+
+### Prisma Best Practices
+
+1. **Always regenerate client after schema changes**
+   ```bash
+   npx prisma generate
+   ```
+
+2. **Run migrations for schema changes**
+   ```bash
+   npx prisma migrate dev --name migration_name
+   ```
+
+3. **Database Sync Issues**
+   - If tables don't exist despite migration showing "in sync", try:
+   ```bash
+   npx prisma db push --force-reset
+   ```
+   - This resets the database and syncs all tables
+   - Note: This deletes all data - use carefully on production
+
+4. **Prisma Guardrails**
+   - AI agents CANNOT run destructive commands without explicit user consent
+   - Protected: `migrate reset --force`, `db drop`
+   - Safe: `migrate dev`, `db push`, `generate`
+
+### Session Management
+
+1. **Secure Session Implementation**
+   - Use httpOnly, secure, sameSite:strict cookies
+   - NEVER store user data in localStorage (XSS vulnerability)
+   - Use NextAuth's built-in session handling
+
+2. **Database Session Tracking**
+   - Create a UserSession model with: userId, ipAddress, userAgent, deviceInfo, expiresAt
+   - Use Web Crypto API (`crypto.getRandomValues()`) instead of Node.js crypto for compatibility
+
+3. **Request Info in Server Actions**
+   - Use `cookies()` from `next/headers` to get request details
+   - Wrap in try-catch as request info may not always be available
+
+### Testing with Playwright
+
+1. **Always clean up after testing**
+   - Kill dev server processes after testing
+   - Check ports: 3000, 3001
+   - Don't kill port 4096 (OpenCode web UI)
+
+2. **Common credentials for testing**
+   - Demo: demo@tradenext6.app / demo123
+   - Admin: admin@tradenext6.app / admin123
+
+### Switch Case Best Practices
+
+Always use block scope `{}` for switch cases to avoid variable hoisting:
+
+```typescript
+// ✅ Correct - each case has its own scope
+switch (type) {
+  case "alerts": {
+    const alerts = await getAnomalyAlerts(50, false);
+    return NextResponse.json(alerts);
+  }
+  default: {
+    const data = await getData();
+    return NextResponse.json(data);
+  }
+}
+
+// ❌ Wrong - variables leak between cases
+switch (type) {
+  case "alerts":
+    const alerts = await getAnomalyAlerts(50, false); // Error if another case uses 'alerts'
+    return NextResponse.json(alerts);
+}
 ```

@@ -31,17 +31,12 @@ function SignInForm() {
                 } else {
                     setError("Invalid email or password");
                 }
-            } else {
-                // Fetch session and store in localStorage as fallback
-                const sessionRes = await fetch('/api/auth/session');
-                const sessionData = await sessionRes.json();
-                if (sessionData?.user) {
-                    localStorage.setItem('nextauth-user', JSON.stringify(sessionData.user));
-                    localStorage.setItem('nextauth-expires', sessionData.expires);
+                } else {
+                    // NextAuth handles session securely via httpOnly cookies
+                    // No localStorage needed - session is managed by NextAuth
+                    await update();
+                    router.push(callbackUrl);
                 }
-                await update();
-                router.push(callbackUrl);
-            }
         } catch {
             setError("An unexpected error occurred");
         }

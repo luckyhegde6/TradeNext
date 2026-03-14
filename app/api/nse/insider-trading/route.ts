@@ -4,31 +4,67 @@ import logger from "@/lib/logger";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
 
 /**
- * Fetch insider trading from NSE
+ * Fetch insider trading from NSE - proper parsing
+ * API: https://www.nseindia.com/api/corporates-pit?
  */
 async function fetchInsiderTradingFromNse(): Promise<any[]> {
   const response = await nseFetch("https://www.nseindia.com/api/corporates-pit?") as any;
   const data = response?.data || response || [];
   const insiderData = Array.isArray(data) ? data : [];
 
+  // Map to proper format based on NSE sample data
   return insiderData.slice(0, 200).map((item: any) => ({
+    // Symbol and Company
     symbol: item.symbol || "",
     companyName: item.company || "",
+    
+    // Regulation (e.g., "7(2)")
     regulation: item.anex || "",
+    
+    // Acquirer Name
     acqName: item.acqName || "",
+    
+    // Security Type
     secType: item.secType || "",
-    securities: item.secAcq || 0,
+    
+    // No. of Securities (parse to number)
+    securities: parseInt(item.secAcq?.toString().replace(/,/g, '')) || 0,
+    
+    // Transaction Type (Buy/Sell/Pledge)
     transactionType: item.tdpTransactionType || "",
+    
+    // Broadcast Date/Time
     broadcastDate: item.date || "",
+    
+    // XBRL Link
     xbrl: item.xbrl || "",
+    
+    // Person Category
     personCategory: item.personCategory || "",
+    
+    // Acquisition Mode
     acqMode: item.acqMode || "",
+    
+    // Exchange
     exchange: item.exchange || "",
+    
+    // Value
     secVal: item.secVal || 0,
+    
+    // Before Acquisition
     beforeShares: item.befAcqSharesNo || "",
     beforePer: item.befAcqSharesPer || "",
+    
+    // After Acquisition
     afterShares: item.afterAcqSharesNo || "",
     afterPer: item.afterAcqSharesPer || "",
+    
+    // Additional fields
+    pid: item.pid || "",
+    did: item.did || "",
+    buyValue: item.buyValue || 0,
+    sellValue: item.sellValue || 0,
+    remarks: item.remarks || "-"
   }));
 }
 

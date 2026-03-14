@@ -2,6 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { 
+  DocumentTextIcon, 
+  TrashIcon, 
+  ArrowDownTrayIcon,
+  FolderIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  ExclamationTriangleIcon
+} from "@heroicons/react/24/outline";
 
 interface APIStats {
   totalRequests: number;
@@ -46,11 +56,17 @@ const SEVERITY_COLORS: Record<string, string> = {
 export default function MonitoringPage() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "anomalies" | "rate-limits">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "nse-calls" | "http-logs" | "server-logs" | "anomalies" | "rate-limits">("overview");
   const [stats, setStats] = useState<APIStats | null>(null);
+  const [httpStats, setHttpStats] = useState<any>(null);
   const [alerts, setAlerts] = useState<AnomalyAlert[]>([]);
   const [rateLimits, setRateLimits] = useState<RateLimitConfig[]>([]);
   const [nseLogs, setNseLogs] = useState<any[]>([]);
+  const [nseCalls, setNseCalls] = useState<any[]>([]);
+  const [httpLogs, setHttpLogs] = useState<any[]>([]);
+  const [serverLogs, setServerLogs] = useState<{ date: string; path: string; size: number }[]>([]);
+  const [selectedLogFile, setSelectedLogFile] = useState<string | null>(null);
+  const [logLines, setLogLines] = useState<string[]>([]);
   const [hours, setHours] = useState(24);
 
   useEffect(() => {
@@ -91,6 +107,34 @@ export default function MonitoringPage() {
       if (nseRes.ok) {
         const data = await nseRes.json();
         setNseLogs(data);
+      }
+
+      // Fetch NSE API calls (in-memory)
+      const nseCallsRes = await fetch("/api/admin/monitoring?type=nse-calls");
+      if (nseCallsRes.ok) {
+        const data = await nseCallsRes.json();
+        setNseCalls(data);
+      }
+
+      // Fetch HTTP request logs (in-memory)
+      const httpLogsRes = await fetch("/api/admin/monitoring?type=http-logs&limit=100");
+      if (httpLogsRes.ok) {
+        const data = await httpLogsRes.json();
+        setHttpLogs(data);
+      }
+
+      // Fetch HTTP stats
+      const httpStatsRes = await fetch("/api/admin/monitoring?type=http-stats");
+      if (httpStatsRes.ok) {
+        const data = await httpStatsRes.json();
+        setHttpStats(data);
+      }
+
+      // Fetch server log files
+      const logsRes = await fetch("/api/admin/monitoring?type=server-logs&action=list");
+      if (logsRes.ok) {
+        const data = await logsRes.json();
+        setServerLogs(data.files || []);
       }
     } catch (error) {
       console.error("Failed to fetch monitoring data:", error);
@@ -165,18 +209,21 @@ export default function MonitoringPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-slate-800">
-          {(["overview", "nse-logs", "anomalies", "rate-limits"] as const).map((tab) => (
+        <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-slate-800 overflow-x-auto">
+          {(["overview", "nse-logs", "nse-calls", "http-logs", "server-logs", "anomalies", "rate-limits"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               }`}
             >
-              {tab === "nse-logs" ? "NSE Logs" : 
+              {tab === "nse-logs" ? "NSE DB Logs" : 
+               tab === "nse-calls" ? "NSE API Calls" : 
+               tab === "http-logs" ? "HTTP Logs" :
+               tab === "server-logs" ? "Server Logs" :
                tab === "rate-limits" ? "Rate Limits" : 
                tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -198,7 +245,7 @@ export default function MonitoringPage() {
             {activeTab === "overview" && stats && (
               <div className="space-y-6">
                 {/* Stats Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800">
                     <div className="text-3xl font-bold text-gray-900 dark:text-white">{stats.totalRequests.toLocaleString()}</div>
                     <div className="text-sm text-gray-500">Total API Requests</div>
@@ -215,6 +262,22 @@ export default function MonitoringPage() {
                     <div className="text-3xl font-bold text-red-600">{stats.anomalies}</div>
                     <div className="text-sm text-gray-500">Active Anomalies</div>
                   </div>
+                  {httpStats && (
+                    <div className={`rounded-lg p-6 border ${
+                      (httpStats.statusCodes?.['401'] || 0) > 0 
+                        ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' 
+                        : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800'
+                    }`}>
+                      <div className={`text-3xl font-bold ${
+                        (httpStats.statusCodes?.['401'] || 0) > 0 
+                          ? 'text-red-600 dark:text-red-400' 
+                          : 'text-gray-900 dark:text-white'
+                      }`}>
+                        {(httpStats.statusCodes?.['401'] || 0) + (httpStats.statusCodes?.['403'] || 0)}
+                      </div>
+                      <div className="text-sm text-gray-500">Unauthorized (401/403)</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Top Endpoints and IPs */}
@@ -277,6 +340,144 @@ export default function MonitoringPage() {
                     )}
                   </div>
                 </div>
+
+                {/* HTTP Stats Section */}
+                {httpStats && httpStats.totalRequests > 0 && (
+                  <div className="space-y-6">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">HTTP Performance</h2>
+                    
+                    {/* Latency & Throughput Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800">
+                        <div className="text-2xl font-bold text-gray-900 dark:text-white">{httpStats.totalRequests}</div>
+                        <div className="text-sm text-gray-500">Total Requests</div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800">
+                        <div className="text-2xl font-bold text-green-600">{httpStats.throughput?.rpm || 0}</div>
+                        <div className="text-sm text-gray-500">Req/min (1m)</div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800">
+                        <div className="text-2xl font-bold text-blue-600">{httpStats.latency?.avg || 0}ms</div>
+                        <div className="text-sm text-gray-500">Avg Latency</div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800">
+                        <div className={`text-2xl font-bold ${httpStats.errorRate > 5 ? 'text-red-600' : 'text-green-600'}`}>
+                          {httpStats.errorRate}%
+                        </div>
+                        <div className="text-sm text-gray-500">Error Rate</div>
+                      </div>
+                    </div>
+
+                    {/* Latency Percentiles */}
+                    <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Latency Percentiles</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-gray-900 dark:text-white">{httpStats.latency?.min || 0}ms</div>
+                          <div className="text-xs text-gray-500">Min</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-gray-900 dark:text-white">{httpStats.latency?.p50 || 0}ms</div>
+                          <div className="text-xs text-gray-500">P50</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-gray-900 dark:text-white">{httpStats.latency?.p90 || 0}ms</div>
+                          <div className="text-xs text-gray-500">P90</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-gray-900 dark:text-white">{httpStats.latency?.p95 || 0}ms</div>
+                          <div className="text-xs text-gray-500">P95</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-gray-900 dark:text-white">{httpStats.latency?.p99 || 0}ms</div>
+                          <div className="text-xs text-gray-500">P99</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status Codes & Methods */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Status Codes */}
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Status Codes</h3>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 text-sm text-gray-500">2xx:</span>
+                            <div className="flex-1 bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+                              <div 
+                                className="bg-green-500 h-full rounded-full" 
+                                style={{ width: `${((httpStats.statusRanges?.['2xx'] || 0) / httpStats.totalRequests) * 100}%` }}
+                              />
+                            </div>
+                            <span className="w-16 text-sm text-right text-gray-900 dark:text-white">{httpStats.statusRanges?.['2xx'] || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 text-sm text-gray-500">3xx:</span>
+                            <div className="flex-1 bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+                              <div 
+                                className="bg-yellow-500 h-full rounded-full" 
+                                style={{ width: `${((httpStats.statusRanges?.['3xx'] || 0) / httpStats.totalRequests) * 100}%` }}
+                              />
+                            </div>
+                            <span className="w-16 text-sm text-right text-gray-900 dark:text-white">{httpStats.statusRanges?.['3xx'] || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 text-sm text-gray-500">4xx:</span>
+                            <div className="flex-1 bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+                              <div 
+                                className="bg-orange-500 h-full rounded-full" 
+                                style={{ width: `${((httpStats.statusRanges?.['4xx'] || 0) / httpStats.totalRequests) * 100}%` }}
+                              />
+                            </div>
+                            <span className="w-16 text-sm text-right text-gray-900 dark:text-white">{httpStats.statusRanges?.['4xx'] || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 text-sm text-gray-500">5xx:</span>
+                            <div className="flex-1 bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+                              <div 
+                                className="bg-red-500 h-full rounded-full" 
+                                style={{ width: `${((httpStats.statusRanges?.['5xx'] || 0) / httpStats.totalRequests) * 100}%` }}
+                              />
+                            </div>
+                            <span className="w-16 text-sm text-right text-gray-900 dark:text-white">{httpStats.statusRanges?.['5xx'] || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Methods */}
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Methods</h3>
+                        <div className="space-y-2">
+                          {Object.entries(httpStats.methods || {}).map(([method, count]) => (
+                            <div key={method} className="flex items-center justify-between">
+                              <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                method === 'GET' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                method === 'POST' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                method === 'PUT' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                method === 'DELETE' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                              }`}>{method}</span>
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{count as number}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Top Endpoints */}
+                    <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Top Endpoints</h3>
+                      <div className="space-y-2">
+                        {(httpStats.topEndpoints || []).slice(0, 8).map((ep: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <span className="text-sm text-gray-600 dark:text-gray-400 font-mono truncate max-w-md">{ep.path}</span>
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{ep.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -340,6 +541,289 @@ export default function MonitoringPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* NSE API Calls Tab - In-memory tracking */}
+            {activeTab === "nse-calls" && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-slate-800">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Time</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Endpoint</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Method</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Response Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {nseCalls.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                            No NSE API calls recorded yet
+                          </td>
+                        </tr>
+                      ) : (
+                        nseCalls.map((call, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                            <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                              {new Date(call.timestamp).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-900 dark:text-white font-mono">
+                              {call.endpoint}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                call.method === 'GET' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                call.method === 'POST' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                              }`}>
+                                {call.method}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {call.status === 'success' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                  <CheckCircleIcon className="w-3 h-3" /> Success
+                                </span>
+                              ) : call.status === 'error' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                                  <XCircleIcon className="w-3 h-3" /> Error
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+                                  <ClockIcon className="w-3 h-3" /> Pending
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                              {call.responseTime ? `${call.responseTime}ms` : '-'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* HTTP Logs Tab - In-memory tracking */}
+            {activeTab === "http-logs" && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-slate-800">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Time</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Method</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">URL</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Response Time</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">IP</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {httpLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                            No HTTP requests logged yet
+                          </td>
+                        </tr>
+                      ) : (
+                        httpLogs.map((log, idx) => {
+                          // Check if this is an unauthorized access (401)
+                          const isUnauthorized = log.status === 401;
+                          const isAuthError = log.status === 401 || log.status === 403;
+                          
+                          return (
+                            <tr 
+                              key={idx} 
+                              className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 ${
+                                isUnauthorized ? 'bg-red-50 dark:bg-red-900/20' : ''
+                              }`}
+                            >
+                              <td className={`px-6 py-4 whitespace-nowrap text-xs ${isUnauthorized ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500'}`}>
+                                {new Date(log.timestamp).toLocaleString()}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                  log.method === 'GET' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                  log.method === 'POST' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                  log.method === 'PUT' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                  log.method === 'DELETE' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                  'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                                }`}>
+                                  {log.method}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-900 dark:text-white font-mono max-w-xs truncate">
+                                {log.url}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {isUnauthorized ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded bg-red-600 text-white animate-pulse">
+                                    401 Unauthorized
+                                  </span>
+                                ) : log.status === 403 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded bg-orange-600 text-white">
+                                    403 Forbidden
+                                  </span>
+                                ) : (
+                                  <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                    log.status >= 200 && log.status < 300 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                    log.status >= 300 && log.status < 400 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                    log.status >= 400 && log.status < 500 ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' :
+                                    log.status >= 500 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                    'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                                  }`}>
+                                    {log.status}
+                                  </span>
+                                )}
+                              </td>
+                              <td className={`px-6 py-4 whitespace-nowrap text-xs ${isAuthError ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500'}`}>
+                                {log.responseTime ? `${log.responseTime}ms` : '-'}
+                              </td>
+                              <td className={`px-6 py-4 whitespace-nowrap text-xs font-mono ${isAuthError ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500'}`}>
+                                {log.ip || '-'}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Server Logs Tab */}
+            {activeTab === "server-logs" && (
+              <div className="space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Server Log Files</h3>
+                    <button
+                      onClick={() => {
+                        setSelectedLogFile(null);
+                        setLogLines([]);
+                        fetchData();
+                      }}
+                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
+                    >
+                      <FolderIcon className="w-4 h-4" />
+                      Refresh
+                    </button>
+                  </div>
+                  
+                  {/* Log Files List */}
+                  {!selectedLogFile ? (
+                    <div className="space-y-2">
+                      {serverLogs.length === 0 ? (
+                        <p className="text-gray-500 text-center py-8">No log files found</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {serverLogs.map((file) => (
+                            <div 
+                              key={file.path} 
+                              className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700"
+                            >
+                              <div className="flex items-center gap-3">
+                                <DocumentTextIcon className="w-5 h-5 text-blue-500" />
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white">{file.date}</p>
+                                  <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={async () => {
+                                    setSelectedLogFile(file.path);
+                                    const res = await fetch(`/api/admin/monitoring?type=server-logs&filePath=${encodeURIComponent(file.path)}&limit=500`);
+                                    if (res.ok) {
+                                      const data = await res.json();
+                                      setLogLines(data.lines || []);
+                                    }
+                                  }}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                                  title="View"
+                                >
+                                  <DocumentTextIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(`Delete log file for ${file.date}?`)) {
+                                      const res = await fetch(`/api/admin/monitoring?type=server-logs&filePath=${encodeURIComponent(file.path)}`, { method: 'DELETE' });
+                                      if (res.ok) {
+                                        fetchData();
+                                      }
+                                    }
+                                  }}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                  title="Delete"
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Log File Content */
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => {
+                            setSelectedLogFile(null);
+                            setLogLines([]);
+                          }}
+                          className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          ← Back to files
+                        </button>
+                        <button
+                          onClick={() => {
+                            const content = logLines.join('\n');
+                            const blob = new Blob([content], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `server-log-${selectedLogFile.split('/').pop()}`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+                        >
+                          <ArrowDownTrayIcon className="w-4 h-4" />
+                          Export
+                        </button>
+                      </div>
+                      
+                      <div className="bg-gray-900 dark:bg-black rounded-lg p-4 max-h-[500px] overflow-auto">
+                        <pre className="text-xs font-mono text-green-400 whitespace-pre-wrap">
+                          {logLines.length === 0 ? 'No log entries' : logLines.map(line => {
+                            try {
+                              const entry = JSON.parse(line);
+                              const level = entry.level?.toUpperCase() || 'INFO';
+                              const color = 
+                                level === 'ERROR' ? 'text-red-400' :
+                                level === 'WARN' ? 'text-yellow-400' :
+                                level === 'DEBUG' ? 'text-blue-400' :
+                                'text-green-400';
+                              return `[${entry.timestamp}] \x1b[1m${level}\x1b[0m ${color ? '' : ''}${typeof entry.message === 'string' ? entry.message : JSON.stringify(entry.message)}`;
+                            } catch {
+                              return line;
+                            }
+                          }).join('\n')}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

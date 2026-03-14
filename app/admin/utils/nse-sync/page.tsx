@@ -12,8 +12,55 @@ import {
     ChartBarIcon,
     ClipboardDocumentListIcon,
     UserGroupIcon,
+    BoltIcon,
+    ArrowTrendingUpIcon,
+    ArrowTrendingDownIcon,
+    ChartBarSquareIcon,
     BuildingLibraryIcon,
 } from "@heroicons/react/24/outline";
+
+interface SyncResult {
+    success: boolean;
+    message: string;
+    duration: number;
+    indices: { name: string; status: string }[];
+    symbols: { symbol: string; status: string }[];
+}
+
+interface LiveSyncResult {
+    success: boolean;
+    type: string;
+    count: number;
+    message: string;
+    duration: number;
+    advances?: number;
+    declines?: number;
+    unchanged?: number;
+    blockDeals?: number;
+    bulkDeals?: number;
+    shortSelling?: number;
+}
+
+interface HistoricalSyncResult {
+    success: boolean;
+    type: string;
+    fromDate: string;
+    toDate: string;
+    recordsFetched: number;
+    recordsSaved: number;
+    duration: number;
+    message: string;
+}
+
+interface IndexStatus {
+    name: string;
+    dbPrice: string;
+    nseStatus: string;
+}
+
+type DataType = 'corporate_actions' | 'announcements' | 'events' | 'results' | 'insider';
+
+type LiveSyncType = 'advance_decline' | 'corporate_actions' | 'announcements' | 'events' | 'deals' | 'volume' | 'insider';
 
 interface SyncResult {
     success: boolean;
@@ -40,7 +87,65 @@ interface IndexStatus {
     nseStatus: string;
 }
 
-type DataType = 'corporate_actions' | 'announcements' | 'events' | 'results' | 'insider';
+interface LiveSyncTile {
+    id: LiveSyncType;
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+    color: string;
+}
+
+const liveSyncTiles: LiveSyncTile[] = [
+    {
+        id: 'advance_decline',
+        label: 'Advance / Decline',
+        description: 'Market breadth data',
+        icon: <ArrowTrendingUpIcon className="w-6 h-6" />,
+        color: 'blue',
+    },
+    {
+        id: 'corporate_actions',
+        label: 'Corporate Actions',
+        description: 'Dividends, Splits, Bonus',
+        icon: <ClipboardDocumentListIcon className="w-6 h-6" />,
+        color: 'green',
+    },
+    {
+        id: 'announcements',
+        label: 'Announcements',
+        description: 'Corporate announcements',
+        icon: <DocumentTextIcon className="w-6 h-6" />,
+        color: 'purple',
+    },
+    {
+        id: 'events',
+        label: 'Event Calendar',
+        description: 'Earnings, dividends, AGMs',
+        icon: <CalendarIcon className="w-6 h-6" />,
+        color: 'orange',
+    },
+    {
+        id: 'deals',
+        label: 'Large Deals',
+        description: 'Block, Bulk, Short Selling',
+        icon: <ChartBarSquareIcon className="w-6 h-6" />,
+        color: 'red',
+    },
+    {
+        id: 'volume',
+        label: 'Volume Analysis',
+        description: 'Most active stocks',
+        icon: <ArrowTrendingDownIcon className="w-6 h-6" />,
+        color: 'cyan',
+    },
+    {
+        id: 'insider',
+        label: 'Insider Trading',
+        description: 'Promoter, stakeholder',
+        icon: <UserGroupIcon className="w-6 h-6" />,
+        color: 'pink',
+    },
+];
 
 export default function NSESyncPage() {
     const [loading, setLoading] = useState(false);
@@ -52,6 +157,11 @@ export default function NSESyncPage() {
     const [historicalResult, setHistoricalResult] = useState<HistoricalSyncResult | null>(null);
     const [stockSyncResult, setStockSyncResult] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
+    
+    // Live sync state
+    const [liveSyncing, setLiveSyncing] = useState(false);
+    const [liveSyncType, setLiveSyncType] = useState<LiveSyncType | null>(null);
+    const [liveSyncResults, setLiveSyncResults] = useState<LiveSyncResult[]>([]);
     
     // Stock sync state
     const [stockIndices, setStockIndices] = useState<{ name: string; url: string }[]>([]);
@@ -174,6 +284,47 @@ export default function NSESyncPage() {
             if (res.ok) alert(`${type === 'all' ? 'All caches' : type + ' cache'} cleared successfully`);
         } catch (err) {
             alert("Failed to clear cache");
+        }
+    };
+
+    // Live sync handler
+    const handleLiveSync = async (type: LiveSyncType) => {
+        if (!confirm(`Sync ${type.replace(/_/g, ' ')} data from NSE now? This will fetch fresh data.`)) return;
+
+        setLiveSyncing(true);
+        setLiveSyncType(type);
+        setError(null);
+
+        try {
+            const res = await fetch("/api/admin/nse/live-sync", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type, forceRefresh: true })
+            });
+            
+            if (!res.ok) throw new Error("Live sync failed");
+            const data = await res.json();
+            
+            const result: LiveSyncResult = {
+                success: data.success,
+                type,
+                count: data.count || 0,
+                message: data.message,
+                duration: data.duration,
+                advances: data.advances,
+                declines: data.declines,
+                unchanged: data.unchanged,
+                blockDeals: data.blockDeals,
+                bulkDeals: data.bulkDeals,
+                shortSelling: data.shortSelling,
+            };
+            
+            setLiveSyncResults(prev => [result, ...prev].slice(0, 10)); // Keep last 10 results
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Live sync failed");
+        } finally {
+            setLiveSyncing(false);
+            setLiveSyncType(null);
         }
     };
 
@@ -366,6 +517,104 @@ export default function NSESyncPage() {
                     </div>
                 </div>
             )}
+
+            {/* Live Data Sync Section */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden">
+                <div className="px-8 py-6 border-b border-gray-100 dark:border-slate-800 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-slate-800/40 dark:to-slate-800/40">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <div className="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center mr-3">
+                                <BoltIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            </div>
+                            <div>
+                                <h2 className="font-black text-gray-900 dark:text-white uppercase tracking-widest text-sm">Live Data Sync</h2>
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 mt-1">
+                                    Fetch fresh data from NSE immediately - bypasses cache for instant updates
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="p-8">
+                    {/* Live Sync Tiles Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+                        {liveSyncTiles.map((tile) => (
+                            <button
+                                key={tile.id}
+                                onClick={() => handleLiveSync(tile.id)}
+                                disabled={liveSyncing}
+                                className={`p-4 rounded-xl border-2 transition-all text-left hover:scale-105 active:scale-95 ${
+                                    liveSyncType === tile.id
+                                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                                        : 'border-gray-200 dark:border-slate-700 hover:border-emerald-300'
+                                }`}
+                            >
+                                <div className={`inline-flex items-center justify-center w-10 h-10 rounded-lg mb-3 ${
+                                    tile.color === 'blue' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
+                                    tile.color === 'green' ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' :
+                                    tile.color === 'purple' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' :
+                                    tile.color === 'orange' ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' :
+                                    tile.color === 'red' ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' :
+                                    tile.color === 'cyan' ? 'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400' :
+                                    'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400'
+                                }`}>
+                                    {liveSyncing && liveSyncType === tile.id ? (
+                                        <ArrowPathIcon className="w-5 h-5 animate-spin" />
+                                    ) : (
+                                        tile.icon
+                                    )}
+                                </div>
+                                <div className="text-xs font-bold text-gray-900 dark:text-white">{tile.label}</div>
+                                <div className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">{tile.description}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Live Sync Results */}
+                    {liveSyncResults.length > 0 && (
+                        <div className="space-y-3">
+                            <h3 className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-wider">Recent Sync Results</h3>
+                            {liveSyncResults.map((result, idx) => (
+                                <div 
+                                    key={idx}
+                                    className={`p-4 rounded-xl border-2 ${
+                                        result.success 
+                                            ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800' 
+                                            : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            {result.success ? (
+                                                <CheckCircleIcon className="w-5 h-5 text-emerald-600 mr-3" />
+                                            ) : (
+                                                <ExclamationCircleIcon className="w-5 h-5 text-red-600 mr-3" />
+                                            )}
+                                            <div>
+                                                <div className="text-sm font-bold text-gray-900 dark:text-white capitalize">
+                                                    {result.type.replace(/_/g, ' ')}
+                                                </div>
+                                                <div className="text-xs text-gray-600 dark:text-gray-400">
+                                                    {result.message}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-lg font-black text-gray-900 dark:text-white">
+                                                {result.count}
+                                            </div>
+                                            <div className="text-[10px] text-gray-500 dark:text-slate-400">
+                                                {result.duration}ms
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* Historical Sync Section */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden">

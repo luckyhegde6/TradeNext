@@ -314,19 +314,22 @@ function MarketAnalyticsTabsContent() {
 
             const transformedInsider = insiderData.map((item: any) => ({
               symbol: item.symbol || "",
-              companyName: item.companyName || "",
+              companyName: item.companyName || item.company || "",
+              regulation: item.regulation || item.anex || "",
               acqName: item.acqName || "",
-              transactionType: item.transactionType || "",
-              securities: Number(item.securities || 0),
-              price: item.price ? Number(item.price) : null,
-              value: item.value ? Number(item.value) : null,
-              secAcqPromoter: item.secAcqPromoter || "",
+              transactionType: item.transactionType || item.tdpTransactionType || "",
+              securities: typeof item.securities === 'string' ? parseInt(item.securities.replace(/,/g, '')) : (Number(item.securities) || Number(item.secAcq) || 0),
               secType: item.secType || "",
-              afterSec: item.afterSec ? Number(item.afterSec) : null,
-              mode: item.mode || "",
-              remarks: item.remarks || "",
-              broadcastDate: item.broadcastDate || "",
-              currentPrice: item.currentPrice ? Number(item.currentPrice) : null,
+              broadcastDate: item.broadcastDate || item.date || "",
+              xbrl: item.xbrl || "",
+              personCategory: item.personCategory || "",
+              acqMode: item.acqMode || "",
+              exchange: item.exchange || "",
+              secVal: typeof item.secVal === 'string' ? parseInt(item.secVal.replace(/,/g, '')) : (Number(item.secVal) || 0),
+              beforeShares: item.beforeShares || item.befAcqSharesNo || "",
+              beforePer: item.beforePer || item.befAcqSharesPer || "",
+              afterShares: item.afterShares || item.afterAcqSharesNo || "",
+              afterPer: item.afterPer || item.afterAcqSharesPer || "",
             }));
 
             return <InsiderTradingTable data={transformedInsider} />
