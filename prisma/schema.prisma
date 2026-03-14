@@ -749,3 +749,78 @@ model MarketCache {
   @@index([nextSyncAt])
   @@map("market_cache")
 }
+
+// API Request Log - tracks all API requests for monitoring and security
+model APIRequestLog {
+  id              String    @id @default(uuid())
+  requestId       String    @unique // Unique request ID for tracing
+  userId          Int?      // User ID if authenticated
+  userEmail       String?  // User email if authenticated
+  ipAddress       String?   // Client IP address
+  userAgent       String?   // Client user agent
+  method          String    // HTTP method (GET, POST, etc.)
+  path            String    // API path
+  queryParams     String?   // Query parameters (sanitized)
+  statusCode      Int?      // Response status code
+  responseTime    Int?      // Response time in ms
+  errorMessage    String?   // Error message if failed
+  isNSE           Boolean   @default(false) // Whether this is an NSE API call
+  nseEndpoint     String?   // NSE endpoint if isNSE = true
+  isRateLimited   Boolean   @default(false) // Whether request was rate limited
+  isAnomaly       Boolean   @default(false) // Whether this request was flagged as anomalous
+  anomalyType     String?   // Type of anomaly detected
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@index([ipAddress])
+  @@index([path])
+  @@index([statusCode])
+  @@index([isNSE])
+  @@index([isAnomaly])
+  @@index([createdAt])
+  @@map("api_request_logs")
+}
+
+// Rate Limit Config - configurable rate limits per endpoint/user
+model RateLimitConfig {
+  id              String    @id @default(uuid())
+  identifier      String    @unique // IP address, user ID, or endpoint pattern
+  identifierType   String    // "ip" | "user" | "endpoint"
+  endpoint        String?   // Specific endpoint or pattern (e.g., "/api/nse/*")
+  limit           Int       @default(100) // Max requests allowed
+  windowSeconds   Int       @default(60) // Time window in seconds
+  currentCount    Int       @default(0) // Current request count
+  resetAt         DateTime? // When the counter resets
+  isBlocked       Boolean   @default(false) // Whether this identifier is blocked
+  blockReason     String?   // Reason for blocking
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([identifier])
+  @@index([identifierType])
+  @@index([isBlocked])
+  @@map("rate_limit_configs")
+}
+
+// Anomaly Alert - stores detected anomalies and security threats
+model AnomalyAlert {
+  id              String    @id @default(uuid())
+  alertType       String    // "high_request_volume" | "suspicious_pattern" | "rate_limit_exceeded" | "unusual_api" | "security_threat"
+  severity        String    // "low" | "medium" | "high" | "critical"
+  title           String
+  description     String
+  identifier      String?   // IP or user that triggered the anomaly
+  identifierType  String?
+  endpoint        String?   // Endpoint that was targeted
+  metadata        Json?     // Additional data about the anomaly
+  isResolved      Boolean   @default(false)
+  resolvedAt       DateTime?
+  resolvedBy       Int?      // Admin user ID who resolved it
+  createdAt       DateTime  @default(now())
+
+  @@index([alertType])
+  @@index([severity])
+  @@index([isResolved])
+  @@index([createdAt])
+  @@map("anomaly_alerts")
+}

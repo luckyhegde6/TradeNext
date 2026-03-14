@@ -11,13 +11,14 @@ const navItems = [
     { name: "Holdings", href: "/admin/holdings" },
     { name: "Audit Logs", href: "/admin/audit" },
     { name: "Tasks", href: "/admin/utils/tasks" },
-    { name: "Docs", href: "/docs" },
-    { name: "Ingest ZIP", href: "/admin/utils/ingest-zip" },
-    { name: "Ingest CSV", href: "/admin/utils/ingest-csv" },
+    { name: "Monitoring", href: "/admin/utils/monitoring" },
     { name: "Workers", href: "/admin/utils/workers" },
     { name: "Cron Config", href: "/admin/utils/cron" },
     { name: "Announcements", href: "/admin/utils/announcements" },
     { name: "NSE Sync", href: "/admin/utils/nse-sync" },
+    { name: "Ingest ZIP", href: "/admin/utils/ingest-zip" },
+    { name: "Ingest CSV", href: "/admin/utils/ingest-csv" },
+    { name: "Docs", href: "/docs" },
 ];
 
 // Get page title based on current path
@@ -31,6 +32,7 @@ function getPageTitle(pathname: string): string {
         "/admin/utils/announcements": "Announcements",
         "/admin/utils/nse-sync": "NSE Sync",
         "/admin/utils/tasks": "Tasks",
+        "/admin/utils/monitoring": "Monitoring",
     };
     // Find exact match or partial match
     for (const [path, title] of Object.entries(map)) {
