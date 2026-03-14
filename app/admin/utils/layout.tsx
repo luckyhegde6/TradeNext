@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const navItems = [
     { name: "Overview", href: "/admin/utils" },
     { name: "Users", href: "/admin/users" },
+    { name: "Sessions", href: "/admin/sessions" },
     { name: "Alerts", href: "/admin/alerts" },
     { name: "Recommendations", href: "/admin/recommendations" },
     { name: "Holdings", href: "/admin/holdings" },
@@ -25,6 +26,7 @@ const navItems = [
 function getPageTitle(pathname: string): string {
     const map: Record<string, string> = {
         "/admin/utils": "Admin Utils",
+        "/admin/sessions": "Sessions",
         "/admin/utils/ingest-zip": "Ingest ZIP",
         "/admin/utils/ingest-csv": "Ingest CSV",
         "/admin/utils/workers": "Workers",

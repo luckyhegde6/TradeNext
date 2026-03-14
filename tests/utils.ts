@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const DEMO_USER = {
-  email: process.env.DEMO_EMAIL || 'demo@tradenext.in',
+  email: process.env.DEMO_EMAIL || 'demo@tradenext6.app',
   password: process.env.DEMO_PASSWORD || '',
 };
 

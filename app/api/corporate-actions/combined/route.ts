@@ -107,46 +107,55 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
     if (!action.symbol || !action.exDate) continue;
     
     try {
-      await prisma.corporateAction.upsert({
+      // Try to find existing by symbol and exDate
+      const existing = await prisma.corporateAction.findFirst({
         where: {
-          symbol_exDate: {
-            symbol: action.symbol,
-            exDate: new Date(action.exDate)
-          }
-        },
-        create: {
           symbol: action.symbol,
-          companyName: action.companyName || "",
-          series: action.series,
-          subject: action.subject || "",
-          actionType: action.actionType || "OTHER",
-          exDate: new Date(action.exDate),
-          recordDate: action.recordDate ? new Date(action.recordDate) : null,
-          faceValue: action.faceValue,
-          ratio: action.ratio,
-          dividendPerShare: action.dividendAmount,
-          dividendYield: action.dividendYield,
-          source: 'nse'
-        },
-        update: {
-          companyName: action.companyName || "",
-          series: action.series,
-          subject: action.subject || "",
-          actionType: action.actionType || "OTHER",
-          recordDate: action.recordDate ? new Date(action.recordDate) : null,
-          faceValue: action.faceValue,
-          ratio: action.ratio,
-          dividendPerShare: action.dividendAmount,
-          dividendYield: action.dividendYield,
-          source: 'nse'
+          exDate: new Date(action.exDate)
         }
       });
+      
+      if (existing) {
+        // Update existing
+        await prisma.corporateAction.update({
+          where: { id: existing.id },
+          data: {
+            companyName: action.companyName || "",
+            series: action.series,
+            subject: action.subject || "",
+            actionType: action.actionType || "OTHER",
+            recordDate: action.recordDate ? new Date(action.recordDate) : null,
+            faceValue: action.faceValue,
+            ratio: action.ratio,
+            dividendPerShare: action.dividendAmount,
+            dividendYield: action.dividendYield,
+            source: 'nse'
+          }
+        });
+      } else {
+        // Create new
+        await prisma.corporateAction.create({
+          data: {
+            symbol: action.symbol,
+            companyName: action.companyName || "",
+            series: action.series,
+            subject: action.subject || "",
+            actionType: action.actionType || "OTHER",
+            exDate: new Date(action.exDate),
+            recordDate: action.recordDate ? new Date(action.recordDate) : null,
+            faceValue: action.faceValue,
+            ratio: action.ratio,
+            dividendPerShare: action.dividendAmount,
+            dividendYield: action.dividendYield,
+            source: 'nse'
+          }
+        });
+      }
       hydrated++;
-    } catch (err) {
-      logger.warn({ msg: "CorporateAction upsert error", symbol: action.symbol, error: err });
+    } catch (error) {
+      console.error('Error hydrating corporate action:', error);
     }
   }
-  
   return hydrated;
 }
 

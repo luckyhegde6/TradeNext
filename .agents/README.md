@@ -48,5 +48,5 @@ This provides:
 
 ## Credentials
 
-Demo: `demo@tradenext.in` / `demo123`  
+Demo: `demo@tradenext6.app` / `demo123`  
 Admin: `admin@tradenext6.app` / `admin123` (configurable via env)

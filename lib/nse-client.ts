@@ -1,7 +1,7 @@
 // lib/nse-client.ts
 import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
-import logger from "@/lib/logger";
+import logger, { trackNseApiCall } from "@/lib/logger";
 
 // Determine if we're in production (Netlify)
 const isProduction = process.env.NODE_ENV === "production";
@@ -50,15 +50,19 @@ async function ensureSession() {
 async function nseFetch(path: string, qs = "", retryCount = 0) {
   await initFetch();
   await ensureSession();
-  const url = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
-  logger.info({ msg: `[NSE Fetch] ${url} (attempt ${retryCount + 1})` });
+  const fullUrl = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
+  const endpoint = path + qs;
+  const startTime = Date.now();
+  
+  logger.info({ msg: `[NSE Fetch] ${fullUrl} (attempt ${retryCount + 1})` });
+  trackNseApiCall(endpoint, 'GET', 'pending');
 
   // Add overall timeout for the entire request
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
   try {
-    const resp = await fetchWithCookies!(url, {
+    const resp = await fetchWithCookies!(fullUrl, {
       headers: {
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -70,9 +74,11 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
     } as any);
 
     clearTimeout(timeoutId);
+    const responseTime = Date.now() - startTime;
 
     if (!resp.ok) {
-      logger.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${url}`);
+      logger.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${fullUrl}`);
+      trackNseApiCall(endpoint, 'GET', 'error', responseTime, `${resp.status} ${resp.statusText}`);
       throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
     }
 
@@ -81,12 +87,16 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
     if ((data as any).error) {
       logger.error({ msg: "[NSE Data Error]", data: JSON.stringify(data) });
     }
+    
+    trackNseApiCall(endpoint, 'GET', 'success', responseTime);
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
+    const responseTime = Date.now() - startTime;
     
     if (error instanceof Error && error.name === 'AbortError') {
-      logger.warn({ msg: `[NSE Timeout] Request timed out for ${url}, retry ${retryCount + 1}/${MAX_RETRIES}` });
+      logger.warn({ msg: `[NSE Timeout] Request timed out for ${fullUrl}, retry ${retryCount + 1}/${MAX_RETRIES}` });
+      trackNseApiCall(endpoint, 'GET', 'error', responseTime, 'Timeout');
       
       // Retry logic
       if (retryCount < MAX_RETRIES) {
@@ -96,9 +106,11 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
         return nseFetch(path, qs, retryCount + 1);
       }
       
-      logger.error({ msg: `[NSE Timeout] All retries exhausted for ${url}` });
-      throw new Error(`NSE request timeout for ${url}`);
+      logger.error({ msg: `[NSE Timeout] All retries exhausted for ${fullUrl}` });
+      throw new Error(`NSE request timeout for ${fullUrl}`);
     }
+    
+    trackNseApiCall(endpoint, 'GET', 'error', responseTime, error instanceof Error ? error.message : String(error));
     throw error;
   }
 }

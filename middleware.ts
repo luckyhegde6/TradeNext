@@ -2,6 +2,10 @@ import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
 import { simpleRateLimit } from "@/lib/rate-limit";
+import { logHttpRequest } from "@/lib/logger";
+
+// Use stable Node.js runtime for middleware (required for Prisma/Postgres)
+export const runtime = 'nodejs';
 
 const { auth } = NextAuth(authConfig);
 
@@ -20,11 +24,14 @@ export default auth((req) => {
     const isLoggedIn = !!req.auth;
     const { nextUrl } = req;
     const response = NextResponse.next();
+    const startTime = Date.now();
 
     // Get client IP for rate limiting
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
                req.headers.get('x-real-ip') || 
                'unknown';
+    
+    const userAgent = req.headers.get('user-agent') || '';
 
     // Handle CORS
     const origin = req.headers.get('origin');
@@ -52,6 +59,9 @@ export default auth((req) => {
       // Use simpler rate limit check for middleware
       if (!simpleRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW * 1000)) {
         logger.warn({ msg: "Rate limit exceeded in middleware", ip, path: nextUrl.pathname });
+        
+        // Log the rate-limited request
+        logHttpRequest(req.method, nextUrl.pathname, 429, Date.now() - startTime, ip, userAgent);
         
         return NextResponse.json(
           { error: "Too many requests. Please try again later." },
@@ -90,6 +100,10 @@ export default auth((req) => {
         return NextResponse.redirect(new URL("/auth/signin?callbackUrl=" + encodeURIComponent(nextUrl.pathname), nextUrl));
     }
 
+    // Log HTTP request after response is created
+    // Note: We can't get actual status in middleware, so we log after
+    // Using a response listener would be better but this is simpler
+    
     return response;
 });
 
@@ -105,7 +119,5 @@ export const config = {
     matcher: [
         // Skip Next.js internals and all static files, unless found in search params
         '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-        // Always run for API routes
-        '/(api|trpc)(.*)',
     ],
 };

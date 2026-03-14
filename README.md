@@ -4,7 +4,14 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.7.0 (Tested: March 13, 2026)
+## Latest Update - v1.8.0 (March 14, 2026)
+
+### Security Enhancements
+- **localStorage Removed**: User data no longer stored in localStorage - prevents XSS attacks
+- **httpOnly Cookies**: Session cookies now use httpOnly, secure, sameSite:strict
+- **CSRF Protection**: Built-in NextAuth CSRF token validation
+- **Database Sessions**: Active session tracking with admin management at `/admin/sessions`
+- **Admin Controls**: View, filter, invalidate individual or all user sessions
 
 ### What's New
 - **Cron Config**: Schedule automated tasks at `/admin/utils/cron`
@@ -30,6 +37,7 @@
 | Alerts | ✅ UI Ready | Empty state (expected) |
 | Financial Results | ✅ Working | NSE format (quarters as columns) |
 | TradingView | ✅ Working | Links on dashboard charts |
+| Session Management | ✅ New | Admin can view/invalidate sessions at /admin/sessions |
 
 ## Overview
 

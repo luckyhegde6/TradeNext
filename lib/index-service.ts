@@ -662,8 +662,8 @@ export async function getCorporateResults(period: string = "Quarterly") {
 
 /**
  * Get insider trading data from NSE
- * Daily: https://www.nseindia.com/api/cmsNote?url=corporate-filings-insider-trading
- * Historical: https://www.nseindia.com/api/corporates-pit?index=equities&from_date=13-03-2025&to_date=13-03-2026
+ * Daily: https://www.nseindia.com/api/corporates-pit?
+ * Historical: https://www.nseindia.com/api/corporates-pit?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY
  */
 export async function getInsiderTrading(fromDate?: string, toDate?: string) {
     const cacheKey = `nse:insiderTrading:${fromDate || 'daily'}:${toDate || 'daily'}`;
@@ -674,14 +674,14 @@ export async function getInsiderTrading(fromDate?: string, toDate?: string) {
         let url: string;
         
         if (fromDate && toDate) {
-            // Historical data
+            // Historical data - use index=equities with date range
             url = `https://www.nseindia.com/api/corporates-pit?index=equities&from_date=${fromDate}&to_date=${toDate}`;
         } else {
-            // Daily data
-            url = "https://www.nseindia.com/api/cmsNote?url=corporate-filings-insider-trading";
+            // Daily data - use the base endpoint
+            url = `https://www.nseindia.com/api/corporates-pit?`;
         }
 
-        logger.info({ msg: 'Fetching insider trading from NSE', fromDate, toDate });
+        logger.info({ msg: 'Fetching insider trading from NSE', url, fromDate, toDate });
         
         const data = await nseFetch(url) as any;
         const insiderData = Array.isArray(data) ? data : (data?.data || []);

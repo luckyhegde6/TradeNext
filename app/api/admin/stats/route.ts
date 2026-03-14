@@ -1,14 +1,23 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { logHttpRequest } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
+    const startTime = Date.now();
+    const url = req.url || '';
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
+               req.headers.get('x-real-ip') || 
+               'unknown';
+    const userAgent = req.headers.get('user-agent') || '';
+
     try {
         const session = await auth();
 
         if (!session || !session.user || session.user.role !== 'admin') {
+            logHttpRequest('GET', url, 401, Date.now() - startTime, ip, userAgent);
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
@@ -110,9 +119,11 @@ export async function GET() {
             timestamp: new Date().toISOString()
         };
 
+        logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
         return NextResponse.json(stats);
     } catch (error) {
         console.error('Admin stats error:', error);
+        logHttpRequest('GET', url, 500, Date.now() - startTime, ip, userAgent);
         return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
     }
 }

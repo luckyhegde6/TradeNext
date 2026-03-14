@@ -30,9 +30,41 @@
 | Calendar View (v1.7.0) | [x] Complete |
 | TradingView Integration (v1.7.0) | [x] Complete |
 | Worker Logging (v1.7.0) | [x] Complete |
+| Security Enhancements (v1.8.0) | [x] Complete |
+| DB Session Tracking (v1.8.0) | [x] Complete |
+| Admin Session Management (v1.8.0) | [x] Complete |
 | Enhanced Alerts | [ ] Pending |
 | Portfolio Analytics | [ ] Pending |
 | Stock Compare | [ ] Pending |
+
+## v1.8.0 - Security Enhancements
+
+### Completed Features (March 14, 2026)
+- **localStorage Removed**: User data no longer stored in localStorage - prevents XSS attacks
+- **httpOnly Cookies**: Session cookies now use httpOnly, secure, sameSite:strict
+- **CSRF Protection**: Built-in NextAuth CSRF token validation
+- **Database Sessions**: Active session tracking at `/admin/sessions`
+  - View all active sessions across the platform
+  - Filter sessions by user ID
+  - Invalidate individual sessions or all sessions for a user
+  - Session statistics: total, active, expired, users with sessions
+
+### Files Changed
+- `lib/auth.config.ts` - Enhanced cookie security settings
+- `lib/auth.ts` - Added session creation/invalidation on login/logout
+- `lib/services/sessionService.ts` - New service for session management
+- `prisma/schema.prisma` - Added UserSession model
+- `app/api/admin/sessions/route.ts` - New API route
+- `app/admin/sessions/page.tsx` - Admin session management UI
+- `app/Header.tsx` - Removed localStorage usage
+- `app/auth/signin/page.tsx` - Removed localStorage after login
+- `middleware.ts` - Fixed runtime to nodejs
+
+### Bug Fixes
+- Fixed monitoring route switch case scope (variable hoisting issue)
+- Fixed crypto module error by using Web Crypto API
+- Fixed middleware edge runtime issues
+- Fixed database sync with `prisma db push --force-reset`
 
 ## v1.7.0 - Cron Jobs, Workers & Calendar
 

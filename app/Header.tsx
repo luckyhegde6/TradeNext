@@ -19,25 +19,15 @@ import {
 
 export default function Header() {
   const pathname = usePathname();
+  // Use ONLY NextAuth session - no localStorage for sensitive data
   const { data: session, status, update } = useSession();
-  const [localUser, setLocalUser] = useState<any>(null);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
-  // Check localStorage for fallback user data - but not during logout
-  useEffect(() => {
-    if (isLoggingOut) return; // Don't read localStorage during logout
-    
-    const storedUser = localStorage.getItem('nextauth-user');
-    if (storedUser) {
-      try {
-        setLocalUser(JSON.parse(storedUser));
-      } catch (e) {
-        console.error('Failed to parse stored user', e);
-      }
-    }
-  }, [isLoggingOut]);
+  // Remove localStorage usage - session is handled securely via httpOnly cookies
+  const isLoggingOut = status === "loading";
   
-  const isLoggedIn = status === "authenticated" || (!!localUser && !isLoggingOut);
+  // Use session data directly - no fallback to localStorage
+  const isLoggedIn = status === "authenticated";
+  
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
@@ -45,31 +35,7 @@ export default function Header() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Fetch session from API on mount and sync to localStorage - but not during logout
-  useEffect(() => {
-    if (isLoggingOut) return; // Don't sync during logout
-    
-    const syncSession = async () => {
-      try {
-        const res = await fetch('/api/auth/session');
-        const data = await res.json();
-        if (data?.user) {
-          localStorage.setItem('nextauth-user', JSON.stringify(data.user));
-          localStorage.setItem('nextauth-expires', data.expires);
-          setLocalUser(data.user);
-        } else {
-          // No user in session - clear localStorage
-          localStorage.removeItem('nextauth-user');
-          localStorage.removeItem('nextauth-expires');
-          setLocalUser(null);
-        }
-      } catch (err) {
-        console.error('Failed to sync session:', err);
-      }
-    };
-    syncSession();
-  }, [isLoggingOut]);
-
+  // Type for user from session
   interface UserWithRole {
     id: string;
     name: string | null;
@@ -79,11 +45,12 @@ export default function Header() {
     mobile?: string | null;
   }
 
-  // Use session user or localStorage user
+  // Get user directly from session (secure)
   const sessionUser = session?.user as UserWithRole | undefined;
-  const user = sessionUser || localUser;
+  const user = sessionUser;
   const isAdmin = user?.role?.toLowerCase() === "admin";
 
+  // Fetch user data only when authenticated via secure session
   useEffect(() => {
     if (isLoggedIn) {
       fetch("/api/portfolio")
@@ -121,22 +88,12 @@ export default function Header() {
   const handleSignOut = async () => {
     console.log('Header: handleSignOut called');
     try {
-      // Mark as logging out to prevent re-sync
-      setIsLoggingOut(true);
-      
-      // Clear localStorage immediately
-      localStorage.removeItem('nextauth-user');
-      localStorage.removeItem('nextauth-expires');
-      setLocalUser(null);
-      
-      // Call the signOut API endpoint to clear server-side session
-      await fetch('/api/auth/signout', { method: 'POST' });
-      
-      // Update the session to clear it
-      await update(null);
-      
-      // Force a hard redirect to home page to clear any cached state
-      window.location.href = '/';
+      // Use NextAuth's signOut - it handles cookie clearing securely
+      // No localStorage manipulation needed - session is in httpOnly cookies
+      await signOut({ 
+        callbackUrl: '/',
+        redirect: true,
+      });
     } catch (error) {
       console.error('Header: SignOut error', error);
       // Force redirect to home even if there's an error
@@ -431,7 +388,7 @@ export default function Header() {
         </div>
       </div>
 
-      {isProfileModalOpen && (
+      {isProfileModalOpen && user && (
         <ProfileModal
           user={user}
           onClose={() => setIsProfileModalOpen(false)}
