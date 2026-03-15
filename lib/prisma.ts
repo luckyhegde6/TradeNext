@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { withAccelerate } from '@prisma/extension-accelerate';
 import logger from './logger';
 
 const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
@@ -18,96 +17,35 @@ logger.info({
 
 let prismaClient: PrismaClient;
 
-// Helper to check if a URL is a Prisma Accelerate URL
-const isAccelerateUrl = (url: string | undefined): boolean => {
-  if (!url) return false;
-  return url.startsWith('prisma+postgres://') || url.includes('accelerate.prisma-data.net');
+// For Prisma 7, we need to use a driver adapter
+// Use the PostgreSQL adapter with connection pooling
+const getDatabaseUrl = (): string => {
+  if (useRemoteDb) {
+    // Use direct PostgreSQL URL for remote
+    return process.env.DATABASE_URL || process.env.DATABASE_REMOTE || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+  }
+  return process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
 };
 
-// Helper to get a direct PostgreSQL URL
-const getDirectPostgresUrl = (): string | null => {
-  // Check for direct PostgreSQL URL first
-  const directUrl = process.env.DATABASE_DIRECT || process.env.DATABASE_URL;
-  if (directUrl && !isAccelerateUrl(directUrl) && directUrl.startsWith('postgresql://')) {
-    return directUrl;
-  }
-  
-  // Check DATABASE_REMOTE - skip if it's Accelerate
-  const remoteUrl = process.env.DATABASE_REMOTE;
-  if (remoteUrl && !isAccelerateUrl(remoteUrl) && remoteUrl.startsWith('postgresql://')) {
-    return remoteUrl;
-  }
-  
-  return null;
-};
+const databaseUrl = getDatabaseUrl();
+logger.info({ msg: "Prisma: Creating client with URL", urlPreview: databaseUrl?.substring(0, 30) + '...' });
 
-if (useRemoteDb) {
-  const directPgUrl = getDirectPostgresUrl();
-  
-  if (directPgUrl) {
-    // Use direct PostgreSQL connection
-    logger.info({ msg: "Prisma: Using direct PostgreSQL connection", hasUrl: true });
-    const pool = new Pool({
-      connectionString: directPgUrl,
-      max: 5,
-      min: 0,
-      idleTimeoutMillis: 15000,
-      connectionTimeoutMillis: 10000,
-      query_timeout: 30000,
-    });
-    const adapter = new PrismaPg(pool);
-    prismaClient = new PrismaClient({
-      adapter,
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    });
-  } else {
-    // No valid direct PostgreSQL URL - try Accelerate
-    // Check multiple environment variables for Accelerate URL
-    const accelerateUrl = process.env.ACCELERATE_URL || process.env.DATABASE_REMOTE || process.env.PRISMA_DATABASE_URL;
-    
-    if (accelerateUrl) {
-      logger.info({ msg: "Prisma: Using Accelerate", hasUrl: !!accelerateUrl, urlPreview: accelerateUrl?.substring(0, 30) + '...' });
-      // For Prisma Accelerate, use the accelerateUrl property
-      // The URL format should be prisma+postgres://... (Accelerate URL)
-      prismaClient = new PrismaClient({
-        accelerateUrl: accelerateUrl,
-        log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-      }).$extends(withAccelerate()) as unknown as PrismaClient;
-    } else {
-      // Fall back to local
-      logger.warn({ msg: "Prisma: No valid remote URL, falling back to local" });
-      const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
-      const pool = new Pool({
-        connectionString: databaseUrl,
-        max: 5,
-        min: 0,
-        idleTimeoutMillis: 15000,
-        connectionTimeoutMillis: 5000,
-        query_timeout: 30000,
-      });
-      const adapter = new PrismaPg(pool);
-      prismaClient = new PrismaClient({
-        adapter,
-        log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-      });
-    }
-  }
-} else {
-  const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: 5,
-    min: 0,
-    idleTimeoutMillis: 15000,
-    connectionTimeoutMillis: 5000,
-    query_timeout: 30000,
-  });
-  const adapter = new PrismaPg(pool);
-  prismaClient = new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-  });
-}
+// Use driver adapter for Prisma 7
+const pool = new Pool({
+  connectionString: databaseUrl,
+  max: 10,
+  min: 2,
+  idleTimeoutMillis: 15000,
+  connectionTimeoutMillis: 10000,
+  query_timeout: 30000,
+});
+
+const adapter = new PrismaPg(pool);
+
+prismaClient = new PrismaClient({
+  adapter,
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
 
 const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient };
 

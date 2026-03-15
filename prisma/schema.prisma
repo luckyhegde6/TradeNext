@@ -6,6 +6,8 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Use classic engine to avoid requiring adapter or accelerateUrl in Prisma 7
+  engineType = "library"
 }
 
 datasource db {
