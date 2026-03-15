@@ -4,8 +4,7 @@
   environment = { 
     SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,tests,.agents/README.md,opencode.json,netlify.toml", 
     ENVIRONMENT = "production", 
-    NODE_ENV = "production",
-    DATABASE_URL = "prisma+postgres://accelerate.prisma-data.net/?api_key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqd3RfaWQiOjEsInNlY3VyZV9rZXkiOiJza19SckpDc3pDWGNNLVAxRmNZMlVCRmUiLCJhcGlfa2V5IjoiMDFLQkU1NFRWQVdLQThIVlFCNDlXNk42UlciLCJ0ZW5hbnRfaWQiOiIzNmJjODFiZmVkMjJiMjA4NzRmYjIzNWM0NTY0Nzg1MGEyODE3ZjA3ZWQwNTlmYTU4Zjk4NjI0ZTE0OWFiMTQxIiwiaW50ZXJuYWxfc2VjcmV0IjoiOThkNzZiZTItOTc4Zi00OWIyLWEwOTUtZTRiOGRiYjJiZGY5In0.HbBnCfaspsidzz5g-qBWnZopX3xxkn2NFOaieTCt5Xk"
+    NODE_ENV = "production"
   }
 
 [functions]
