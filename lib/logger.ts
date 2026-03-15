@@ -1,8 +1,11 @@
 // Next.js 16 compatible logger with file logging support
 // Uses console-based logging and writes to date-wise log files
 
-// Check if we're on the server side
-const isServer = typeof window === 'undefined' && process.env.NODE_ENV !== 'test';
+// Check if we're on the server side - always true for API routes and server components
+const isServer = typeof window === 'undefined';
+
+// Force console output in production for debugging
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Only import fs and path on the server
 let fs: any = null;
@@ -13,7 +16,7 @@ if (isServer) {
     fs = require('fs');
     path = require('path');
   } catch (e) {
-    console.warn('Could not load fs/path for logger');
+    // Fallback to console only
   }
 }
 
@@ -203,17 +206,27 @@ function formatLogEntry(level: LogLevel, message: string | object, ...args: any[
   return `${timestamp} | ${levelColor} ${levelStr} | ${msgStr}${extraArgs}`;
 }
 
-// Write to file
-function writeToFile(entry: string) {
-  if (!isServer || !fs || !logsDirAvailable) return;
+// Write to file - but ALWAYS log to console first
+function writeToFile(entry: string, level: LogLevel = 'info') {
+  // ALWAYS log to console - this is critical for debugging
+  if (level === 'error' || level === 'warn') {
+    console.error(entry);
+  } else if (level === 'debug') {
+    console.debug(entry);
+  } else {
+    console.log(entry);
+  }
+  
+  // Then try to write to file
+  if (!isServer || !fs) return;
   try {
     ensureLogsDir();
     const filePath = getTodayLogPath();
-    if (filePath) {
+    if (filePath && logsDirAvailable) {
       fs.appendFileSync(filePath, entry + '\n', 'utf-8');
     }
   } catch (error) {
-    // Silently fail - don't log to console in production
+    // File writing failed - we already logged to console above
     logsDirAvailable = false;
   }
 }
@@ -312,15 +325,12 @@ const createLogger = (): Logger => {
   return {
     info: (message, ...args) => {
       const entry = formatLogEntry('info', message, ...args);
-      writeToFile(entry);
-      // Always log to console in both dev and production
-      console.log(...formatMessage('INFO', message, ...args));
+      writeToFile(entry, 'info');
     },
     
     warn: (message, ...args) => {
       const entry = formatLogEntry('warn', message, ...args);
-      writeToFile(entry);
-      console.warn(...formatMessage('WARN', message, ...args));
+      writeToFile(entry, 'warn');
     },
     
     error: (message: unknown, ...args: unknown[]) => {
@@ -334,24 +344,12 @@ const createLogger = (): Logger => {
       }
       
       const entry = formatLogEntry('error', msgObj, ...args);
-      writeToFile(entry);
-      
-      // Use consistent formatting for console
-      const msgForConsole = typeof message === 'object' ? message : { error: String(message) };
-      if (message instanceof Error) {
-        console.error(...formatMessage('ERROR', { error: message.message, stack: message.stack?.split('\n').slice(0, 3).join(' | ') }));
-      } else if (typeof message === "string") {
-        console.error(...formatMessage('ERROR', message, ...args));
-      } else {
-        console.error(...formatMessage('ERROR', msgObj, ...args));
-      }
+      writeToFile(entry, 'error');
     },
     
     debug: (message, ...args) => {
       const entry = formatLogEntry('debug', message, ...args);
-      writeToFile(entry);
-      // Always log to console in both dev and production
-      console.debug(...formatMessage('DEBUG', message, ...args));
+      writeToFile(entry, 'debug');
     },
     
     // NSE API tracking helper
@@ -506,3 +504,7 @@ export function withHttpLogging<P extends string, T extends { status: number }>(
 const logger = createLogger();
 
 export default logger;
+export const info = logger.info;
+export const warn = logger.warn;
+export const error = logger.error;
+export const debug = logger.debug;

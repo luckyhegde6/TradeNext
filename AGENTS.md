@@ -4,6 +4,7 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.8.1** - Build Fixes (March 16, 2026). Fixed Prisma 7 adapter configuration. Moved type packages to dependencies for Netlify. Fixed logger to output in production. Fixed netlify.toml syntax. Added startup logging for debugging 502 errors.
 - **v1.8.0** - Security Enhancements (March 14, 2026). Fixed localStorage exposure - user data no longer stored in localStorage. Added httpOnly, secure, sameSite:strict cookies for session management. Added CSRF token validation. Added database-backed session tracking with admin session management page at /admin/sessions. Admin can view active user sessions, invalidate specific sessions, or invalidate all sessions for a user.
 - **v1.7.0** - Cron Jobs, Workers & Calendar (March 13, 2026). Added Cron Config management for scheduled tasks. Added Background Workers system with task queue. Added Corporate Actions Calendar view at /markets/calendar. Added TradingView integration links. Added file-based worker logging system.
 - **v1.6.1** - Bug Fixes & Financial Results UI (March 13, 2026). Fixed Corporate Actions Dividend/Yield columns showing "-". Added Financial Results tab with NSE-format table (quarters as columns, metrics as rows). Fixed audit logs to show Method, Path, Status, Speed columns. Added Stock List Sync to admin panel.
@@ -302,6 +303,25 @@ When this guardrail is triggered, the AI agent must:
 | HTTP | node-fetch, SWR |
 | Validation | Zod 4.x |
 | Logging | pino (via custom wrapper) |
+
+---
+
+## Agent Documentation Files
+
+This project uses additional documentation for agent sessions:
+
+| File | Purpose |
+|------|---------|
+| `Primer.md` | Session tracking - read at start of every session |
+| `agent-memory.md` | Activity log - tracks all agent work |
+| `Lessons.md` | Rules & corrections - read before every commit |
+
+### Usage
+
+1. **Start of session**: Read `Primer.md` to understand current state
+2. **During work**: Log activities in `agent-memory.md`
+3. **Before commit**: Read `Lessons.md` to apply rules
+4. **End of session**: Update `Primer.md` with progress
 
 ---
 

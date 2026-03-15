@@ -2,7 +2,10 @@ import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
 import { simpleRateLimit } from "@/lib/rate-limit";
-import { logHttpRequest } from "@/lib/logger";
+import { logHttpRequest, info as loggerInfo } from "@/lib/logger";
+
+// Startup log
+loggerInfo({ msg: "Middleware: Server starting", environment: process.env.NODE_ENV });
 
 // Use stable Node.js runtime for middleware (required for Prisma/Postgres)
 export const runtime = 'nodejs';
