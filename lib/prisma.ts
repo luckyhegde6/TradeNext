@@ -21,8 +21,22 @@ let prismaClient: PrismaClient;
 // Use the PostgreSQL adapter with connection pooling
 const getDatabaseUrl = (): string => {
   if (useRemoteDb) {
-    // Use direct PostgreSQL URL for remote
-    return process.env.DATABASE_URL || process.env.DATABASE_REMOTE || 'postgresql://postgres:postgres@localhost:5432/tradenext';
+    // For remote/production: prioritize DATABASE_REMOTE, then ACCELERATE_URL, then DATABASE_URL
+    // DATABASE_REMOTE and ACCELERATE_URL can be either:
+    // - Standard PostgreSQL: postgresql://user:pass@host:5432/db
+    // - Prisma Accelerate: prisma+postgres://... (only works with Accelerate extension)
+    const remoteUrl = process.env.DATABASE_REMOTE || process.env.ACCELERATE_URL;
+    if (remoteUrl) {
+      // Check if it's a standard PostgreSQL URL
+      if (remoteUrl.startsWith('postgresql://')) {
+        return remoteUrl;
+      }
+      // If it's an Accelerate URL, we need to fall back to local for now
+      // Or use a direct PostgreSQL connection if available
+      logger.warn({ msg: "Prisma: DATABASE_REMOTE is Accelerate URL, need direct PostgreSQL for adapter" });
+    }
+    // Fall back to DATABASE_URL if available
+    return process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
   }
   return process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradenext';
 };
