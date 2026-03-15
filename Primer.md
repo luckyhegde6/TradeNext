@@ -13,7 +13,14 @@
 
 **Issue**: Production site (https://tradenext6.netlify.app/) returning 502 Bad Gateway
 
-**Root Cause**: Database connection issue - app trying to connect to localhost:5432 which doesn't exist on Netlify
+**Root Cause**: 
+1. Database connection - app tries to connect but DATABASE_URL not set in Netlify
+2. Added early console logging to debug
+
+**Fix Applied**:
+- Added `console.log` at top of prisma.ts for early logging
+- Added fatal error message when DATABASE_URL is missing
+- Build succeeds locally
 
 ---
 
@@ -29,7 +36,7 @@
 
 **Key Changes Made**:
 - `lib/logger.ts` - Always console.log in production
-- `lib/prisma.ts` - Using PrismaPg driver adapter
+- `lib/prisma.ts` - Using PrismaPg driver adapter, added early console logging
 - `netlify.toml` - Removed USE_REMOTE_DB=true
 - `prisma/schema.prisma` - Added engineType = "library"
 - Various type packages moved to dependencies
@@ -40,16 +47,26 @@
 ## Pending Actions
 
 1. [ ] Deploy and check Netlify Function logs
-2. [ ] Fix DATABASE_URL in Netlify environment variables
+2. [ ] Set DATABASE_URL in Netlify environment variables
 3. [ ] Verify site works after database connection fix
+4. [ ] Check logs show ">>> FATAL: No valid DATABASE_URL" error
 
 ---
 
-## Environment Variables Needed on Netlify
+## CRITICAL - Database Setup Required
 
-```
-DATABASE_URL=postgresql://user:password@host:5432/dbname
-```
+The app CANNOT work without a valid PostgreSQL database URL.
+
+**Option 1: Set in Netlify Dashboard**
+- Go to: Site Settings → Environment Variables
+- Add: DATABASE_URL=postgresql://user:password@host:port/database
+
+**Option 2: Use Prisma Postgres**
+- Install Prisma Postgres extension in Netlify
+- It will automatically set DATABASE_URL
+
+**Option 3: Use a free PostgreSQL service**
+- Neon, Supabase, Railway, etc.
 
 ---
 
@@ -58,4 +75,5 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname
 - Logger now exports named functions (info, warn, error, debug)
 - Build command: `npx prisma generate && npm run quickbuild`
 - Prisma 7 requires driver adapter or accelerateUrl
+- Early logging added: check Netlify Function logs for `>>>` prefix
 
