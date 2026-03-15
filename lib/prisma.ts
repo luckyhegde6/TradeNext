@@ -61,15 +61,16 @@ if (useRemoteDb) {
       log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
     });
   } else {
-    // No valid direct PostgreSQL URL - try Accelerate as fallback
-    const accelerateUrl = process.env.ACCELERATE_URL || process.env.DATABASE_REMOTE;
+    // No valid direct PostgreSQL URL - try Accelerate
+    // Check multiple environment variables for Accelerate URL
+    const accelerateUrl = process.env.ACCELERATE_URL || process.env.DATABASE_REMOTE || process.env.PRISMA_DATABASE_URL;
     
     if (accelerateUrl) {
       logger.info({ msg: "Prisma: Using Accelerate", hasUrl: !!accelerateUrl, urlPreview: accelerateUrl?.substring(0, 30) + '...' });
-      // For Prisma Accelerate, set the URL in env and use $extends
-      // The URL should be passed via DATABASE_URL or as datasourceUrl
-      process.env.DATABASE_URL = accelerateUrl;
+      // For Prisma Accelerate, use the accelerateUrl property
+      // The URL format should be prisma+postgres://... (Accelerate URL)
       prismaClient = new PrismaClient({
+        accelerateUrl: accelerateUrl,
         log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
       }).$extends(withAccelerate()) as unknown as PrismaClient;
     } else {
