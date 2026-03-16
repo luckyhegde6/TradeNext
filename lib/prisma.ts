@@ -3,6 +3,8 @@ console.log('>>> Prisma module loading...');
 
 import { PrismaClient } from '@prisma/client';
 import { withAccelerate } from '@prisma/extension-accelerate';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import logger from './logger';
 
 console.log('>>> Prisma imports done, environment:', process.env.NODE_ENV);
@@ -31,14 +33,13 @@ console.log('>>> Use Accelerate:', useAccelerate);
 try {
   if (useAccelerate) {
     console.log('>>> Creating Prisma client with Accelerate extension...');
-    prismaClient = new PrismaClient({
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    }).$extends(withAccelerate());
+    const baseClient = new PrismaClient();
+    prismaClient = baseClient.$extends(withAccelerate()) as unknown as PrismaClient;
   } else {
-    console.log('>>> Creating standard Prisma client...');
-    prismaClient = new PrismaClient({
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    });
+    console.log('>>> Creating Prisma client with PG adapter...');
+    const pool = new Pool({ connectionString: databaseUrl });
+    const adapter = new PrismaPg(pool);
+    prismaClient = new PrismaClient({ adapter });
   }
   console.log('>>> Prisma client created successfully');
 } catch (error) {
