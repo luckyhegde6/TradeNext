@@ -2,7 +2,6 @@
 console.log('>>> Prisma module loading...');
 
 import { PrismaClient } from '@prisma/client';
-import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
@@ -32,12 +31,10 @@ console.log('>>> Use Accelerate:', useAccelerate);
 
 try {
   if (useAccelerate) {
-    console.log('>>> Creating Prisma client with Accelerate extension...');
-    // For Prisma Accelerate, pass the accelerateUrl option
-    const baseClient = new PrismaClient({
-      accelerateUrl: databaseUrl,
-    });
-    prismaClient = baseClient.$extends(withAccelerate()) as unknown as PrismaClient;
+    console.log('>>> Creating Prisma client with Accelerate URL (no extension)...');
+    // For Prisma Accelerate - just pass accelerateUrl, no extension needed for basic functionality
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaClient = new PrismaClient({ accelerateUrl: databaseUrl } as any);
   } else {
     console.log('>>> Creating Prisma client with PG adapter...');
     const pool = new Pool({ connectionString: databaseUrl });
@@ -47,7 +44,18 @@ try {
   console.log('>>> Prisma client created successfully');
 } catch (error) {
   console.error('>>> Prisma initialization failed:', error);
-  prismaClient = new PrismaClient();
+  // Fallback: Try with PG adapter
+  try {
+    console.log('>>> Falling back to PG adapter...');
+    const pool = new Pool({ connectionString: databaseUrl });
+    const adapter = new PrismaPg(pool);
+    prismaClient = new PrismaClient({ adapter });
+  } catch (fallbackError) {
+    console.error('>>> Fallback also failed:', fallbackError);
+    // Last resort - create with empty options
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaClient = new PrismaClient({} as any);
+  }
 }
 
 const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient };
