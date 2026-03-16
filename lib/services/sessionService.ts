@@ -331,3 +331,49 @@ export async function getSessionStats(): Promise<{
     return { total: 0, active: 0, expired: 0, usersWithSessions: 0 };
   }
 }
+
+/**
+ * Increment user token version to invalidate all their JWT tokens
+ * This forces all sessions to re-authenticate
+ */
+export async function invalidateUserTokens(userId: number): Promise<number> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { tokenVersion: true }
+    });
+    
+    if (!user) {
+      logger.warn({ msg: "Session: User not found for token invalidation", userId });
+      return -1;
+    }
+    
+    const newVersion = user.tokenVersion + 1;
+    
+    await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: newVersion }
+    });
+    
+    // Also invalidate all sessions in the database
+    await prisma.userSession.updateMany({
+      where: { userId, isActive: true },
+      data: { isActive: false }
+    });
+    
+    logger.info({ 
+      msg: "Session: Invalidated all tokens for user", 
+      userId, 
+      newVersion 
+    });
+    
+    return newVersion;
+  } catch (error) {
+    logger.error({ 
+      msg: "Session: Failed to invalidate user tokens", 
+      userId,
+      error: error instanceof Error ? error.message : String(error) 
+    });
+    return -1;
+  }
+}

@@ -19,7 +19,23 @@ logger.info({
 
 let prismaClient: PrismaClient;
 
-const databaseUrl = process.env.DATABASE_URL || '';
+// Use DATABASE_URL if set, otherwise fall back to ACCELERATE_URL for Prisma Accelerate
+let databaseUrl = process.env.DATABASE_URL || '';
+
+// If DATABASE_URL is not set but ACCELERATE_URL is, use ACCELERATE_URL
+if (!databaseUrl && process.env.ACCELERATE_URL) {
+  databaseUrl = process.env.ACCELERATE_URL;
+  console.log('>>> Using ACCELERATE_URL as DATABASE_URL');
+}
+
+// If still no database URL, check DATABASE_REMOTE
+if (!databaseUrl && process.env.DATABASE_REMOTE) {
+  databaseUrl = process.env.DATABASE_REMOTE;
+  console.log('>>> Using DATABASE_REMOTE as DATABASE_URL');
+}
+
+console.log('>>> Final DATABASE_URL:', databaseUrl ? 'SET' : 'NOT SET');
+console.log('>>> DATABASE_URL prefix:', databaseUrl?.substring(0, 30));
 
 // Check if using Prisma Accelerate (URL starts with prisma+postgres:// or prisma://)
 const isAccelerateUrl = (url: string): boolean => {

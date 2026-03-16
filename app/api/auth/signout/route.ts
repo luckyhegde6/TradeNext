@@ -1,6 +1,8 @@
-import { signOut } from "next-auth/react";
+import { signOut } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import logger from "@/lib/logger";
+
+export const runtime = "nodejs";
 
 export async function GET() {
   logger.info({ msg: "Auth: SignOut GET called" });
@@ -13,12 +15,12 @@ export async function GET() {
     logger.info({ msg: "Auth: SignOut completed" });
     
     // Redirect to home page
-    return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL || "https://tradenext6.netlify.app"), {
+    return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"), {
       status: 302,
     });
   } catch (error) {
     logger.error({ msg: "Auth: SignOut error", error: error instanceof Error ? error.message : String(error) });
-    return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL || "https://tradenext6.netlify.app"), {
+    return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"), {
       status: 302,
     });
   }

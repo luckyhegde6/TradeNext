@@ -35,6 +35,7 @@
     "db:up": "bash scripts/dev-db-up.sh",
     "db:down": "bash scripts/dev-db-down.sh",
     "dbprod": "cross-env USE_REMOTE_DB=true npm run dev",
+    "dbprod:build": "cross-env NODE_ENV=production USE_REMOTE_DB=true npm run quickbuild",
     "db:enable-timescale": "npx ts-node scripts/enable_timescale.ts",
     "docker:terminate:win": "powershell -ExecutionPolicy Bypass -File scripts/docker-terminate.ps1",
     "docker:terminate": "node scripts/docker-terminate-cross.cjs"

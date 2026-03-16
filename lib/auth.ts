@@ -109,6 +109,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             name: user.name,
             role: user.role,
             mobile: (user as any).mobile,
+            tokenVersion: (user as any).tokenVersion,
           };
         } catch (error) {
           logger.error({ msg: "Auth: Login error", email, error: error instanceof Error ? error.message : String(error) });
@@ -119,13 +120,62 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, user, trigger, session }) {
-      const tokenExt = token as unknown as { role?: string; id?: string; mobile?: string | null; name?: string };
+      const tokenExt = token as unknown as { 
+        role?: string; 
+        id?: string; 
+        mobile?: string | null; 
+        name?: string;
+        tokenVersion?: number;
+        isValid?: boolean;
+      };
 
       if (user) {
         logger.debug({ msg: "Auth: JWT callback - adding user to token", userId: user.id });
         tokenExt.role = user.role;
         tokenExt.id = user.id;
         tokenExt.mobile = user.mobile ?? null;
+        // Include token version in JWT
+        tokenExt.tokenVersion = (user as any).tokenVersion || 1;
+        tokenExt.isValid = true;
+      }
+
+      // Check token version on each request - if user exists in token, verify version
+      if (tokenExt.id && !user && tokenExt.isValid) {
+        // This is a refresh/callback - check if token version is still valid
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: parseInt(tokenExt.id) },
+            select: { tokenVersion: true, isBlocked: true, isVerified: true }
+          });
+          
+          if (!dbUser) {
+            logger.warn({ msg: "Auth: User not found in DB during token refresh", userId: tokenExt.id });
+            throw new Error("Session invalidated");
+          }
+          
+          if (dbUser.isBlocked) {
+            logger.warn({ msg: "Auth: User blocked - invalidating token", userId: tokenExt.id });
+            throw new Error("Account blocked");
+          }
+          
+          if (!dbUser.isVerified) {
+            logger.warn({ msg: "Auth: User not verified - invalidating token", userId: tokenExt.id });
+            throw new Error("Email not verified");
+          }
+          
+          // Check token version - if different, token is invalidated
+          if (dbUser.tokenVersion !== tokenExt.tokenVersion) {
+            logger.warn({ msg: "Auth: Token version mismatch - session invalidated", userId: tokenExt.id, dbVersion: dbUser.tokenVersion, tokenVersion: tokenExt.tokenVersion });
+            throw new Error("Session invalidated");
+          }
+        } catch (error) {
+          // If there's an error (including our custom errors), invalidate the token
+          if (error instanceof Error && error.message.includes("Session") || error instanceof Error && error.message.includes("blocked")) {
+            // Return a token with isValid = false to signal invalidation
+            tokenExt.isValid = false;
+          }
+          logger.error({ msg: "Auth: Error checking token version", error: error instanceof Error ? error.message : String(error) });
+        }
       }
 
       if (trigger === "update" && session) {
@@ -136,6 +186,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return token;
     },
     async session({ session, token }) {
+      const tokenExt = token as unknown as { isValid?: boolean };
+      
+      // If token was invalidated, return empty session
+      if (tokenExt.isValid === false) {
+        return { 
+          ...session,
+          user: {
+            id: '',
+            email: '',
+            role: '',
+          }
+        };
+      }
+      
       logger.debug({ msg: "Auth: Session callback", hasToken: !!token, hasSession: !!session });
       if (token && session.user) {
         session.user.role = token.role as string;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { getAllActiveSessions, getSessionStats, invalidateSession, invalidateAllUserSessions } from "@/lib/services/sessionService";
+import { getAllActiveSessions, getSessionStats, invalidateSession, invalidateAllUserSessions, invalidateUserTokens } from "@/lib/services/sessionService";
 
 export const runtime = "nodejs";
 
@@ -95,15 +95,37 @@ export async function POST(request: NextRequest) {
         }
 
         if (action === 'invalidateAll' && userId) {
-            // Invalidate all sessions for a user
-            const count = await invalidateAllUserSessions(parseInt(userId));
-            return NextResponse.json({ success: true, count, message: `${count} sessions invalidated` });
+            // Invalidate all sessions AND JWT tokens for a user (force complete logout)
+            const userIdNum = parseInt(userId);
+            const tokenVersion = await invalidateUserTokens(userIdNum);
+            if (tokenVersion >= 0) {
+                return NextResponse.json({ 
+                    success: true, 
+                    message: 'All sessions and JWT tokens invalidated. User will be logged out.',
+                    tokenVersion 
+                });
+            }
+            return NextResponse.json({ success: false, error: 'Failed to invalidate tokens' }, { status: 500 });
         }
 
         if (action === 'invalidateAllExceptCurrent' && userId) {
-            // Invalidate all sessions except the current admin's session
+            // Invalidate all sessions except the current admin's session (database only)
             const count = await invalidateAllUserSessions(parseInt(userId));
-            return NextResponse.json({ success: true, count, message: `${count} sessions invalidated (except current)` });
+            return NextResponse.json({ success: true, count, message: `${count} sessions invalidated (database only)` });
+        }
+
+        if (action === 'invalidateTokens' && userId) {
+            // Invalidate only JWT tokens (database sessions remain, but JWT becomes invalid)
+            const userIdNum = parseInt(userId);
+            const tokenVersion = await invalidateUserTokens(userIdNum);
+            if (tokenVersion >= 0) {
+                return NextResponse.json({ 
+                    success: true, 
+                    message: 'JWT tokens invalidated. User will be logged out on next request.',
+                    tokenVersion 
+                });
+            }
+            return NextResponse.json({ success: false, error: 'Failed to invalidate tokens' }, { status: 500 });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });

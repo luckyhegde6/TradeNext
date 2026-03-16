@@ -11,12 +11,12 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!session || session.user.role !== "admin") {
+    if (!session || !session.user || (session.user as any).role !== "admin") {
       router.push("/");
     }
   }, [session, status, router]);
 
-  if (status === "loading" || !session || session.user.role !== "admin") {
+  if (status === "loading" || !session || !session.user || (session.user as any).role !== "admin") {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-gray-500">Checking permissions...</div>

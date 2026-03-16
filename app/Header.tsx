@@ -17,12 +17,24 @@ import {
 } from "@heroicons/react/24/outline";
 
 async function handleLogout() {
-  // Use NextAuth's signOut directly - it handles cookie clearing properly
-  // redirect: false allows us to handle the redirect manually
-  await signOut({ 
-    callbackUrl: '/',
-    redirect: true 
-  });
+  try {
+    // Call the signout endpoint
+    const response = await fetch('/api/auth/signout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+    
+    // Force a full page reload to clear all client-side state
+    // This ensures no cached session data persists
+    window.location.reload();
+  } catch (error) {
+    console.error('Logout error:', error);
+    // Fallback - try client-side signOut
+    await signOut({ callbackUrl: '/' });
+  }
 }
 
 export default function Header() {
