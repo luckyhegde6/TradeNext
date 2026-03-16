@@ -7,6 +7,12 @@ import StockSearchBar from "@/app/components/StockSearchBar";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
+// ISR: Revalidate this page every 60 seconds
+export const revalidate = 60;
+
+// Disable dynamic rendering for faster initial load
+export const dynamic = 'force-static';
+
 interface Post {
   id: string;
   title: string;
@@ -20,7 +26,8 @@ interface Post {
 async function getRecentPosts() {
   try {
     const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/home/recent-posts`, {
-      cache: 'no-store'
+      // Cache for 60 seconds to reduce DB load
+      next: { revalidate: 60 }
     });
     const data = await res.json();
     return data.posts || [];
@@ -29,19 +36,13 @@ async function getRecentPosts() {
   }
 }
 
-export const dynamic = 'force-dynamic';
-
 export default async function Home() {
   const posts = await getRecentPosts();
   const session = await auth();
 
-  let hasPortfolio = false;
-  if (session?.user?.id) {
-    const portfolio = await prisma.portfolio.findFirst({
-      where: { userId: Number(session.user.id) }
-    });
-    hasPortfolio = !!portfolio;
-  }
+  // Skip portfolio check in ISR mode - it will be checked client-side when navigating
+  // This prevents DB timeout issues during static generation
+  const hasPortfolio = false;
 
   return (
     <div className="bg-gray-50 dark:bg-slate-950 min-h-screen">
