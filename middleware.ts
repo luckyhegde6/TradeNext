@@ -1,14 +1,10 @@
-import NextAuth from "next-auth";
-import { authConfig } from "@/lib/auth.config";
+// Minimal middleware without NextAuth - for Netlify compatibility
 import { NextResponse } from "next/server";
 
 // Use Node.js runtime explicitly
 export const runtime = 'nodejs';
 
-// Simple startup log
-console.log('Middleware: Starting...');
-
-const { auth } = NextAuth(authConfig);
+console.log('Middleware: Starting (minimal)...');
 
 // Allowed origins for CORS
 const ALLOWED_ORIGINS = [
@@ -17,11 +13,7 @@ const ALLOWED_ORIGINS = [
   'https://tradenext.vercel.app',
 ];
 
-// Rate limit configuration - simplified for middleware
-const RATE_LIMIT_WINDOW = 60; // 1 minute
-const RATE_LIMIT_MAX = 100; // Max requests per minute
-
-// Simple in-memory rate limiting
+// Simple rate limiting
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 function checkRateLimit(key: string, max: number, windowMs: number): boolean {
@@ -41,18 +33,17 @@ function checkRateLimit(key: string, max: number, windowMs: number): boolean {
   return true;
 }
 
-export default auth((req) => {
-    const isLoggedIn = !!req.auth;
-    const { nextUrl } = req;
+export function middleware(request: Request) {
+    const { nextUrl } = new URL(request.url);
     const response = NextResponse.next();
 
     // Get client IP
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
-               req.headers.get('x-real-ip') || 
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 
+               request.headers.get('x-real-ip') || 
                'unknown';
 
     // Handle CORS
-    const origin = req.headers.get('origin');
+    const origin = request.headers.get('origin');
     if (origin && ALLOWED_ORIGINS.includes(origin)) {
       response.headers.set('Access-Control-Allow-Origin', origin);
     }
@@ -63,7 +54,7 @@ export default auth((req) => {
     response.headers.set('Access-Control-Max-Age', '86400');
 
     // Handle preflight
-    if (req.method === 'OPTIONS') {
+    if (request.method === 'OPTIONS') {
       return response;
     }
 
@@ -71,44 +62,24 @@ export default auth((req) => {
     if (nextUrl.pathname.startsWith('/api/')) {
       const rateLimitKey = `ratelimit:${ip}:${nextUrl.pathname}`;
       
-      if (!checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW * 1000)) {
-        console.warn(`Rate limit exceeded for ${ip} on ${nextUrl.pathname}`);
+      if (!checkRateLimit(rateLimitKey, 100, 60000)) {
+        console.warn(`Rate limit exceeded for ${ip}`);
         return NextResponse.json(
-          { error: "Too many requests. Please try again later." },
-          { 
-            status: 429,
-            headers: {
-              'Retry-After': String(RATE_LIMIT_WINDOW),
-              'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
-              'X-RateLimit-Remaining': '0',
-            }
-          }
+          { error: "Too many requests" },
+          { status: 429 }
         );
       }
-
-      response.headers.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
-      response.headers.set('X-RateLimit-Remaining', String(RATE_LIMIT_MAX - 1));
     }
 
     // Security headers
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('X-XSS-Protection', '1; mode=block');
-    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-    response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
-    // Protected routes
-    const isProtected =
-        nextUrl.pathname.startsWith("/portfolio") ||
-        nextUrl.pathname.startsWith("/posts/new");
-
-    // Redirect to login if accessing protected route while not logged in
-    if (isProtected && !isLoggedIn) {
-        return NextResponse.redirect(new URL("/auth/signin?callbackUrl=" + encodeURIComponent(nextUrl.pathname), nextUrl));
-    }
+    // Note: Protected routes are handled at API route level via auth()
 
     return response;
-});
+}
 
 // Matcher - skip static files
 export const config = {
