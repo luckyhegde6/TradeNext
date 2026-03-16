@@ -19,43 +19,28 @@ logger.info({
 
 let prismaClient: PrismaClient;
 
-// Check if using Prisma Accelerate (URL starts with prisma+postgres://)
-const isAccelerateUrl = (url: string): boolean => {
-  return url.startsWith('prisma+postgres://');
-};
-
 const databaseUrl = process.env.DATABASE_URL || '';
-const useAccelerate = isAccelerateUrl(databaseUrl);
 
-console.log('>>> Use Accelerate:', useAccelerate);
-
+// Create Prisma client with PG adapter - works for any PostgreSQL connection
+// For Prisma Accelerate, use the accelerateUrl option instead of adapter
 try {
-  if (useAccelerate) {
-    console.log('>>> Creating Prisma client with Accelerate URL (no extension)...');
-    // For Prisma Accelerate - just pass accelerateUrl, no extension needed for basic functionality
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prismaClient = new PrismaClient({ accelerateUrl: databaseUrl } as any);
-  } else {
-    console.log('>>> Creating Prisma client with PG adapter...');
-    const pool = new Pool({ connectionString: databaseUrl });
-    const adapter = new PrismaPg(pool);
-    prismaClient = new PrismaClient({ adapter });
-  }
+  console.log('>>> Creating Prisma client with PG adapter...');
+  const pool = new Pool({ 
+    connectionString: databaseUrl,
+    // Add connection pool settings for serverless
+    max: 5,
+    min: 1,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
+  });
+  const adapter = new PrismaPg(pool);
+  prismaClient = new PrismaClient({ adapter });
   console.log('>>> Prisma client created successfully');
 } catch (error) {
   console.error('>>> Prisma initialization failed:', error);
-  // Fallback: Try with PG adapter
-  try {
-    console.log('>>> Falling back to PG adapter...');
-    const pool = new Pool({ connectionString: databaseUrl });
-    const adapter = new PrismaPg(pool);
-    prismaClient = new PrismaClient({ adapter });
-  } catch (fallbackError) {
-    console.error('>>> Fallback also failed:', fallbackError);
-    // Last resort - create with empty options
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prismaClient = new PrismaClient({} as any);
-  }
+  // Last resort fallback
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prismaClient = new PrismaClient({} as any);
 }
 
 const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient };
