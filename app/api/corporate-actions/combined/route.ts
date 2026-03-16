@@ -31,10 +31,30 @@ function parsePurpose(purpose: string): {
   let dividendAmount: number | undefined = undefined;
   let ratio: string | undefined = undefined;
 
+  // Check for dividend in purpose - multiple patterns
   if (p.includes('dividend') || p.includes('interest payment')) {
     actionType = p.includes('interest') ? 'INTEREST' : 'DIVIDEND';
-    const match = purpose.match(/Rs\s*([\d,.]+)\s*Per Share/i);
-    if (match) dividendAmount = parseFloat(match[1].replace(/,/g, ''));
+    // Try multiple patterns for dividend amount
+    const patterns = [
+      /Rs\s*([\d,.]+)\s*Per Share/i,
+      /Rs\s*([\d,.]+)\s*\/\s*Share/i,
+      /Rs\.?\s*([\d,.]+)/i,
+      /₹\s*([\d,.]+)/i,
+      /([\d,.]+)\s*Per Share/i,
+      /final\s+dividend\s+([\d,.]+)/i,
+      /interim\s+dividend\s+([\d,.]+)/i,
+      /dividend\s+([\d,.]+)/i,
+    ];
+    for (const pattern of patterns) {
+      const match = purpose.match(pattern);
+      if (match) {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (!isNaN(amount) && amount > 0) {
+          dividendAmount = amount;
+          break;
+        }
+      }
+    }
   } else if (p.includes('bonus')) {
     actionType = 'BONUS';
     const match = purpose.match(/bonus\s+(\d+:\d+)/i);
@@ -59,16 +79,42 @@ function parsePurpose(purpose: string): {
 }
 
 function parseCorporateActionFromNse(item: any): any | null {
-  const parsed = parsePurpose(item.PURPOSE || item.purpose || '');
+  const purpose = item.PURPOSE || item.purpose || '';
+  const parsed = parsePurpose(purpose);
   const exDate = parseNseDate(item['EX-DATE'] || item.exDate || "");
   if (!exDate) return null;
 
-  const dividendAmount = parsed.dividendAmount || null;
+  // Try to get dividend amount from multiple possible fields in NSE API
+  let dividendAmount = parsed.dividendAmount || null;
+  
+  // Check if NSE API has a specific dividend amount field
+  if (!dividendAmount) {
+    const possibleFields = ['DIVIDEND_AMOUNT', 'dividendAmount', 'DIVIDEND', 'nd', ' Dividend'];
+    for (const field of possibleFields) {
+      if (item[field] !== undefined && item[field] !== null && item[field] !== '-') {
+        const parsedVal = parseFloat(String(item[field]).replace(/,/g, ''));
+        if (!isNaN(parsedVal) && parsedVal > 0) {
+          dividendAmount = parsedVal;
+          break;
+        }
+      }
+    }
+  }
+  
+  // If still no dividend amount, try to infer from purpose if it says "dividend"
+  if (!dividendAmount && purpose.toLowerCase().includes('dividend')) {
+    // For cases like "Dividend" without amount, we can't determine the amount
+    // But at least mark it as DIVIDEND type
+  }
+  
   let dividendYield: number | null = null;
-  if (dividendAmount && item['FACE VALUE']) {
-    const faceValue = parseFloat(item['FACE VALUE'].replace(/,/g, ''));
-    if (faceValue > 0) {
-      dividendYield = (dividendAmount / faceValue) * 100;
+  if (dividendAmount) {
+    const faceValue = item['FACE VALUE'] || item.faceValue || item['FV'] || item.fv;
+    if (faceValue) {
+      const fv = parseFloat(String(faceValue).replace(/,/g, ''));
+      if (fv > 0) {
+        dividendYield = (dividendAmount / fv) * 100;
+      }
     }
   }
 
@@ -76,11 +122,11 @@ function parseCorporateActionFromNse(item: any): any | null {
     symbol: item.SYMBOL || item.symbol || "",
     companyName: item['COMPANY NAME'] || item.companyName || "",
     series: item.SERIES || item.series || null,
-    subject: item.PURPOSE || item.purpose || "",
+    subject: purpose,
     actionType: parsed.actionType,
     exDate: exDate,
     recordDate: parseNseDate(item['RECORD DATE'] || item.recordDate || ""),
-    faceValue: item['FACE VALUE'] || item.faceValue || null,
+    faceValue: item['FACE VALUE'] || item.faceValue || item['FV'] || item.fv || null,
     ratio: parsed.ratio,
     dividendPerShare: dividendAmount,
     dividendYield: dividendYield,
@@ -127,7 +173,7 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
             recordDate: action.recordDate ? new Date(action.recordDate) : null,
             faceValue: action.faceValue,
             ratio: action.ratio,
-            dividendPerShare: action.dividendAmount,
+            dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
             dividendYield: action.dividendYield,
             source: 'nse'
           }
@@ -145,7 +191,7 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
             recordDate: action.recordDate ? new Date(action.recordDate) : null,
             faceValue: action.faceValue,
             ratio: action.ratio,
-            dividendPerShare: action.dividendAmount,
+            dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
             dividendYield: action.dividendYield,
             source: 'nse'
           }

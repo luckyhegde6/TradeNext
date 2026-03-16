@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { signIn, signOut } from "next-auth/react";
+import { useSession, signIn, signOut } from "next-auth/react";
 import { useState, useEffect } from "react";
 import ProfileModal from "@/app/components/modals/ProfileModal";
 import {
@@ -18,28 +17,12 @@ import {
 } from "@heroicons/react/24/outline";
 
 async function handleLogout() {
-  try {
-    // Call the signout endpoint directly
-    const response = await fetch('/api/auth/signout', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    });
-    
-    if (response.ok) {
-      // Force a full page reload to clear all state
-      window.location.href = '/';
-    } else {
-      // Fallback to next-auth signOut
-      await signOut({ callbackUrl: '/' });
-    }
-  } catch (error) {
-    console.error('Logout error:', error);
-    // Fallback to next-auth signOut
-    await signOut({ callbackUrl: '/' });
-  }
+  // Use NextAuth's signOut directly - it handles cookie clearing properly
+  // redirect: false allows us to handle the redirect manually
+  await signOut({ 
+    callbackUrl: '/',
+    redirect: true 
+  });
 }
 
 export default function Header() {
