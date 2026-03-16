@@ -33,7 +33,10 @@ console.log('>>> Use Accelerate:', useAccelerate);
 try {
   if (useAccelerate) {
     console.log('>>> Creating Prisma client with Accelerate extension...');
-    const baseClient = new PrismaClient();
+    // For Prisma Accelerate, pass the accelerateUrl option
+    const baseClient = new PrismaClient({
+      accelerateUrl: databaseUrl,
+    });
     prismaClient = baseClient.$extends(withAccelerate()) as unknown as PrismaClient;
   } else {
     console.log('>>> Creating Prisma client with PG adapter...');
