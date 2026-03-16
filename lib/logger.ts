@@ -34,11 +34,15 @@ interface LogEntry {
 // Server logs directory - use /tmp on serverless platforms
 const getLogsDir = (): string => {
   // Check if we're on a serverless platform (Netlify/Vercel)
-  const isServerless = process.env.NETLIFY || process.env.VERCEL;
+  const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY === '1';
+  const isVercel = !!process.env.VERCEL;
+  const isServerless = isNetlify || isVercel;
+  
+  console.log('[Logger] Platform check:', { isNetlify, isVercel, isServerless, NETLIFY: process.env.NETLIFY, VERCEL: !!process.env.VERCEL });
   
   if (isServerless) {
     // Use /tmp which is writable on serverless
-    return '/tmp/server_logs';
+    return '/tmp/tradenext_logs';
   }
   
   const cwd = process.cwd();

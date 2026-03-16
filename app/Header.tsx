@@ -17,6 +17,31 @@ import {
   ChevronRightIcon
 } from "@heroicons/react/24/outline";
 
+async function handleLogout() {
+  try {
+    // Call the signout endpoint directly
+    const response = await fetch('/api/auth/signout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+    
+    if (response.ok) {
+      // Force a full page reload to clear all state
+      window.location.href = '/';
+    } else {
+      // Fallback to next-auth signOut
+      await signOut({ callbackUrl: '/' });
+    }
+  } catch (error) {
+    console.error('Logout error:', error);
+    // Fallback to next-auth signOut
+    await signOut({ callbackUrl: '/' });
+  }
+}
+
 export default function Header() {
   const pathname = usePathname();
   // Use ONLY NextAuth session - no localStorage for sensitive data
@@ -377,7 +402,7 @@ export default function Header() {
                   </div>
                 </div>
                 <button
-                  onClick={() => { window.location.href = '/api/auth/signout'; }}
+                  onClick={handleLogout}
                   className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-2xl transition-colors"
                 >
                   <ArrowRightOnRectangleIcon className="h-6 w-6" />

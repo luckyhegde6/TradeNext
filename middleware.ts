@@ -1,5 +1,5 @@
 // Minimal middleware without NextAuth - for Netlify compatibility
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 // Use Node.js runtime explicitly
 export const runtime = 'nodejs';
@@ -33,8 +33,8 @@ function checkRateLimit(key: string, max: number, windowMs: number): boolean {
   return true;
 }
 
-export function middleware(request: Request) {
-    const { nextUrl } = new URL(request.url);
+export function middleware(request: NextRequest) {
+    const nextUrl = request.nextUrl;
     const response = NextResponse.next();
 
     // Get client IP
