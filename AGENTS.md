@@ -4,7 +4,47 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.8.2** - Netlify 502 Fix (March 16, 2026). Fixed 502 Bad Gateway error on Netlify. Root cause: Middleware with NextAuth was causing edge function crashes despite `runtime = 'nodejs'`. Solution: Created minimal middleware without NextAuth imports. Authentication now handled at API route level. Prisma Accelerate configuration fixed with `accelerateUrl` option.
 - **v1.8.1** - Build Fixes (March 16, 2026). Fixed Prisma 7 adapter configuration. Moved type packages to dependencies for Netlify. Fixed logger to output in production. Fixed netlify.toml syntax. Added startup logging for debugging 502 errors.
+
+---
+
+## Netlify 502 Fix Details (v1.8.2)
+
+### Problem
+- Site returning 502 Bad Gateway on Netlify
+- Build succeeded but runtime failed
+- Even static pages returned 502
+
+### Root Cause
+- Middleware with NextAuth (`import NextAuth from "next-auth"`) caused crashes
+- Despite `export const runtime = 'nodejs'`, middleware deployed as Edge Function
+- Edge functions have 10s timeout and limited Node.js support
+
+### Solution
+1. **Minimal Middleware**: Created middleware without NextAuth imports
+   - Handles CORS, basic rate limiting, security headers only
+   - Authentication now handled at API route level via `auth()` from `@/lib/auth`
+
+2. **Prisma Accelerate**: Fixed to properly detect and use accelerateUrl
+   ```typescript
+   const useAccelerate = databaseUrl.startsWith('prisma+postgres://') || databaseUrl.startsWith('prisma://');
+   if (useAccelerate) {
+     prismaClient = new PrismaClient({ accelerateUrl: databaseUrl });
+   }
+   ```
+
+### Files Changed
+- `middleware.ts` - Minimal middleware without NextAuth
+- `lib/prisma.ts` - Accelerate URL detection and connection
+- `next.config.ts` - Added skipMiddlewareUrlNormalize
+
+### Testing
+- Disabled middleware temporarily to isolate issue
+- Site loaded successfully without middleware
+- Re-enabled with minimal config - works!
+
+---
 - **v1.8.0** - Security Enhancements (March 14, 2026). Fixed localStorage exposure - user data no longer stored in localStorage. Added httpOnly, secure, sameSite:strict cookies for session management. Added CSRF token validation. Added database-backed session tracking with admin session management page at /admin/sessions. Admin can view active user sessions, invalidate specific sessions, or invalidate all sessions for a user.
 - **v1.7.0** - Cron Jobs, Workers & Calendar (March 13, 2026). Added Cron Config management for scheduled tasks. Added Background Workers system with task queue. Added Corporate Actions Calendar view at /markets/calendar. Added TradingView integration links. Added file-based worker logging system.
 - **v1.6.1** - Bug Fixes & Financial Results UI (March 13, 2026). Fixed Corporate Actions Dividend/Yield columns showing "-". Added Financial Results tab with NSE-format table (quarters as columns, metrics as rows). Fixed audit logs to show Method, Path, Status, Speed columns. Added Stock List Sync to admin panel.
