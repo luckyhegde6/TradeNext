@@ -21,20 +21,36 @@ let prismaClient: PrismaClient;
 
 const databaseUrl = process.env.DATABASE_URL || '';
 
-// Create Prisma client with PG adapter - works for any PostgreSQL connection
-// For Prisma Accelerate, use the accelerateUrl option instead of adapter
+// Check if using Prisma Accelerate (URL starts with prisma+postgres:// or prisma://)
+const isAccelerateUrl = (url: string): boolean => {
+  return url.startsWith('prisma+postgres://') || url.startsWith('prisma://');
+};
+
+const useAccelerate = isAccelerateUrl(databaseUrl);
+
+console.log('>>> Use Accelerate:', useAccelerate);
+
+// Create Prisma client - use accelerateUrl for Accelerate, adapter for direct PostgreSQL
 try {
-  console.log('>>> Creating Prisma client with PG adapter...');
-  const pool = new Pool({ 
-    connectionString: databaseUrl,
-    // Add connection pool settings for serverless
-    max: 5,
-    min: 1,
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 5000,
-  });
-  const adapter = new PrismaPg(pool);
-  prismaClient = new PrismaClient({ adapter });
+  if (useAccelerate) {
+    console.log('>>> Creating Prisma client with Accelerate URL...');
+    // For Prisma Accelerate, use the accelerateUrl option
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaClient = new PrismaClient({ 
+      accelerateUrl: databaseUrl 
+    } as any);
+  } else {
+    console.log('>>> Creating Prisma client with PG adapter...');
+    const pool = new Pool({ 
+      connectionString: databaseUrl,
+      max: 5,
+      min: 1,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 5000,
+    });
+    const adapter = new PrismaPg(pool);
+    prismaClient = new PrismaClient({ adapter });
+  }
   console.log('>>> Prisma client created successfully');
 } catch (error) {
   console.error('>>> Prisma initialization failed:', error);
