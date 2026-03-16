@@ -2,26 +2,44 @@
 console.log('>>> Prisma module loading...');
 
 import { PrismaClient } from '@prisma/client';
+import { withAccelerate } from '@prisma/extension-accelerate';
 import logger from './logger';
 
 console.log('>>> Prisma imports done, environment:', process.env.NODE_ENV);
 console.log('>>> DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
-console.log('>>> DATABASE_URL prefix:', process.env.DATABASE_URL?.substring(0, 20));
+console.log('>>> DATABASE_URL prefix:', process.env.DATABASE_URL?.substring(0, 30));
 
 logger.info({ 
   msg: "Prisma: Initializing", 
   nodeEnv: process.env.NODE_ENV,
-  hasDatabaseUrl: !!process.env.DATABASE_URL
+  hasDatabaseUrl: !!process.env.DATABASE_URL,
+  dbUrlPrefix: process.env.DATABASE_URL?.substring(0, 30)
 });
 
 let prismaClient: PrismaClient;
 
-// For Prisma 7 with library engine type, we can use simple PrismaClient
-// No adapter needed - the DATABASE_URL should be available
+// Check if using Prisma Accelerate (URL starts with prisma+postgres://)
+const isAccelerateUrl = (url: string): boolean => {
+  return url.startsWith('prisma+postgres://');
+};
+
+const databaseUrl = process.env.DATABASE_URL || '';
+const useAccelerate = isAccelerateUrl(databaseUrl);
+
+console.log('>>> Use Accelerate:', useAccelerate);
+
 try {
-  prismaClient = new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-  });
+  if (useAccelerate) {
+    console.log('>>> Creating Prisma client with Accelerate extension...');
+    prismaClient = new PrismaClient({
+      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    }).$extends(withAccelerate());
+  } else {
+    console.log('>>> Creating standard Prisma client...');
+    prismaClient = new PrismaClient({
+      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    });
+  }
   console.log('>>> Prisma client created successfully');
 } catch (error) {
   console.error('>>> Prisma initialization failed:', error);
