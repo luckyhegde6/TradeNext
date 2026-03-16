@@ -2,6 +2,9 @@
   command = "npx prisma generate && npm run quickbuild"
   publish = ".next"
 
+[build.environment]
+  SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,tests,.agents/README.md,opencode.json"
+
 [functions]
   directory = "netlify/functions"
 
