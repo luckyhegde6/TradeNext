@@ -1,14 +1,12 @@
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
-import { simpleRateLimit } from "@/lib/rate-limit";
-import { logHttpRequest, info as loggerInfo } from "@/lib/logger";
 
-// Startup log
-loggerInfo({ msg: "Middleware: Server starting", environment: process.env.NODE_ENV });
-
-// Use stable Node.js runtime for middleware (required for Prisma/Postgres)
+// Use Node.js runtime explicitly
 export const runtime = 'nodejs';
+
+// Simple startup log
+console.log('Middleware: Starting...');
 
 const { auth } = NextAuth(authConfig);
 
@@ -19,29 +17,44 @@ const ALLOWED_ORIGINS = [
   'https://tradenext.vercel.app',
 ];
 
-// Rate limit configuration
+// Rate limit configuration - simplified for middleware
 const RATE_LIMIT_WINDOW = 60; // 1 minute
 const RATE_LIMIT_MAX = 100; // Max requests per minute
+
+// Simple in-memory rate limiting
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+function checkRateLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const record = rateLimitMap.get(key);
+  
+  if (!record || now > record.resetTime) {
+    rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
+    return true;
+  }
+  
+  if (record.count >= max) {
+    return false;
+  }
+  
+  record.count++;
+  return true;
+}
 
 export default auth((req) => {
     const isLoggedIn = !!req.auth;
     const { nextUrl } = req;
     const response = NextResponse.next();
-    const startTime = Date.now();
 
-    // Get client IP for rate limiting
+    // Get client IP
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
                req.headers.get('x-real-ip') || 
                'unknown';
-    
-    const userAgent = req.headers.get('user-agent') || '';
 
     // Handle CORS
     const origin = req.headers.get('origin');
     if (origin && ALLOWED_ORIGINS.includes(origin)) {
       response.headers.set('Access-Control-Allow-Origin', origin);
-    } else if (ALLOWED_ORIGINS.includes('*')) {
-      response.headers.set('Access-Control-Allow-Origin', '*');
     }
     
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -56,16 +69,10 @@ export default auth((req) => {
 
     // Rate limiting for API routes
     if (nextUrl.pathname.startsWith('/api/')) {
-      // Create rate limit key based on IP
       const rateLimitKey = `ratelimit:${ip}:${nextUrl.pathname}`;
       
-      // Use simpler rate limit check for middleware
-      if (!simpleRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW * 1000)) {
-        logger.warn({ msg: "Rate limit exceeded in middleware", ip, path: nextUrl.pathname });
-        
-        // Log the rate-limited request
-        logHttpRequest(req.method, nextUrl.pathname, 429, Date.now() - startTime, ip, userAgent);
-        
+      if (!checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW * 1000)) {
+        console.warn(`Rate limit exceeded for ${ip} on ${nextUrl.pathname}`);
         return NextResponse.json(
           { error: "Too many requests. Please try again later." },
           { 
@@ -74,16 +81,13 @@ export default auth((req) => {
               'Retry-After': String(RATE_LIMIT_WINDOW),
               'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
               'X-RateLimit-Remaining': '0',
-              'X-RateLimit-Reset': String(Date.now() + RATE_LIMIT_WINDOW * 1000)
             }
           }
         );
       }
 
-      // Add rate limit headers
       response.headers.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
-      response.headers.set('X-RateLimit-Remaining', String(RATE_LIMIT_MAX - 1)); // Approximate
-      response.headers.set('X-RateLimit-Reset', String(Date.now() + RATE_LIMIT_WINDOW * 1000));
+      response.headers.set('X-RateLimit-Remaining', String(RATE_LIMIT_MAX - 1));
     }
 
     // Security headers
@@ -103,24 +107,12 @@ export default auth((req) => {
         return NextResponse.redirect(new URL("/auth/signin?callbackUrl=" + encodeURIComponent(nextUrl.pathname), nextUrl));
     }
 
-    // Log HTTP request after response is created
-    // Note: We can't get actual status in middleware, so we log after
-    // Using a response listener would be better but this is simpler
-    
     return response;
 });
 
-// Simple logger for middleware
-const logger = {
-  warn: (data: { msg: string; ip?: string; path?: string }) => {
-    console.warn(`[RATE LIMIT] ${data.msg}`, { ip: data.ip, path: data.path });
-  }
-};
-
-// Updated matcher for Next.js 16 compatibility
+// Matcher - skip static files
 export const config = {
     matcher: [
-        // Skip Next.js internals and all static files, unless found in search params
         '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     ],
 };

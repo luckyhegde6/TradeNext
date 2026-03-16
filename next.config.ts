@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
     'tough-cookie',
     'fetch-cookie'
   ],
+  
+  // Disable edge middleware - use Node.js for all server-side operations
+  skipMiddlewareUrlNormalize: true,
 };
 
 export default nextConfig;
