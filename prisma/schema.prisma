@@ -607,7 +607,7 @@ model CronJob {
 model WorkerTask {
   id            String    @id @default(uuid())
   name          String
-  taskType      String    // alert_check | screener | recommendations | data_sync | cleanup
+  taskType      String    // alert_check | screener | recommendations | data_sync | cleanup | csv_processing | password_reset | notification_broadcast | announcement_mgmt | maintenance | market_data
   taskCategory  String    @default("regular") // cron | async | regular
   status        String    @default("pending") // pending | running | completed | failed | cancelled
   priority      Int       @default(5) // 1-10, higher = more urgent
@@ -621,14 +621,19 @@ model WorkerTask {
   createdBy     Int?
   assignedTo    String?   // Worker node identifier
   cronJobId     String?   // Reference to CronJob if created from cron
+  parentTaskId  String?   // For sub-tasks or re-runs tracing back to original
+  triggeredBy   String?   // "cron" | "upload" | "admin" | "system"
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  events        TaskEvent[]
 
   @@index([status])
   @@index([taskType])
   @@index([taskCategory])
   @@index([priority])
   @@index([createdAt])
+  @@index([parentTaskId])
   @@map("worker_tasks")
 }
 
@@ -647,6 +652,26 @@ model WorkerStatus {
   updatedAt       DateTime  @updatedAt
 
   @@map("worker_status")
+}
+
+// ============================================
+// Task Event Log — granular event tracking
+// ============================================
+
+model TaskEvent {
+  id          String   @id @default(uuid())
+  taskId      String
+  eventType   String   // task_created | task_started | task_completed | task_failed | alert_triggered | csv_row_processed | notification_sent
+  message     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  task        WorkerTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("task_events")
 }
 
 // ============================================
@@ -716,8 +741,8 @@ model ScreenerResult {
   marketCap       Decimal?  @db.Decimal(30,6)
   peRatio         Decimal?  @db.Decimal(30,6)
   pbRatio         Decimal?  @db.Decimal(30,6)
-  roe             Decimal?  @db.Decimal(30,6)
-  debtToEquity    Decimal?  @db.Decimal(30,6)
+  roe             Decimal?  @db.Decimal(10,4)
+  debtToEquity    Decimal?  @db.Decimal(10,4)
   eps             Decimal?  @db.Decimal(30,6)
   bookValue       Decimal?  @db.Decimal(30,6)
   dividendYield   Decimal?  @db.Decimal(30,6)
@@ -731,6 +756,20 @@ model ScreenerResult {
   @@index([symbol])
   @@index([createdAt])
   @@map("screener_results")
+}
+
+model DailyScreenerSync {
+  id          String   @id @default(uuid())
+  syncDate    DateTime @unique // Normalized to midnight or use a Date string
+  data        Json     // Full TradingView scan status
+  recordCount Int      @default(0)
+  status      String   @default("completed") // completed | failed
+  error       String?  // Error message if failed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([syncDate])
+  @@map("daily_screener_syncs")
 }
 
 // Market Cache - stores cached NSE data with smart refresh logic

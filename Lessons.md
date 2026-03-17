@@ -181,6 +181,16 @@ switch (type) {
 
 ---
 
+### 11. Dynamic Directory Creation & Permissions
+**Issue**: Background tasks failing to write logs in restricted environments (e.g., .next folder).
+**Root Cause**: Sub-processes or monitoring servers may lack write/read access to dynamically created directories.
+**Solution**: 
+- Create directories with explicit octal permissions: `fs.mkdirSync(path, { recursive: true, mode: 0o777 })`.
+- Use `fs.chmodSync(path, 0o777)` after creation to ensure permissions are applied regardless of umask.
+- Always provide a local fallback (e.g., `process.cwd() + "/worker_logs"`) if the target path is non-writable.
+
+---
+
 ## Before Every Commit Checklist
 
 - [ ] Read Lessons.md

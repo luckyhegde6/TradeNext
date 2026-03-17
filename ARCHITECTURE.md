@@ -128,6 +128,30 @@ Post
 ├── authorId (Int, FK)
 ├── createdAt (DateTime)
 └── updatedAt (DateTime)
+
+WorkerTask
+├── id (String, PK)
+├── name (String)
+├── taskType (String)
+├── status (Enum: pending, running, completed, failed)
+├── taskCategory (Enum: cron, async, regular)
+├── payload (Json)
+├── parentTaskId (String, nullable)
+├── triggeredBy (String)
+└── createdAt (DateTime)
+
+TaskEvent
+├── id (String, PK)
+├── taskId (String, FK)
+├── eventType (String)
+├── message (String)
+└── createdAt (DateTime)
+
+DailyScreenerSync
+├── id (String, PK)
+├── syncDate (DateTime, unique)
+├── data (Json)
+└── createdAt (DateTime)
 ```
 
 ---
@@ -166,6 +190,10 @@ PUT   /api/admin/users/:id        - Update user
 DELETE /api/admin/users/:id       - Delete user
 GET   /api/admin/stats            - System stats
 POST  /api/admin/ingest/announcements - Trigger ingest
+GET   /api/admin/workers            - List worker tasks
+POST  /api/admin/workers            - Create ad-hoc task
+POST  /api/admin/workers/engine     - Start/Stop worker loops
+POST  /api/admin/workers/trigger    - Trigger linked cron job
 ```
 
 ---
@@ -363,5 +391,6 @@ services:
 
 ### Features
 - WebSocket for real-time quotes
-- Background workers for data ingestion
+- Background workers for data ingestion (Implemented v1.9.0)
 - AI/ML service integration
+- Dynamic server-side logging in `.next/server_logs`

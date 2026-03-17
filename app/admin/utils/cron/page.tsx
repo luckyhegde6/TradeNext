@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 
 interface CronJob {
   id: string;
@@ -128,24 +129,22 @@ export default function CronConfigPage() {
     }
   };
 
-const handleRunNow = async (job: CronJob) => {
+  const handleRunNow = async (job: CronJob) => {
     if (!confirm(`Run "${job.name}" now?`)) return;
 
     try {
-      // Create a manual task for this cron job with category = cron
-      await fetch("/api/admin/workers", {
+      const res = await fetch("/api/admin/workers/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `Cron: ${job.name}`,
-          taskType: job.taskType,
-          taskCategory: "cron",
-          cronJobId: job.id,
-          payload: job.config,
-          priority: 10,
-        }),
+        body: JSON.stringify({ cronJobId: job.id }),
       });
-      alert("Task added to worker queue");
+      if (res.ok) {
+        const data = await res.json();
+        fetchCronJobs();
+        alert(`Task created: ${data.task.name}\nView it in Tasks → Cron tab`);
+      } else {
+        alert("Failed to trigger cron job");
+      }
     } catch (error) {
       console.error("Failed to run cron job:", error);
     }
@@ -207,6 +206,14 @@ const handleRunNow = async (job: CronJob) => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Cross-navigation bar */}
+        <div className="flex items-center gap-2 mb-6 p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800">
+          <span className="text-xs font-bold text-gray-400 dark:text-slate-600 uppercase tracking-wider mr-2">Task System:</span>
+          <span className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg">⏰ Cron Config</span>
+          <Link href="/admin/utils/tasks" className="px-3 py-1.5 text-xs font-bold text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">📋 Tasks</Link>
+          <Link href="/admin/utils/workers" className="px-3 py-1.5 text-xs font-bold text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">⚙️ Workers</Link>
+        </div>
+
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Cron Configurations</h1>
@@ -300,10 +307,16 @@ const handleRunNow = async (job: CronJob) => {
                         <span>Last: {new Date(job.lastRun).toLocaleString()}</span>
                       )}
                     </div>
-                    <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                       <span>Runs: {job.runCount}</span>
                       <span className="text-green-600">Success: {job.successCount}</span>
                       <span className="text-red-600">Failed: {job.failureCount}</span>
+                      <Link
+                        href={`/admin/utils/tasks?category=cron&cronJobId=${job.id}`}
+                        className="text-blue-600 hover:text-blue-700 font-medium hover:underline"
+                      >
+                        View Tasks →
+                      </Link>
                     </div>
                   </div>
                   <div className="flex gap-2">

@@ -4,18 +4,35 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { z } from "zod";
+import {
+  spawnCronTask,
+  spawnAsyncTask,
+  spawnRegularTask,
+  getTaskWithEvents,
+  getTaskStats,
+} from "@/lib/services/worker/task-orchestrator";
 
 export const runtime = "nodejs";
 
 // Worker task validation schema
 const workerTaskSchema = z.object({
   name: z.string().min(1),
-  taskType: z.enum(["alert_check", "screener", "recommendations", "data_sync", "cleanup", "stock_sync", "csv_processing", "historical_sync"]),
+  taskType: z.enum([
+    // Cron types
+    "alert_check", "screener", "recommendations", "data_sync", "stock_sync", "corp_actions", "market_data",
+    "corp_actions_fetch", "events_fetch", "news_fetch", "market_data_fetch", "announcement_fetch", "screener_sync",
+    // Async types
+    "csv_processing", "historical_sync",
+    // Regular types
+    "cleanup", "password_reset", "notification_broadcast", "announcement_mgmt", "user_query", "maintenance",
+  ]),
   taskCategory: z.enum(["cron", "async", "regular"]).optional(),
   priority: z.number().min(1).max(10).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   maxRetries: z.number().min(0).max(10).optional(),
   cronJobId: z.string().optional(),
+  parentTaskId: z.string().optional(),
+  triggeredBy: z.string().optional(),
 });
 
 // GET - List worker tasks
@@ -30,7 +47,17 @@ export async function GET(req: Request) {
     const status = searchParams.get("status");
     const taskType = searchParams.get("taskType");
     const taskCategory = searchParams.get("taskCategory");
+    const taskId = searchParams.get("taskId");
     const limit = parseInt(searchParams.get("limit") || "50");
+
+    // If requesting a specific task with events
+    if (taskId) {
+      const task = await getTaskWithEvents(taskId);
+      if (!task) {
+        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      }
+      return NextResponse.json({ task });
+    }
 
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
@@ -39,9 +66,12 @@ export async function GET(req: Request) {
 
     const tasks = await prisma.workerTask.findMany({
       where,
-      orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
       take: limit,
     });
+
+    // Get stats from orchestrator
+    const taskStats = await getTaskStats();
 
     // Get queue stats by category
     const statsByCategory = await prisma.workerTask.groupBy({
@@ -55,14 +85,14 @@ export async function GET(req: Request) {
       _count: true,
     });
 
-    return NextResponse.json({ tasks, stats, statsByCategory });
+    return NextResponse.json({ tasks, stats, statsByCategory, taskStats });
   } catch (error) {
     logger.error({ msg: "Failed to fetch worker tasks", error });
     return NextResponse.json({ error: "Failed to fetch worker tasks" }, { status: 500 });
   }
 }
 
-// POST - Create a new worker task
+// POST - Create a new worker task via orchestrator
 export async function POST(req: Request) {
   try {
     const session = await auth();
@@ -72,21 +102,55 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     const validated = workerTaskSchema.parse(body);
+    const createdBy = session.user.id ? parseInt(session.user.id) : undefined;
+    const category = validated.taskCategory ?? "regular";
 
-    const task = await prisma.workerTask.create({
-      data: {
-        name: validated.name,
-        taskType: validated.taskType,
-        taskCategory: validated.taskCategory ?? "regular",
-        priority: validated.priority ?? 5,
-        maxRetries: validated.maxRetries ?? 3,
-        payload: (validated.payload as never) ?? undefined,
-        createdBy: session.user.id ? parseInt(session.user.id) : null,
-        cronJobId: validated.cronJobId,
-      },
-    });
+    let task;
 
-    logger.info({ msg: "Worker task created", taskId: task.id, taskType: task.taskType, taskCategory: task.taskCategory });
+    switch (category) {
+      case "cron":
+        if (!validated.cronJobId) {
+          return NextResponse.json({ error: "cronJobId required for cron tasks" }, { status: 400 });
+        }
+        task = await spawnCronTask(validated.cronJobId, {
+          name: validated.name,
+          taskType: validated.taskType,
+          priority: validated.priority,
+          maxRetries: validated.maxRetries,
+          payload: validated.payload,
+          createdBy,
+          parentTaskId: validated.parentTaskId,
+        });
+        break;
+
+      case "async":
+        task = await spawnAsyncTask({
+          name: validated.name,
+          taskType: validated.taskType,
+          priority: validated.priority,
+          maxRetries: validated.maxRetries,
+          payload: validated.payload,
+          createdBy,
+          parentTaskId: validated.parentTaskId,
+          triggeredBy: validated.triggeredBy,
+        });
+        break;
+
+      default:
+        task = await spawnRegularTask({
+          name: validated.name,
+          taskType: validated.taskType,
+          priority: validated.priority,
+          maxRetries: validated.maxRetries,
+          payload: validated.payload,
+          createdBy,
+          parentTaskId: validated.parentTaskId,
+          triggeredBy: validated.triggeredBy,
+        });
+        break;
+    }
+
+    logger.info({ msg: "Worker task created via orchestrator", taskId: task.id, taskType: task.taskType, taskCategory: task.taskCategory });
     return NextResponse.json(task, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {

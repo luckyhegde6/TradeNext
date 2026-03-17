@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 
 interface WorkerTask {
   id: string;
@@ -38,6 +39,12 @@ const TASK_TYPES = [
   { value: "recommendations", label: "Recommendations", description: "Generate recommendations" },
   { value: "data_sync", label: "Data Sync", description: "Sync data from external sources" },
   { value: "stock_sync", label: "Stock Sync", description: "Sync stock data from NSE" },
+  { value: "corp_actions_fetch", label: "Corp Actions Fetch", description: "Fetch corporate actions from NSE" },
+  { value: "events_fetch", label: "Events Fetch", description: "Fetch market events from NSE" },
+  { value: "news_fetch", label: "News Fetch", description: "Fetch market news" },
+  { value: "market_data_fetch", label: "Market Data Fetch", description: "Fetch live quotes and market data" },
+  { value: "announcement_fetch", label: "Announcement Fetch", description: "Fetch corporate announcements" },
+  { value: "screener_sync", label: "Screener Sync", description: "Daily TradingView snapshot" },
   { value: "cleanup", label: "Cleanup", description: "Clean old data" },
 ];
 
@@ -59,7 +66,7 @@ export default function WorkersPage() {
   const [filter, setFilter] = useState<"all" | "pending" | "running" | "completed" | "failed">("all");
   const [categoryFilter, setCategoryFilter] = useState<"all" | "cron" | "async" | "regular">("all");
   const [activeTab, setActiveTab] = useState<"tasks" | "workers" | "logs">("tasks");
-  
+
   // Logs state
   const [logFiles, setLogFiles] = useState<{ taskId: string; path: string; size: number; created: Date }[]>([]);
   const [selectedLog, setSelectedLog] = useState<{ taskId: string; content: string } | null>(null);
@@ -73,9 +80,12 @@ export default function WorkersPage() {
     payload: {},
   });
 
+  const [engineStatus, setEngineStatus] = useState({ isRunning: false, loading: false });
+
   useEffect(() => {
     if (status === "authenticated") {
       fetchData();
+      checkEngineStatus();
       if (activeTab === "logs") {
         fetchLogs();
       }
@@ -88,6 +98,38 @@ export default function WorkersPage() {
       return () => clearInterval(interval);
     }
   }, [status, filter, activeTab]);
+
+  const checkEngineStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/workers/engine");
+      if (res.ok) {
+        const data = await res.json();
+        setEngineStatus(prev => ({ ...prev, isRunning: data.isRunning }));
+      }
+    } catch (error) {
+      console.error("Failed to check engine status:", error);
+    }
+  };
+
+  const handleToggleEngine = async () => {
+    setEngineStatus(prev => ({ ...prev, loading: true }));
+    try {
+      const action = engineStatus.isRunning ? "stop" : "start";
+      const res = await fetch("/api/admin/workers/engine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+
+      if (res.ok) {
+        setEngineStatus(prev => ({ ...prev, isRunning: !prev.isRunning }));
+      }
+    } catch (error) {
+      console.error("Failed to toggle engine:", error);
+    } finally {
+      setEngineStatus(prev => ({ ...prev, loading: false }));
+    }
+  };
 
   const fetchLogs = async () => {
     try {
@@ -244,6 +286,14 @@ export default function WorkersPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Cross-navigation bar */}
+        <div className="flex items-center gap-2 mb-6 p-3 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800">
+          <span className="text-xs font-bold text-gray-400 dark:text-slate-600 uppercase tracking-wider mr-2">Task System:</span>
+          <Link href="/admin/utils/cron" className="px-3 py-1.5 text-xs font-bold text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">⏰ Cron Config</Link>
+          <Link href="/admin/utils/tasks" className="px-3 py-1.5 text-xs font-bold text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">📋 Tasks</Link>
+          <span className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg">⚙️ Workers</span>
+        </div>
+
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Background Workers</h1>
@@ -251,43 +301,56 @@ export default function WorkersPage() {
               Monitor and manage async task queue
             </p>
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
-          >
-            Add Task
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleToggleEngine}
+              disabled={engineStatus.loading}
+              className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-sm ${engineStatus.isRunning
+                ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+                : "bg-green-50 text-green-600 border border-green-200 hover:bg-green-100"
+                }`}
+            >
+              {engineStatus.loading ? (
+                <span className="animate-spin text-sm px-4">⟳</span>
+              ) : (
+                <span>{engineStatus.isRunning ? "🛑 Stop Services" : "▶ Start Services"}</span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition-all active:scale-95"
+            >
+              Add Task
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-slate-800">
           <button
             onClick={() => setActiveTab("tasks")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "tasks"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "tasks"
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
           >
             Tasks
           </button>
           <button
             onClick={() => setActiveTab("workers")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "workers"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "workers"
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
           >
             Workers
           </button>
           <button
             onClick={() => { setActiveTab("logs"); fetchLogs(); }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "logs"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "logs"
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
           >
             Logs
           </button>
@@ -297,7 +360,7 @@ export default function WorkersPage() {
         {activeTab === "logs" && (
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Worker Logs</h2>
-            
+
             {loadingLogs ? (
               <div className="flex justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -313,11 +376,10 @@ export default function WorkersPage() {
                     {logFiles.map((file) => (
                       <div
                         key={file.taskId}
-                        className={`p-3 rounded-lg border cursor-pointer ${
-                          selectedLog?.taskId === file.taskId
-                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                            : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800"
-                        }`}
+                        className={`p-3 rounded-lg border cursor-pointer ${selectedLog?.taskId === file.taskId
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800"
+                          }`}
                         onClick={() => fetchLogContent(file.taskId)}
                       >
                         <div className="flex justify-between items-start">
@@ -379,37 +441,37 @@ export default function WorkersPage() {
 
         {/* Worker Nodes - Show for tasks and workers tabs */}
         {(activeTab === "tasks" || activeTab === "workers") && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Active Workers</h2>
-          {workers.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800 text-center text-gray-500">
-              No workers connected. Workers will appear here when they check in.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {workers.map((worker) => (
-                <div
-                  key={worker.workerId}
-                  className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {worker.workerName || worker.workerId.slice(0, 8)}
-                    </span>
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${worker.status === "idle" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
-                      {worker.status}
-                    </span>
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Active Workers</h2>
+            {workers.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800 text-center text-gray-500">
+                No workers connected. Workers will appear here when they check in.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {workers.map((worker) => (
+                  <div
+                    key={worker.workerId}
+                    className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-gray-900 dark:text-white">
+                        {worker.workerName || worker.workerId.slice(0, 8)}
+                      </span>
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${worker.status === "idle" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                        {worker.status}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      <div>Completed: {worker.tasksCompleted}</div>
+                      <div>Failed: {worker.tasksFailed}</div>
+                      <div>Last heartbeat: {new Date(worker.lastHeartbeat).toLocaleTimeString()}</div>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-500">
-                    <div>Completed: {worker.tasksCompleted}</div>
-                    <div>Failed: {worker.tasksFailed}</div>
-                    <div>Last heartbeat: {new Date(worker.lastHeartbeat).toLocaleTimeString()}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Category Filter */}
@@ -418,11 +480,10 @@ export default function WorkersPage() {
             <button
               key={category}
               onClick={() => setCategoryFilter(category)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                categoryFilter === category
-                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                  : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400 hover:bg-gray-200"
-              }`}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${categoryFilter === category
+                ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400 hover:bg-gray-200"
+                }`}
             >
               {category === "all" ? "All Categories" : category.charAt(0).toUpperCase() + category.slice(1)}
             </button>
@@ -526,22 +587,30 @@ export default function WorkersPage() {
                       {new Date(task.createdAt).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {task.status === "pending" && (
-                        <button
-                          onClick={() => handleCancel(task.id)}
-                          className="text-yellow-600 hover:text-yellow-800"
+                      <div className="flex items-center gap-2">
+                        {task.status === "pending" && (
+                          <button
+                            onClick={() => handleCancel(task.id)}
+                            className="text-yellow-600 hover:text-yellow-800"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
+                          <button
+                            onClick={() => handleDelete(task.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            Delete
+                          </button>
+                        )}
+                        <Link
+                          href={`/admin/utils/tasks?taskId=${task.id}`}
+                          className="text-blue-600 hover:text-blue-700 font-medium hover:underline"
                         >
-                          Cancel
-                        </button>
-                      )}
-                      {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
-                        <button
-                          onClick={() => handleDelete(task.id)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          Delete
-                        </button>
-                      )}
+                          Detail →
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
