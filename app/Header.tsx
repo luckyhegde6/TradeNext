@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useState, useEffect } from "react";
 import ProfileModal from "@/app/components/modals/ProfileModal";
+import LoginModal from "@/app/components/modals/LoginModal";
 import {
   HomeIcon,
   ChartBarIcon,
@@ -37,6 +38,7 @@ export default function Header() {
   // State for UI
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -126,7 +128,7 @@ export default function Header() {
               </NavLink>
             ) : (
               <button
-                onClick={() => signIn()}
+                onClick={() => setIsLoginModalOpen(true)}
                 className="px-4 py-2 text-sm font-bold rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-900 hover:bg-gray-100/80 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
               >
                 Portfolio
@@ -272,7 +274,7 @@ export default function Header() {
               </div>
             ) : (
               <button
-                onClick={() => signIn()}
+                onClick={() => setIsLoginModalOpen(true)}
                 className="inline-flex items-center justify-center px-6 py-2.5 bg-primary text-white text-sm font-black rounded-xl hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 active:scale-95 whitespace-nowrap"
               >
                 SIGN IN
@@ -314,7 +316,7 @@ export default function Header() {
               </MobileNavLink>
             ) : (
               <button
-                onClick={() => { signIn(); setIsMobileMenuOpen(false); }}
+                onClick={() => { setIsLoginModalOpen(true); setIsMobileMenuOpen(false); }}
                 className="flex items-center justify-center px-4 py-3 text-sm font-bold text-gray-600 dark:text-slate-400 hover:text-primary hover:bg-primary/5 rounded-2xl transition-all border border-border"
               >
                 Portfolio
@@ -384,6 +386,13 @@ export default function Header() {
           user={user}
           onClose={() => setIsProfileModalOpen(false)}
           onUpdate={() => window.location.reload()}
+        />
+      )}
+
+      {isLoginModalOpen && (
+        <LoginModal
+          onClose={() => setIsLoginModalOpen(false)}
+          callbackUrl={pathname || "/"}
         />
       )}
     </header>

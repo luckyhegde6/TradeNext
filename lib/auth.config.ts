@@ -3,7 +3,7 @@ import logger from "./logger";
 
 const isProduction = process.env.NODE_ENV === "production";
 
-logger.info({ msg: "Auth Config: Loading", environment: process.env.NODE_ENV, isProduction });
+
 
 export const authConfig: NextAuthConfig = {
     trustHost: true,
