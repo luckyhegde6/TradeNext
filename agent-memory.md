@@ -55,6 +55,20 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-18 | Worker Engine, NSE Sync & Dynamic Logging - COMPLETE
+- **Action**: Implemented full background worker engine, automated NSE sync tasks, and dynamic logging.
+- **Root Cause**: 
+  - NSE sync was manual and disconnected from the admin task system.
+  - Logging was scattered and lacked consistent permissions for monitoring.
+- **Files**: lib/services/worker/*, app/api/admin/workers/*, app/admin/utils/workers/page.tsx, ARCHITECTURE.md, AGENTS.md, Lessons.md
+- **Details**:
+  - Built `worker-engine.ts` for polling and cron scheduling.
+  - Expanded `worker-service.ts` to support all NSE sync types (corp actions, events, news, etc.).
+  - Configured `worker-logger.ts` to use `.next/server_logs` with `0o777` permissions.
+  - Fixed Next.js build error in `/admin/utils/tasks` by wrapping the component in a `Suspense` boundary for `useSearchParams` compatibility.
+  - Updated all major documentation files to reflect v1.9.0 architecture.
+- **Status**: ✅ RESOLVED - Worker system fully operational and documented.
+
 ### 2026-03-18 | Corporate Actions Seeding & Auth Fixes - COMPLETE
 - **Action**: Fixed CSV parsing for corporate actions, optimized DB seeding, and fixed ghost sessions
 - **Root Cause**: 

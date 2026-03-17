@@ -6,13 +6,14 @@ import { existsSync } from "fs";
 import { auth } from "@/lib/auth";
 import logger from "@/lib/logger";
 import { createAuditLog } from "@/lib/audit";
+import { spawnAsyncTask } from "@/lib/services/worker/task-orchestrator";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
     try {
         const session = await auth();
-        const user = session?.user as { role?: string };
+        const user = session?.user as { role?: string; id?: string };
         const isAdmin = user?.role === "admin";
 
         if (!session || !isAdmin) {
@@ -51,11 +52,26 @@ export async function POST(req: Request) {
             metadata: { fileName: uniqueName }
         });
 
+        // Spawn an async worker task for CSV processing if it's a CSV file
+        let workerTask = null;
+        if (file.name.endsWith(".csv")) {
+            workerTask = await spawnAsyncTask({
+                name: `CSV Ingest: ${file.name}`,
+                taskType: "csv_processing",
+                priority: 6,
+                payload: { filePath, fileName: uniqueName, originalName: file.name },
+                createdBy: user.id ? parseInt(user.id) : undefined,
+                triggeredBy: "upload",
+            });
+            logger.info({ msg: 'Async CSV processing task created', taskId: workerTask.id, fileName: uniqueName });
+        }
+
         logger.info({ msg: 'Admin file upload completed', fileName: uniqueName, filePath });
         return NextResponse.json({
             success: true,
             filePath,
             fileName: uniqueName,
+            workerTaskId: workerTask?.id ?? null,
             meta: {
                 fetchedAt: new Date().toISOString(),
                 stale: false,
@@ -67,3 +83,4 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }
+

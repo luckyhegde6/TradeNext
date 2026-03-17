@@ -24,6 +24,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Automatically reload the page if a new deployment causes a ChunkLoadError
+    if (error.name === 'ChunkLoadError' || error.message.includes('Failed to load chunk')) {
+      logger.warn({ msg: 'ChunkLoadError detected, forcing page reload to get fresh assets.' });
+      window.location.reload();
+      return;
+    }
+
     logger.error({
       msg: 'React Error Boundary caught an error',
       error: error.message,

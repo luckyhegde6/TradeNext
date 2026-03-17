@@ -11,7 +11,10 @@ export const runtime = "nodejs";
 const cronJobSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  taskType: z.enum(["stock_sync", "corp_actions", "alert_check", "screener", "recommendations", "market_data"]),
+  taskType: z.enum([
+    "stock_sync", "corp_actions", "alert_check", "screener", "recommendations", "market_data",
+    "corp_actions_fetch", "events_fetch", "news_fetch", "market_data_fetch", "announcement_fetch", "screener_sync"
+  ]),
   cronExpression: z.string().min(9), // Minimum cron expression
   isActive: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
@@ -160,14 +163,14 @@ function calculateNextRun(cronExpression: string): Date {
   // Simple cron parser for common intervals
   // Format: minute hour day month dayOfWeek
   const parts = cronExpression.split(" ");
-  
+
   const now = new Date();
   const next = new Date(now);
 
   // Handle different cron patterns
   if (parts.length >= 5) {
     const [minute, hour] = parts;
-    
+
     // Daily at specific time (e.g., "0 6 * * *" = daily at 6 AM)
     if (parts[2] === "*" && parts[3] === "*") {
       next.setHours(parseInt(hour) || 0, parseInt(minute) || 0, 0, 0);
