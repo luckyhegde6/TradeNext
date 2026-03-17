@@ -4,17 +4,39 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
 
-// Use DATABASE_URL if set, otherwise fall back to ACCELERATE_URL for Prisma Accelerate
-let databaseUrl = process.env.DATABASE_URL || '';
+// Determine environment from ENVIRONMENT env var (defaults to 'development')
+// Options: local, development, production
+const env = process.env.ENVIRONMENT || 'development';
+const isDev = env === 'development' || env === 'local';
+const isLocal = env === 'local';
+const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
 
-// If DATABASE_URL is not set but ACCELERATE_URL is, use ACCELERATE_URL
-if (!databaseUrl && process.env.ACCELERATE_URL) {
-  databaseUrl = process.env.ACCELERATE_URL;
-}
+// Database URL selection logic:
+// - ENVIRONMENT=local + USE_REMOTE_DB=true → use DATABASE_REMOTE (Prisma Accelerate)
+// - ENVIRONMENT=local + USE_REMOTE_DB=false → use DATABASE_URL (local PostgreSQL)  
+// - ENVIRONMENT=production → use DATABASE_URL if Prisma Accelerate format, else DATABASE_REMOTE
 
-// If still no database URL, check DATABASE_REMOTE
-if (!databaseUrl && process.env.DATABASE_REMOTE) {
-  databaseUrl = process.env.DATABASE_REMOTE;
+let databaseUrl = '';
+
+if (isLocal) {
+  // Local environment - check USE_REMOTE_DB flag
+  if (useRemoteDb && process.env.DATABASE_REMOTE) {
+    databaseUrl = process.env.DATABASE_REMOTE;
+  } else {
+    // Use local DATABASE_URL (postgresql://postgres:postgres@localhost:5432/tradenext)
+    databaseUrl = process.env.DATABASE_URL || '';
+  }
+} else {
+  // Production environment - prefer DATABASE_URL if it's Prisma Accelerate format
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl && (dbUrl.startsWith('prisma+postgres://') || dbUrl.startsWith('prisma://'))) {
+    databaseUrl = dbUrl;
+  } else if (process.env.DATABASE_REMOTE) {
+    // Fall back to DATABASE_REMOTE if available
+    databaseUrl = process.env.DATABASE_REMOTE;
+  } else {
+    databaseUrl = dbUrl || '';
+  }
 }
 
 // Check if using Prisma Accelerate (URL starts with prisma+postgres:// or prisma://)
@@ -24,13 +46,15 @@ const isAccelerateUrl = (url: string): boolean => {
 
 const useAccelerate = isAccelerateUrl(databaseUrl);
 
-// Only log in development for debugging
-const isDev = process.env.NODE_ENV !== 'production';
+// Only log in local/development for debugging
 if (isDev) {
   logger.info({ 
     msg: "Prisma: Initializing", 
-    nodeEnv: process.env.NODE_ENV,
+    environment: env,
+    isLocal,
+    useRemoteDb,
     hasDatabaseUrl: !!databaseUrl,
+    dbUrlPrefix: databaseUrl ? databaseUrl.substring(0, 30) + "..." : "none",
     useAccelerate
   });
 }
@@ -69,6 +93,10 @@ const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient | 
 export const db = globalForPrisma.prismaClient ?? prismaClient;
 export const prisma = globalForPrisma.prismaClient ?? prismaClient;
 
+// Default export for backward compatibility
+export default prisma;
+
+// Only cache in dev/local to avoid issues in production
 if (isDev) {
   globalForPrisma.prismaClient = prismaClient;
 }

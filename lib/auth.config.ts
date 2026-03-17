@@ -15,109 +15,38 @@ export const authConfig: NextAuthConfig = {
     session: {
         strategy: "jwt",
         maxAge: 30 * 24 * 60 * 60, // 30 days
-        updateAge: 24 * 60 * 60, // Update session every 24 hours
-    },
-    providers: [],
-    callbacks: {
-        // Add additional claims to JWT
-        async jwt({ token, user, trigger, session }) {
-            if (user) {
-                // Initial sign in
-                token.role = user.role;
-                token.id = user.id;
-                token.mobile = user.mobile;
-                token.iat = Math.floor(Date.now() / 1000); // Issue time
-            }
-            
-            // Add current time to token for expiry checks
-            token.currentTime = Math.floor(Date.now() / 1000);
-            
-            // Handle session updates
-            if (trigger === "update" && session) {
-                token.name = session.name;
-                token.mobile = session.mobile;
-            }
-            
-            return token;
-        },
-    },
-    events: {
-        async signIn({ user, account, profile }) {
-            logger.info({ 
-                msg: "Auth: User signed in", 
-                userId: user.id, 
-                email: user.email,
-                provider: account?.provider 
-            });
-        },
-        async session({ session, token }) {
-            // Add token validation
-            if (token) {
-                // Verify token is not expired
-                const tokenExpiry = token.exp as number;
-                const currentTime = Math.floor(Date.now() / 1000);
-                
-                if (tokenExpiry && tokenExpiry < currentTime) {
-                    logger.warn({ msg: "Auth: Token expired", userId: token.id });
-                }
-                
-                session.user.id = token.id as string;
-                session.user.role = token.role as string;
-                session.user.mobile = token.mobile as string | null;
-            }
-        },
     },
     cookies: {
         sessionToken: {
-            name: isProduction ? "__Secure-next-auth.session-token" : "next-auth.session-token",
+            name: `tradenext-session-token`,
             options: {
                 httpOnly: true,
-                secure: isProduction,
-                sameSite: "strict", // Changed from "lax" for better security
+                sameSite: "lax",
                 path: "/",
-                maxAge: 30 * 24 * 60 * 60, // 30 days
+                secure: isProduction,
             },
         },
-        callbackUrl: {
-            name: isProduction ? "__Secure-next-auth.callback-url" : "next-auth.callback-url",
-            options: {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 60, // 1 hour
-            },
-        },
-        csrfToken: {
-            name: isProduction ? "__Secure-next-auth.csrf-token" : "next-auth.csrf-token",
-            options: {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 60, // 1 hour
-            },
-        },
-        // Anti-csrf token for state/pkce
-        pkceCodeVerifier: {
-            name: "next-auth.pkce.code_verifier",
-            options: {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 15, // 15 minutes
-            },
-        },
-        state: {
-            name: "next-auth.state",
-            options: {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 15, // 15 minutes
-            },
+    },
+    providers: [],
+    callbacks: {
+        authorized({ auth, request: { nextUrl } }) {
+            const isLoggedIn = !!auth?.user;
+            const isAuthPage = nextUrl.pathname.startsWith("/auth");
+            const isAdminPage = nextUrl.pathname.startsWith("/admin");
+
+            if (isAdminPage) {
+                if (isLoggedIn && (auth.user as any).role === "admin") return true;
+                return false;
+            }
+
+            if (isAuthPage) {
+                if (isLoggedIn) {
+                    return Response.redirect(new URL("/", nextUrl));
+                }
+                return true;
+            }
+
+            return true;
         },
     },
 } satisfies NextAuthConfig;

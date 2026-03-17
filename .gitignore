@@ -56,3 +56,6 @@ nul
 
 # Worker logs
 worker_logs/
+
+#server logs
+server_logs/

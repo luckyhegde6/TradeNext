@@ -7,11 +7,9 @@ import StockSearchBar from "@/app/components/StockSearchBar";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
-// ISR: Revalidate this page every 60 seconds
-export const revalidate = 60;
-
-// Disable dynamic rendering for faster initial load
-export const dynamic = 'force-static';
+// Allow dynamic rendering to ensure session is checked on every request
+// This is critical for logout to work properly - users should see logged-out state immediately
+export const dynamic = 'force-dynamic';
 
 interface Post {
   id: string;
@@ -26,8 +24,8 @@ interface Post {
 async function getRecentPosts() {
   try {
     const res = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/home/recent-posts`, {
-      // Cache for 60 seconds to reduce DB load
-      next: { revalidate: 60 }
+      // Don't cache - fetch fresh posts on every request
+      cache: 'no-store'
     });
     const data = await res.json();
     return data.posts || [];

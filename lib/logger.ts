@@ -4,17 +4,14 @@
 // Check if we're on the server side - always true for API routes and server components
 const isServer = typeof window === 'undefined';
 
-// Force console output in production for debugging
-const isProduction = process.env.NODE_ENV === 'production';
-
 // Only import fs and path on the server
 let fs: any = null;
-let path: any = null;
+let pathModule: any = null;
 
 if (isServer) {
   try {
     fs = require('fs');
-    path = require('path');
+    pathModule = require('path');
   } catch (e) {
     // Fallback to console only
   }
@@ -38,15 +35,13 @@ const getLogsDir = (): string => {
   const isVercel = !!process.env.VERCEL;
   const isServerless = isNetlify || isVercel;
   
-  console.log('[Logger] Platform check:', { isNetlify, isVercel, isServerless, NETLIFY: process.env.NETLIFY, VERCEL: !!process.env.VERCEL });
-  
   if (isServerless) {
     // Use /tmp which is writable on serverless
     return '/tmp/tradenext_logs';
   }
   
   const cwd = process.cwd();
-  return isServer ? path.join(cwd, 'server_logs') : '';
+  return isServer ? pathModule.join(cwd, 'server_logs') : '';
 };
 
 // Export for use in other files
@@ -73,7 +68,7 @@ function ensureLogsDir() {
 
 // Get today's log file path
 function getTodayLogPath(): string {
-  if (!isServer || !fs || !path || !logsDirAvailable) return '';
+  if (!isServer || !fs || !pathModule || !logsDirAvailable) return '';
   
   try {
     const today = new Date();
@@ -81,12 +76,12 @@ function getTodayLogPath(): string {
     const yearMonth = dateStr.substring(0, 7); // YYYY-MM
     
     const logsDir = getLogsDir();
-    const yearMonthDir = path.join(logsDir, yearMonth);
+    const yearMonthDir = pathModule.join(logsDir, yearMonth);
     if (!fs.existsSync(yearMonthDir)) {
       fs.mkdirSync(yearMonthDir, { recursive: true });
     }
     
-    return path.join(yearMonthDir, `${dateStr}.log`);
+    return pathModule.join(yearMonthDir, `${dateStr}.log`);
   } catch (error) {
     logsDirAvailable = false;
     return '';
@@ -95,7 +90,7 @@ function getTodayLogPath(): string {
 
 // Get list of available log files
 export function getLogFiles(): { date: string; path: string; size: number }[] {
-  if (!isServer || !fs || !path) return [];
+  if (!isServer || !fs || !pathModule) return [];
   ensureLogsDir();
   
   const files: { date: string; path: string; size: number }[] = [];
@@ -103,14 +98,14 @@ export function getLogFiles(): { date: string; path: string; size: number }[] {
   
   try {
     if (!fs.existsSync(logsDir)) return [];
-    const yearDirs = fs.readdirSync(logsDir).filter((f: string) => fs.statSync(path.join(logsDir, f)).isDirectory());
+    const yearDirs = fs.readdirSync(logsDir).filter((f: string) => fs.statSync(pathModule.join(logsDir, f)).isDirectory());
     
     for (const yearDir of yearDirs) {
-      const yearMonthDir = path.join(logsDir, yearDir);
+      const yearMonthDir = pathModule.join(logsDir, yearDir);
       const logFiles = fs.readdirSync(yearMonthDir).filter((f: string) => f.endsWith('.log'));
       
       for (const logFile of logFiles) {
-        const filePath = path.join(yearMonthDir, logFile);
+        const filePath = pathModule.join(yearMonthDir, logFile);
         const stats = fs.statSync(filePath);
         files.push({
           date: logFile.replace('.log', ''),
@@ -120,7 +115,7 @@ export function getLogFiles(): { date: string; path: string; size: number }[] {
       }
     }
   } catch (error) {
-    console.error('Error reading log files:', error);
+    // Error reading log files
   }
   
   return files.sort((a, b) => b.date.localeCompare(a.date));
@@ -135,18 +130,17 @@ export function readLogFile(filePath: string, limit: number = 1000): string[] {
     const lines = content.split('\n').filter((line: string) => line.trim());
     return lines.slice(-limit);
   } catch (error) {
-    console.error('Error reading log file:', error);
     return [];
   }
 }
 
 // Read log file with date filter
 export function readLogsByDate(date: string, limit: number = 1000): string[] {
-  if (!isServer || !fs || !path) return [];
+  if (!isServer || !fs || !pathModule) return [];
   const logsDir = getLogsDir();
   const dateStr = date.replace(/-/g, '');
   const yearMonth = dateStr.substring(0, 6); // YYYYMM
-  const filePath = path.join(logsDir, yearMonth.substring(0, 4), yearMonth, `${date}.log`);
+  const filePath = pathModule.join(logsDir, yearMonth.substring(0, 4), yearMonth, `${date}.log`);
   
   if (!fs.existsSync(filePath)) {
     return [];
@@ -165,7 +159,6 @@ export function deleteLogFile(filePath: string): boolean {
     }
     return false;
   } catch (error) {
-    console.error('Error deleting log file:', error);
     return false;
   }
 }
@@ -295,6 +288,15 @@ interface Logger {
 
 // Create logger
 const createLogger = (): Logger => {
+  // Use ENVIRONMENT env var: local, development, production
+  // - local: debug logs enabled
+  // - development: debug logs enabled  
+  // - production: debug logs disabled (default if not set)
+  const env = process.env.ENVIRONMENT || 'production';
+  const isLocal = env === 'local';
+  const isDev = env === 'development' || isLocal;
+  const enableDebug = isDev;
+  
   const formatMessage = (level: string, message: string | object, ...args: any[]) => {
     const now = new Date();
     const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
@@ -351,7 +353,9 @@ const createLogger = (): Logger => {
       writeToFile(entry, 'error');
     },
     
+    // Skip DEBUG logs unless in local/development
     debug: (message, ...args) => {
+      if (!enableDebug) return; // Skip debug in production
       const entry = formatLogEntry('debug', message, ...args);
       writeToFile(entry, 'debug');
     },
