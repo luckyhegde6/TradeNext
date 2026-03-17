@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -138,7 +138,7 @@ type Category = keyof typeof CATEGORY_CONFIG;
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TasksPage() {
+function TasksContent() {
   const { data: session, status: authStatus } = useSession();
   const searchParams = useSearchParams();
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
@@ -945,5 +945,17 @@ export default function TasksPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    }>
+      <TasksContent />
+    </Suspense>
   );
 }

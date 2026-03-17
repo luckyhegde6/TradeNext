@@ -38,6 +38,7 @@
 - **Worker Engine**: Built persistent loops for task polling and cron scheduling. Linkage with `CronJob` and `WorkerTask` models.
 - **NSE Sync**: Implemented fetchers for events, news, announcements, and market data. Integrated TradingView screener sync.
 - **Logging**: Switched to `.next/server_logs` with dynamic directory creation and `0o777` permissions for cross-process visibility.
+- **Build Fix**: Wrapped `/admin/utils/tasks` in `Suspense` to resolve `useSearchParams` pre-rendering crash.
 - **Documentation**: Updated `ARCHITECTURE.md`, `Lessons.md`, and `AGENTS.md` to version 1.9.0.
 
 ### Session 2 (March 18, 2026)

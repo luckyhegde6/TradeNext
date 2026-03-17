@@ -65,6 +65,7 @@ echo "" >> agent--memory.md
   - Built `worker-engine.ts` for polling and cron scheduling.
   - Expanded `worker-service.ts` to support all NSE sync types (corp actions, events, news, etc.).
   - Configured `worker-logger.ts` to use `.next/server_logs` with `0o777` permissions.
+  - Fixed Next.js build error in `/admin/utils/tasks` by wrapping the component in a `Suspense` boundary for `useSearchParams` compatibility.
   - Updated all major documentation files to reflect v1.9.0 architecture.
 - **Status**: ✅ RESOLVED - Worker system fully operational and documented.
 
