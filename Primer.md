@@ -9,22 +9,35 @@
 
 ## Current Project Status
 
-### Netlify Deployment - 502 Error Investigation
+### Netlify Deployment - 502 Error & Database Issues
+**Issue**: Production site returned 502 Bad Gateway.
+**Fix Applied**: 
+- Removed NextAuth from Next.js middleware.
+- Fixed Prisma 7 adapter configuration for Accelerate.
+- Status: RESOLVED in v1.8.2.
 
-**Issue**: Production site (https://tradenext6.netlify.app/) returning 502 Bad Gateway
+---
 
-**Root Cause**: 
-1. Database connection - app tries to connect but DATABASE_URL not set in Netlify
-2. Added early console logging to debug
+### Corporate Actions DB Seeding & Auth Ghosts
+**Issue**: 
+1. `seed.ts` failed to insert corporate actions due to incorrect CSV parsing.
+2. NextAuth had a "ghost session" bug where users appeared logged in after signing out.
+3. Seeding scripts threw `ECONNREFUSED` timeouts against remote Prisma Accelerate.
 
 **Fix Applied**:
-- Added `console.log` at top of prisma.ts for early logging
-- Added fatal error message when DATABASE_URL is missing
-- Build succeeds locally
+- Rewrote `seed.ts` CSV parsing to correctly parse strings with embedded commas and quotes.
+- Refactored data seeding loops into `createMany({ skipDuplicates: true })` batching.
+- Fixed NextAuth ghost sessions by deleting conflicting manual endpoints and renaming the session cookie.
+- Status: RESOLVED in v1.8.3. 
 
 ---
 
 ## Session History
+
+### Session 2 (March 18, 2026)
+- **Corporate Actions**: Fixed missing CSV data parsing resulting in correct dividend and ratio values.
+- **Prisma Rate limits**: Changed `upsert` and looped `create` calls into `.createMany()` arrays. Prevented `P2002` schema errors and `ECONNREFUSED` connection drops.
+- **Auth bug**: Traced "Ghost Session" issue to cookie mismatch/stale active sessions and a custom `/api/auth/session` endpoint overriding NextAuth. Naming the cookie `tradenext-session-token` immediately resolved it.
 
 ### Session 1 (March 16, 2026)
 - Started with 502 error on Netlify
@@ -32,15 +45,6 @@
 - Fixed Prisma 7 adapter issue (needed driver adapter, not accelerateUrl)
 - Moved type packages to dependencies for Netlify build
 - Added startup logs to middleware and auth routes
-- Build succeeds locally but 502 persists due to missing DATABASE_URL
-
-**Key Changes Made**:
-- `lib/logger.ts` - Always console.log in production
-- `lib/prisma.ts` - Using PrismaPg driver adapter, added early console logging
-- `netlify.toml` - Removed USE_REMOTE_DB=true
-- `prisma/schema.prisma` - Added engineType = "library"
-- Various type packages moved to dependencies
-- Added startup logs in middleware.ts and auth route
 
 ---
 

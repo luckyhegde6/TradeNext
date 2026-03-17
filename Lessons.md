@@ -165,6 +165,22 @@ switch (type) {
 
 ---
 
+### 9. Prisma Bulk Updates & Accelerate Limits
+**Issue**: `ECONNREFUSED` errors or `P2002` constraint errors combined with dropped connections during `npx prisma db seed` or large data inserts when using Prisma Accelerate.
+**Root Cause**: Iterating large arrays and calling `prisma.model.create()` or `upsert()` inside a loop exhausts the connection pool and rate limits of remote databases like Prisma Accelerate.
+**Solution**: Always use `createMany({ skipDuplicates: true })` in batches (e.g., 500 records) instead of looping singular insert operations.
+
+---
+
+### 10. NextAuth Ghost Sessions & Custom Routes
+**Issue**: User signs out but immediately appears signed back in because a ghost session persists.
+**Root Cause**: Manual overrides of auth routes (like a custom `app/api/auth/session/route.ts`) conflict with NextAuth's internal lifecycle. Also, old cookies might stick around if domain/path configs drift.
+**Solution**: 
+- NEVER create custom routes overlapping with `[...nextauth]` functionality unless absolutely necessary.
+- If sessions are stubbornly stuck, change the `sessionToken` cookie name in `auth.config.ts` to nuke all existing client sessions and force a clean slate.
+
+---
+
 ## Before Every Commit Checklist
 
 - [ ] Read Lessons.md

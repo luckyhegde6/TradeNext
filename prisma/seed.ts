@@ -49,7 +49,7 @@ async function main() {
   // Create admin user
   const admin = await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
-    update: {},
+    update: { updatedAt: new Date() },
     create: {
       email: ADMIN_EMAIL,
       name: 'Admin User',
@@ -65,7 +65,7 @@ async function main() {
   // Create admin portfolio with transactions
   const adminPortfolio = await prisma.portfolio.upsert({
     where: { id: `admin-portfolio-${admin.id}` },
-    update: {},
+    update: { updatedAt: new Date() },
     create: {
       id: `admin-portfolio-${admin.id}`,
       userId: admin.id,
@@ -78,7 +78,7 @@ async function main() {
   // Add admin fund transactions
   await prisma.fundTransaction.upsert({
     where: { id: `admin-fund-${adminPortfolio.id}` },
-    update: {},
+    update: { amount: 1000000 },
     create: {
       id: `admin-fund-${adminPortfolio.id}`,
       portfolioId: adminPortfolio.id,
@@ -99,7 +99,13 @@ async function main() {
     const t = adminTransactions[i];
     await prisma.transaction.upsert({
       where: { id: `admin-txn-${adminPortfolio.id}-${i}` },
-      update: {},
+      update: {
+        ticker: t.ticker,
+        side: t.side,
+        quantity: t.quantity,
+        price: t.price,
+        tradeDate: t.tradeDate,
+      },
       create: {
         id: `admin-txn-${adminPortfolio.id}-${i}`,
         portfolioId: adminPortfolio.id,
@@ -113,11 +119,10 @@ async function main() {
     });
   }
   console.log("Admin portfolio created with", adminTransactions.length, "transactions");
-
   // Create demo user with portfolio
   const demoUser = await prisma.user.upsert({
     where: { email: DEMO_EMAIL },
-    update: {},
+    update: { updatedAt: new Date() },
     create: {
       email: DEMO_EMAIL,
       name: 'Demo User',
@@ -133,7 +138,7 @@ async function main() {
   // Create demo portfolio with transactions
   const portfolio = await prisma.portfolio.upsert({
     where: { id: `demo-portfolio-${demoUser.id}` },
-    update: {},
+    update: { updatedAt: new Date() },
     create: {
       id: `demo-portfolio-${demoUser.id}`,
       userId: demoUser.id,
@@ -142,11 +147,10 @@ async function main() {
     },
   });
   console.log("Demo portfolio created with ID:", portfolio.id, "for userId:", portfolio.userId);
-
   // Add fund transactions
   await prisma.fundTransaction.upsert({
     where: { id: `demo-fund-${portfolio.id}` },
-    update: {},
+    update: { amount: 500000 },
     create: {
       id: `demo-fund-${portfolio.id}`,
       portfolioId: portfolio.id,
@@ -170,7 +174,13 @@ async function main() {
     const t = transactions[i];
     await prisma.transaction.upsert({
       where: { id: `demo-txn-${portfolio.id}-${i}` },
-      update: {},
+      update: {
+        ticker: t.ticker,
+        side: t.side,
+        quantity: t.quantity,
+        price: t.price,
+        tradeDate: t.tradeDate,
+      },
       create: {
         id: `demo-txn-${portfolio.id}-${i}`,
         portfolioId: portfolio.id,
@@ -208,53 +218,53 @@ async function main() {
   console.log("Seeding symbols from JSON...");
   // Seed deals data from CSV files
   console.log("\n=== Seeding Deals Data ===");
-const sampleDataPath = path.join(process.cwd(), 'sample');
+  const sampleDataPath = path.join(process.cwd(), 'sample');
 
-// Helper function to parse CSV
-function parseCSV(content: string): string[][] {
-  const lines = content.trim().split('\n');
-  return lines.map(line => {
-    // Handle CSV with quotes and commas in fields
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += char;
+  // Helper function to parse CSV
+  function parseCSV(content: string): string[][] {
+    const lines = content.trim().split('\n');
+    return lines.map(line => {
+      // Handle CSV with quotes and commas in fields
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
       }
-    }
-    result.push(current.trim());
-    return result;
-  });
-}
+      result.push(current.trim());
+      return result;
+    });
+  }
 
-// Helper to parse date from "07-MAR-2025" format
-function parseDate(dateStr: string): Date {
-  const [day, monStr, year] = dateStr.split('-');
-  const monthMap: Record<string, number> = {
-    'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
-    'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
-  };
-  const month = monthMap[monStr.toUpperCase()] ?? 0;
-  return new Date(parseInt(year), month, parseInt(day));
-}
+  // Helper to parse date from "07-MAR-2025" format
+  function parseDate(dateStr: string): Date {
+    const [day, monStr, year] = dateStr.split('-');
+    const monthMap: Record<string, number> = {
+      'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+      'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+    };
+    const month = monthMap[monStr.toUpperCase()] ?? 0;
+    return new Date(parseInt(year), month, parseInt(day));
+  }
 
-// Helper to parse quantity with commas
-function parseQuantity(qtyStr: string): number {
-  return parseInt(qtyStr.replace(/,/g, ''), 10) || 0;
-}
+  // Helper to parse quantity with commas
+  function parseQuantity(qtyStr: string): number {
+    return parseInt(qtyStr.replace(/,/g, ''), 10) || 0;
+  }
 
-// Helper to parse trade price
-function parseTradePrice(priceStr: string): number {
-  return parseFloat(priceStr) || 0;
-}
+  // Helper to parse trade price
+  function parseTradePrice(priceStr: string): number {
+    return parseFloat(priceStr) || 0;
+  }
 
   // Seed Bulk Deals
   const bulkDealsPath = path.join(sampleDataPath, 'ingest_csv', 'Bulk-Deals-07-03-2025-to-07-03-2026.csv');
@@ -263,7 +273,7 @@ function parseTradePrice(priceStr: string): number {
     const bulkContent = fs.readFileSync(bulkDealsPath, 'utf8');
     const bulkRows = parseCSV(bulkContent);
     const headers = bulkRows[0];
-    
+
     // Find column indices (account for BOM in first header)
     const dateIdx = headers.findIndex(h => h.replace('\ufeff', '').toLowerCase().includes('date'));
     const symbolIdx = headers.findIndex(h => h.toLowerCase().includes('symbol'));
@@ -276,7 +286,7 @@ function parseTradePrice(priceStr: string): number {
 
     const bulkDealsToInsert: any[] = [];
     const maxRecords = 50;
-    
+
     for (let i = 1; i < Math.min(bulkRows.length, maxRecords + 1); i++) {
       const row = bulkRows[i];
       if (row.length < Math.max(quantityIdx, tradePriceIdx) + 1) continue;
@@ -303,12 +313,13 @@ function parseTradePrice(priceStr: string): number {
     }
 
     // Insert in batches
-    const batchSize = 20;
+    const batchSize = 500;
     for (let i = 0; i < bulkDealsToInsert.length; i += batchSize) {
       const batch = bulkDealsToInsert.slice(i, i + batchSize);
-      await Promise.all(batch.map(deal =>
-        prisma.bulkDeal.create({ data: deal })
-      ));
+      await prisma.bulkDeal.createMany({
+        data: batch,
+        skipDuplicates: true
+      });
     }
     console.log(`Inserted ${bulkDealsToInsert.length} Bulk Deals`);
   } else {
@@ -360,12 +371,13 @@ function parseTradePrice(priceStr: string): number {
       });
     }
 
-    const batchSize = 20;
+    const batchSize = 500;
     for (let i = 0; i < blockDealsToInsert.length; i += batchSize) {
       const batch = blockDealsToInsert.slice(i, i + batchSize);
-      await Promise.all(batch.map(deal =>
-        prisma.blockDeal.create({ data: deal })
-      ));
+      await prisma.blockDeal.createMany({
+        data: batch,
+        skipDuplicates: true
+      });
     }
     console.log(`Inserted ${blockDealsToInsert.length} Block Deals`);
   } else {
@@ -405,12 +417,13 @@ function parseTradePrice(priceStr: string): number {
       });
     }
 
-    const batchSize = 20;
+    const batchSize = 500;
     for (let i = 0; i < shortSellingToInsert.length; i += batchSize) {
       const batch = shortSellingToInsert.slice(i, i + batchSize);
-      await Promise.all(batch.map(deal =>
-        prisma.shortSelling.create({ data: deal })
-      ));
+      await prisma.shortSelling.createMany({
+        data: batch,
+        skipDuplicates: true
+      });
     }
     console.log(`Inserted ${shortSellingToInsert.length} Short Selling records`);
   } else {
@@ -423,7 +436,7 @@ function parseTradePrice(priceStr: string): number {
     console.log("Seeding additional data from bulkdeals.json...");
     const jsonContent = fs.readFileSync(bulkDealsJsonPath, 'utf8');
     const bulkData = JSON.parse(jsonContent);
-    
+
     if (bulkData.BULK_DEALS_DATA && Array.isArray(bulkData.BULK_DEALS_DATA)) {
       const jsonDealsToInsert: any[] = [];
       const maxRecords = 50;
@@ -452,12 +465,13 @@ function parseTradePrice(priceStr: string): number {
         });
       }
 
-      const batchSize = 20;
+      const batchSize = 500;
       for (let i = 0; i < jsonDealsToInsert.length; i += batchSize) {
         const batch = jsonDealsToInsert.slice(i, i + batchSize);
-        await Promise.all(batch.map(deal =>
-          prisma.bulkDeal.create({ data: deal })
-        ));
+        await prisma.bulkDeal.createMany({
+          data: batch,
+          skipDuplicates: true
+        });
       }
       console.log(`Inserted ${jsonDealsToInsert.length} additional Bulk Deals from JSON`);
     }
@@ -575,12 +589,13 @@ function parseTradePrice(priceStr: string): number {
       });
     }
 
-    const batchSize = 20;
+    const batchSize = 500;
     for (let i = 0; i < corporateActionsToInsert.length; i += batchSize) {
       const batch = corporateActionsToInsert.slice(i, i + batchSize);
-      await Promise.all(batch.map(ca =>
-        prisma.corporateAction.create({ data: ca })
-      ));
+      await prisma.corporateAction.createMany({
+        data: batch,
+        skipDuplicates: true
+      });
     }
     console.log(`Inserted ${corporateActionsToInsert.length} Corporate Actions`);
   } else {

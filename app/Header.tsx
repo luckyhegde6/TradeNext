@@ -16,38 +16,25 @@ import {
   ChevronRightIcon
 } from "@heroicons/react/24/outline";
 
-async function handleLogout() {
-  try {
-    // Call the signout endpoint
-    const response = await fetch('/api/auth/signout', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    });
-    
-    // Force a full page reload to clear all client-side state
-    // This ensures no cached session data persists
-    window.location.reload();
-  } catch (error) {
-    console.error('Logout error:', error);
-    // Fallback - try client-side signOut
-    await signOut({ callbackUrl: '/' });
-  }
-}
-
 export default function Header() {
   const pathname = usePathname();
   // Use ONLY NextAuth session - no localStorage for sensitive data
-  const { data: session, status, update } = useSession();
-  
+  const { data: session, status } = useSession();
+
   // Remove localStorage usage - session is handled securely via httpOnly cookies
   const isLoggingOut = status === "loading";
-  
+
   // Use session data directly - no fallback to localStorage
   const isLoggedIn = status === "authenticated";
-  
+
+  // Logout handler
+  // Note: Due to NextAuth client-side session caching, we must force a page reload
+  // after signOut to ensure the UI reflects the logged-out state
+  const handleSignOut = () => {
+    signOut({ callbackUrl: '/' });
+  };
+
+  // State for UI
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [hasPortfolio, setHasPortfolio] = useState<boolean | null>(null);
@@ -102,22 +89,6 @@ export default function Header() {
       setNotifications(notifications.map(n => ({ ...n, isRead: true })));
     } catch (err) {
       console.error('Error marking notifications as read:', err);
-    }
-  };
-
-  const handleSignOut = async () => {
-    console.log('Header: handleSignOut called');
-    try {
-      // Use NextAuth's signOut - it handles cookie clearing securely
-      // No localStorage manipulation needed - session is in httpOnly cookies
-      await signOut({ 
-        callbackUrl: '/',
-        redirect: true,
-      });
-    } catch (error) {
-      console.error('Header: SignOut error', error);
-      // Force redirect to home even if there's an error
-      window.location.href = '/';
     }
   };
 
@@ -397,7 +368,7 @@ export default function Header() {
                   </div>
                 </div>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleSignOut}
                   className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-2xl transition-colors"
                 >
                   <ArrowRightOnRectangleIcon className="h-6 w-6" />

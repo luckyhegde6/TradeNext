@@ -55,6 +55,21 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-18 | Corporate Actions Seeding & Auth Fixes - COMPLETE
+- **Action**: Fixed CSV parsing for corporate actions, optimized DB seeding, and fixed ghost sessions
+- **Root Cause**: 
+  - `seed.ts` had incorrect column indices and rigid regex for parsing the new NSE CSV format
+  - Empty update objects in `prisma.user.upsert` caused constraint errors on Prisma Accelerate due to schema mismatch
+  - Looping individual prisma `create` calls exhausted Accelerate connection pools (`ECONNREFUSED`)
+  - Duplicate cookie names or old active cookies caused NextAuth ghost sessions
+- **Files**: prisma/seed.ts, lib/auth.ts, lib/auth.config.ts, app/api/auth/session/route.ts
+- **Details**:
+  - Restructured seed.ts parsing logic to correctly handle the new NSE CA CSV format with embedded commas
+  - Replaced individual loops with `prisma.model.createMany({ skipDuplicates: true })` for batch inserts
+  - Deleted manual `/api/auth/session` route to let NextAuth handle session state natively
+  - Renamed session cookie to `tradenext-session-token` to force invalidation of old buggy sessions
+- **Status**: ✅ RESOLVED - Database seeded successfully, corp actions showing up in UI, auth flow stable
+
 ### 2026-03-16 18:20 | Netlify 502 Fix - FINAL RESOLUTION
 - **Action**: Fixed 502 Bad Gateway error on Netlify
 - **Root Cause**: Middleware with NextAuth was causing edge function crashes

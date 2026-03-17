@@ -333,7 +333,7 @@ export async function getSessionStats(): Promise<{
 }
 
 /**
- * Increment user token version to invalidate all their JWT tokens
+ * Increment user token version and clear session ID to invalidate all their JWT tokens
  * This forces all sessions to re-authenticate
  */
 export async function invalidateUserTokens(userId: number): Promise<number> {
@@ -350,9 +350,15 @@ export async function invalidateUserTokens(userId: number): Promise<number> {
     
     const newVersion = user.tokenVersion + 1;
     
+    // Generate new sessionId to invalidate all existing JWT tokens
+    const newSessionId = crypto.randomUUID();
+    
     await prisma.user.update({
       where: { id: userId },
-      data: { tokenVersion: newVersion }
+      data: { 
+        tokenVersion: newVersion,
+        currentSessionId: newSessionId  // Clear current sessionId to invalidate all JWT tokens
+      }
     });
     
     // Also invalidate all sessions in the database
@@ -364,7 +370,8 @@ export async function invalidateUserTokens(userId: number): Promise<number> {
     logger.info({ 
       msg: "Session: Invalidated all tokens for user", 
       userId, 
-      newVersion 
+      newVersion,
+      newSessionId: newSessionId.substring(0, 8) + "..."
     });
     
     return newVersion;
