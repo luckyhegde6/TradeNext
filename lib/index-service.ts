@@ -65,7 +65,8 @@ export async function getIndexChartData(indexName: string, timeframe: string = '
         if (dbCount > 10) {
             const points = await prisma.indexPoint.findMany({
                 where: { indexName: indexName, time: { gte: startOfDay, lte: endOfDay } },
-                orderBy: { time: 'asc' }
+                orderBy: { time: 'asc' },
+                select: { time: true, close: true }
             });
             const grapthData = points.map(p => [p.time.getTime(), Number(p.close)]);
             return { grapthData };
@@ -109,7 +110,7 @@ export async function getIndexChartData(indexName: string, timeframe: string = '
 
         return normalizedData;
     } catch (e) {
-logger.error(
+        logger.error(
             "Failed to fetch index chart for index %s with timeframe %s:",
             indexName,
             timeframe,
@@ -403,7 +404,7 @@ export async function getIndexCorporateActions(indexName: string) {
     } catch (e) {
         // Log specific error types
         if (e instanceof Error && e.message.includes('404')) {
-logger.warn(`Corporate actions not available for ${indexName} (API returned 404)`);
+            logger.warn(`Corporate actions not available for ${indexName} (API returned 404)`);
         } else {
             logger.error("Corporate actions fetch error", e);
         }
@@ -458,7 +459,7 @@ export async function getIndexAnnouncements(indexName: string) {
                     }
                 }
             } catch (err) {
-logger.warn("Announcements DB Error (continuing without saving to DB):", err);
+                logger.warn("Announcements DB Error (continuing without saving to DB):", err);
             }
         })();
 
@@ -480,7 +481,7 @@ export async function getAdvanceDecline(indexName: string) {
 
     const qs = `?functionName=getAdvanceDecline&&index=${encodeURIComponent(indexName)}`;
     try {
-logger.info({ msg: `[Index Service] Fetching advance/decline for ${indexName}` });
+        logger.info({ msg: `[Index Service] Fetching advance/decline for ${indexName}` });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawData = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs) as any;
         const data = rawData?.data?.[0] || {};
@@ -534,14 +535,14 @@ export async function getCorporateActionsHistorical(fromDate?: string, toDate?: 
 
     try {
         let url = "https://www.nseindia.com/api/corporates-corporateActions?index=equities";
-        
+
         // Add date range if provided
         if (fromDate && toDate) {
             url = `https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=${fromDate}&to_date=${toDate}`;
         }
 
         logger.info({ msg: 'Fetching corporate actions from NSE', fromDate, toDate, url: url.split('?')[1] });
-        
+
         const data = await nseFetch(url) as any;
         const actions = Array.isArray(data) ? data : (data?.data || []);
 
@@ -568,19 +569,19 @@ export async function getCorporateAnnouncements(symbol?: string, fromDate?: stri
 
     try {
         let url = "https://www.nseindia.com/api/corporate-announcements?index=equities";
-        
+
         // Add filters if provided
         const params = new URLSearchParams();
         if (symbol) params.set('symbol', symbol);
         if (fromDate) params.set('from_date', fromDate);
         if (toDate) params.set('to_date', toDate);
-        
+
         if (params.toString()) {
             url += '&' + params.toString();
         }
 
         logger.info({ msg: 'Fetching corporate announcements from NSE', symbol, fromDate, toDate });
-        
+
         const data = await nseFetch(url) as any;
         const announcements = Array.isArray(data) ? data : (data?.data || []);
 
@@ -608,14 +609,14 @@ export async function getEventCalendar(fromDate?: string, toDate?: string) {
 
     try {
         let url = "https://www.nseindia.com/api/event-calendar?";
-        
+
         // Add date range if provided
         if (fromDate && toDate) {
             url = `https://www.nseindia.com/api/event-calendar?index=equities&from_date=${fromDate}&to_date=${toDate}`;
         }
 
         logger.info({ msg: 'Fetching event calendar from NSE', fromDate, toDate });
-        
+
         const data = await nseFetch(url) as any;
         const events = Array.isArray(data) ? data : (data?.data || []);
 
@@ -642,9 +643,9 @@ export async function getCorporateResults(period: string = "Quarterly") {
 
     try {
         const url = `https://www.nseindia.com/api/corporates-financial-results?index=equities&period=${period}`;
-        
+
         logger.info({ msg: 'Fetching corporate results from NSE', period });
-        
+
         const data = await nseFetch(url) as any;
         const results = Array.isArray(data) ? data : (data?.data || []);
 
@@ -672,7 +673,7 @@ export async function getInsiderTrading(fromDate?: string, toDate?: string) {
 
     try {
         let url: string;
-        
+
         if (fromDate && toDate) {
             // Historical data - use index=equities with date range
             url = `https://www.nseindia.com/api/corporates-pit?index=equities&from_date=${fromDate}&to_date=${toDate}`;
@@ -682,7 +683,7 @@ export async function getInsiderTrading(fromDate?: string, toDate?: string) {
         }
 
         logger.info({ msg: 'Fetching insider trading from NSE', url, fromDate, toDate });
-        
+
         const data = await nseFetch(url) as any;
         const insiderData = Array.isArray(data) ? data : (data?.data || []);
 
@@ -712,17 +713,17 @@ export async function getFinancialResultsComparison(symbol: string, issuerName?:
             index: 'equities',
             symbol: symbol
         });
-        
+
         if (issuerName) {
             params.set('issuer', issuerName);
         }
-        
+
         const url = `https://www.nseindia.com/api/results-comparision?${params.toString()}`;
-        
+
         logger.info({ msg: 'Fetching financial results comparison from NSE', symbol, issuerName });
-        
+
         const data = await nseFetch(url) as any;
-        
+
         // Cache for 1 hour
         const ttl = 3600;
         staticCache.set(cacheKey, data, ttl);
@@ -746,11 +747,11 @@ export async function getEquityMaster() {
 
     try {
         const url = `https://www.nseindia.com/api/equity-master`;
-        
+
         logger.info({ msg: 'Fetching equity master from NSE' });
-        
+
         const data = await nseFetch(url) as any;
-        
+
         // Cache for 24 hours
         const ttl = 86400;
         staticCache.set(cacheKey, data, ttl);
@@ -775,20 +776,20 @@ export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
     try {
         const encodedIndex = encodeURIComponent(indexName);
         const url = `https://www.nseindia.com/api/equity-stockIndices?index=${encodedIndex}`;
-        
+
         logger.info({ msg: 'Fetching index stocks from NSE', index: indexName });
-        
+
         const data = await nseFetch(url) as any;
-        
+
         // Response format: { name, advance, timestamp, data: [...] }
         // The first item in data array is the index itself, rest are stocks
         const stocksData = data?.data || [];
-        
+
         // Filter out the index itself (first item has symbol matching indexName)
-        const stocks = stocksData.filter((item: any) => 
+        const stocks = stocksData.filter((item: any) =>
             item.symbol && item.symbol !== indexName && item.series === 'EQ'
         );
-        
+
         // Cache for 1 hour
         const ttl = 3600;
         staticCache.set(cacheKey, stocks, ttl);
@@ -807,7 +808,7 @@ export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
 export async function syncStocksToDatabase(indexName?: string) {
     try {
         let stocks: any[] = [];
-        
+
         if (indexName) {
             // Fetch from specific index - getIndexStocks now returns just the stocks array
             const indexData = await getIndexStocks(indexName);
@@ -817,7 +818,7 @@ export async function syncStocksToDatabase(indexName?: string) {
             const masterData = await getEquityMaster();
             stocks = masterData?.data || [];
         }
-        
+
         if (stocks.length === 0) {
             return { success: false, message: "No stocks found from NSE" };
         }
