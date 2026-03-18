@@ -16,6 +16,7 @@
 - Implemented `@netlify/blobs` for persistent worker logging.
 - Fixed NSE DB logs and centered login modal.
 - Status: RESOLVED in v1.9.1.
+- Note: Build fixed and tests passing (13/13 suites).
 - Note: Requires `DATABASE_URL` and Netlify Blobs environment.
 
 ---
