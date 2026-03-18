@@ -18,7 +18,6 @@ export async function GET(req: Request) {
     const taskId = searchParams.get("taskId");
 
     if (taskId) {
-      // Read specific log file
       const content = readLog(taskId);
       return NextResponse.json({ taskId, content });
     }
@@ -48,7 +47,7 @@ export async function DELETE(req: Request) {
     }
 
     const deleted = deleteLog(taskId);
-    
+
     if (deleted) {
       logger.info({ msg: "Worker log deleted", taskId });
       return NextResponse.json({ success: true });
