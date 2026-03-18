@@ -55,6 +55,21 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-18 | Notifications, Persistent Logging & UX - COMPLETE
+- **Action**: Implemented Notifications system, Netlify Blobs logging, and centered login modal.
+- **Root Cause**: 
+    - Notifications page was a 404 and lacked a unified feed.
+    - Netlify file logs were lost after deployment.
+    - NSE API monitoring was missing database logs.
+- **Files**: app/notifications/page.tsx, app/api/updates/route.ts, lib/netlify-logger.ts, lib/services/worker/worker-service.ts, nse-client.ts, Header.tsx
+- **Details**:
+    - Created aggregated `/api/updates` for personal & system notifications.
+    - Added `@netlify/blobs` integration for persistent worker logs.
+    - Fixed NSE DB logging by integrating `logAPIRequest`.
+    - Centered Login Modal and added mobile responsiveness.
+    - Resolved Prisma casing lint errors in `worker-service.ts`.
+- **Status**: ✅ RESOLVED - Notifications active, logging persistent, UI polished.
+
 ### 2026-03-18 | Worker Engine, NSE Sync & Dynamic Logging - COMPLETE
 - **Action**: Implemented full background worker engine, automated NSE sync tasks, and dynamic logging.
 - **Root Cause**: 

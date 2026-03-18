@@ -191,6 +191,41 @@ switch (type) {
 
 ---
 
+### 12. Prisma v7 Casing Handling
+**Issue**: Prisma client generated with idiosyncratic casing (e.g., `aPIRequestLog` or `workerTask` missing from types) causes lint errors or runtime crashes.
+**Root Cause**: Prisma's name normalization can sometimes mismatch the developer's expectations or schema casing in complex setups.
+**Solution**: Use `(prisma as any)` to access models that are throwing type errors, while ensuring the underlying runtime property name is correct.
+```typescript
+// ✅ Fixes lint errors for custom cased models
+await (prisma as any).aPIRequestLog.create({ ... });
+```
+
+---
+
+### 13. Persistent Logging on Serverless (Netlify Blobs)
+**Issue**: `/tmp` and local file systems in Netlify/Vercel are ephemeral; logs are wiped after every execution or deployment.
+**Root Cause**: Local file system writes don't persist in serverless environments.
+**Solution**: Use cloud-native storage like **Netlify Blobs** or **S3** for persistent log files.
+- Convert logging utilities to `async` functions.
+- Check environment at runtime: `process.env.NETLIFY === 'true'`.
+- Implement a fallback to local logging for development environments.
+
+---
+
+### 14. Dependency Minimization for UI Helpers
+**Rule**: Avoid heavy libraries like `date-fns` for simple, repetitive UI tasks like "time ago" formatting.
+**Solution**: Use a native JavaScript helper function. This reduces bundle size and avoids dependency overhead.
+```typescript
+// Example helper
+export function formatTimeAgo(date: Date): string {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  // ... calc intervals ...
+  return `${interval} ${unit} ago`;
+}
+```
+
+---
+
 ## Before Every Commit Checklist
 
 - [ ] Read Lessons.md
@@ -227,8 +262,9 @@ switch (type) {
 ---
 
 ## Last Updated
-2026-03-16 18:20
+2026-03-18 05:45
 
 ## Update Log
+- 2026-03-18: Added v1.9.1 lessons (Prisma casing, Netlify Blobs, Dependency minimization)
 - 2026-03-16: Added middleware rules (main 502 cause discovered)
 - 2026-03-16: Initial rules added based on Netlify 502 fix

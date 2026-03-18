@@ -17,6 +17,15 @@ if (isServer) {
   }
 }
 
+// Netlify Blobs support
+const getNetlifyLogger = () => {
+  try {
+    return require('@/lib/netlify-logger');
+  } catch (e) {
+    return null;
+  }
+};
+
 // Log levels
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
@@ -34,12 +43,12 @@ const getLogsDir = (): string => {
   const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY === '1';
   const isVercel = !!process.env.VERCEL;
   const isServerless = isNetlify || isVercel;
-  
+
   if (isServerless) {
     // Use /tmp which is writable on serverless
     return '/tmp/tradenext_logs';
   }
-  
+
   const cwd = process.cwd();
   return isServer ? pathModule.join(cwd, 'server_logs') : '';
 };
@@ -53,7 +62,7 @@ let logsDirAvailable = true;
 // Ensure logs directory exists
 function ensureLogsDir() {
   if (!isServer || !fs || !logsDirAvailable) return;
-  
+
   try {
     const logsDir = getLogsDir();
     if (!fs.existsSync(logsDir)) {
@@ -62,25 +71,31 @@ function ensureLogsDir() {
   } catch (error) {
     // Directory creation failed - disable file logging
     logsDirAvailable = false;
-    console.warn('[Logger] File logging disabled - could not create logs directory');
+
+    // Only warn if we're NOT on a serverless platform (where we expect this to fail or be ignored)
+    const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY === '1';
+    const isVercel = !!process.env.VERCEL;
+    if (!isNetlify && !isVercel) {
+      console.warn('[Logger] File logging disabled - could not create logs directory');
+    }
   }
 }
 
 // Get today's log file path
 function getTodayLogPath(): string {
   if (!isServer || !fs || !pathModule || !logsDirAvailable) return '';
-  
+
   try {
     const today = new Date();
     const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
     const yearMonth = dateStr.substring(0, 7); // YYYY-MM
-    
+
     const logsDir = getLogsDir();
     const yearMonthDir = pathModule.join(logsDir, yearMonth);
     if (!fs.existsSync(yearMonthDir)) {
       fs.mkdirSync(yearMonthDir, { recursive: true });
     }
-    
+
     return pathModule.join(yearMonthDir, `${dateStr}.log`);
   } catch (error) {
     logsDirAvailable = false;
@@ -89,40 +104,69 @@ function getTodayLogPath(): string {
 }
 
 // Get list of available log files
-export function getLogFiles(): { date: string; path: string; size: number }[] {
-  if (!isServer || !fs || !pathModule) return [];
-  ensureLogsDir();
-  
+export async function getLogFiles(): Promise<{ date: string; path: string; size: number }[]> {
   const files: { date: string; path: string; size: number }[] = [];
-  const logsDir = getLogsDir();
-  
-  try {
-    if (!fs.existsSync(logsDir)) return [];
-    const yearDirs = fs.readdirSync(logsDir).filter((f: string) => fs.statSync(pathModule.join(logsDir, f)).isDirectory());
-    
-    for (const yearDir of yearDirs) {
-      const yearMonthDir = pathModule.join(logsDir, yearDir);
-      const logFiles = fs.readdirSync(yearMonthDir).filter((f: string) => f.endsWith('.log'));
-      
-      for (const logFile of logFiles) {
-        const filePath = pathModule.join(yearMonthDir, logFile);
-        const stats = fs.statSync(filePath);
-        files.push({
-          date: logFile.replace('.log', ''),
-          path: filePath,
-          size: stats.size
-        });
-      }
+
+  // Try Netlify Blobs first if on Netlify
+  if (process.env.NETLIFY) {
+    try {
+      const { listBlobLogs } = require('@/lib/netlify-logger');
+      const blobFiles = await listBlobLogs('server-logs');
+      files.push(...blobFiles);
+    } catch (error) {
+      console.error("Failed to list logs from Netlify Blobs:", error);
     }
-  } catch (error) {
-    // Error reading log files
   }
-  
+
+  // Also include local logs (if any)
+  if (isServer && fs && pathModule) {
+    ensureLogsDir();
+    const logsDir = getLogsDir();
+
+    try {
+      if (fs.existsSync(logsDir)) {
+        const yearDirs = fs.readdirSync(logsDir).filter((f: string) => fs.statSync(pathModule.join(logsDir, f)).isDirectory());
+
+        for (const yearDir of yearDirs) {
+          const yearMonthDir = pathModule.join(logsDir, yearDir);
+          const logFiles = fs.readdirSync(yearMonthDir).filter((f: string) => f.endsWith('.log'));
+
+          for (const logFile of logFiles) {
+            const filePath = pathModule.join(yearMonthDir, logFile);
+            const stats = fs.statSync(filePath);
+            files.push({
+              date: logFile.replace('.log', ''),
+              path: filePath,
+              size: stats.size
+            });
+          }
+        }
+      }
+    } catch (error) {
+      // Error reading log files
+    }
+  }
+
   return files.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // Read log file content
-export function readLogFile(filePath: string, limit: number = 1000): string[] {
+export async function readLogFile(filePath: string, limit: number = 1000): Promise<string[]> {
+  // If filePath matches a Netlify Blob pattern (e.g., starts with "blob:")
+  if (filePath.startsWith('blob:')) {
+    try {
+      const { readBlobLog } = require('@/lib/netlify-logger');
+      const blobKey = filePath.replace('blob:', '');
+      const content = await readBlobLog(blobKey);
+      if (content) {
+        const lines = content.split('\n').filter((line: string) => line.trim());
+        return lines.slice(-limit);
+      }
+    } catch (error) {
+      console.error("Failed to read log from Netlify Blobs:", error);
+    }
+  }
+
   if (!isServer || !fs) return [];
   try {
     if (!fs.existsSync(filePath)) return [];
@@ -135,22 +179,42 @@ export function readLogFile(filePath: string, limit: number = 1000): string[] {
 }
 
 // Read log file with date filter
-export function readLogsByDate(date: string, limit: number = 1000): string[] {
+export async function readLogsByDate(date: string, limit: number = 1000): Promise<string[]> {
   if (!isServer || !fs || !pathModule) return [];
   const logsDir = getLogsDir();
   const dateStr = date.replace(/-/g, '');
   const yearMonth = dateStr.substring(0, 6); // YYYYMM
   const filePath = pathModule.join(logsDir, yearMonth.substring(0, 4), yearMonth, `${date}.log`);
-  
+
+  // On Netlify, we might want to check Blobs if local file doesn't exist
+  // But the monitoring API uses filePath directly for Blobs now (prefixed with blob:)
+
   if (!fs.existsSync(filePath)) {
+    // If not found locally and on Netlify, try checking for blob:YYYY-MM-DD
+    if (process.env.NETLIFY) {
+      return await readLogFile(`blob:${date}.log`, limit);
+    }
     return [];
   }
-  
-  return readLogFile(filePath, limit);
+
+  return await readLogFile(filePath, limit);
 }
 
 // Delete log file
-export function deleteLogFile(filePath: string): boolean {
+export async function deleteLogFile(filePath: string): Promise<boolean> {
+  // If filePath matches a Netlify Blob pattern
+  if (filePath.startsWith('blob:')) {
+    try {
+      const { deleteBlobLog } = require('@/lib/netlify-logger');
+      const blobKey = filePath.replace('blob:', '');
+      await deleteBlobLog(blobKey);
+      return true;
+    } catch (error) {
+      console.error("Failed to delete log from Netlify Blobs:", error);
+      return false;
+    }
+  }
+
   if (!isServer || !fs) return false;
   try {
     if (fs.existsSync(filePath)) {
@@ -167,13 +231,13 @@ export function deleteLogFile(filePath: string): boolean {
 function formatLogEntry(level: LogLevel, message: string | object, ...args: any[]): string {
   const now = new Date();
   const timestamp = now.toISOString().replace('T', ' ').substring(0, 19); // YYYY-MM-DD HH:mm:ss
-  
+
   // Level formatting with colors (for console)
   const levelStr = level.toUpperCase().padEnd(5);
   const levelColor = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : level === 'debug' ? '🔍' : 'ℹ️';
-  
+
   let msgStr: string;
-  
+
   if (typeof message === 'object') {
     // Format object as readable key: value pairs
     const entries = Object.entries(message as Record<string, unknown>);
@@ -194,12 +258,12 @@ function formatLogEntry(level: LogLevel, message: string | object, ...args: any[
   } else {
     msgStr = message;
   }
-  
+
   // Add extra args if present
-  const extraArgs = args.length > 0 
+  const extraArgs = args.length > 0
     ? ' | ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(', ')
     : '';
-  
+
   return `${timestamp} | ${levelColor} ${levelStr} | ${msgStr}${extraArgs}`;
 }
 
@@ -213,7 +277,7 @@ function writeToFile(entry: string, level: LogLevel = 'info') {
   } else {
     console.log(entry);
   }
-  
+
   // Then try to write to file
   if (!isServer || !fs) return;
   try {
@@ -262,7 +326,7 @@ export function trackNseApiCall(
     responseTime,
     error
   });
-  
+
   // Keep only last 1000 calls in memory
   if (calls.length > 1000) {
     calls.pop();
@@ -296,17 +360,17 @@ const createLogger = (): Logger => {
   const isLocal = env === 'local';
   const isDev = env === 'development' || isLocal;
   const enableDebug = isDev;
-  
+
   const formatMessage = (level: string, message: string | object, ...args: any[]) => {
     const now = new Date();
     const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
-    
+
     // Level formatting
-    const levelColor = level === 'ERROR' ? '\x1b[31m' : 
-                       level === 'WARN' ? '\x1b[33m' : 
-                       level === 'DEBUG' ? '\x1b[36m' : '\x1b[32m';
+    const levelColor = level === 'ERROR' ? '\x1b[31m' :
+      level === 'WARN' ? '\x1b[33m' :
+        level === 'DEBUG' ? '\x1b[36m' : '\x1b[32m';
     const reset = '\x1b[0m';
-    
+
     let msgStr: string;
     if (typeof message === 'object') {
       const entries = Object.entries(message as Record<string, unknown>);
@@ -320,25 +384,25 @@ const createLogger = (): Logger => {
     } else {
       msgStr = message;
     }
-    
-    const extraArgs = args.length > 0 
+
+    const extraArgs = args.length > 0
       ? ' | ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(', ')
       : '';
-    
+
     return `${timestamp} | ${levelColor}${level.padEnd(5)}${reset} | ${msgStr}${extraArgs}`;
   };
-  
+
   return {
     info: (message, ...args) => {
       const entry = formatLogEntry('info', message, ...args);
       writeToFile(entry, 'info');
     },
-    
+
     warn: (message, ...args) => {
       const entry = formatLogEntry('warn', message, ...args);
       writeToFile(entry, 'warn');
     },
-    
+
     error: (message: unknown, ...args: unknown[]) => {
       let msgObj: object;
       if (message instanceof Error) {
@@ -348,23 +412,23 @@ const createLogger = (): Logger => {
       } else {
         msgObj = message as object;
       }
-      
+
       const entry = formatLogEntry('error', msgObj, ...args);
       writeToFile(entry, 'error');
     },
-    
+
     // Skip DEBUG logs unless in local/development
     debug: (message, ...args) => {
       if (!enableDebug) return; // Skip debug in production
       const entry = formatLogEntry('debug', message, ...args);
       writeToFile(entry, 'debug');
     },
-    
+
     // NSE API tracking helper
     nse: (endpoint: string, method: string = 'GET') => {
       const startTime = Date.now();
       trackNseApiCall(endpoint, method, 'pending');
-      
+
       return {
         success: (responseTime: number = Date.now() - startTime) => {
           trackNseApiCall(endpoint, method, 'success', responseTime);
@@ -419,21 +483,21 @@ export function logHttpRequest(
     ip,
     userAgent
   });
-  
+
   // Keep only last 2000 HTTP requests
   if (logs.length > 2000) {
     logs.pop();
   }
-  
+
   // Also write to file in readable format (only if available)
   if (isServer && fs && logsDirAvailable) {
     try {
       const now = new Date();
       const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
       const statusColor = status >= 400 ? '❌' : status >= 300 ? '⚠️' : '✅';
-      
+
       const logLine = `${timestamp} | ${statusColor} ${method.padEnd(6)} | ${status} | ${responseTime}ms | ${url}`;
-      
+
       ensureLogsDir();
       const filePath = getTodayLogPath();
       if (filePath) {
@@ -471,15 +535,15 @@ export function withHttpLogging<P extends string, T extends { status: number }>(
   return async function (req: Request, ...args: unknown[]): Promise<T> {
     const startTime = Date.now();
     const url = req.url || '';
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
-               req.headers.get('x-real-ip') || 
-               'unknown';
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ||
+      req.headers.get('x-real-ip') ||
+      'unknown';
     const userAgent = req.headers.get('user-agent') || '';
-    
+
     try {
       const response = await handler(req);
       const responseTime = Date.now() - startTime;
-      
+
       // Log the request
       logHttpRequest(
         method,
@@ -489,11 +553,11 @@ export function withHttpLogging<P extends string, T extends { status: number }>(
         ip,
         userAgent
       );
-      
+
       return response;
     } catch (error) {
       const responseTime = Date.now() - startTime;
-      
+
       // Log error requests
       logHttpRequest(
         method,
@@ -503,7 +567,7 @@ export function withHttpLogging<P extends string, T extends { status: number }>(
         ip,
         userAgent
       );
-      
+
       throw error;
     }
   };
