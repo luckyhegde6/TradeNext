@@ -68,7 +68,10 @@ echo "" >> agent--memory.md
     - Fixed NSE DB logging by integrating `logAPIRequest`.
     - Centered Login Modal and added mobile responsiveness.
     - Resolved Prisma casing lint errors in `worker-service.ts`.
-- **Status**: ✅ RESOLVED - Notifications active, logging persistent, UI polished.
+    - **Fixed Build Errors**: Resolved `Promise<boolean>` vs `boolean` mismatch in worker logs API.
+    - **Fixed Type Errors**: Resolved `ArrayBuffer` vs `string` mismatch in `netlify-logger.ts`.
+    - **Fixed Flaky Tests**: Made `technical-indicators.test.ts` deterministic.
+- **Status**: ✅ RESOLVED - Notifications active, logging persistent, UI polished, and build/tests green.
 
 ### 2026-03-18 | Worker Engine, NSE Sync & Dynamic Logging - COMPLETE
 - **Action**: Implemented full background worker engine, automated NSE sync tasks, and dynamic logging.
