@@ -12,7 +12,7 @@ export async function writeBlobLog(taskId: string, entry: string): Promise<void>
 
     try {
         const store = getBlobStore();
-        const existing = await store.get(taskId) || "";
+        const existing = await store.get(taskId, { type: "text" }) || "";
         await store.set(taskId, existing + entry);
     } catch (error) {
         console.error("Failed to write to Netlify Blobs:", error);
@@ -27,7 +27,7 @@ export async function readBlobLog(taskId: string): Promise<string> {
 
     try {
         const store = getBlobStore();
-        return await store.get(taskId) || "";
+        return await store.get(taskId, { type: "text" }) || "";
     } catch (error) {
         console.error("Failed to read from Netlify Blobs:", error);
         return "";

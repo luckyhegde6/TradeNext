@@ -206,7 +206,8 @@ await (prisma as any).aPIRequestLog.create({ ... });
 **Issue**: `/tmp` and local file systems in Netlify/Vercel are ephemeral; logs are wiped after every execution or deployment.
 **Root Cause**: Local file system writes don't persist in serverless environments.
 **Solution**: Use cloud-native storage like **Netlify Blobs** or **S3** for persistent log files.
-- Convert logging utilities to `async` functions.
+- Convert logging utilities to `async` functions and **ALWAYS await them** in API routes and worker logic.
+- Specify the data type when reading from Blobs: `store.get(key, { type: 'text' })` to avoid `ArrayBuffer` type errors.
 - Check environment at runtime: `process.env.NETLIFY === 'true'`.
 - Implement a fallback to local logging for development environments.
 
@@ -262,7 +263,7 @@ export function formatTimeAgo(date: Date): string {
 ---
 
 ## Last Updated
-2026-03-18 05:45
+2026-03-18 08:00
 
 ## Update Log
 - 2026-03-18: Added v1.9.1 lessons (Prisma casing, Netlify Blobs, Dependency minimization)
