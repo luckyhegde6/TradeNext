@@ -1,6 +1,6 @@
-// lib/services/worker/worker-logger.ts
 import fs from "fs";
 import path from "path";
+import { writeBlobLog, readBlobLog, deleteBlobLog } from "@/lib/netlify-logger";
 
 const LOGS_DIR = path.join(process.cwd(), ".next", "server_logs");
 
@@ -41,24 +41,37 @@ export function getLogFilePath(taskId: string): string {
 }
 
 /**
- * Write log entry to file
+ * Write log entry to file and/or Netlify Blobs
  */
-export function writeLog(taskId: string, level: string, message: string, data?: unknown): void {
+export async function writeLog(taskId: string, level: string, message: string, data?: unknown): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}${data ? ` ${JSON.stringify(data)}` : ""}\n`;
+
+  // Write to local file (if possible)
   try {
     const logFile = getLogFilePath(taskId);
-    const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}${data ? ` ${JSON.stringify(data)}` : ""}\n`;
-
     fs.appendFileSync(logFile, logEntry);
   } catch (error) {
-    console.error("Failed to write worker log:", error);
+    // console.error("Failed to write worker log to file:", error);
+  }
+
+  // Write to Netlify Blobs (if on Netlify)
+  if (process.env.NETLIFY) {
+    await writeBlobLog(taskId, logEntry);
   }
 }
 
 /**
  * Read log file for a task
  */
-export function readLog(taskId: string): string {
+export async function readLog(taskId: string): Promise<string> {
+  // Try Netlify Blobs first if on Netlify
+  if (process.env.NETLIFY) {
+    const blobContent = await readBlobLog(taskId);
+    if (blobContent) return blobContent;
+  }
+
+  // Fallback to local file
   try {
     const logFile = getLogFilePath(taskId);
     if (fs.existsSync(logFile)) {
@@ -103,18 +116,27 @@ export function getAllLogFiles(): { taskId: string; path: string; size: number; 
 /**
  * Delete log file
  */
-export function deleteLog(taskId: string): boolean {
+export async function deleteLog(taskId: string): Promise<boolean> {
+  let deleted = false;
+
+  // Delete from Netlify Blobs
+  if (process.env.NETLIFY) {
+    await deleteBlobLog(taskId);
+    deleted = true;
+  }
+
+  // Delete local file
   try {
     const logFile = getLogFilePath(taskId);
     if (fs.existsSync(logFile)) {
       fs.unlinkSync(logFile);
-      return true;
+      deleted = true;
     }
-    return false;
   } catch (error) {
     console.error("Failed to delete worker log:", error);
-    return false;
   }
+
+  return deleted;
 }
 
 /**

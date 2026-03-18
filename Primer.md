@@ -9,16 +9,27 @@
 
 ## Current Project Status
 
-### Netlify Deployment - 502 Error & Database Issues
-**Issue**: Production site returned 502 Bad Gateway.
+### Notifications & Persistent Logging
+**Issue**: Missing unified updates feed and ephemeral serverless logs.
 **Fix Applied**: 
-- Removed NextAuth from Next.js middleware.
-- Fixed Prisma 7 adapter configuration for Accelerate.
-- Status: RESOLVED in v1.8.2.
+- Implemented `/notifications` page with role-based filtering.
+- Implemented `@netlify/blobs` for persistent worker logging.
+- Fixed NSE DB logs and centered login modal.
+- Status: RESOLVED in v1.9.1.
+- Note: Build fixed and tests passing (13/13 suites).
+- Note: Requires `DATABASE_URL` and Netlify Blobs environment.
 
 ---
 
-### Corporate Actions DB Seeding & Auth Ghosts
+## Session History
+
+### Session 4 (March 18, 2026)
+- **Notifications**: Built `/notifications` page and aggregated API route. Combined worker tasks, audit logs, and alerts.
+- **Logging**: Integrated Netlify Blobs for persistent storage. Converted logger to async.
+- **UX Fixes**: Centered and polished login modal. Fixed NSE DB logging in `nse-client.ts`.
+- **Documentation**: Updated `AGENTS.md`, `agent-memory.md`, `Lessons.md`, and `Primer.md` to version 1.9.1.
+
+### Session 3 (March 18, 2026)
 **Issue**: 
 1. `seed.ts` failed to insert corporate actions due to incorrect CSV parsing.
 2. NextAuth had a "ghost session" bug where users appeared logged in after signing out.

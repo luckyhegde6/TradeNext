@@ -2,6 +2,8 @@
 import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
 import logger, { trackNseApiCall } from "@/lib/logger";
+import { logAPIRequest } from "@/lib/rate-limit";
+import crypto from "crypto";
 
 // Determine if we're in production (Netlify)
 const isProduction = process.env.NODE_ENV === "production";
@@ -53,9 +55,21 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
   const fullUrl = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
   const endpoint = path + qs;
   const startTime = Date.now();
-  
-  logger.info({ msg: `[NSE Fetch] ${fullUrl} (attempt ${retryCount + 1})` });
+
+  const requestId = crypto.randomUUID();
+
+  logger.info({ msg: `[NSE Fetch] ${fullUrl} (attempt ${retryCount + 1})`, requestId });
   trackNseApiCall(endpoint, 'GET', 'pending');
+
+  // Initial log entry in DB
+  logAPIRequest({
+    requestId,
+    method: 'GET',
+    path: fullUrl,
+    isNSE: true,
+    nseEndpoint: endpoint,
+    statusCode: 0, // Pending
+  }).catch(err => logger.error({ msg: "Failed to create initial NSE API log", error: err }));
 
   // Add overall timeout for the entire request
   const controller = new AbortController();
@@ -77,8 +91,20 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
     const responseTime = Date.now() - startTime;
 
     if (!resp.ok) {
-      logger.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${fullUrl}`);
+      logger.error(`[NSE Error] ${resp.status} ${resp.statusText} for ${fullUrl}`, { requestId });
       trackNseApiCall(endpoint, 'GET', 'error', responseTime, `${resp.status} ${resp.statusText}`);
+
+      logAPIRequest({
+        requestId,
+        method: 'GET',
+        path: fullUrl,
+        isNSE: true,
+        nseEndpoint: endpoint,
+        statusCode: resp.status,
+        responseTime,
+        errorMessage: `${resp.status} ${resp.statusText}`
+      }).catch(err => logger.error({ msg: "Failed to update NSE API error log", error: err }));
+
       throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
     }
 
@@ -87,17 +113,28 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
     if ((data as any).error) {
       logger.error({ msg: "[NSE Data Error]", data: JSON.stringify(data) });
     }
-    
+
     trackNseApiCall(endpoint, 'GET', 'success', responseTime);
+
+    logAPIRequest({
+      requestId,
+      method: 'GET',
+      path: fullUrl,
+      isNSE: true,
+      nseEndpoint: endpoint,
+      statusCode: 200,
+      responseTime
+    }).catch(err => logger.error({ msg: "Failed to update NSE API success log", error: err }));
+
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
     const responseTime = Date.now() - startTime;
-    
+
     if (error instanceof Error && error.name === 'AbortError') {
       logger.warn({ msg: `[NSE Timeout] Request timed out for ${fullUrl}, retry ${retryCount + 1}/${MAX_RETRIES}` });
       trackNseApiCall(endpoint, 'GET', 'error', responseTime, 'Timeout');
-      
+
       // Retry logic
       if (retryCount < MAX_RETRIES) {
         // Wait before retrying (exponential backoff)
@@ -105,12 +142,24 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
         await new Promise(resolve => setTimeout(resolve, delay));
         return nseFetch(path, qs, retryCount + 1);
       }
-      
+
       logger.error({ msg: `[NSE Timeout] All retries exhausted for ${fullUrl}` });
       throw new Error(`NSE request timeout for ${fullUrl}`);
     }
-    
+
     trackNseApiCall(endpoint, 'GET', 'error', responseTime, error instanceof Error ? error.message : String(error));
+
+    logAPIRequest({
+      requestId,
+      method: 'GET',
+      path: fullUrl,
+      isNSE: true,
+      nseEndpoint: endpoint,
+      statusCode: 500,
+      responseTime,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    }).catch(err => logger.error({ msg: "Failed to update NSE API exception log", error: err }));
+
     throw error;
   }
 }

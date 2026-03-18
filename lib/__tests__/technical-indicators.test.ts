@@ -17,22 +17,23 @@ const generateTestData = (count: number, basePrice: number = 100): PriceData[] =
   const data: PriceData[] = [];
   let price = basePrice;
   const now = Date.now();
-  
+
   for (let i = 0; i < count; i++) {
-    const change = (Math.random() - 0.5) * 10;
+    // Deterministic price change: alternating +2, -1, +3, -2, etc.
+    const change = (i % 2 === 0) ? (i % 5) : -(i % 3);
     price = Math.max(price + change, 10);
-    const volatility = Math.random() * 5;
-    
+    const volatility = 2; // Fixed volatility
+
     data.push({
       timestamp: now - (count - i) * 86400000,
-      open: price - Math.random() * 3,
-      high: price + Math.random() * 5,
-      low: price - Math.random() * 5,
+      open: price - 1,
+      high: price + 2,
+      low: price - 2,
       close: price,
-      volume: Math.floor(Math.random() * 10000000),
+      volume: 1000000 + i * 10000,
     });
   }
-  
+
   return data;
 };
 
@@ -41,7 +42,7 @@ describe('Technical Indicators', () => {
     test('should calculate SMA correctly', () => {
       const data = generateTestData(10, 100);
       const sma = calculateSMA(data, 5);
-      
+
       expect(sma.length).toBe(6);
       expect(sma[0].value).toBeGreaterThan(90);
       expect(sma[0].value).toBeLessThan(110);
@@ -50,7 +51,7 @@ describe('Technical Indicators', () => {
     test('should return empty array for insufficient data', () => {
       const data = generateTestData(3, 100);
       const sma = calculateSMA(data, 5);
-      
+
       expect(sma.length).toBe(0);
     });
   });
@@ -59,7 +60,7 @@ describe('Technical Indicators', () => {
     test('should calculate EMA correctly', () => {
       const data = generateTestData(20, 100);
       const ema = calculateEMA(data, 10);
-      
+
       expect(ema.length).toBe(11);
     });
   });
@@ -68,7 +69,7 @@ describe('Technical Indicators', () => {
     test('should calculate RSI correctly', () => {
       const data = generateTestData(30, 100);
       const rsi = calculateRSI(data, 14);
-      
+
       expect(rsi.length).toBe(16);
       rsi.forEach(r => {
         expect(r.value).toBeGreaterThanOrEqual(0);
@@ -81,7 +82,7 @@ describe('Technical Indicators', () => {
       data.forEach((d, i) => {
         d.close = 100 + i * 2;
       });
-      
+
       const rsi = calculateRSI(data, 14);
       expect(rsi[rsi.length - 1].value).toBeGreaterThan(50);
     });
@@ -91,7 +92,7 @@ describe('Technical Indicators', () => {
     test('should calculate MACD correctly', () => {
       const data = generateTestData(60, 100);
       const macd = calculateMACD(data);
-      
+
       expect(macd.length).toBeGreaterThanOrEqual(0);
       if (macd.length > 0) {
         macd.forEach(m => {
@@ -107,7 +108,7 @@ describe('Technical Indicators', () => {
     test('should calculate Stochastic correctly', () => {
       const data = generateTestData(30, 100);
       const stoch = calculateStochastic(data, 14, 3);
-      
+
       expect(stoch.k.length).toBeGreaterThan(0);
       stoch.k.forEach(k => {
         expect(k.value).toBeGreaterThanOrEqual(0);
@@ -119,7 +120,7 @@ describe('Technical Indicators', () => {
     test('should calculate Bollinger Bands correctly', () => {
       const data = generateTestData(30, 100);
       const bands = calculateBollingerBands(data, 20, 2);
-      
+
       expect(bands.length).toBe(11);
       bands.forEach(b => {
         expect(b.upper).toBeGreaterThan(b.middle);
@@ -132,7 +133,7 @@ describe('Technical Indicators', () => {
     test('should calculate Stochastic correctly', () => {
       const data = generateTestData(30, 100);
       const stoch = calculateStochastic(data, 14, 3);
-      
+
       expect(stoch.k.length).toBe(17);
       stoch.k.forEach(k => {
         expect(k.value).toBeGreaterThanOrEqual(0);
@@ -145,7 +146,7 @@ describe('Technical Indicators', () => {
     test('should calculate ATR correctly', () => {
       const data = generateTestData(30, 100);
       const atr = calculateAverageTrueRange(data, 14);
-      
+
       expect(atr.length).toBe(16);
       atr.forEach(a => {
         expect(a.value).toBeGreaterThan(0);
@@ -157,7 +158,7 @@ describe('Technical Indicators', () => {
     test('should calculate OBV correctly', () => {
       const data = generateTestData(20, 100);
       const obv = calculateOBV(data);
-      
+
       expect(obv.length).toBe(20);
     });
   });

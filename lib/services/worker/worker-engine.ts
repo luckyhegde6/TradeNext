@@ -108,7 +108,7 @@ async function pollAndExecute() {
 
     await updateHeartbeat("busy", task.id);
     const taskLogger = createTaskLogger(task.id);
-    taskLogger.info(`Worker ${WORKER_ID} started task: ${task.name} [${task.taskType}]`);
+    await taskLogger.info(`Worker ${WORKER_ID} started task: ${task.name} [${task.taskType}]`);
 
     try {
         // 3. Execute the task logic
@@ -125,7 +125,7 @@ async function pollAndExecute() {
             },
         });
 
-        taskLogger.info(`Task ${task.id} finished with status: ${result.success ? "completed" : "failed"}`);
+        await taskLogger.info(`Task ${task.id} finished with status: ${result.success ? "completed" : "failed"}`);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         await prisma.workerTask.update({
@@ -136,7 +136,7 @@ async function pollAndExecute() {
                 error: errorMessage,
             },
         });
-        taskLogger.error(`Task ${task.id} execution failed`, error);
+        await taskLogger.error(`Task ${task.id} execution failed`, error);
     } finally {
         await updateHeartbeat("idle");
     }

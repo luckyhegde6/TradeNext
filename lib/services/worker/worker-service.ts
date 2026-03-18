@@ -202,75 +202,116 @@ async function executeScreenerSync(payload?: Record<string, unknown>): Promise<u
 }
 
 /**
- * Alert Check - Batch checks user alerts against current prices
+ * Alert Check - Batch checks all alert types against current prices
  */
 async function executeAlertCheck(payload?: Record<string, unknown>): Promise<unknown> {
   const batchSize = (payload?.batchSize as number) || 100;
-
   logger.info({ msg: "Starting alert check", batchSize });
 
-  // Get active alerts
-  const alerts = await prisma.userAlert.findMany({
+  // 1. Process UserAlerts (User-defined specific targets)
+  const userAlerts = await prisma.userAlert.findMany({
     where: { status: "active" },
     take: batchSize,
   });
 
-  if (alerts.length === 0) {
-    return { checked: 0, triggered: 0, message: "No active alerts" };
+  // 2. Process basic Alerts (System/automatic alerts)
+  const systemAlerts = await prisma.alert.findMany({
+    where: { triggered: false, symbol: { not: null } },
+    take: batchSize,
+  });
+
+  if (userAlerts.length === 0 && systemAlerts.length === 0) {
+    return { checked: 0, triggered: 0, message: "No active alerts in this batch" };
   }
 
-  // Get unique symbols from alerts
-  const symbols = [...new Set(alerts.map((a) => a.symbol).filter(Boolean))];
+  // Get unique symbols from both sets
+  const symbols = [...new Set([
+    ...userAlerts.map(a => a.symbol),
+    ...systemAlerts.map(a => a.symbol)
+  ].filter(Boolean) as string[])];
 
-  // Get current prices (from stock snapshots)
+  // Get current prices
   const snapshots = await prisma.stockSnapshot.findMany({
-    where: {
-      symbol: { in: symbols as string[] },
-    },
+    where: { symbol: { in: symbols } },
     orderBy: { capturedAt: "desc" },
     distinct: ["symbol"],
   });
 
-  const priceMap = new Map(snapshots.map((s) => [s.symbol, s.lastPrice?.toNumber() || 0]));
-
-  let triggered = 0;
-
-  for (const alert of alerts) {
-    if (!alert.symbol || !priceMap.has(alert.symbol)) continue;
-
-    const currentPrice = priceMap.get(alert.symbol) || 0;
-    const targetPrice = alert.targetPrice?.toNumber() || 0;
-
-    let shouldTrigger = false;
-
-    switch (alert.alertType) {
-      case "price_above":
-        shouldTrigger = currentPrice > targetPrice;
-        break;
-      case "price_below":
-        shouldTrigger = currentPrice < targetPrice;
-        break;
-      case "volume_spike":
-        // Would need volume data - skip for now
-        break;
+  const priceMap = new Map(snapshots.map(s => [
+    s.symbol,
+    {
+      price: s.lastPrice?.toNumber() || 0,
+      change: s.change?.toNumber() || 0,
+      volume: s.volume ? Number(s.volume) : 0
     }
+  ]));
 
-    if (shouldTrigger) {
+  let triggeredCount = 0;
+
+  // Process UserAlerts
+  for (const alert of userAlerts) {
+    if (!alert.symbol || !priceMap.has(alert.symbol)) continue;
+    const { price } = priceMap.get(alert.symbol)!;
+    const target = alert.targetPrice?.toNumber() || 0;
+
+    let triggered = false;
+    if (alert.alertType === "price_above") triggered = price > target;
+    else if (alert.alertType === "price_below") triggered = price < target;
+
+    if (triggered) {
+      const now = new Date();
       await prisma.userAlert.update({
         where: { id: alert.id },
-        data: {
-          status: "triggered",
-          triggeredAt: new Date(),
-          currentPrice: currentPrice,
-        },
+        data: { status: "triggered", triggeredAt: now, currentPrice: price },
       });
-      triggered++;
+
+      // Create notification
+      await prisma.notification.create({
+        data: {
+          userId: alert.userId,
+          type: "alert_triggered",
+          title: `Alert Triggered: ${alert.symbol}`,
+          message: `${alert.symbol} hit your target of ${target}. Current price: ${price}`,
+          link: `/company/${alert.symbol}`,
+        }
+      });
+
+      triggeredCount++;
     }
   }
 
-  logger.info({ msg: "Alert check completed", checked: alerts.length, triggered });
+  // Process System Alerts
+  const { triggerAlert } = await import("@/lib/services/alertService");
+  for (const alert of systemAlerts) {
+    if (!alert.symbol || !priceMap.has(alert.symbol)) continue;
+    const { price, change } = priceMap.get(alert.symbol)!;
+    const condition = alert.condition as any;
+    const prevPrice = price - change;
+    const pChange = prevPrice > 0 ? (change / prevPrice) * 100 : 0;
 
-  return { checked: alerts.length, triggered };
+    let triggered = false;
+    if (alert.type === "price_above" && condition.threshold) triggered = price > condition.threshold;
+    else if (alert.type === "price_below" && condition.threshold) triggered = price < condition.threshold;
+    else if (alert.type === "price_jump" && condition.changePercent) triggered = Math.abs(pChange) > condition.changePercent;
+
+    if (triggered) {
+      await triggerAlert(alert.id);
+      triggeredCount++;
+    }
+  }
+
+  logger.info({
+    msg: "Alert check completed",
+    userAlertsChecked: userAlerts.length,
+    systemAlertsChecked: systemAlerts.length,
+    totalTriggered: triggeredCount
+  });
+
+  return {
+    userAlertsChecked: userAlerts.length,
+    systemAlertsChecked: systemAlerts.length,
+    triggered: triggeredCount
+  };
 }
 
 /**
@@ -627,12 +668,12 @@ async function executeMaintenance(taskId: string, payload?: Record<string, unkno
   });
 
   // Clean old task events
-  const { count: eventsDeleted } = await prisma.taskEvent.deleteMany({
+  const { count: eventsDeleted } = await (prisma as any).taskEvent.deleteMany({
     where: { createdAt: { lt: cutoff } },
   });
 
   // Clean old API request logs
-  const { count: logsDeleted } = await prisma.aPIRequestLog.deleteMany({
+  const { count: logsDeleted } = await (prisma as any).aPIRequestLog.deleteMany({
     where: { createdAt: { lt: cutoff } },
   });
 

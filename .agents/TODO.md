@@ -12,6 +12,7 @@ This file contains the implementation checklist for TradeNext features.
   - [x] POST /api/ingest/run (trigger ingestion)
   - [x] GET /api/company/:ticker (fundamentals + latest prices)
 - [x] Admin routes with role-based protection
+- [x] Notifications system with aggregated feed and persistent logging
 
 ### In Progress
 - [ ] Implement Piotroski F-score fully in SQL and TypeScript (historical comparisons)
@@ -22,7 +23,7 @@ This file contains the implementation checklist for TradeNext features.
 ### Pending
 - [ ] Elasticsearch index for company documents and fast research queries
 - [ ] Backtest engine for saved screens
-- [ ] Alerts & notifications subsystem
+- [x] Alerts & notifications subsystem
 
 ## Notes for Implementers
 

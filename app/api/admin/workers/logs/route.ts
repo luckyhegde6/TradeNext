@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     const taskId = searchParams.get("taskId");
 
     if (taskId) {
-      const content = readLog(taskId);
+      const content = await readLog(taskId);
       return NextResponse.json({ taskId, content });
     }
 
@@ -46,7 +46,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
     }
 
-    const deleted = deleteLog(taskId);
+    const deleted = await deleteLog(taskId);
 
     if (deleted) {
       logger.info({ msg: "Worker log deleted", taskId });
