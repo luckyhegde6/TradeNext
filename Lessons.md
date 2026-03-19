@@ -48,24 +48,25 @@ if (useAccelerate) {
 - All pages (including static) return 502
 
 **Solution**: 
-- DO NOT use NextAuth in middleware on Netlify
-- Create minimal middleware WITHOUT NextAuth imports
+- DO NOT use NextAuth in proxy on Netlify
+- Create minimal proxy WITHOUT NextAuth imports
 - Handle authentication at API route level instead
+- Use `proxy.ts` (not `middleware.ts`) in Next.js 16+
 
-**CORRECT Minimal Middleware**:
+**CORRECT Minimal Proxy**:
 ```typescript
-// middleware.ts - Netlify compatible
-import { NextResponse } from "next/server";
+// proxy.ts - Next.js 16+ compatible
+import { NextResponse, type NextRequest } from "next/server";
 
-export const runtime = 'nodejs';
-
-export function middleware(request: Request) {
+export function proxy(request: NextRequest) {  // Export name MUST be "proxy"
     const response = NextResponse.next();
     
     // CORS headers
-    response.headers.set('Access-Control-Allow-Origin', 'https://tradenext6.netlify.app');
+    const origin = request.headers.get('origin');
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        response.headers.set('Access-Control-Allow-Origin', origin);
+    }
     
-    // Rate limiting (simple in-memory)
     // Security headers
     response.headers.set('X-Content-Type-Options', 'nosniff');
     
@@ -84,6 +85,11 @@ import NextAuth from "next-auth";
 const { auth } = NextAuth(authConfig);
 export default auth((req) => { ... });
 ```
+
+**Key Points for Next.js 16+**:
+- File MUST be named `proxy.ts` (not `middleware.ts`)
+- Export MUST be named `proxy` (not `middleware`)
+- No `runtime = 'nodejs'` needed (proxy runs on Node.js by default)
 
 ---
 
