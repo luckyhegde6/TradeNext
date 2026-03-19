@@ -1,11 +1,7 @@
-// Minimal middleware without NextAuth - for Netlify compatibility
+// Minimal proxy without NextAuth - for Netlify compatibility
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/lib/auth";
 
-// Use Node.js runtime explicitly
-export const runtime = 'nodejs';
-
-console.log('Middleware: Starting (minimal)...');
+console.log('Proxy: Starting (minimal - no NextAuth)...');
 
 // Allowed origins for CORS
 const ALLOWED_ORIGINS = [
@@ -14,7 +10,7 @@ const ALLOWED_ORIGINS = [
   'https://tradenext.vercel.app',
 ];
 
-// Simple rate limiting
+// Simple rate limiting (in-memory)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 function checkRateLimit(key: string, max: number, windowMs: number): boolean {
@@ -34,10 +30,8 @@ function checkRateLimit(key: string, max: number, windowMs: number): boolean {
   return true;
 }
 
-export default auth((request) => {
+export function proxy(request: NextRequest) {
   const nextUrl = request.nextUrl;
-  const authData = (request as any).auth;
-  const isLoggedIn = !!authData?.user;
   const response = NextResponse.next();
 
   // Get client IP
@@ -74,23 +68,13 @@ export default auth((request) => {
     }
   }
 
-  // RBAC Logic for /admin and /users
-  const isAdminPage = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/users");
-  if (isAdminPage) {
-    if (!isLoggedIn || (authData.user as any).role !== "admin") {
-      const loginUrl = new URL("/auth/signin", nextUrl);
-      loginUrl.searchParams.set("callbackUrl", nextUrl.pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-  }
-
   // Security headers
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-XSS-Protection', '1; mode=block');
 
   return response;
-});
+}
 
 // Matcher - skip static files
 export const config = {
