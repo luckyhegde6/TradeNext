@@ -207,7 +207,9 @@ await (prisma as any).aPIRequestLog.create({ ... });
 **Root Cause**: Local file system writes don't persist in serverless environments.
 **Solution**: Use cloud-native storage like **Netlify Blobs** or **S3** for persistent log files.
 - Convert logging utilities to `async` functions and **ALWAYS await them** in API routes and worker logic.
-- Specify the data type when reading from Blobs: `store.get(key, { type: 'text' })` to avoid `ArrayBuffer` type errors.
+- **Handling Netlify Blob Data Types**: When reading from Netlify Blobs using `store.get`, always specify `{ type: 'text' }` if a string is expected, otherwise it returns an `ArrayBuffer`.
+- **Duplicate Key Errors in Request Logging**: When logging API requests that have multiple lifecycle states (e.g., pending -> success/error), use `prisma.upsert` with a unique ID (like `requestId`) instead of `prisma.create` to avoid `P2002` unique constraint violations on status updates.
+- **Serverless File Logging Warnings**: On serverless platforms like Netlify, file logging is typically disabled. Suppress noisy warnings by detecting `process.env.NETLIFY` or `process.env.AWS_LAMBDA_FUNCTION_NAME`.
 - Check environment at runtime: `process.env.NETLIFY === 'true'`.
 - Implement a fallback to local logging for development environments.
 

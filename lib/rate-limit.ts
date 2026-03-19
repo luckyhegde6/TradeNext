@@ -9,19 +9,19 @@ const memoryHits = new Map<string, { count: number; ts: number }>();
 const RATE_LIMITS = {
   // Default limits per minute
   default: { limit: 60, window: 60 },
-  
+
   // NSE API endpoints - more restrictive
   nse: { limit: 30, window: 60 },
-  
+
   // Auth endpoints
   auth: { limit: 10, window: 60 },
-  
+
   // Admin endpoints
   admin: { limit: 100, window: 60 },
-  
+
   // Public endpoints
   public: { limit: 120, window: 60 },
-  
+
   // Critical endpoints (write operations)
   critical: { limit: 20, window: 60 },
 };
@@ -39,23 +39,23 @@ function getRateLimitConfig(path: string): { limit: number; window: number } {
   if (path.startsWith("/api/nse/") || path.includes("nse")) {
     return RATE_LIMITS.nse;
   }
-  
+
   // Auth endpoints
   if (path.includes("/auth/") || path.includes("/signin") || path.includes("/signup")) {
     return RATE_LIMITS.auth;
   }
-  
+
   // Admin endpoints
   if (path.startsWith("/api/admin/")) {
     return RATE_LIMITS.admin;
   }
-  
+
   // Write operations (POST, PUT, DELETE)
-  if (path.includes("/create") || path.includes("/update") || path.includes("/delete") || 
-      path.includes("/import") || path.includes("/ingest")) {
+  if (path.includes("/create") || path.includes("/update") || path.includes("/delete") ||
+    path.includes("/import") || path.includes("/ingest")) {
     return RATE_LIMITS.critical;
   }
-  
+
   return RATE_LIMITS.default;
 }
 
@@ -122,7 +122,7 @@ export async function checkRateLimit(
         identifierType,
         path
       );
-      
+
       return {
         allowed: false,
         remaining: 0,
@@ -208,7 +208,7 @@ export async function blockIdentifier(
         blockReason: reason
       }
     });
-    
+
     logger.warn({ msg: "Blocked identifier", identifier, reason });
   } catch (error) {
     logger.error({ msg: "Failed to block identifier", identifier, error });
@@ -226,7 +226,7 @@ export async function unblockIdentifier(identifier: string): Promise<void> {
         currentCount: 0
       }
     });
-    
+
     logger.info({ msg: "Unblocked identifier", identifier });
   } catch (error) {
     logger.error({ msg: "Failed to unblock identifier", identifier, error });
@@ -268,10 +268,10 @@ export async function detectAnomalies(
   path: string
 ): Promise<void> {
   if (!ipAddress) return;
-  
+
   try {
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    
+
     // Count requests in last minute from memory
     let memoryCount = 0;
     const memKey = `${ipAddress}:${path}`;
@@ -332,25 +332,31 @@ export async function logAPIRequest(data: {
   anomalyType?: string;
 }): Promise<void> {
   try {
-    await prisma.aPIRequestLog.create({
-      data: {
+    const logData = {
+      userId: data.userId,
+      userEmail: data.userEmail,
+      ipAddress: data.ipAddress,
+      userAgent: data.userAgent,
+      method: data.method,
+      path: data.path,
+      queryParams: data.queryParams,
+      statusCode: data.statusCode,
+      responseTime: data.responseTime,
+      errorMessage: data.errorMessage,
+      isNSE: data.isNSE ?? false,
+      nseEndpoint: data.nseEndpoint,
+      isRateLimited: data.isRateLimited ?? false,
+      isAnomaly: data.isAnomaly ?? false,
+      anomalyType: data.anomalyType
+    };
+
+    await prisma.aPIRequestLog.upsert({
+      where: { requestId: data.requestId },
+      create: {
         requestId: data.requestId,
-        userId: data.userId,
-        userEmail: data.userEmail,
-        ipAddress: data.ipAddress,
-        userAgent: data.userAgent,
-        method: data.method,
-        path: data.path,
-        queryParams: data.queryParams,
-        statusCode: data.statusCode,
-        responseTime: data.responseTime,
-        errorMessage: data.errorMessage,
-        isNSE: data.isNSE ?? false,
-        nseEndpoint: data.nseEndpoint,
-        isRateLimited: data.isRateLimited ?? false,
-        isAnomaly: data.isAnomaly ?? false,
-        anomalyType: data.anomalyType
-      }
+        ...logData
+      },
+      update: logData
     });
   } catch (error) {
     logger.error({ msg: "Failed to log API request", error });
@@ -360,7 +366,7 @@ export async function logAPIRequest(data: {
 // Get API statistics
 export async function getAPIStats(hours: number = 24) {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-  
+
   try {
     const [totalRequests, nseRequests, rateLimited, anomalies, byEndpoint, byIP] = await Promise.all([
       prisma.aPIRequestLog.count({

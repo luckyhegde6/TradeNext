@@ -71,8 +71,8 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 sm:p-6 md:p-8 animate-in fade-in duration-200">
-            <div className="w-full max-w-md bg-surface rounded-2xl shadow-2xl p-6 sm:p-8 relative border border-border animate-in zoom-in-95 duration-200 max-h-[calc(100vh-2rem)] overflow-y-auto custom-scrollbar">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-md bg-surface rounded-2xl shadow-2xl p-6 sm:p-8 relative border border-border animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
                 <button
                     onClick={onClose}
                     className="absolute top-4 right-4 text-surface-foreground/40 hover:text-surface-foreground/60 transition-colors z-10"

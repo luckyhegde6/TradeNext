@@ -72,10 +72,9 @@ function ensureLogsDir() {
     // Directory creation failed - disable file logging
     logsDirAvailable = false;
 
-    // Only warn if we're NOT on a serverless platform (where we expect this to fail or be ignored)
-    const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY === '1';
-    const isVercel = !!process.env.VERCEL;
-    if (!isNetlify && !isVercel) {
+    // Only warn if we're NOT on a serverless platform (where we expect this to fail)
+    const isServerless = !!process.env.NETLIFY || !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    if (!isServerless) {
       console.warn('[Logger] File logging disabled - could not create logs directory');
     }
   }
