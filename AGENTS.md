@@ -4,11 +4,69 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.10.0** - Stock Screener Enhancement (March 20, 2026). Fixed screener API to fetch live data directly from TradingView when database is empty. Added comprehensive filters: Quick Filters (High Volume, Top Gainers, Top Losers, Value Stocks, Growth Stocks, High Dividend), Basic Filters (Market Cap, Sector, Price, P/E, Volume, Relative Volume), and Advanced Filters (P/B Ratio, Dividend Yield, ROE, Debt/Equity). Enhanced table with color-coded metrics. Fixed `stocks.sort()` error when no data available.
+- **v1.9.3** - Build Fixes (March 19, 2026). Fixed Next.js 15+ async params in dynamic route handlers (`Promise<{ id: string }>`). Fixed Zod v4 error property (`issues` instead of `errors`). Regenerated Prisma client.
+- **v1.9.2** - Secure Join Request Flow (March 19, 2026). Replaced direct user signup with an admin-approved join request system. Implemented RBAC for `/users/*` and `/admin/*` routes. Added a tabbed management interface for admins and cleaned up legacy insecure routes.
 - **v1.9.1** - Notifications & UX Enhancements (March 18, 2026). Implemented a comprehensive Notifications Page at `/notifications`. Integrated triggered alerts into the notification feed. Added persistent logging via Netlify Blobs for serverless environments. Fixed NSE DB logging and centered the login modal.
 - **v1.9.0** - Worker Engine & NSE Sync (March 18, 2026). Implemented a persistent background worker and cron scheduler. Added automated NSE data synchronization for corporate actions, events, news, and market data. Introduced a dynamic logging system in `.next/server_logs` with elevated permissions.
 - **v1.8.3** - Corp Actions Seeding & Auth Stability (March 18, 2026). Fixed broken database seeding logic for corporate actions, eliminating Prisma Accelerate connection timeouts by batching inserts. Resolved a stubborn NextAuth "ghost session" bug that prevented proper logout.
 - **v1.8.2** - Netlify 502 Fix (March 16, 2026). Fixed 502 Bad Gateway error on Netlify. Root cause: Middleware with NextAuth was causing edge function crashes despite `runtime = 'nodejs'`. Solution: Created minimal middleware without NextAuth imports. Authentication now handled at API route level. Prisma Accelerate configuration fixed with `accelerateUrl` option.
 - **v1.8.1** - Build Fixes (March 16, 2026). Fixed Prisma 7 adapter configuration. Moved type packages to dependencies for Netlify. Fixed logger to output in production. Fixed netlify.toml syntax. Added startup logging for debugging 502 errors.
+
+---
+
+## New Features (v1.10.0)
+
+### Stock Screener Enhancement
+
+The Stock Screener (`/markets/screener`) has been significantly enhanced with live TradingView data:
+
+#### Quick Filters (Presets)
+- **All Stocks**: Show all NSE stocks
+- **High Volume (1.5x+)**: Stocks with relative volume ≥ 1.5x
+- **Top Gainers (3%+)**: Stocks with % change ≥ 3%
+- **Top Losers (3%-)**: Stocks with % change ≤ -3%
+- **Value Stocks**: Low P/E (≤25) and P/B (≤3)
+- **Growth Stocks**: P/E between 15-60
+- **High Dividend (3%+)**: Stocks with dividend yield ≥ 3%
+
+#### Basic Filters
+- Market Cap: Large Cap (>20,000 Cr), Mid Cap (500-20,000 Cr), Small Cap (<500 Cr)
+- Sector: 19 NSE sectors
+- Price Range (₹)
+- P/E Ratio
+- % Change
+- Volume (absolute)
+- Relative Volume
+
+#### Advanced Filters (collapsible)
+- P/B Ratio
+- Dividend Yield (%)
+- ROE (%)
+- Debt/Equity Max
+- Weekly Performance (%)
+- Monthly Performance (%)
+
+#### Enhanced Table Columns
+- Symbol, Market Cap, Price, Change, P/E, P/B, Dividend Yield, Volume
+- Color-coded values (green for good metrics)
+- Sort by any column
+
+#### TradingView Integration
+- Fetches live data directly from TradingView when database is empty
+- Falls back to database cache if available
+- Supports 2000+ NSE stocks
+
+---
+
+## New Features (v1.9.2)
+
+### Secure Join Request Flow
+- **Admin Approval System**: Direct user creation is now restricted. Prospective users must submit a "Join Request" (Name, Email, Mobile, Message).
+- **Admin Interface**: A new tabbed interface in User Management allows admins to review, approve, or reject pending requests.
+- **Auto-Account Creation**: Upon approval, the system automatically creates a user account and generates a temporary password (stored securely).
+- **RBAC Enforcement**: Middleware now strictly protects `/users/*` and `/admin/*` routes, redirecting unauthorized attempts.
+- **Security Cleanup**: Removed legacy `/users/new` route and direct signup APIs to close security loopholes.
 
 ---
 

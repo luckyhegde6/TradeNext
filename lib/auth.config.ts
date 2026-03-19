@@ -32,11 +32,12 @@ export const authConfig: NextAuthConfig = {
         authorized({ auth, request: { nextUrl } }) {
             const isLoggedIn = !!auth?.user;
             const isAuthPage = nextUrl.pathname.startsWith("/auth");
-            const isAdminPage = nextUrl.pathname.startsWith("/admin");
+            const isAdminPage = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/users");
 
             if (isAdminPage) {
                 if (isLoggedIn && (auth.user as any).role === "admin") return true;
-                return false;
+                const callbackUrl = nextUrl.pathname;
+                return Response.redirect(new URL(`/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`, nextUrl));
             }
 
             if (isAuthPage) {

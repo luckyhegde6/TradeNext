@@ -69,3 +69,33 @@ export async function createUser(data: { name?: string; email: string; password?
         },
     });
 }
+
+export interface JoinRequest {
+    id: string;
+    name: string;
+    email: string;
+    mobile?: string | null;
+    message?: string | null;
+    status: string;
+    createdAt: Date;
+}
+
+export async function createJoinRequest(data: { name: string; email: string; mobile?: string; message?: string }) {
+    return await prisma.joinRequest.create({
+        data
+    });
+}
+
+export async function getPendingJoinRequests(): Promise<JoinRequest[]> {
+    return await prisma.joinRequest.findMany({
+        where: { status: 'pending' },
+        orderBy: { createdAt: 'desc' }
+    });
+}
+
+export async function updateJoinRequestStatus(id: string, status: 'approved' | 'rejected') {
+    return await prisma.joinRequest.update({
+        where: { id },
+        data: { status }
+    });
+}

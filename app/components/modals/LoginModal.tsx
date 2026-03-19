@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 import Link from "next/link";
-import { XMarkIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 
 interface LoginModalProps {
     onClose: () => void;
@@ -71,16 +71,27 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-md bg-surface rounded-2xl shadow-2xl p-6 sm:p-8 relative border border-border animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200 overflow-y-auto w-full h-full">
+            <div className="w-full max-w-md bg-surface rounded-2xl shadow-2xl p-6 sm:p-8 relative border border-border animate-in zoom-in-95 duration-200">
+                {/* Back Button */}
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-surface-foreground/40 hover:text-surface-foreground/60 transition-colors z-10"
+                    className="absolute top-4 left-4 text-surface-foreground/40 hover:text-surface-foreground/60 transition-colors z-10 p-2 rounded-full hover:bg-surface-foreground/5"
+                    title="Back"
+                >
+                    <ArrowLeftIcon className="w-5 h-5" />
+                </button>
+
+                {/* Close Button */}
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 text-surface-foreground/40 hover:text-surface-foreground/60 transition-colors z-10 p-2 rounded-full hover:bg-surface-foreground/5"
+                    title="Close"
                 >
                     <XMarkIcon className="w-6 h-6" />
                 </button>
 
-                <div className="text-center mb-8">
+                <div className="text-center mb-8 pt-2">
                     <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center shadow-lg mx-auto mb-4">
                         <span className="text-white font-black text-2xl">T</span>
                     </div>
@@ -113,11 +124,18 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
                             required
                         />
                     </div>
-                    <div className="pt-2">
+                    <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-1 rounded-xl border border-border bg-surface px-4 py-3.5 text-surface-foreground font-bold hover:bg-surface-foreground/5 transition-all active:scale-[0.98]"
+                        >
+                            Cancel
+                        </button>
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full rounded-xl bg-primary px-4 py-3.5 text-white font-bold hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-[2] rounded-xl bg-primary px-4 py-3.5 text-white font-bold hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {loading ? "Signing In..." : "Sign In"}
                         </button>
@@ -126,7 +144,7 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
 
                 <div className="mt-8 text-center text-sm text-surface-foreground/60">
                     Don&apos;t have an account?{" "}
-                    <Link href="/users/new" onClick={onClose} className="text-primary hover:underline font-bold transition-colors">
+                    <Link href="/auth/join" onClick={onClose} className="text-primary hover:underline font-bold transition-colors">
                         Join Now
                     </Link>
                 </div>

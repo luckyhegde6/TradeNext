@@ -1,5 +1,6 @@
 // Minimal middleware without NextAuth - for Netlify compatibility
 import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 
 // Use Node.js runtime explicitly
 export const runtime = 'nodejs';
@@ -19,71 +20,81 @@ const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 function checkRateLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
   const record = rateLimitMap.get(key);
-  
+
   if (!record || now > record.resetTime) {
     rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
     return true;
   }
-  
+
   if (record.count >= max) {
     return false;
   }
-  
+
   record.count++;
   return true;
 }
 
-export function middleware(request: NextRequest) {
-    const nextUrl = request.nextUrl;
-    const response = NextResponse.next();
+export default auth((request) => {
+  const nextUrl = request.nextUrl;
+  const authData = (request as any).auth;
+  const isLoggedIn = !!authData?.user;
+  const response = NextResponse.next();
 
-    // Get client IP
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 
-               request.headers.get('x-real-ip') || 
-               'unknown';
+  // Get client IP
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0] ||
+    request.headers.get('x-real-ip') ||
+    'unknown';
 
-    // Handle CORS
-    const origin = request.headers.get('origin');
-    if (origin && ALLOWED_ORIGINS.includes(origin)) {
-      response.headers.set('Access-Control-Allow-Origin', origin);
-    }
-    
-    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    response.headers.set('Access-Control-Allow-Credentials', 'true');
-    response.headers.set('Access-Control-Max-Age', '86400');
+  // Handle CORS
+  const origin = request.headers.get('origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    response.headers.set('Access-Control-Allow-Origin', origin);
+  }
 
-    // Handle preflight
-    if (request.method === 'OPTIONS') {
-      return response;
-    }
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  response.headers.set('Access-Control-Allow-Credentials', 'true');
+  response.headers.set('Access-Control-Max-Age', '86400');
 
-    // Rate limiting for API routes
-    if (nextUrl.pathname.startsWith('/api/')) {
-      const rateLimitKey = `ratelimit:${ip}:${nextUrl.pathname}`;
-      
-      if (!checkRateLimit(rateLimitKey, 100, 60000)) {
-        console.warn(`Rate limit exceeded for ${ip}`);
-        return NextResponse.json(
-          { error: "Too many requests" },
-          { status: 429 }
-        );
-      }
-    }
-
-    // Security headers
-    response.headers.set('X-Content-Type-Options', 'nosniff');
-    response.headers.set('X-Frame-Options', 'DENY');
-    response.headers.set('X-XSS-Protection', '1; mode=block');
-
-    // Note: Protected routes are handled at API route level via auth()
-
+  // Handle preflight
+  if (request.method === 'OPTIONS') {
     return response;
-}
+  }
+
+  // Rate limiting for API routes
+  if (nextUrl.pathname.startsWith('/api/')) {
+    const rateLimitKey = `ratelimit:${ip}:${nextUrl.pathname}`;
+
+    if (!checkRateLimit(rateLimitKey, 100, 60000)) {
+      console.warn(`Rate limit exceeded for ${ip}`);
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429 }
+      );
+    }
+  }
+
+  // RBAC Logic for /admin and /users
+  const isAdminPage = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/users");
+  if (isAdminPage) {
+    if (!isLoggedIn || (authData.user as any).role !== "admin") {
+      const loginUrl = new URL("/auth/signin", nextUrl);
+      loginUrl.searchParams.set("callbackUrl", nextUrl.pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Security headers
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-XSS-Protection', '1; mode=block');
+
+  return response;
+});
 
 // Matcher - skip static files
 export const config = {
-    matcher: [
-        '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    ],
+  matcher: [
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+  ],
 };
