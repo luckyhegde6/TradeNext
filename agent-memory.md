@@ -55,6 +55,44 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-20 | Stock Screener Enhancement - COMPLETE
+- **Action**: Fixed screener to fetch live TradingView data directly when database is empty.
+- **Root Cause**:
+    - Screener relied on pre-synced database data which didn't exist.
+    - TradingView API had invalid field names causing errors.
+    - `stocks.sort()` failed when data was empty object instead of array.
+- **Files**: app/api/screener/route.ts, lib/services/tradingview-service.ts, app/markets/screener/page.tsx
+- **Details**:
+    - Modified `getStocks()` to fetch from TradingView when DB cache is empty.
+    - Fixed TradingView column names: removed `perf.W`, `perf.M`, `beta_1_year`, `technical_rating`, `change_percent`.
+    - Added `Array.isArray()` check for safe sorting.
+    - Added Quick Filters, Basic Filters, and Advanced Filters UI.
+    - Enhanced table with P/E, P/B, Dividend Yield columns and color coding.
+- **Status**: ✅ RESOLVED - Screener now shows 2000+ live stocks.
+
+### 2026-03-20 | Build Fixes - COMPLETE
+- **Action**: Fixed TypeScript build errors for Next.js 15+ and Zod v4.
+- **Files**: app/api/admin/join-requests/[id]/approve/route.ts, app/api/admin/join-requests/[id]/reject/route.ts, app/api/auth/join/route.ts
+- **Details**:
+    - Updated dynamic route params to use `Promise<{ id: string }>`.
+    - Changed `error.errors` to `error.issues` for Zod v4.
+    - Regenerated Prisma client.
+- **Status**: ✅ RESOLVED - Build passes successfully.
+
+### 2026-03-19 | Secure Join Request Flow & RBAC - COMPLETE
+- **Action**: Implemented admin-approved signup flow and reinforced RBAC.
+- **Root Cause**: 
+    - Direct user creation via `/users/new` was a security vulnerability.
+    - Missing approval workflow for new user signups.
+- **Files**: prisma/schema.prisma, middleware.ts, app/api/auth/join/route.ts, app/auth/join/page.tsx, app/admin/users/page.tsx, components/modals/LoginModal.tsx
+- **Details**:
+    - Added `JoinRequest` model to database.
+    - Restricted `/admin/*` and `/users/*` to ADMIN role in middleware.
+    - Created join request page and admin approval dashboard.
+    - Updated Login Modal "Join Now" link.
+    - Deleted insecure `/users/new` route.
+- **Status**: ✅ RESOLVED - Onboarding is now secure and admin-controlled.
+
 ### 2026-03-18 | Notifications, Persistent Logging & UX - COMPLETE
 - **Action**: Implemented Notifications system, Netlify Blobs logging, and centered login modal.
 - **Root Cause**: 

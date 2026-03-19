@@ -72,7 +72,7 @@ export async function syncDailyScreener(): Promise<{ success: boolean; recordCou
                 where: { syncDate },
                 create: {
                     syncDate,
-                    data: {},
+                    data: [],
                     status: "failed",
                     error: errorMessage,
                 },

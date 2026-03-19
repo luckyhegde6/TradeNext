@@ -769,7 +769,9 @@ export async function getEquityMaster() {
  * API: https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20TOTAL%20MARKET
  */
 export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
-    const cacheKey = `nse:indexStocks:${indexName.replace(/\s+/g, '_')}`;
+    // Ensure indexName is a string to avoid .replace errors
+    const safeIndexName = String(indexName || "NIFTY TOTAL MARKET");
+    const cacheKey = `nse:indexStocks:${safeIndexName.replace(/\s+/g, '_')}`;
     const cached = staticCache.get(cacheKey);
     if (cached) return cached;
 

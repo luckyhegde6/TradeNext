@@ -42,6 +42,19 @@ model User {
   sessions UserSession[]
 }
 
+model JoinRequest {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  mobile    String?
+  message   String?
+  status    String   @default("pending") // pending | approved | rejected
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("join_requests")
+}
+
 model Post {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())

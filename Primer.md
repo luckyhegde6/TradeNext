@@ -3,13 +3,43 @@
 > Agent reads this at the start of every session to understand current state and progress
 
 ## Last Updated
-2026-03-18
+2026-03-20
 
 ---
 
 ## Current Project Status
 
-### Notifications & Persistent Logging
+### Stock Screener Enhancement (v1.10.0)
+**Issue**: Screener was not showing any data because it relied on pre-synced database data.
+**Fix Applied**: 
+- Modified API to fetch directly from TradingView when database is empty.
+- Added comprehensive filters: Quick Filters, Basic Filters, Advanced Filters.
+- Fixed `stocks.sort()` error when data is empty.
+- Fixed TradingView column names to match API (removed invalid fields like `perf.W`, `beta_1_year`).
+- Status: RESOLVED in v1.10.0.
+
+### Build Fixes (v1.9.3)
+**Issue**: Build failing with async params and Zod error handling type errors.
+**Fix Applied**:
+- Updated dynamic route handlers to use `Promise<{ id: string }>` for params.
+- Changed `error.errors` to `error.issues` for Zod v4 compatibility.
+- Regenerated Prisma client.
+- Status: RESOLVED in v1.9.3.
+
+---
+
+## Current Project Status
+
+### Secure Join Request Flow (v1.9.2)
+**Issue**: Insecure direct signup via `/users/new`.
+**Fix Applied**: 
+- Implemented `JoinRequest` system for admin-approved onboarding.
+- Reinforced RBAC in middleware for `/users/*` and `/admin/*`.
+- Refactored Admin Users page with tabbed requests/users management.
+- Redirected Login Modal to the new join flow.
+- Status: RESOLVED in v1.9.2.
+
+### Notifications & Persistent Logging (v1.9.1)
 **Issue**: Missing unified updates feed and ephemeral serverless logs.
 **Fix Applied**: 
 - Implemented `/notifications` page with role-based filtering.
@@ -22,6 +52,13 @@
 ---
 
 ## Session History
+
+### Session 5 (March 19, 2026)
+- **Join Flow**: Implemented `JoinRequest` model and `/auth/join` request page.
+- **Admin UI**: Added tabbed "Join Requests" management to `/admin/users`.
+- **RBAC**: Secured all user management routes via middleware.
+- **Cleanup**: Deleted `/users/new` and updated `LoginModal`.
+- **Documentation**: Updated `AGENTS.md`, `agent-memory.md`, `Lessons.md`, and `Primer.md` to version 1.9.2.
 
 ### Session 4 (March 18, 2026)
 - **Notifications**: Built `/notifications` page and aggregated API route. Combined worker tasks, audit logs, and alerts.

@@ -207,7 +207,9 @@ await (prisma as any).aPIRequestLog.create({ ... });
 **Root Cause**: Local file system writes don't persist in serverless environments.
 **Solution**: Use cloud-native storage like **Netlify Blobs** or **S3** for persistent log files.
 - Convert logging utilities to `async` functions and **ALWAYS await them** in API routes and worker logic.
-- Specify the data type when reading from Blobs: `store.get(key, { type: 'text' })` to avoid `ArrayBuffer` type errors.
+- **Handling Netlify Blob Data Types**: When reading from Netlify Blobs using `store.get`, always specify `{ type: 'text' }` if a string is expected, otherwise it returns an `ArrayBuffer`.
+- **Duplicate Key Errors in Request Logging**: When logging API requests that have multiple lifecycle states (e.g., pending -> success/error), use `prisma.upsert` with a unique ID (like `requestId`) instead of `prisma.create` to avoid `P2002` unique constraint violations on status updates.
+- **Serverless File Logging Warnings**: On serverless platforms like Netlify, file logging is typically disabled. Suppress noisy warnings by detecting `process.env.NETLIFY` or `process.env.AWS_LAMBDA_FUNCTION_NAME`.
 - Check environment at runtime: `process.env.NETLIFY === 'true'`.
 - Implement a fallback to local logging for development environments.
 
@@ -224,6 +226,74 @@ export function formatTimeAgo(date: Date): string {
   return `${interval} ${unit} ago`;
 }
 ```
+
+---
+
+### 15. Role-Based Access Control (RBAC) & Middleware (v1.9.2)
+**Rule**: Always wrap middleware with `auth` from `@/lib/auth` if you need to check session/roles for routing.
+**Solution**:
+```typescript
+// middleware.ts
+export default auth((req) => {
+  const role = req.auth?.user?.role;
+  const isProtected = req.nextUrl.pathname.startsWith('/admin') || req.nextUrl.pathname.startsWith('/users');
+  
+  if (isProtected && role !== 'ADMIN') {
+    return NextResponse.redirect(new URL('/auth/signin', req.url));
+  }
+  // ... other logic ...
+});
+```
+
+---
+
+### 16. Next.js 15+ Async Params (v1.10.0)
+**Rule**: In Next.js 15+, dynamic route params are now Promises, not synchronous objects.
+**Solution**: Always use async params:
+```typescript
+// ❌ Wrong - synchronous params (Next.js 14)
+export async function POST(
+    request: Request,
+    { params }: { params: { id: string } }
+) {
+    const { id } = params; // Direct access
+}
+
+// ✅ Correct - async params (Next.js 15+)
+export async function POST(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const { id } = await params; // Await the promise
+}
+```
+
+---
+
+### 17. Zod v4 Error Handling (v1.10.0)
+**Rule**: In Zod v4, access validation errors via `error.issues` not `error.errors`.
+**Solution**:
+```typescript
+// ❌ Wrong - Zod v3 syntax
+if (error instanceof z.ZodError) {
+    return NextResponse.json({ error: error.errors[0].message }, { status: 400 });
+}
+
+// ✅ Correct - Zod v4 syntax
+if (error instanceof z.ZodError) {
+    return NextResponse.json({ error: error.issues[0].message }, { status: 400 });
+}
+```
+
+---
+
+### 18. Secure Onboarding (Join Requests) (v1.9.2)
+**Rule**: Avoid direct user signup in production for high-security applications. Use a request-approval workflow.
+**Solution**:
+- Prospective users submit a `JoinRequest`.
+- Admins review and approve the request.
+- The system generates a temporary password and creates the user account only after approval.
+- Delete any legacy direct creation routes (e.g., `/users/new`).
 
 ---
 
