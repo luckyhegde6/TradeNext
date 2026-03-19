@@ -508,56 +508,68 @@ export function CorporateActionsTable({ data, pageSize = 10 }: Props) {
             <table className="min-w-full divide-y divide-yellow-200 dark:divide-yellow-700">
               <thead className="bg-yellow-100 dark:bg-yellow-900/30">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Symbol</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Company</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Dividend (₹)</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Yield</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Ex Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Record Date</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Symbol</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Company</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Type</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Dividend (₹)</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Yield</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider min-w-[200px]">Subject</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Ex Date</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Record Date</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">FV</th>
+                  <th className="px-3 py-3 text-left text-xs font-bold text-yellow-800 dark:text-yellow-200 uppercase tracking-wider">Price</th>
                 </tr>
               </thead>
                <tbody className="divide-y divide-yellow-200 dark:divide-yellow-700 bg-white dark:bg-slate-900">
                  {(showAllUpcoming ? upcoming : upcoming.slice(0, 5)).map((action, idx) => (
                    <tr key={`${action.symbol}-${action.exDate}-${idx}`} className="hover:bg-yellow-25 dark:hover:bg-yellow-900/5 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <Link href={`/company/${action.symbol}`} className="font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
-                        {action.symbol}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate font-medium">{action.companyName}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full border ${getTypeColor(action.type)}`}>
-                        {getTypeIcon(action.type)}
-                        {action.type?.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      {action.type === "DIVIDEND" && action.dividendPerShare !== null && action.dividendPerShare !== undefined ? (
-                        <span className="font-semibold text-green-600 dark:text-green-400 text-base">
-                          ₹{action.dividendPerShare.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      {action.type === "DIVIDEND" && action.dividendYield !== null && action.dividendYield !== undefined ? (
-                        <span className="font-semibold text-green-600 dark:text-green-400">
-                          {action.dividendYield.toFixed(2)}%
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600 dark:text-red-400">
-                      {formatDateWithDay(action.exDate)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                      {action.recDate && action.recDate.trim() ? formatDateWithDay(action.recDate) : "-"}
-                    </td>
-                  </tr>
-                ))}
+                     <td className="px-3 py-3 whitespace-nowrap">
+                       <Link href={`/company/${action.symbol}`} className="font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+                         {action.symbol}
+                       </Link>
+                     </td>
+                     <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-[150px] truncate font-medium">{action.companyName}</td>
+                     <td className="px-3 py-3 whitespace-nowrap">
+                       <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-full border ${getTypeColor(action.type)}`}>
+                         {getTypeIcon(action.type)}
+                         {action.type?.replace('_', ' ')}
+                       </span>
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm">
+                       {action.type === "DIVIDEND" && action.dividendPerShare !== null && action.dividendPerShare !== undefined ? (
+                         <span className="font-semibold text-green-600 dark:text-green-400">
+                           ₹{action.dividendPerShare.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                         </span>
+                       ) : (
+                         <span className="text-gray-400">-</span>
+                       )}
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm">
+                       {action.type === "DIVIDEND" && action.dividendYield !== null && action.dividendYield !== undefined ? (
+                         <span className="text-green-600 dark:text-green-400">
+                           {action.dividendYield.toFixed(2)}%
+                         </span>
+                       ) : (
+                         <span className="text-gray-400">-</span>
+                       )}
+                     </td>
+                     <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-[200px] truncate" title={action.subject}>
+                       {action.subject || "-"}
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-red-600 dark:text-red-400">
+                       {formatDateWithDay(action.exDate)}
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                       {action.recDate && action.recDate.trim() ? formatDateWithDay(action.recDate) : "-"}
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                       {action.faceValue ? `₹${action.faceValue}` : "-"}
+                     </td>
+                     <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                       {action.currentPrice ? `₹${action.currentPrice.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "-"}
+                     </td>
+                   </tr>
+                 ))}
               </tbody>
             </table>
            </div>

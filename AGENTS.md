@@ -4,6 +4,11 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.10.5** - Corporate Actions NSE Field Fix (March 20, 2026). Fixed corporate actions sync saving all records as "OTHER" type. Root cause: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, `RECORD DATE`, `FACE VALUE`). Also fixed dividend amount field mismatch (`dividendPerShare` vs `dividendAmount`). Updated both `app/api/admin/nse/live-sync/route.ts` and `app/api/corporate-actions/combined/route.ts`. Added Subject, Face Value, and Price columns to Upcoming Actions table for uniform formatting with Historical table.
+- **v1.10.4** - Serverless Logging Fix (March 20, 2026). Added `ServerLog` model to database for persistent logging on serverless platforms (Netlify, Vercel). Created `lib/services/db-logger.ts` for DB-backed logging with helpers (`dbInfo`, `dbWarn`, `dbError`, `dbDebug`). Updated `lib/services/worker/worker-logger.ts` with DB fallback when file logging fails. Added `/api/admin/logs` API route for viewing and managing server logs with filtering (level, source, taskId). Schema synced via `prisma db push --accept-data-loss` since using Prisma Accelerate.
+- **v1.10.3** - Price Alert Current Price Display (March 20, 2026). Added current stock price display when creating price alerts and viewing existing alerts. Now shows "Current Price: ₹XXX" when selecting a stock symbol in the alert form. Also updated admin stats to properly show worker/cron status instead of "disabled".
+- **v1.10.2** - Worker Cache Key Type Fix (March 20, 2026). Fixed `stock_sync` worker task failing with "TypeError: indexName.replace is not a function". Root cause: `generateCacheKey` in `market-cache.ts` checked `if (indexName)` but didn't verify the type was string. Fixed by using `typeof indexName === 'string'` check.
+- **v1.10.1** - Corporate Actions Deduplication Fix (March 20, 2026). Fixed duplicate corporate actions being created during NSE sync. Root cause: deduplication logic only checked `symbol + exDate` but schema unique constraint is `symbol + actionType + exDate`. Also fixed timezone inconsistency in date parsing. All sync functions now use `upsert` with correct unique constraint and UTC noon dates.
 - **v1.10.0** - Stock Screener Enhancement (March 20, 2026). Fixed screener API to fetch live data directly from TradingView when database is empty. Added comprehensive filters: Quick Filters (High Volume, Top Gainers, Top Losers, Value Stocks, Growth Stocks, High Dividend), Basic Filters (Market Cap, Sector, Price, P/E, Volume, Relative Volume), and Advanced Filters (P/B Ratio, Dividend Yield, ROE, Debt/Equity). Enhanced table with color-coded metrics. Fixed `stocks.sort()` error when no data available.
 - **v1.9.3** - Build Fixes (March 19, 2026). Fixed Next.js 15+ async params in dynamic route handlers (`Promise<{ id: string }>`). Fixed Zod v4 error property (`issues` instead of `errors`). Regenerated Prisma client.
 - **v1.9.2** - Secure Join Request Flow (March 19, 2026). Replaced direct user signup with an admin-approved join request system. Implemented RBAC for `/users/*` and `/admin/*` routes. Added a tabbed management interface for admins and cleaned up legacy insecure routes.
@@ -56,6 +61,171 @@ The Stock Screener (`/markets/screener`) has been significantly enhanced with li
 - Fetches live data directly from TradingView when database is empty
 - Falls back to database cache if available
 - Supports 2000+ NSE stocks
+
+---
+
+## Corporate Actions Deduplication Fix (v1.10.1)
+
+### Problem
+Corporate Actions table showed duplicate entries for the same symbol and ex-date:
+```
+VESUVIUS   30-APR-2026
+VESUVIUS   30-APR-2026  (duplicate)
+SCHAEFFLER 23-APR-2026
+SCHAEFFLER 23-APR-2026  (duplicate)
+```
+
+### Root Cause
+1. **Deduplication mismatch**: Code checked `symbol + exDate` but schema unique constraint is `symbol + actionType + exDate`
+2. **Timezone inconsistency**: Date parsing created dates at midnight local time, causing timezone mismatches
+3. **Multiple sync paths**: Different sync functions had inconsistent deduplication logic
+
+### Solution
+1. **Fixed date parsing**: All `parseNseDate` functions now create dates at noon UTC:
+   ```typescript
+   new Date(Date.UTC(parseInt(yr), month, parseInt(dd), 12, 0, 0, 0))
+   ```
+
+2. **Fixed deduplication**: All sync functions now use Prisma `upsert` with correct unique constraint:
+   ```typescript
+   await prisma.corporateAction.upsert({
+     where: {
+       symbol_actionType_exDate: { symbol, actionType, exDate }
+     },
+     update: { ... },
+     create: { ... }
+   });
+   ```
+
+### Files Changed
+- `app/api/corporate-actions/combined/route.ts` - Fixed date parsing and upsert
+- `app/api/admin/nse/live-sync/route.ts` - Fixed date parsing and upsert
+- `app/api/admin/corporate-actions/route.ts` - Fixed date parsing and upsert
+- `app/api/admin/nse/historical/route.ts` - Fixed date parsing (already had upsert)
+- `lib/services/sync-service.ts` - Fixed to use upsert
+
+### Cleanup SQL (for existing duplicates)
+```sql
+-- View duplicate counts
+SELECT symbol, "actionType", "exDate", COUNT(*) as cnt
+FROM corporate_actions
+GROUP BY symbol, "actionType", "exDate"
+HAVING COUNT(*) > 1;
+
+-- Delete duplicates (keep the newest record)
+DELETE FROM corporate_actions a
+USING corporate_actions b
+WHERE a.id < b.id
+  AND a.symbol = b.symbol
+  AND a."actionType" = b."actionType"
+  AND a."exDate" = b."exDate";
+```
+
+---
+
+## Corporate Actions NSE Field Fix (v1.10.5)
+
+### Problem
+- Corporate actions sync saved all records with `actionType = "OTHER"`
+- Company names were empty, record dates missing
+- Dividend amounts showing "-"
+
+### Root Cause
+NSE API returns lowercase field names but code looked for uppercase:
+- `subject` vs `PURPOSE` / `purpose`
+- `comp` vs `COMPANY NAME`
+- `recDate` vs `RECORD DATE`
+- `faceVal` vs `FACE VALUE`
+
+### Solution
+Fixed field mappings in both routes:
+
+```typescript
+// Before (WRONG)
+const purpose = item.PURPOSE || item.purpose || '';
+const companyName = item['COMPANY NAME'] || item.companyName || "";
+
+// After (CORRECT)
+const purpose = item.PURPOSE || item.purpose || item.subject || '';
+const companyName = item['COMPANY NAME'] || item.companyName || item.comp || "";
+```
+
+Also fixed dividend amount field name mismatch:
+```typescript
+// Before (WRONG)
+dividendPerShare: action.dividendAmount,
+
+// After (CORRECT)
+dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
+```
+
+### Files Changed
+- `app/api/admin/nse/live-sync/route.ts` - Added lowercase field mappings
+- `app/api/corporate-actions/combined/route.ts` - Added lowercase field mappings
+- `app/components/analytics/CorporateActionsTable.tsx` - Added Subject, FV, Price columns to Upcoming Actions
+
+### NSE API Field Names
+| Field | NSE API | Code Was Looking For |
+|-------|---------|---------------------|
+| Purpose | `subject` | `PURPOSE`, `purpose` |
+| Company | `comp` | `COMPANY NAME`, `companyName` |
+| Record Date | `recDate` | `RECORD DATE`, `recordDate` |
+| Face Value | `faceVal` | `FACE VALUE`, `faceValue`, `FV`, `fv` |
+
+---
+
+## Serverless Logging Fix (v1.10.4)
+
+### Problem
+- Worker logs and server logs were not working on serverless platforms (Netlify/Vercel)
+- `.next/server_logs` directory doesn't exist or isn't writable in serverless environments
+- No persistent storage for logs across deployments
+
+### Solution
+Added database-backed logging system that works everywhere:
+
+#### ServerLog Model
+```prisma
+model ServerLog {
+  id          String    @id @default(uuid())
+  level       String    // "info" | "warn" | "error" | "debug"
+  message     String
+  source      String?   // "worker" | "api" | "sync" | "system" | "nse"
+  taskId      String?   // Associated task ID (for worker logs)
+  metadata    Json?     // Additional structured data
+  ipAddress   String?
+  userAgent   String?
+  requestId   String?
+  createdAt   DateTime  @default(now())
+  
+  @@index([level])
+  @@index([source])
+  @@index([taskId])
+  @@index([createdAt])
+}
+```
+
+#### db-logger.ts Service
+Provides helper functions for logging:
+- `logToDb(entry)` - Core logging function
+- `dbInfo(message, metadata?, source?)` - Quick info log
+- `dbWarn(message, metadata?, source?)` - Quick warning log
+- `dbError(message, metadata?, source?)` - Quick error log
+- `dbDebug(message, metadata?, source?)` - Quick debug log
+- `getDbLogs(options)` - Retrieve logs with filtering
+- `cleanupOldLogs(retentionDays)` - Automatic cleanup (default 7 days)
+- `getLogStats()` - Get statistics
+
+#### worker-logger.ts Updates
+Updated to use fallback chain:
+1. File logging (local only)
+2. Netlify Blobs (if on Netlify)
+3. Database fallback (always works)
+
+#### API Route
+`GET/DELETE /api/admin/logs` for managing server logs:
+- Query params: `type` (db|worker|files|stats), `level`, `source`, `taskId`, `limit`, `offset`
+- DELETE with `retentionDays` param for cleanup
 
 ---
 
@@ -442,6 +612,31 @@ This project uses additional documentation for agent sessions:
 | `Primer.md` | Session tracking - read at start of every session |
 | `agent-memory.md` | Activity log - tracks all agent work |
 | `Lessons.md` | Rules & corrections - read before every commit |
+
+### ⚠️ MANDATORY: Documentation Update Rule
+
+**Documentation MUST be updated IMMEDIATELY after completing any implementation. This is NOT optional.**
+
+After every change (bug fix, feature, refactoring), update these files:
+
+1. **AGENTS.md**:
+   - Add entry to "Version History" (top of file)
+   - Add detailed section under "New Features" or "Bug Fixes"
+   - List all files changed
+   - Explain root cause (for bugs) or feature (for new features)
+
+2. **Primer.md**:
+   - Add to "Current Project Status" with issue/fix/status
+   - Add entry to "Session History"
+
+3. **agent-memory.md**:
+   - Add detailed activity log entry with files and root cause
+
+4. **Lessons.md**:
+   - Add new lesson if new pattern or bug discovered
+   - Update "Last Updated" and "Update Log"
+
+**If documentation is not updated, the task is NOT complete.**
 
 ### Usage
 

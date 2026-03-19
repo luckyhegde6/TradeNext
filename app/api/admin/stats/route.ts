@@ -90,12 +90,37 @@ export async function GET(req: Request) {
             totalProcessed = 0;
         }
 
-        // System status (simplified since we removed Redis/cron)
+        // System status - check actual worker and cron job status
+        let workersStatus = 'idle';
+        let cronStatus = 'idle';
+
+        try {
+            // Check for running/pending tasks
+            const runningTasks = await prisma.workerTask.count({
+                where: { status: { in: ['pending', 'running'] } }
+            }).catch(() => 0);
+
+            if (runningTasks > 0) {
+                workersStatus = 'active';
+            }
+
+            // Check for active cron jobs
+            const activeCronJobs = await prisma.cronJob.count({
+                where: { isActive: true }
+            }).catch(() => 0);
+
+            if (activeCronJobs > 0) {
+                cronStatus = 'active';
+            }
+        } catch (error) {
+            console.warn('Failed to get worker/cron status:', error);
+        }
+
         const systemStatus = {
             database: dbResponseTime < 1000 ? 'healthy' : 'slow',
             cache: 'in-memory',
-            workers: 'disabled',
-            cron: 'disabled'
+            workers: workersStatus,
+            cron: cronStatus
         };
 
         const stats = {

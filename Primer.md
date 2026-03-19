@@ -1,6 +1,7 @@
 # Primer.md - Session Tracking
 
 > Agent reads this at the start of every session to understand current state and progress
+> ⚠️ IMPORTANT: After completing ANY task, you MUST update documentation (AGENTS.md, Primer.md, agent-memory.md, Lessons.md). See Lessons.md Lesson 20 for details.
 
 ## Last Updated
 2026-03-20
@@ -8,6 +9,58 @@
 ---
 
 ## Current Project Status
+
+### Corporate Actions NSE Field Fix (v1.10.5)
+**Issue**: Corporate actions sync saved all records as "OTHER" type with missing company names, record dates, and dividends.
+**Root Cause**: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, etc.). Also dividend field mismatch (`dividendPerShare` vs `dividendAmount`).
+**Fix Applied**:
+- Added lowercase field mappings to `parseCorporateActionFromNse` in both routes
+- Fixed dividend field name: `action.dividendPerShare ?? action.dividendAmount ?? null`
+- Added Subject, Face Value, and Price columns to Upcoming Actions table
+- Created `scripts/fix-corp-actions.ts` for cleanup of incorrect records
+**Files Changed**: app/api/admin/nse/live-sync/route.ts, app/api/corporate-actions/combined/route.ts, app/components/analytics/CorporateActionsTable.tsx, scripts/fix-corp-actions.ts (new)
+**Status**: RESOLVED in v1.10.5.
+
+### Serverless Logging Fix (v1.10.4)
+**Issue**: Worker logs and server logs not working on serverless platforms (Netlify/Vercel).
+**Fix Applied**:
+- Added `ServerLog` model to Prisma schema for persistent DB-backed logging.
+- Created `lib/services/db-logger.ts` with helper functions: `logToDb`, `dbInfo`, `dbWarn`, `dbError`, `dbDebug`, `getDbLogs`, `cleanupOldLogs`, `getLogStats`.
+- Updated `lib/services/worker/worker-logger.ts` with fallback chain: file logging → Netlify Blobs → Database.
+- Created `/api/admin/logs` route for viewing and managing server logs with filtering.
+- Schema synced via `prisma db push --accept-data-loss` (using Prisma Accelerate).
+**Files Changed**: prisma/schema.prisma, lib/services/db-logger.ts (new), lib/services/worker/worker-logger.ts, app/api/admin/logs/route.ts (new)
+**Status**: RESOLVED in v1.10.4.
+
+### Price Alert Current Price Display (v1.10.3)
+**Issue**: Alerts didn't show current stock price during creation or in the list.
+**Fix Applied**:
+- Added `fetchCurrentPrice` function to fetch live price when symbol is selected.
+- Added `fetchAlertPrices` to get prices for all existing alerts.
+- Display: "Current Price: ₹XXX" below symbol input in alert form.
+- Alert list now shows current price next to each symbol.
+- Also fixed admin stats to show actual worker/cron status instead of hardcoded "disabled".
+- Status: RESOLVED in v1.10.3.
+
+### Worker Cache Key Type Fix (v1.10.2)
+**Issue**: `stock_sync` worker task failing with "TypeError: indexName.replace is not a function".
+**Root Cause**: `generateCacheKey` in `market-cache.ts` checked `if (indexName)` but didn't verify the type was string.
+**Fix Applied**:
+- Changed check from `if (indexName)` to `typeof indexName === 'string' && indexName.length > 0`
+- Status: RESOLVED in v1.10.2.
+
+### Corporate Actions Duplicates Fix (v1.10.1)
+**Issue**: Corporate Actions table showed duplicate entries for the same symbol and ex-date.
+**Root Cause**: 
+- Deduplication logic only checked `symbol + exDate` but schema unique constraint is `symbol + actionType + exDate`
+- Date parsing created dates without timezone awareness (midnight vs noon)
+- Multiple sync paths had inconsistent deduplication logic
+**Fix Applied**:
+- Fixed all `parseNseDate` functions to use UTC noon dates: `new Date(Date.UTC(yr, month, dd, 12, 0, 0, 0))`
+- Updated all sync functions to use Prisma `upsert` with correct unique constraint: `symbol_actionType_exDate`
+- Fixed: combined route, admin live-sync route, admin corporate-actions route, historical route, sync-service
+**Files Changed**: app/api/corporate-actions/combined/route.ts, app/api/admin/nse/live-sync/route.ts, app/api/admin/corporate-actions/route.ts, app/api/admin/nse/historical/route.ts, lib/services/sync-service.ts
+**Status**: RESOLVED in v1.10.1. Existing duplicates need manual cleanup via SQL.
 
 ### Stock Screener Enhancement (v1.10.0)
 **Issue**: Screener was not showing any data because it relied on pre-synced database data.
@@ -53,6 +106,24 @@
 
 ## Session History
 
+### Session 8 (March 20, 2026)
+- **Price Alert Enhancement**: Added current stock price display in alerts.
+- **Admin Stats Fix**: Updated stats API to show actual worker/cron status.
+- **Documentation**: Updated to v1.10.3.
+
+### Session 7 (March 20, 2026)
+- **Worker Cache Fix**: Fixed `stock_sync` task failing with "TypeError: indexName.replace is not a function".
+- **Root Cause**: `generateCacheKey` checked `if (indexName)` but didn't verify it's a string.
+- **Fix**: Changed to `typeof indexName === 'string' && indexName.length > 0`.
+- **Documentation**: Updated to v1.10.2.
+
+### Session 6 (March 20, 2026)
+- **Corp Actions Fix**: Fixed duplicate corporate actions being created during NSE sync.
+- **Root Cause**: Deduplication only checked `symbol + exDate` but schema requires `symbol + actionType + exDate`.
+- **Fix**: Updated all sync functions to use Prisma `upsert` with correct unique constraint and UTC noon dates.
+- **Files**: combined route, admin live-sync, admin corporate-actions route, historical route, sync-service.
+- **Documentation**: Updated `AGENTS.md`, `agent-memory.md`, `Lessons.md`, and `Primer.md` to version 1.10.1.
+
 ### Session 5 (March 19, 2026)
 - **Join Flow**: Implemented `JoinRequest` model and `/auth/join` request page.
 - **Admin UI**: Added tabbed "Join Requests" management to `/admin/users`.
@@ -81,6 +152,21 @@
 ---
 
 ## Session History
+
+### Session 5 (March 20, 2026)
+- **Corporate Actions NSE Field Fix (v1.10.5)**: Fixed sync saving all records as "OTHER" type.
+- **Root Cause**: NSE API uses lowercase fields (`subject`, `comp`, `recDate`, `faceVal`) not uppercase.
+- **Files Modified**: app/api/admin/nse/live-sync/route.ts, app/api/corporate-actions/combined/route.ts, app/components/analytics/CorporateActionsTable.tsx
+- **New File**: scripts/fix-corp-actions.ts for cleanup
+- **Updated Upcoming Actions UI**: Added Subject, FV, Price columns to match Historical table format.
+
+### Session 4 (March 20, 2026)
+- **Serverless Logging Fix (v1.10.4)**: Added `ServerLog` model for DB-backed logging on serverless platforms.
+- **Files Created**: `lib/services/db-logger.ts`, `app/api/admin/logs/route.ts`
+- **Files Modified**: `prisma/schema.prisma`, `lib/services/worker/worker-logger.ts`
+- **Corporate Actions Duplicates (v1.10.1)**: Fixed deduplication - schema uses `symbol + actionType + exDate`, not just `symbol + exDate`. Fixed date parsing to use UTC noon.
+- **Worker Cache Fix (v1.10.2)**: Fixed `typeof indexName === 'string'` check in `market-cache.ts`.
+- **Price Alert Enhancement (v1.10.3)**: Added current price display when creating/viewing alerts.
 
 ### Session 3 (March 18, 2026)
 - **Worker Engine**: Built persistent loops for task polling and cron scheduling. Linkage with `CronJob` and `WorkerTask` models.

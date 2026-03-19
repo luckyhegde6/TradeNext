@@ -219,6 +219,25 @@ await (prisma as any).aPIRequestLog.create({ ... });
 - Check environment at runtime: `process.env.NETLIFY === 'true'`.
 - Implement a fallback to local logging for development environments.
 
+### 13b. Database-Backed Logging (v1.10.4)
+**Issue**: Netlify Blobs require special SDK and configuration; not always available.
+**Solution**: Use database-backed logging as the most reliable fallback:
+```typescript
+// lib/services/db-logger.ts
+export async function logToDb(entry: LogEntry): Promise<void> {
+  try {
+    await prisma.serverLog.create({ data: entry });
+  } catch (error) {
+    // Fallback to console if DB fails
+    console.error(`[${entry.level.toUpperCase()}] ${entry.message}`);
+  }
+}
+```
+- Works on ANY platform (local, Netlify, Vercel, AWS Lambda)
+- Use Prisma Accelerate for serverless databases
+- Add indexes on frequently queried fields (level, source, taskId, createdAt)
+- Implement automatic cleanup with `deleteMany` for retention policy
+
 ---
 
 ### 14. Dependency Minimization for UI Helpers
@@ -303,6 +322,142 @@ if (error instanceof z.ZodError) {
 
 ---
 
+### 19. Prisma Unique Constraints & Deduplication (v1.10.1)
+**Rule**: When syncing data, ALWAYS match the deduplication logic to the schema's unique constraint.
+**Problem**: Corporate actions showed duplicates because code checked `symbol + exDate` but schema had `@@unique([symbol, actionType, exDate])`.
+**Solution**:
+1. Check the schema's unique constraints before implementing deduplication
+2. Use `upsert` with the exact field combination from the unique constraint
+3. Normalize dates to UTC noon to avoid timezone mismatches:
+   ```typescript
+   // ❌ Wrong - timezone issues
+   new Date(parseInt(yr), month, parseInt(dd))
+   
+   // ✅ Correct - UTC noon
+   new Date(Date.UTC(parseInt(yr), month, parseInt(dd), 12, 0, 0, 0))
+   ```
+4. Use atomic `upsert` operations instead of find + create/update to avoid race conditions:
+   ```typescript
+   // ❌ Wrong - race condition possible
+   const existing = await prisma.model.findFirst({ where: { ... } });
+   if (existing) await prisma.model.update(...);
+   else await prisma.model.create(...);
+   
+   // ✅ Correct - atomic operation
+   await prisma.model.upsert({
+     where: { field1_field2_field3: { field1, field2, field3 } },
+     update: { ... },
+     create: { ... }
+   });
+   ```
+
+---
+
+### 20. Type Checking Before Method Calls (v1.10.2)
+**Rule**: Always verify the type of a variable before calling string/object methods on it.
+**Problem**: `indexName.replace is not a function` error occurred because `indexName` was truthy but not a string.
+**Solution**:
+```typescript
+// ❌ Wrong - only checks truthiness
+if (indexName) {
+  return indexName.replace(...); // Error if indexName is number/object
+}
+
+// ✅ Correct - explicitly check the type
+if (typeof indexName === 'string' && indexName.length > 0) {
+  return indexName.replace(...); // Safe
+}
+```
+**Also apply this to**:
+- `.split()`, `.join()`, `.map()`, `.filter()`, etc. on union types
+- Any method call on a variable that could be `unknown` or union type
+
+---
+
+### 21. MANDATORY Documentation Updates (v1.10.1) ⚠️
+**Rule**: Documentation MUST be updated IMMEDIATELY after completing any implementation. This is NOT optional.
+**Why**: Without proper documentation, future agents cannot understand what was done, why changes were made, or what files were modified. The project loses institutional knowledge.
+
+**Files to Update After Every Change**:
+
+| File | When to Update | What to Add |
+|------|---------------|-------------|
+| `AGENTS.md` | Every change | Add version entry, detailed change description, files changed |
+| `Primer.md` | Every change | Add to "Current Project Status" section |
+| `agent-memory.md` | Every change | Add detailed activity log entry |
+| `Lessons.md` | Bugs/patterns | Add new lesson if new pattern discovered |
+| `README.md` | Major features | Update feature list, commands, or tech stack |
+
+**MANDATORY Checklist - Do This BEFORE Finishing ANY Task**:
+
+```markdown
+- [ ] Implementation complete (code written, tested, builds pass)
+- [ ] AGENTS.md updated:
+      - [ ] Added entry to "Version History" (top of file)
+      - [ ] Added detailed section under "New Features" or "Bug Fixes"
+      - [ ] Listed all files changed
+      - [ ] Explained root cause (for bugs) or feature (for new features)
+- [ ] Primer.md updated:
+      - [ ] Added to "Current Project Status" with issue/fix/status
+      - [ ] Added to "Session History"
+- [ ] agent-memory.md updated:
+      - [ ] Added detailed activity log entry with files
+- [ ] Lessons.md updated (if new pattern/bug discovered):
+      - [ ] Added new lesson with problem/solution
+      - [ ] Updated "Last Updated" and "Update Log"
+```
+
+**What This Looks Like in Practice**:
+
+1. **Bug Fix**: After fixing a bug, immediately add:
+   - Root cause analysis
+   - Solution explanation  
+   - Files that were changed
+   - SQL scripts if database cleanup needed
+
+2. **New Feature**: After adding a feature, immediately add:
+   - Feature description
+   - How it works
+   - API endpoints (if any)
+   - Files created/modified
+
+3. **Refactoring**: After refactoring, immediately add:
+   - Why the refactoring was needed
+   - What changed
+   - Files affected
+
+**Enforcement**: 
+- The `Before Every Commit Checklist` in this file explicitly requires documentation updates
+- Agents MUST NOT skip documentation - it is part of completing the task
+- If you forget, the user will need to remind you - don't let it get to that point!
+
+---
+
+### 22. NSE API Field Name Casing (v1.10.5)
+**Issue**: Corporate actions sync saved all records as "OTHER" type because field names didn't match.
+
+**Root Cause**: NSE India API returns lowercase field names, not uppercase:
+- `symbol`, `subject`, `comp`, `series`, `faceVal`, `exDate`, `recDate`
+
+**Solution**: Always check actual API response before mapping fields:
+```bash
+# Always verify field names by checking actual API response
+curl -s "https://www.nseindia.com/api/endpoint" | node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(0,'utf-8'))[0]))"
+```
+
+**Safe Field Mapping Pattern**:
+```typescript
+// Check BOTH uppercase and lowercase versions
+const purpose = item.PURPOSE || item.purpose || item.subject || '';
+const companyName = item['COMPANY NAME'] || item.companyName || item.comp || '';
+const recordDate = item['RECORD DATE'] || item.recordDate || item.recDate || "";
+const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVal || null;
+```
+
+**Lesson**: Never assume API field casing. Always verify with actual API response.
+
+---
+
 ## Before Every Commit Checklist
 
 - [ ] Read Lessons.md
@@ -312,8 +467,12 @@ if (error instanceof z.ZodError) {
 - [ ] Verify dependencies in package.json
 - [ ] Test build locally (`npm run quickbuild`)
 - [ ] Check for console.log in critical paths (debugging)
-- [ ] Update Primer.md with session summary
-- [ ] Update agent-memory.md with activity
+- [ ] **MANDATORY: Update ALL documentation files**:
+      - [ ] **AGENTS.md** - Version history + detailed change section
+      - [ ] **Primer.md** - Current status + session history
+      - [ ] **agent-memory.md** - Activity log entry
+      - [ ] **Lessons.md** - New lesson if new pattern discovered
+- [ ] If documentation is NOT updated → DO NOT COMMIT until it is
 
 ---
 
@@ -339,9 +498,14 @@ if (error instanceof z.ZodError) {
 ---
 
 ## Last Updated
-2026-03-18 08:00
+2026-03-20 23:10
 
 ## Update Log
+- 2026-03-20: Added lesson 22 (NSE API Field Casing) - NSE uses lowercase fields
+- 2026-03-20: Added lesson 13b (Database-Backed Logging) for serverless platforms
+- 2026-03-20: Added lesson 20 (Type Checking Before Method Calls)
+- 2026-03-20: Added lesson 21 (MANDATORY Documentation Updates) and updated commit checklist
+- 2026-03-20: Added lesson 19 (Prisma Unique Constraints & Deduplication)
 - 2026-03-18: Added v1.9.1 lessons (Prisma casing, Netlify Blobs, Dependency minimization)
 - 2026-03-16: Added middleware rules (main 502 cause discovered)
 - 2026-03-16: Initial rules added based on Netlify 502 fix

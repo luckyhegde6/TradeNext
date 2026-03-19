@@ -138,6 +138,43 @@ async function executeStockSync(payload?: Record<string, unknown>): Promise<unkn
 /**
  * Corporate Actions Sync - Syncs corporate actions from NSE
  */
+/**
+ * Parse purpose string to determine action type
+ */
+function parseActionPurpose(purpose: string): { actionType: string; dividendAmount?: number } {
+  const p = (purpose || "").toUpperCase();
+  let actionType = "OTHER";
+  let dividendAmount: number | undefined = undefined;
+
+  // Check for dividend patterns
+  if (p.includes("DIVIDEND") || p.includes("INTERIM DIVIDEND") || p.includes("FINAL DIVIDEND")) {
+    actionType = "DIVIDEND";
+    // Try to extract dividend amount from purpose
+    const match = purpose.match(/Rs\.?\s*([\d,.]+)/i) || purpose.match(/₹\s*([\d,.]+)/i);
+    if (match) {
+      dividendAmount = parseFloat(match[1].replace(/,/g, ""));
+    }
+  } else if (p.includes("BONUS")) {
+    actionType = "BONUS";
+  } else if (p.includes("SPLIT") || p.includes("SUB-DIVISION")) {
+    actionType = "SPLIT";
+  } else if (p.includes("RIGHTS")) {
+    actionType = "RIGHTS";
+  } else if (p.includes("BUYBACK")) {
+    actionType = "BUYBACK";
+  } else if (p.includes("INTEREST")) {
+    actionType = "INTEREST";
+  } else if (p.includes("DEMERGER")) {
+    actionType = "DEMERGER";
+  } else if (p.includes("REDEMPTION")) {
+    actionType = "REDEMPTION";
+  } else if (p.includes("AMALGAMATION") || p.includes("MERGER")) {
+    actionType = "MERGER";
+  }
+
+  return { actionType, dividendAmount };
+}
+
 async function executeCorpActionsSync(payload?: Record<string, unknown>): Promise<unknown> {
   const { getIndexCorporateActions } = await import("@/lib/index-service");
 
@@ -153,12 +190,21 @@ async function executeCorpActionsSync(payload?: Record<string, unknown>): Promis
 
   for (const action of actions) {
     try {
+      // Parse the purpose to determine action type
+      const { actionType, dividendAmount } = parseActionPurpose(action.purpose || "");
+      
+      // Parse exDate
+      const exDate = action.exDate ? new Date(action.exDate) : null;
+      if (!exDate || isNaN(exDate.getTime())) {
+        continue; // Skip records without valid exDate
+      }
+
       await prisma.corporateAction.upsert({
         where: {
           symbol_actionType_exDate: {
             symbol: action.symbol,
-            actionType: action.purpose || "OTHER",
-            exDate: action.exDate ? new Date(action.exDate) : new Date(0),
+            actionType: actionType,
+            exDate: exDate,
           },
         },
         create: {
@@ -166,16 +212,21 @@ async function executeCorpActionsSync(payload?: Record<string, unknown>): Promis
           companyName: action.companyName || action.symbol,
           series: action.series || "EQ",
           subject: action.purpose,
-          actionType: action.purpose || "OTHER",
-          exDate: action.exDate ? new Date(action.exDate) : null,
+          actionType: actionType,
+          exDate: exDate,
+          recordDate: action.recordDate ? new Date(action.recordDate) : null,
           source: "nse",
+          dividendPerShare: dividendAmount,
         },
         update: {
           subject: action.purpose,
+          actionType: actionType,
+          dividendPerShare: dividendAmount,
         },
       });
       updated++;
-    } catch {
+    } catch (error) {
+      logger.warn({ msg: "Error syncing corporate action", symbol: action.symbol, error });
       created++;
     }
   }

@@ -55,6 +55,80 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-20 | Corporate Actions NSE Field Fix - COMPLETE
+- **Action**: Fixed corporate actions sync saving all records as "OTHER" type with missing data.
+- **Root Cause**: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, etc.). Also dividend field mismatch (`dividendPerShare` vs `dividendAmount`).
+- **Files Modified**:
+    - `app/api/admin/nse/live-sync/route.ts` - Added lowercase field mappings
+    - `app/api/corporate-actions/combined/route.ts` - Added lowercase field mappings
+    - `app/components/analytics/CorporateActionsTable.tsx` - Added Subject, FV, Price columns
+- **Files Created**:
+    - `scripts/fix-corp-actions.ts` - Cleanup script for incorrect records
+- **Details**:
+    - Fixed field mappings: `subject`, `comp`, `recDate`, `faceVal`
+    - Fixed dividend field: `dividendPerShare ?? dividendAmount ?? null`
+    - Upcoming Actions table now matches Historical format with Subject, FV, Price columns
+- **Status**: ✅ RESOLVED - Fixed in v1.10.5.
+
+### 2026-03-20 | Serverless Logging Fix - COMPLETE
+- **Action**: Added database-backed logging for serverless platforms (Netlify, Vercel).
+- **Problem**: File-based logging (`.next/server_logs`) doesn't work on serverless - directory isn't writable.
+- **Files Created**:
+    - `lib/services/db-logger.ts` - DB logging service with helpers
+    - `app/api/admin/logs/route.ts` - API route for reading/managing logs
+- **Files Modified**:
+    - `prisma/schema.prisma` - Added `ServerLog` model
+    - `lib/services/worker/worker-logger.ts` - Added DB fallback chain
+- **Details**:
+    - `ServerLog` model with indexes on level, source, taskId, createdAt
+    - `db-logger.ts` provides: `logToDb`, `dbInfo`, `dbWarn`, `dbError`, `dbDebug`, `getDbLogs`, `cleanupOldLogs`, `getLogStats`
+    - Worker logger fallback chain: file logging → Netlify Blobs → Database
+    - API route supports filtering by type (db|worker|files|stats), level, source, taskId
+    - Schema synced via `prisma db push --accept-data-loss`
+    - Build passes successfully
+- **Status**: ✅ RESOLVED - Fixed in v1.10.4.
+
+### 2026-03-20 | Price Alert Current Price Display - COMPLETE
+- **Action**: Added current stock price display when creating and viewing price alerts.
+- **Files**: 
+    - app/alerts/page.tsx
+    - app/components/alerts/AlertPanel.tsx
+- **Details**:
+    - Added `fetchCurrentPrice` function to fetch live price from `/api/nse/stock/{symbol}/quote`
+    - Added `fetchAlertPrices` to get prices for all alerts at once
+    - Display shows "Current Price: ₹XXX" below symbol input
+    - Alert list shows current price next to each symbol (e.g., "(₹1,234.56)")
+    - Also fixed admin stats to show actual worker/cron status instead of hardcoded "disabled"
+- **Status**: ✅ RESOLVED - Fixed in v1.10.3.
+
+### 2026-03-20 | Worker Cache Key Type Fix - COMPLETE
+- **Action**: Fixed `stock_sync` worker task failing with "TypeError: indexName.replace is not a function".
+- **Root Cause**: `generateCacheKey` in `market-cache.ts` checked `if (indexName)` but didn't verify the type was string before calling `.replace()`.
+- **Files**: lib/market-cache.ts
+- **Details**:
+    - Changed check from `if (indexName)` to `typeof indexName === 'string' && indexName.length > 0`
+    - Build passes successfully.
+- **Status**: ✅ RESOLVED - Fixed in v1.10.2.
+
+### 2026-03-20 | Corporate Actions Deduplication Fix - COMPLETE
+- **Action**: Fixed duplicate corporate actions being created during NSE sync.
+- **Root Cause**:
+    - Deduplication logic only checked `symbol + exDate` but schema unique constraint is `symbol + actionType + exDate`.
+    - Date parsing created dates at midnight local time without timezone awareness.
+    - Multiple sync paths had inconsistent deduplication logic.
+- **Files**: 
+    - app/api/corporate-actions/combined/route.ts
+    - app/api/admin/nse/live-sync/route.ts
+    - app/api/admin/corporate-actions/route.ts
+    - app/api/admin/nse/historical/route.ts
+    - lib/services/sync-service.ts
+- **Details**:
+    - Fixed all `parseNseDate` functions to use UTC noon dates.
+    - Updated all sync functions to use Prisma `upsert` with correct unique constraint.
+    - Build passes, all tests pass (12/13 suites).
+- **Note**: Existing duplicates in database need manual cleanup via SQL.
+- **Status**: ✅ RESOLVED - Code fixed in v1.10.1.
+
 ### 2026-03-20 | Stock Screener Enhancement - COMPLETE
 - **Action**: Fixed screener to fetch live TradingView data directly when database is empty.
 - **Root Cause**:

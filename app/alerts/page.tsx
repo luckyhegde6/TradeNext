@@ -17,6 +17,7 @@ interface Alert {
   triggeredAt?: string;
   seen: boolean;
   createdAt: string;
+  currentPrice?: number;
 }
 
 const ALERT_TYPES = [
@@ -38,6 +39,9 @@ export default function AlertsPage() {
     threshold: '',
     changePercent: '',
   });
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [alertPrices, setAlertPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (session) {
@@ -50,11 +54,34 @@ export default function AlertsPage() {
       const res = await fetch('/api/alerts');
       const data = await res.json();
       setAlerts(data);
+      
+      // Fetch current prices for alerts with symbols
+      const symbols = [...new Set(data.filter((a: Alert) => a.symbol).map((a: Alert) => a.symbol))] as string[];
+      fetchAlertPrices(symbols);
     } catch (error) {
       console.error('Failed to fetch alerts:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Fetch current prices for multiple symbols
+  const fetchAlertPrices = async (symbols: string[]) => {
+    const prices: Record<string, number> = {};
+    for (const symbol of symbols) {
+      try {
+        const res = await fetch(`/api/nse/stock/${symbol}/quote`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.lastPrice) {
+            prices[symbol] = parseFloat(data.lastPrice);
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to fetch price for ${symbol}:`, error);
+      }
+    }
+    setAlertPrices(prices);
   };
 
   const createAlert = async (e: React.FormEvent) => {
@@ -145,10 +172,45 @@ export default function AlertsPage() {
     return ALERT_TYPES.find(t => t.value === type)?.label || type;
   };
 
+  // Fetch current price when symbol changes
+  const fetchCurrentPrice = async (symbol: string) => {
+    if (!symbol) {
+      setCurrentPrice(null);
+      return;
+    }
+    
+    setPriceLoading(true);
+    try {
+      const res = await fetch(`/api/nse/stock/${symbol}/quote`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lastPrice) {
+          setCurrentPrice(parseFloat(data.lastPrice) || null);
+        } else {
+          setCurrentPrice(null);
+        }
+      } else {
+        setCurrentPrice(null);
+      }
+    } catch (error) {
+      console.error('Failed to fetch price:', error);
+      setCurrentPrice(null);
+    } finally {
+      setPriceLoading(false);
+    }
+  };
+
+  // Handle symbol selection
+  const handleSymbolSelect = (symbol: string) => {
+    setFormData({ ...formData, symbol });
+    fetchCurrentPrice(symbol);
+  };
+
   const closeForm = () => {
     setShowForm(false);
     setEditingAlert(null);
     setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
+    setCurrentPrice(null);
   };
 
   if (!session) {
@@ -202,10 +264,23 @@ export default function AlertsPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Stock Symbol</label>
                 <Autocomplete
-                  onSelect={(symbol: string) => setFormData({ ...formData, symbol })}
+                  onSelect={handleSymbolSelect}
                   placeholder="e.g., RELIANCE"
                   initialValue={formData.symbol}
                 />
+                {formData.symbol && (
+                  <div className="mt-2 text-sm">
+                    {priceLoading ? (
+                      <span className="text-muted-foreground">Loading price...</span>
+                    ) : currentPrice !== null ? (
+                      <span className="text-green-600 font-medium">
+                        Current Price: ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Price not available</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {(formData.type === 'price_above' || formData.type === 'price_below') && (
@@ -281,6 +356,11 @@ export default function AlertsPage() {
                       </span>
                       <span className="font-medium">{getAlertTypeLabel(alert.type)}</span>
                       {alert.symbol && <span className="text-muted-foreground">{alert.symbol}</span>}
+                      {alert.symbol && alertPrices[alert.symbol] && (
+                        <span className="text-green-600 font-medium text-sm ml-2">
+                          (₹{alertPrices[alert.symbol].toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                        </span>
+                      )}
                     </div>
                     <div className="text-sm text-muted-foreground mt-1">
                       {alert.condition.threshold && `Target: ₹${alert.condition.threshold}`}

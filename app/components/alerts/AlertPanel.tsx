@@ -25,6 +25,56 @@ export function AlertPanel() {
     threshold: "",
     changePercent: "",
   });
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [alertPrices, setAlertPrices] = useState<Record<string, number>>({});
+
+  // Fetch current price for symbol
+  const fetchCurrentPrice = async (symbol: string) => {
+    if (!symbol) {
+      setCurrentPrice(null);
+      return;
+    }
+    
+    setPriceLoading(true);
+    try {
+      const res = await fetch(`/api/nse/stock/${symbol}/quote`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lastPrice) {
+          setCurrentPrice(parseFloat(data.lastPrice));
+        } else {
+          setCurrentPrice(null);
+        }
+      } else {
+        setCurrentPrice(null);
+      }
+    } catch (error) {
+      console.error('Failed to fetch price:', error);
+      setCurrentPrice(null);
+    } finally {
+      setPriceLoading(false);
+    }
+  };
+
+  // Fetch current prices for all alert symbols
+  const fetchAlertPrices = async (symbols: string[]) => {
+    const prices: Record<string, number> = {};
+    for (const symbol of symbols) {
+      try {
+        const res = await fetch(`/api/nse/stock/${symbol}/quote`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.lastPrice) {
+            prices[symbol] = parseFloat(data.lastPrice);
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to fetch price for ${symbol}:`, error);
+      }
+    }
+    setAlertPrices(prices);
+  };
 
   const fetchAlerts = useCallback(async () => {
     if (!session?.user) return;
@@ -34,6 +84,10 @@ export function AlertPanel() {
       if (res.ok) {
         const data = await res.json();
         setAlerts(data);
+        
+        // Fetch current prices for alerts with symbols
+        const symbols = [...new Set(data.filter((a: Alert) => a.symbol).map((a: Alert) => a.symbol))] as string[];
+        fetchAlertPrices(symbols);
       }
     } catch (error) {
       console.error("Error fetching alerts:", error);
@@ -177,10 +231,27 @@ export function AlertPanel() {
               <input
                 type="text"
                 value={newAlert.symbol}
-                onChange={(e) => setNewAlert({ ...newAlert, symbol: e.target.value })}
+                onChange={(e) => {
+                  const symbol = e.target.value.toUpperCase();
+                  setNewAlert({ ...newAlert, symbol });
+                  fetchCurrentPrice(symbol);
+                }}
                 placeholder="RELIANCE"
                 className="w-full rounded border border-border bg-background px-3 py-2 uppercase dark:border-slate-700 dark:bg-slate-800"
               />
+              {newAlert.symbol && (
+                <div className="mt-1 text-sm">
+                  {priceLoading ? (
+                    <span className="text-gray-500">Loading price...</span>
+                  ) : currentPrice !== null ? (
+                    <span className="text-green-600 font-medium">
+                      Current: ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">Price not available</span>
+                  )}
+                </div>
+              )}
             </div>
             {(newAlert.type === "price_above" || newAlert.type === "price_below") && (
               <div>
@@ -237,9 +308,14 @@ export function AlertPanel() {
                   <p className="font-medium">
                     {getAlertTypeLabel(alert.type)}
                     {alert.symbol && <span className="ml-2 text-gray-500">@{alert.symbol}</span>}
+                    {alert.symbol && alertPrices[alert.symbol] && (
+                      <span className="ml-2 text-green-600 font-medium">
+                        (₹{alertPrices[alert.symbol].toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                      </span>
+                    )}
                   </p>
                   <p className="text-sm text-gray-500">
-                    {(alert.condition.threshold as number) && `₹${alert.condition.threshold}`}
+                    {(alert.condition.threshold as number) && `Target: ₹${alert.condition.threshold}`}
                     {(alert.condition.changePercent as number) && `${alert.condition.changePercent}%`}
                     {alert.triggered && alert.triggeredAt && (
                       <span className="ml-2 text-green-600">

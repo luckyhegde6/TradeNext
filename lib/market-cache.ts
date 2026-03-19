@@ -36,7 +36,8 @@ interface GetOrFetchResult<T> {
  * Generate a unique cache key for the data type and index
  */
 export function generateCacheKey(dataType: DataType, indexName?: string): string {
-  if (indexName) {
+  // Ensure indexName is a string before calling .replace()
+  if (typeof indexName === 'string' && indexName.length > 0) {
     return `${dataType}_${indexName.replace(/\s+/g, "_").toUpperCase()}`;
   }
   return dataType;
