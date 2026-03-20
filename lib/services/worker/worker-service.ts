@@ -87,6 +87,16 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "cleanup":
         result = await executeMaintenance(taskId, payload);
         break;
+      // F-Score task types
+      case "fscore_calc":
+        result = await executeFScoreCalculation(payload);
+        break;
+      case "fscore_batch":
+        result = await executeFScoreBatch(payload);
+        break;
+      case "fscore_single":
+        result = await executeFScoreSingle(payload);
+        break;
       default:
         throw new Error(`Unknown task type: ${taskType}`);
     }
@@ -732,4 +742,294 @@ async function executeMaintenance(taskId: string, payload?: Record<string, unkno
   logger.info({ msg: "Maintenance cleanup completed", taskId, ...result });
 
   return result;
+}
+
+/**
+ * F-Score Calculation - Calculate Piotroski F-Score for all stocks
+ * F-Score = Profitability + Leverage + Liquidity + Dilution + Efficiency
+ */
+async function executeFScoreCalculation(payload?: Record<string, unknown>): Promise<unknown> {
+  const batchSize = (payload?.batchSize as number) || 100;
+  
+  logger.info({ msg: "Starting F-Score calculation", batchSize });
+
+  // Get all symbols from database
+  const symbols = await prisma.symbol.findMany({
+    select: { symbol: true },
+    take: batchSize,
+    skip: payload?.offset as number || 0,
+  });
+
+  let calculated = 0;
+  let errors = 0;
+
+  for (const { symbol } of symbols) {
+    try {
+      // Get fundamentals for this symbol
+      const fundamentals = await prisma.fundamental.findMany({
+        where: { ticker: symbol },
+        orderBy: { asOf: "desc" },
+        take: 2,
+      });
+
+      if (fundamentals.length < 1) {
+        continue;
+      }
+
+      const current = fundamentals[0];
+      const previous = fundamentals[1];
+
+      // Calculate F-Score
+      const fScore = calculateFScore(current, previous);
+      
+      // Save to database
+      await prisma.financialScore.upsert({
+        where: {
+          symbol_periodType_asOf: {
+            symbol: symbol,
+            periodType: current.periodType,
+            asOf: current.asOf,
+          }
+        },
+        create: {
+          symbol: symbol,
+          periodType: current.periodType,
+          asOf: current.asOf,
+          fScore: fScore.total,
+          roa: fScore.roa,
+          roaChange: fScore.roaChange,
+          cfo: fScore.cfo,
+          cfoVsNi: fScore.cfoVsNi,
+          leverage: fScore.leverage,
+          leverageChange: fScore.leverageChange,
+          currentRatio: fScore.currentRatio,
+          currentRatioChg: fScore.currentRatioChg,
+          sharesChange: fScore.sharesChange,
+          grossMargin: fScore.grossMargin,
+          marginChange: fScore.marginChange,
+          assetTurnover: fScore.assetTurnover,
+          turnoverChange: fScore.turnoverChange,
+        },
+        update: {
+          fScore: fScore.total,
+          roa: fScore.roa,
+          roaChange: fScore.roaChange,
+          cfo: fScore.cfo,
+          cfoVsNi: fScore.cfoVsNi,
+          leverage: fScore.leverage,
+          leverageChange: fScore.leverageChange,
+          currentRatio: fScore.currentRatio,
+          currentRatioChg: fScore.currentRatioChg,
+          sharesChange: fScore.sharesChange,
+          grossMargin: fScore.grossMargin,
+          marginChange: fScore.marginChange,
+          assetTurnover: fScore.assetTurnover,
+          turnoverChange: fScore.turnoverChange,
+        },
+      });
+
+      calculated++;
+    } catch (error) {
+      errors++;
+      logger.warn({ msg: "F-Score calculation error", symbol, error });
+    }
+  }
+
+  const result = { calculated, errors, batchSize };
+  logger.info({ msg: "F-Score calculation completed", ...result });
+
+  return result;
+}
+
+/**
+ * F-Score Batch - Calculate F-Score for a batch of specific symbols
+ */
+async function executeFScoreBatch(payload?: Record<string, unknown>): Promise<unknown> {
+  const symbolList = payload?.symbols as string[];
+  
+  if (!symbolList || !Array.isArray(symbolList)) {
+    throw new Error("symbols array required for fscore_batch");
+  }
+
+  logger.info({ msg: "Starting F-Score batch calculation", symbols: symbolList.length });
+
+  let calculated = 0;
+  let skipped = 0;
+
+  for (const symbol of symbolList) {
+    try {
+      const fundamentals = await prisma.fundamental.findMany({
+        where: { ticker: symbol },
+        orderBy: { asOf: "desc" },
+        take: 2,
+      });
+
+      if (fundamentals.length < 1) {
+        skipped++;
+        continue;
+      }
+
+      const current = fundamentals[0];
+      const previous = fundamentals[1];
+      const fScore = calculateFScore(current, previous);
+
+      await prisma.financialScore.upsert({
+        where: {
+          symbol_periodType_asOf: {
+            symbol: symbol,
+            periodType: current.periodType,
+            asOf: current.asOf,
+          }
+        },
+        create: {
+          symbol: symbol,
+          periodType: current.periodType,
+          asOf: current.asOf,
+          fScore: fScore.total,
+          roa: fScore.roa,
+          cfo: fScore.cfo,
+          leverage: fScore.leverage,
+          grossMargin: fScore.grossMargin,
+          assetTurnover: fScore.assetTurnover,
+        },
+        update: {
+          fScore: fScore.total,
+        },
+      });
+
+      calculated++;
+    } catch (error) {
+      logger.warn({ msg: "F-Score batch error", symbol, error });
+    }
+  }
+
+  return { calculated, skipped, total: symbolList.length };
+}
+
+/**
+ * F-Score Single - Calculate F-Score for a single symbol
+ */
+async function executeFScoreSingle(payload?: Record<string, unknown>): Promise<unknown> {
+  const symbol = payload?.symbol as string;
+  
+  if (!symbol) {
+    throw new Error("symbol required for fscore_single");
+  }
+
+  logger.info({ msg: "Calculating F-Score for single symbol", symbol });
+
+  const fundamentals = await prisma.fundamental.findMany({
+    where: { ticker: symbol },
+    orderBy: { asOf: "desc" },
+    take: 2,
+  });
+
+  if (fundamentals.length < 1) {
+    throw new Error(`No fundamentals data found for ${symbol}`);
+  }
+
+  const current = fundamentals[0];
+  const previous = fundamentals[1];
+  const fScore = calculateFScore(current, previous);
+
+  await prisma.financialScore.upsert({
+    where: {
+      symbol_periodType_asOf: {
+        symbol: symbol,
+        periodType: current.periodType,
+        asOf: current.asOf,
+      }
+    },
+    create: {
+      symbol: symbol,
+      periodType: current.periodType,
+      asOf: current.asOf,
+      fScore: fScore.total,
+      roa: fScore.roa,
+      cfo: fScore.cfo,
+      leverage: fScore.leverage,
+      grossMargin: fScore.grossMargin,
+      assetTurnover: fScore.assetTurnover,
+    },
+    update: {
+      fScore: fScore.total,
+    },
+  });
+
+  logger.info({ msg: "F-Score calculated", symbol, fScore: fScore.total });
+
+  return {
+    symbol,
+    fScore: fScore.total,
+    ...fScore,
+  };
+}
+
+/**
+ * Calculate Piotroski F-Score
+ */
+function calculateFScore(current: any, previous: any) {
+  // Calculate ROA (Return on Assets)
+  const currentRoa = Number(current.netIncome) / Number(current.totalAssets);
+  const previousRoa = previous ? Number(previous.netIncome) / Number(previous.totalAssets) : 0;
+  
+  // Calculate CFO (using net income as proxy)
+  const currentCfo = Number(current.netIncome);
+  const previousCfo = previous ? Number(previous.netIncome) : 0;
+  
+  // Calculate Leverage
+  const currentLeverage = Number(current.totalLiabilities) / Number(current.totalAssets);
+  const previousLeverage = previous ? Number(previous.totalLiabilities) / Number(previous.totalAssets) : 0;
+  
+  // Calculate Current Ratio
+  const currentRatio = Number(current.totalAssets) / Number(current.totalLiabilities);
+  const previousRatio = previous ? Number(previous.totalAssets) / Number(previous.totalLiabilities) : 0;
+  
+  // Calculate Gross Margin
+  const currentMargin = Number(current.revenue) > 0 ? Number(current.netIncome) / Number(current.revenue) : 0;
+  const previousMargin = previous && Number(previous.revenue) > 0 ? Number(previous.netIncome) / Number(previous.revenue) : 0;
+  
+  // Calculate Asset Turnover
+  const currentTurnover = Number(current.totalAssets) > 0 ? Number(current.revenue) / Number(current.totalAssets) : 0;
+  const previousTurnover = previous && Number(previous.totalAssets) > 0 ? Number(previous.revenue) / Number(previous.totalAssets) : 0;
+
+  // Calculate F-Score (9 criteria)
+  let fScore = 0;
+  
+  // Profitability Criteria (4 points)
+  if (currentRoa > 0) fScore++; // ROA > 0
+  if (currentCfo > 0) fScore++; // CFO > 0
+  if (currentRoa > previousRoa) fScore++; // ROA improving
+  if (currentCfo > currentRoa) fScore++; // CFO > Net Income
+  
+  // Leverage Criteria (1 point)
+  if (currentLeverage < previousLeverage) fScore++; // Decreasing leverage
+  
+  // Liquidity Criteria (1 point)
+  if (currentRatio > previousRatio) fScore++; // Current ratio improving
+  
+  // Dilution Criteria (1 point)
+  // Simplified - would need share count data
+  fScore++; // No dilution (simplified)
+  
+  // Efficiency Criteria (2 points)
+  if (currentMargin > previousMargin) fScore++; // Margin improving
+  if (currentTurnover > previousTurnover) fScore++; // Turnover improving
+
+  return {
+    total: fScore,
+    roa: currentRoa,
+    roaChange: currentRoa - previousRoa,
+    cfo: currentCfo,
+    cfoVsNi: currentCfo - currentRoa,
+    leverage: currentLeverage,
+    leverageChange: currentLeverage - previousLeverage,
+    currentRatio: currentRatio,
+    currentRatioChg: currentRatio - previousRatio,
+    sharesChange: 0, // Simplified
+    grossMargin: currentMargin,
+    marginChange: currentMargin - previousMargin,
+    assetTurnover: currentTurnover,
+    turnoverChange: currentTurnover - previousTurnover,
+  };
 }

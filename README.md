@@ -4,20 +4,20 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.8.0 (March 14, 2026)
+## Latest Update - v1.11.0 (March 21, 2026)
 
-### Security Enhancements
-- **localStorage Removed**: User data no longer stored in localStorage - prevents XSS attacks
-- **httpOnly Cookies**: Session cookies now use httpOnly, secure, sameSite:strict
-- **CSRF Protection**: Built-in NextAuth CSRF token validation
-- **Database Sessions**: Active session tracking with admin management at `/admin/sessions`
-- **Admin Controls**: View, filter, invalidate individual or all user sessions
+### Google Analytics & SEO Enhancement
+- **Google Analytics 4**: Integrated GA4 with custom event tracking
+- **SEO Metadata**: Comprehensive OpenGraph, Twitter Card, and JSON-LD structured data
+- **Dynamic Sitemap**: Auto-generated sitemap with priority levels for all public pages
+- **robots.txt**: Configured for Googlebot and Bingbot with proper blocking rules
+- **Page Metadata**: Custom metadata for all key routes (Markets, Analytics, Screener, Portfolio, News, Alerts)
+- **Security**: Input sanitization for event tracking, GA ID validation, no PII tracking
 
 ### What's New
-- **Cron Config**: Schedule automated tasks at `/admin/utils/cron`
-- **Background Workers**: Async task queue at `/admin/utils/workers`
-- **Calendar View**: Corporate actions calendar at `/markets/calendar`
-- **TradingView Integration**: Open charts in TradingView directly from dashboard
+- **Analytics Tracking**: Custom event helpers (`StockTracking`, `AdminTracking`)
+- **Structured Data**: Organization, WebSite, WebPage, and Stock schemas
+- **SEO Optimization**: Canonical URLs, language settings, image metadata
 
 ### Tested Features (March 2026)
 | Feature | Status | Notes |

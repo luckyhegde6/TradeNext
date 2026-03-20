@@ -535,9 +535,50 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-03-20 23:30
+2026-03-21 00:00
+
+## SEO & Analytics Implementation (v1.11.0)
+
+### Google Analytics 4 Setup
+1. Install `@next/third-parties` package
+2. Create `app/components/analytics/GoogleAnalytics.tsx` - validates GA ID format before rendering
+3. Add `NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX` to environment variables
+4. Import and add `<Analytics />` component in root layout
+
+### SEO Best Practices
+1. **Use Metadata API** - Next.js 16's built-in metadata beats manual `<head>` tags
+2. **Create metadata.ts files** for each route with title, description, keywords
+3. **JSON-LD Schemas** - Add structured data for Organization, WebSite, WebPage
+4. **Generate sitemap dynamically** - Include all public pages, exclude `/api/*`, `/admin/*`
+5. **robots.txt** - Configure crawlers with specific rules for Googlebot, Bingbot
+
+### Security Considerations
+- **Only use `NEXT_PUBLIC_` prefix** for client-side variables (GA ID is NOT a secret)
+- **Sanitize all event tracking inputs** - prevent XSS in analytics data
+- **Validate GA ID format** - reject invalid IDs before rendering
+- **Never track PII** - don't pass user emails, names, or personal data to analytics
+
+### Custom Event Tracking Pattern
+```typescript
+// Sanitize and validate before tracking
+export function trackEvent(action: string, category: string, options?: { label?: string; value?: number }) {
+  if (typeof window === "undefined" || !window.gtag) return;
+  
+  // Sanitize inputs
+  const sanitizedAction = action.replace(/<[^>]*>/g, "").slice(0, 50);
+  
+  window.gtag("event", sanitizedAction, {
+    event_category: category,
+    event_label: options?.label,
+    value: options?.value,
+  });
+}
+```
+
+---
 
 ## Update Log
+- 2026-03-21: Added SEO & Analytics lesson (v1.11.0)
 - 2026-03-20: Added lesson 23 (Path Traversal Prevention) - sanitize user inputs in file paths
 - 2026-03-20: Added lesson 22 (NSE API Field Casing) - NSE uses lowercase fields
 - 2026-03-20: Added lesson 13b (Database-Backed Logging) for serverless platforms

@@ -11,6 +11,7 @@ import {
   getTaskWithEvents,
   getTaskStats,
 } from "@/lib/services/worker/task-orchestrator";
+import { executeTask } from "@/lib/services/worker/worker-service";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,8 @@ const workerTaskSchema = z.object({
     "csv_processing", "historical_sync",
     // Regular types
     "cleanup", "password_reset", "notification_broadcast", "announcement_mgmt", "user_query", "maintenance",
+    // F-Score types
+    "fscore_calc", "fscore_batch", "fscore_single",
   ]),
   taskCategory: z.enum(["cron", "async", "regular"]).optional(),
   priority: z.number().min(1).max(10).optional(),
@@ -33,6 +36,12 @@ const workerTaskSchema = z.object({
   cronJobId: z.string().optional(),
   parentTaskId: z.string().optional(),
   triggeredBy: z.string().optional(),
+});
+
+// Action schema for task management
+const taskActionSchema = z.object({
+  action: z.enum(["runNow", "cancel", "retry", "delete"]),
+  taskId: z.string().min(1),
 });
 
 // GET - List worker tasks
@@ -225,5 +234,120 @@ export async function DELETE(req: Request) {
   } catch (error) {
     logger.error({ msg: "Failed to delete worker task", error });
     return NextResponse.json({ error: "Failed to delete worker task" }, { status: 500 });
+  }
+}
+
+// PATCH - Task actions (run now, cancel, retry)
+export async function PATCH(req: Request) {
+  try {
+    const session = await auth();
+    if (!session || session.user.role !== "admin") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { action, taskId } = taskActionSchema.parse(body);
+
+    // Get the task
+    const task = await prisma.workerTask.findUnique({
+      where: { id: taskId },
+    });
+
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    switch (action) {
+      case "runNow": {
+        // Can only run pending tasks immediately
+        if (task.status !== "pending" && task.status !== "failed") {
+          return NextResponse.json({ 
+            error: `Cannot run task in "${task.status}" status. Only "pending" or "failed" tasks can be run.` 
+          }, { status: 400 });
+        }
+
+        // Update status to pending
+        await prisma.workerTask.update({
+          where: { id: taskId },
+          data: { status: "pending", startedAt: null, completedAt: null, error: null },
+        });
+
+        // Execute the task
+        const result = await executeTask(taskId, task.taskType, task.payload as Record<string, unknown>);
+
+        return NextResponse.json({ 
+          success: true, 
+          action: "runNow",
+          taskId,
+          result 
+        });
+      }
+
+      case "cancel": {
+        // Can only cancel pending or running tasks
+        if (task.status !== "pending" && task.status !== "running") {
+          return NextResponse.json({ 
+            error: `Cannot cancel task in "${task.status}" status. Only "pending" or "running" tasks can be cancelled.` 
+          }, { status: 400 });
+        }
+
+        // Update status to cancelled
+        await prisma.workerTask.update({
+          where: { id: taskId },
+          data: { 
+            status: "cancelled", 
+            completedAt: new Date(),
+          },
+        });
+
+        logger.info({ msg: "Worker task cancelled by admin", taskId });
+
+        return NextResponse.json({ 
+          success: true, 
+          action: "cancel",
+          taskId 
+        });
+      }
+
+      case "retry": {
+        // Can only retry failed tasks
+        if (task.status !== "failed") {
+          return NextResponse.json({ 
+            error: `Cannot retry task in "${task.status}" status. Only "failed" tasks can be retried.` 
+          }, { status: 400 });
+        }
+
+        // Update status to pending
+        await prisma.workerTask.update({
+          where: { id: taskId },
+          data: { status: "pending", startedAt: null, completedAt: null, error: null },
+        });
+
+        // Execute the task
+        const result = await executeTask(taskId, task.taskType, task.payload as Record<string, unknown>);
+
+        return NextResponse.json({ 
+          success: true, 
+          action: "retry",
+          taskId,
+          result 
+        });
+      }
+
+      case "delete": {
+        await prisma.workerTask.delete({ where: { id: taskId } });
+        logger.info({ msg: "Worker task deleted by admin", taskId });
+        return NextResponse.json({ success: true, action: "delete", taskId });
+      }
+
+      default:
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: "Validation error", details: error.issues }, { status: 400 });
+    }
+    logger.error({ msg: "Failed to perform task action", error });
+    return NextResponse.json({ error: "Failed to perform task action" }, { status: 500 });
   }
 }

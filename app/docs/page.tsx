@@ -37,16 +37,24 @@ export default function DocsPage() {
       document.head.appendChild(css);
 
       script.onload = async () => {
-        // @ts-expect-error - SwaggerUIBundle is loaded dynamically
-        window.ui = (window as Window & { SwaggerUIBundle: unknown }).SwaggerUIBundle({
+        // Define UI type
+        type SwaggerUIBundleType = unknown;
+        type SwaggerUI = {
+          authActions?: { authorize: (config: unknown) => void };
+        };
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const bundle = (window as any).SwaggerUIBundle as (config: unknown) => SwaggerUI;
+        const uiWindow = window as Window & { ui?: SwaggerUI };
+        
+        uiWindow.ui = bundle({
           url: '/api/openapi',
           dom_id: '#swagger',
           persistAuthorization: true,
           onComplete: () => {
             // Set token if already entered
             if (token) {
-              // @ts-expect-error - Swagger UI is loaded dynamically
-              window.ui.authActions.authorize({ bearerAuth: { schema: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, value: token } });
+              uiWindow.ui?.authActions?.authorize({ bearerAuth: { schema: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, value: token } });
             }
           }
         });
@@ -64,10 +72,9 @@ export default function DocsPage() {
       return;
     }
     setError('');
-    // @ts-expect-error - Swagger UI is loaded dynamically
-    if (window.ui) {
-      // @ts-expect-error - Swagger UI is loaded dynamically
-      window.ui.authActions.authorize({ bearerAuth: { schema: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, value: token } });
+    const uiWindow = window as Window & { ui?: { authActions?: { authorize: (config: unknown) => void } } };
+    if (uiWindow.ui?.authActions) {
+      uiWindow.ui.authActions.authorize({ bearerAuth: { schema: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, value: token } });
     }
   };
 
