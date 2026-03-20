@@ -56,9 +56,16 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
         fs.mkdirSync(logsDir, { recursive: true, mode: 0o777 });
       }
       
-      const logFile = path.join(logsDir, `${safeTaskId}.log`);
-      fs.appendFileSync(logFile, logEntry + "\n");
-      return;
+      const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+      
+      // Verify the resolved path is still within logsDir (path traversal prevention)
+      const resolvedPath = path.resolve(candidatePath);
+      if (resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) {
+        fs.appendFileSync(resolvedPath, logEntry + "\n");
+        return;
+      }
+      
+      throw new Error("Path traversal attempt detected");
     } catch (error) {
       // File logging failed, disable it
       fileLoggingAvailable = false;
@@ -124,9 +131,14 @@ export async function readLog(taskId: string): Promise<string> {
         const fs = require("fs");
         const path = require("path");
         const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        const logFile = path.join(logsDir, `${safeTaskId}.log`);
-        if (fs.existsSync(logFile)) {
-          return fs.readFileSync(logFile, "utf-8");
+        const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+        
+        // Verify the resolved path is still within logsDir (path traversal prevention)
+        const resolvedPath = path.resolve(candidatePath);
+        if (resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) {
+          if (fs.existsSync(resolvedPath)) {
+            return fs.readFileSync(resolvedPath, "utf-8");
+          }
         }
       }
     } catch (error) {
@@ -215,9 +227,12 @@ export async function deleteLog(taskId: string): Promise<boolean> {
         const fs = require("fs");
         const path = require("path");
         const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        const logFile = path.join(logsDir, `${safeTaskId}.log`);
-        if (fs.existsSync(logFile)) {
-          fs.unlinkSync(logFile);
+        const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+        
+        // Verify the resolved path is still within logsDir (path traversal prevention)
+        const resolvedPath = path.resolve(candidatePath);
+        if ((resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) && fs.existsSync(resolvedPath)) {
+          fs.unlinkSync(resolvedPath);
           deleted = true;
         }
       }
