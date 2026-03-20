@@ -433,6 +433,43 @@ if (typeof indexName === 'string' && indexName.length > 0) {
 
 ---
 
+### 23. Path Traversal Prevention (v1.10.6)
+**Issue**: CodeQL security warning - uncontrolled data used in path expression.
+
+**Problem**: User-controlled values (like taskId) used directly in filesystem paths without validation.
+
+**Solution**: Sanitize all user inputs before using in filesystem operations:
+```typescript
+const sanitizeTaskIdForPath = (taskId: string): string | null => {
+  const trimmed = taskId.trim();
+  if (!trimmed || trimmed.length > 128) return null;
+  
+  // Allow only safe filename characters
+  const safePattern = /^[A-Za-z0-9_\-:.]+$/;
+  if (!safePattern.test(trimmed)) return null;
+  
+  return trimmed;
+};
+```
+
+**Usage**:
+```typescript
+// Before (UNSAFE)
+const logFile = path.join(logsDir, `${taskId}.log`);
+
+// After (SAFE)
+const safeTaskId = sanitizeTaskIdForPath(taskId);
+if (!safeTaskId) return; // Skip for invalid IDs
+const logFile = path.join(logsDir, `${safeTaskId}.log`);
+```
+
+**Key Points**:
+- Reject path separators (`/`, `\`) and traversal (`..`)
+- Limit length to prevent buffer overflow attacks
+- Always validate BEFORE constructing the path
+
+---
+
 ### 22. NSE API Field Name Casing (v1.10.5)
 **Issue**: Corporate actions sync saved all records as "OTHER" type because field names didn't match.
 
@@ -498,9 +535,10 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-03-20 23:10
+2026-03-20 23:30
 
 ## Update Log
+- 2026-03-20: Added lesson 23 (Path Traversal Prevention) - sanitize user inputs in file paths
 - 2026-03-20: Added lesson 22 (NSE API Field Casing) - NSE uses lowercase fields
 - 2026-03-20: Added lesson 13b (Database-Backed Logging) for serverless platforms
 - 2026-03-20: Added lesson 20 (Type Checking Before Method Calls)

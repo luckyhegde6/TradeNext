@@ -14,6 +14,25 @@ const isServerless = () => {
 };
 
 /**
+ * Sanitize task ID for safe filesystem usage
+ * Prevents path traversal attacks by allowing only safe filename characters
+ * @returns Sanitized taskId or null if invalid
+ */
+const sanitizeTaskIdForPath = (taskId: string): string | null => {
+  // Limit length to prevent abuse
+  const trimmed = taskId.trim();
+  if (!trimmed || trimmed.length > 128) {
+    return null;
+  }
+  // Allow only safe filename characters (no path separators or traversal)
+  const safePattern = /^[A-Za-z0-9_\-:.]+$/;
+  if (!safePattern.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+};
+
+/**
  * Log to both file (if available) and DB
  */
 async function writeToBoth(taskId: string, level: string, message: string, data?: unknown): Promise<void> {
@@ -23,6 +42,12 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
   // Try file logging first (only if not serverless)
   if (!isServerless() && fileLoggingAvailable) {
     try {
+      const safeTaskId = sanitizeTaskIdForPath(taskId);
+      if (!safeTaskId) {
+        // Invalid taskId - skip file logging
+        throw new Error("Invalid taskId");
+      }
+      
       const fs = require("fs");
       const path = require("path");
       const logsDir = path.join(process.cwd(), ".next", "server_logs");
@@ -31,7 +56,7 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
         fs.mkdirSync(logsDir, { recursive: true, mode: 0o777 });
       }
       
-      const logFile = path.join(logsDir, `${taskId}.log`);
+      const logFile = path.join(logsDir, `${safeTaskId}.log`);
       fs.appendFileSync(logFile, logEntry + "\n");
       return;
     } catch (error) {
@@ -94,11 +119,15 @@ export async function readLog(taskId: string): Promise<string> {
   // Try file (only if not serverless)
   if (!isServerless()) {
     try {
-      const fs = require("fs");
-      const path = require("path");
-      const logFile = path.join(process.cwd(), ".next", "server_logs", `${taskId}.log`);
-      if (fs.existsSync(logFile)) {
-        return fs.readFileSync(logFile, "utf-8");
+      const safeTaskId = sanitizeTaskIdForPath(taskId);
+      if (safeTaskId) {
+        const fs = require("fs");
+        const path = require("path");
+        const logsDir = path.join(process.cwd(), ".next", "server_logs");
+        const logFile = path.join(logsDir, `${safeTaskId}.log`);
+        if (fs.existsSync(logFile)) {
+          return fs.readFileSync(logFile, "utf-8");
+        }
       }
     } catch (error) {
       // Continue to DB
@@ -181,12 +210,16 @@ export async function deleteLog(taskId: string): Promise<boolean> {
   // Delete local file (only if not serverless)
   if (!isServerless()) {
     try {
-      const fs = require("fs");
-      const path = require("path");
-      const logFile = path.join(process.cwd(), ".next", "server_logs", `${taskId}.log`);
-      if (fs.existsSync(logFile)) {
-        fs.unlinkSync(logFile);
-        deleted = true;
+      const safeTaskId = sanitizeTaskIdForPath(taskId);
+      if (safeTaskId) {
+        const fs = require("fs");
+        const path = require("path");
+        const logsDir = path.join(process.cwd(), ".next", "server_logs");
+        const logFile = path.join(logsDir, `${safeTaskId}.log`);
+        if (fs.existsSync(logFile)) {
+          fs.unlinkSync(logFile);
+          deleted = true;
+        }
       }
     } catch (error) {
       // Continue

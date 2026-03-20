@@ -10,6 +10,16 @@
 
 ## Current Project Status
 
+### Worker Logger Security Fix (v1.10.6)
+**Issue**: CodeQL security vulnerability - uncontrolled data used in path expression in `worker-logger.ts`.
+**Fix Applied**:
+- Added `sanitizeTaskIdForPath()` function to validate task IDs
+- Only allows safe filename characters: `/^[A-Za-z0-9_\-:.]+$/`
+- Rejects taskIds with path separators, traversal (`..`), or longer than 128 chars
+- Applied to `writeToBoth()`, `readLog()`, and `deleteLog()` functions
+**Files Changed**: lib/services/worker/worker-logger.ts
+**Status**: RESOLVED in v1.10.6.
+
 ### Corporate Actions NSE Field Fix (v1.10.5)
 **Issue**: Corporate actions sync saved all records as "OTHER" type with missing company names, record dates, and dividends.
 **Root Cause**: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, etc.). Also dividend field mismatch (`dividendPerShare` vs `dividendAmount`).
@@ -152,6 +162,11 @@
 ---
 
 ## Session History
+
+### Session 6 (March 20, 2026)
+- **Worker Logger Security Fix (v1.10.6)**: Fixed CodeQL path traversal vulnerability.
+- Added `sanitizeTaskIdForPath()` function allowing only safe filename chars.
+- Applied sanitization to write, read, and delete operations.
 
 ### Session 5 (March 20, 2026)
 - **Corporate Actions NSE Field Fix (v1.10.5)**: Fixed sync saving all records as "OTHER" type.

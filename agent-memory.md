@@ -55,6 +55,18 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-20 | Worker Logger Security Fix - COMPLETE
+- **Action**: Fixed CodeQL path traversal vulnerability in worker-logger.ts.
+- **Issue**: Uncontrolled data used in path expression - taskId used directly in filesystem paths.
+- **Files Modified**:
+    - `lib/services/worker/worker-logger.ts` - Added task ID sanitization
+- **Details**:
+    - Added `sanitizeTaskIdForPath()` function
+    - Validates taskId against `/^[A-Za-z0-9_\-:.]+$/` pattern
+    - Max length 128 characters
+    - Applied to `writeToBoth()`, `readLog()`, and `deleteLog()`
+- **Status**: ✅ RESOLVED - Fixed in v1.10.6.
+
 ### 2026-03-20 | Corporate Actions NSE Field Fix - COMPLETE
 - **Action**: Fixed corporate actions sync saving all records as "OTHER" type with missing data.
 - **Root Cause**: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, etc.). Also dividend field mismatch (`dividendPerShare` vs `dividendAmount`).
