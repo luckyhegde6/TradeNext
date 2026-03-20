@@ -157,22 +157,17 @@ export const AdminTracking = {
 
 /**
  * Sanitize string input to prevent XSS
- * - Strips all HTML tags completely
- * - Escapes remaining angle brackets
+ * - Removes ALL HTML tags including partial ones
+ * - Only allows safe alphanumeric and basic punctuation
  * - Limits length
- * - Only allows safe characters
+ * 
+ * Uses whitelist approach: only allow known-safe characters
  */
 function sanitizeString(input: string, maxLength: number): string {
   return input
-    // Step 1: Remove ALL HTML tags completely (including partial ones like <script)
-    .replace(/<[^>]*>/g, "")
-    // Step 2: Escape any remaining angle brackets to prevent tag injection
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    // Step 3: Remove quotes and ampersands that could be used in event handlers
-    .replace(/["']/g, "")
-    .replace(/&/g, "&amp;")
-    // Step 4: Trim and limit length
+    // Remove everything except letters, numbers, spaces, hyphens, underscores, @, and dots
+    // This is a whitelist approach - only allow known-safe characters
+    .replace(/[^a-zA-Z0-9\s\-_@.]/g, "")
     .trim()
     .slice(0, maxLength);
 }
