@@ -27,7 +27,8 @@ function parseNseDate(dateStr: string | undefined): Date {
         };
         const month = months[parts[1].toLowerCase()];
         if (month !== undefined) {
-            return new Date(parseInt(parts[2]), month, parseInt(parts[0]));
+            // Create date at noon UTC to avoid timezone issues
+            return new Date(Date.UTC(parseInt(parts[2]), month, parseInt(parts[0]), 12, 0, 0, 0));
         }
     }
     

@@ -201,30 +201,58 @@ async function createCorporateAction(rec: any): Promise<any> {
   // Parse purpose to determine actionType and extract numeric values
   const { actionType, dividendAmount, dividendYield, ratio } = parsePurpose(purpose, faceValue);
 
-  // Build the data object with all fields
-  const data = {
-    symbol,
-    companyName,
-    series,
-    subject: purpose,
-    actionType,
-    exDate,
-    recordDate,
-    effectiveDate: exDate, // usually ex-date is effective
-    faceValue,
-    oldFV: null,
-    newFV: null,
-    ratio,
-    dividendPerShare: dividendAmount || null,
-    dividendYield: dividendYield || null,
-    isin: rec.ISIN || rec.isin || null,
-    bookClosureStartDate: bookClosureStart,
-    bookClosureEndDate: bookClosureEnd,
-    announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
-    source: 'admin',
-  };
+  // Skip if missing required fields
+  if (!symbol || !exDate) {
+    return null;
+  }
 
-  return await prisma.corporateAction.create({ data });
+  // Use upsert with symbol + actionType + exDate to match unique constraint
+  return await prisma.corporateAction.upsert({
+    where: {
+      symbol_actionType_exDate: {
+        symbol,
+        actionType,
+        exDate
+      }
+    },
+    update: {
+      companyName,
+      series,
+      subject: purpose,
+      recordDate,
+      effectiveDate: exDate,
+      faceValue,
+      ratio,
+      dividendPerShare: dividendAmount || null,
+      dividendYield: dividendYield || null,
+      isin: rec.ISIN || rec.isin || null,
+      bookClosureStartDate: bookClosureStart,
+      bookClosureEndDate: bookClosureEnd,
+      announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
+      source: 'admin',
+    },
+    create: {
+      symbol,
+      companyName,
+      series,
+      subject: purpose,
+      actionType,
+      exDate,
+      recordDate,
+      effectiveDate: exDate,
+      faceValue,
+      oldFV: null,
+      newFV: null,
+      ratio,
+      dividendPerShare: dividendAmount || null,
+      dividendYield: dividendYield || null,
+      isin: rec.ISIN || rec.isin || null,
+      bookClosureStartDate: bookClosureStart,
+      bookClosureEndDate: bookClosureEnd,
+      announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
+      source: 'admin',
+    }
+  });
 }
 
 function parseDate(dateStr: string): Date | null {
@@ -238,7 +266,8 @@ function parseDate(dateStr: string): Date | null {
     };
     const month = monthMap[mon.toUpperCase()];
     if (month === undefined) return null;
-    return new Date(parseInt(yr), month, parseInt(dd));
+    // Create date at noon UTC to avoid timezone issues
+    return new Date(Date.UTC(parseInt(yr), month, parseInt(dd), 12, 0, 0, 0));
   } catch {
     return null;
   }

@@ -152,53 +152,46 @@ export async function syncActions(symbol: string, actions: CorpActionDTO[]) {
                 }
             }
 
-            // Check if exists and update or create
-            const existing = await prisma.corporateAction.findFirst({
+            // Use upsert with symbol + actionType + exDate to match unique constraint
+            await prisma.corporateAction.upsert({
                 where: {
+                    symbol_actionType_exDate: {
+                        symbol: symbol.toUpperCase(),
+                        actionType: actionType,
+                        exDate: exDate
+                    }
+                },
+                update: {
+                    companyName: action.comp || action.symbol || symbol,
+                    series: action.series || "EQ",
+                    subject: action.subject,
+                    recordDate: recDate || undefined,
+                    faceValue: action.faceVal || undefined,
+                    oldFV: oldFV,
+                    newFV: newFV,
+                    ratio: ratio,
+                    dividendPerShare: dividendPerShare,
+                    dividendYield: dividendYield,
+                    isin: action.isin || undefined,
+                    updatedAt: new Date()
+                },
+                create: {
                     symbol: symbol.toUpperCase(),
+                    companyName: action.comp || action.symbol || symbol,
+                    series: action.series || "EQ",
+                    subject: action.subject,
+                    actionType: actionType,
                     exDate: exDate,
-                    actionType: actionType
+                    recordDate: recDate || undefined,
+                    faceValue: action.faceVal || undefined,
+                    oldFV: oldFV,
+                    newFV: newFV,
+                    ratio: ratio,
+                    dividendPerShare: dividendPerShare,
+                    dividendYield: dividendYield,
+                    isin: action.isin || undefined
                 }
             });
-
-            if (existing) {
-                await prisma.corporateAction.update({
-                    where: { id: existing.id },
-                    data: {
-                        companyName: action.comp || action.symbol || symbol,
-                        series: action.series || "EQ",
-                        subject: action.subject,
-                        recordDate: recDate || undefined,
-                        faceValue: action.faceVal || undefined,
-                        oldFV: oldFV,
-                        newFV: newFV,
-                        ratio: ratio,
-                        dividendPerShare: dividendPerShare,
-                        dividendYield: dividendYield,
-                        isin: action.isin || undefined,
-                        updatedAt: new Date()
-                    }
-                });
-            } else {
-                await prisma.corporateAction.create({
-                    data: {
-                        symbol: symbol.toUpperCase(),
-                        companyName: action.comp || action.symbol || symbol,
-                        series: action.series || "EQ",
-                        subject: action.subject,
-                        actionType: actionType,
-                        exDate: exDate,
-                        recordDate: recDate || undefined,
-                        faceValue: action.faceVal || undefined,
-                        oldFV: oldFV,
-                        newFV: newFV,
-                        ratio: ratio,
-                        dividendPerShare: dividendPerShare,
-                        dividendYield: dividendYield,
-                        isin: action.isin || undefined
-                    }
-                });
-            }
         }
         logger.info({ msg: "Synced corporate actions to DB", symbol, count: actions.length });
     } catch (e) {

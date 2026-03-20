@@ -857,8 +857,27 @@ model RateLimitConfig {
 
   @@index([identifier])
   @@index([identifierType])
-  @@index([isBlocked])
   @@map("rate_limit_configs")
+}
+
+// Server Log - database-backed logging for serverless environments
+model ServerLog {
+  id          String    @id @default(uuid())
+  level       String    // "info" | "warn" | "error" | "debug"
+  message     String    // Main log message
+  source      String?   // Source of log: "worker" | "api" | "sync" | "system" | "nse"
+  taskId      String?   // Associated task ID (for worker logs)
+  metadata    Json?     // Additional structured data
+  ipAddress   String?   // Client IP if applicable
+  userAgent   String?   // User agent if applicable
+  requestId   String?   // Request ID for tracing
+  createdAt   DateTime  @default(now())
+
+  @@index([level])
+  @@index([source])
+  @@index([taskId])
+  @@index([createdAt])
+  @@map("server_logs")
 }
 
 // Anomaly Alert - stores detected anomalies and security threats

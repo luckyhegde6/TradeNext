@@ -31,7 +31,8 @@ function parseNseDate(dateStr: string): string | null {
     };
     const month = monthMap[mon.toUpperCase()];
     if (month === undefined) return null;
-    const date = new Date(parseInt(yr), month, parseInt(dd));
+    // Create date at noon UTC to avoid timezone issues with midnight
+    const date = new Date(Date.UTC(parseInt(yr), month, parseInt(dd), 12, 0, 0, 0));
     return isNaN(date.getTime()) ? null : date.toISOString();
   } catch {
     return null;
@@ -96,7 +97,8 @@ function parsePurpose(purpose: string): {
 }
 
 function parseCorporateActionFromNse(item: any): any | null {
-  const purpose = item.PURPOSE || item.purpose || '';
+  // NSE API uses 'subject' field, not 'PURPOSE'
+  const purpose = item.PURPOSE || item.purpose || item.subject || '';
   const parsed = parsePurpose(purpose);
   const exDate = parseNseDate(item['EX-DATE'] || item.exDate || "");
   if (!exDate) return null;
@@ -131,13 +133,13 @@ function parseCorporateActionFromNse(item: any): any | null {
 
   return {
     symbol: item.SYMBOL || item.symbol || "",
-    companyName: item['COMPANY NAME'] || item.companyName || "",
+    companyName: item['COMPANY NAME'] || item.companyName || item.comp || "",
     series: item.SERIES || item.series || null,
     subject: purpose,
     actionType: parsed.actionType,
     exDate: exDate,
-    recordDate: parseNseDate(item['RECORD DATE'] || item.recordDate || ""),
-    faceValue: item['FACE VALUE'] || item.faceValue || item['FV'] || item.fv || null,
+    recordDate: parseNseDate(item['RECORD DATE'] || item.recordDate || item.recDate || ""),
+    faceValue: item['FACE VALUE'] || item.faceValue || item['FV'] || item.fv || item.faceVal || null,
     ratio: parsed.ratio,
     dividendPerShare: dividendAmount,
     dividendYield: dividendYield,
@@ -152,47 +154,44 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
     if (!action.symbol || !action.exDate) continue;
     
     try {
-      const existing = await prisma.corporateAction.findFirst({
+      const actionType = action.actionType || "OTHER";
+      const exDate = new Date(action.exDate);
+      
+      // Use upsert with symbol + actionType + exDate to match unique constraint
+      await prisma.corporateAction.upsert({
         where: {
+          symbol_actionType_exDate: {
+            symbol: action.symbol,
+            actionType: actionType,
+            exDate: exDate
+          }
+        },
+        update: {
+          companyName: action.companyName || "",
+          series: action.series,
+          subject: action.subject || "",
+          recordDate: action.recordDate ? new Date(action.recordDate) : null,
+          faceValue: action.faceValue,
+          ratio: action.ratio,
+          dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
+          dividendYield: action.dividendYield,
+          source: 'nse'
+        },
+        create: {
           symbol: action.symbol,
-          exDate: new Date(action.exDate)
+          companyName: action.companyName || "",
+          series: action.series,
+          subject: action.subject || "",
+          actionType: actionType,
+          exDate: exDate,
+          recordDate: action.recordDate ? new Date(action.recordDate) : null,
+          faceValue: action.faceValue,
+          ratio: action.ratio,
+          dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
+          dividendYield: action.dividendYield,
+          source: 'nse'
         }
       });
-      
-      if (existing) {
-        await prisma.corporateAction.update({
-          where: { id: existing.id },
-          data: {
-            companyName: action.companyName || "",
-            series: action.series,
-            subject: action.subject || "",
-            actionType: action.actionType || "OTHER",
-            recordDate: action.recordDate ? new Date(action.recordDate) : null,
-            faceValue: action.faceValue,
-            ratio: action.ratio,
-            dividendPerShare: action.dividendAmount,
-            dividendYield: action.dividendYield,
-            source: 'nse'
-          }
-        });
-      } else {
-        await prisma.corporateAction.create({
-          data: {
-            symbol: action.symbol,
-            companyName: action.companyName || "",
-            series: action.series,
-            subject: action.subject || "",
-            actionType: action.actionType || "OTHER",
-            exDate: new Date(action.exDate),
-            recordDate: action.recordDate ? new Date(action.recordDate) : null,
-            faceValue: action.faceValue,
-            ratio: action.ratio,
-            dividendPerShare: action.dividendAmount,
-            dividendYield: action.dividendYield,
-            source: 'nse'
-          }
-        });
-      }
       hydrated++;
     } catch (error) {
       logger.error({ msg: 'Error hydrating corporate action', symbol: action.symbol, error });
