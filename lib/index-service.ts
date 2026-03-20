@@ -776,10 +776,16 @@ export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
     if (cached) return cached;
 
     try {
-        const encodedIndex = encodeURIComponent(indexName);
+        // Double-check safeIndexName is a valid string before using
+        if (typeof safeIndexName !== 'string' || safeIndexName.length === 0) {
+            logger.error({ msg: 'Invalid indexName provided', indexName });
+            return null;
+        }
+        
+        const encodedIndex = encodeURIComponent(safeIndexName);
         const url = `https://www.nseindia.com/api/equity-stockIndices?index=${encodedIndex}`;
 
-        logger.info({ msg: 'Fetching index stocks from NSE', index: indexName });
+        logger.info({ msg: 'Fetching index stocks from NSE', index: safeIndexName });
 
         const data = await nseFetch(url) as any;
 
@@ -789,17 +795,17 @@ export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
 
         // Filter out the index itself (first item has symbol matching indexName)
         const stocks = stocksData.filter((item: any) =>
-            item.symbol && item.symbol !== indexName && item.series === 'EQ'
+            item.symbol && item.symbol !== safeIndexName && item.series === 'EQ'
         );
 
         // Cache for 1 hour
         const ttl = 3600;
         staticCache.set(cacheKey, stocks, ttl);
 
-        logger.info({ msg: 'Index stocks fetched', index: indexName, count: stocks.length });
+        logger.info({ msg: 'Index stocks fetched', index: safeIndexName, count: stocks.length });
         return stocks;
     } catch (e) {
-        logger.error({ msg: 'Index stocks fetch error', index: indexName, error: e });
+        logger.error({ msg: 'Index stocks fetch error', index: safeIndexName, error: e });
         return null;
     }
 }

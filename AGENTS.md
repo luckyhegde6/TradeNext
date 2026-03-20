@@ -4,6 +4,16 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.11.0** - Google Analytics & SEO Enhancement (March 21, 2026). Added comprehensive SEO and analytics integration:
+  - **Google Analytics 4**: Installed `@next/third-parties`, created `app/components/analytics/GoogleAnalytics.tsx` with GA4 integration. Only loads if `NEXT_PUBLIC_GA_ID` is set and validates GA ID format.
+  - **Custom Event Tracking**: Created `app/components/analytics/trackEvent.ts` with sanitized `trackEvent()`, `trackPageView()`, `trackTiming()`, and helper functions (`StockTracking`, `AdminTracking`).
+  - **SEO Metadata**: Created `app/components/seo/` with Organization, WebSite, WebPage, and Stock JSON-LD schemas. Added `SEOTags` component with comprehensive metadata.
+  - **Dynamic Sitemap**: Enhanced `app/sitemap.ts` with all public pages, priority levels, and change frequencies.
+  - **Robots.txt**: Enhanced `app/robots.ts` with Googlebot and Bingbot specific rules.
+  - **Page Metadata**: Added `metadata.ts` files to `/markets`, `/markets/screener`, `/markets/analytics`, `/portfolio`, `/news`, `/alerts` routes.
+  - **Root Layout Update**: Updated `app/layout.tsx` to include `<SEOTags />` and `<Analytics />` components.
+  - **Environment Variables**: Updated `.env.example` with `NEXT_PUBLIC_BASE_URL` and `NEXT_PUBLIC_GA_ID`.
+  - **Security**: All event tracking sanitizes inputs to prevent XSS. GA only loads with valid ID format.
 - **v1.10.6** - Worker Logger Security Fix (March 20, 2026). Fixed CodeQL security vulnerability in `lib/services/worker/worker-logger.ts` - uncontrolled data used in path expression. Added `sanitizeTaskIdForPath()` function to validate task IDs contain only safe filename characters (`/^[A-Za-z0-9_\-:.]+$/`), preventing path traversal attacks. Applied sanitization to `writeToBoth()`, `readLog()`, and `deleteLog()` functions.
 - **v1.10.5** - Corporate Actions NSE Field Fix (March 20, 2026). Fixed corporate actions sync saving all records as "OTHER" type. Root cause: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, `RECORD DATE`, `FACE VALUE`). Also fixed dividend amount field mismatch (`dividendPerShare` vs `dividendAmount`). Updated both `app/api/admin/nse/live-sync/route.ts` and `app/api/corporate-actions/combined/route.ts`. Added Subject, Face Value, and Price columns to Upcoming Actions table for uniform formatting with Historical table.
 - **v1.10.4** - Serverless Logging Fix (March 20, 2026). Added `ServerLog` model to database for persistent logging on serverless platforms (Netlify, Vercel). Created `lib/services/db-logger.ts` for DB-backed logging with helpers (`dbInfo`, `dbWarn`, `dbError`, `dbDebug`). Updated `lib/services/worker/worker-logger.ts` with DB fallback when file logging fails. Added `/api/admin/logs` API route for viewing and managing server logs with filtering (level, source, taskId). Schema synced via `prisma db push --accept-data-loss` since using Prisma Accelerate.

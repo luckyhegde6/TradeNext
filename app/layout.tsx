@@ -4,9 +4,21 @@ import Header from "./Header";
 import Breadcrumbs from "./components/ui/Breadcrumbs";
 import { Providers } from "./Providers";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
+import { Analytics } from "./components/analytics";
+import { SEOTags, defaultMetadata } from "./components/seo";
 
-// ... metadata remains the same ...
+// Apply default SEO metadata
+export const metadata = defaultMetadata;
 
+/**
+ * Root Layout
+ * 
+ * SEO & Analytics:
+ * - Google Analytics 4 via @next/third-parties
+ * - JSON-LD structured data (Organization, WebSite, WebPage)
+ * - OpenGraph and Twitter Card meta tags
+ * - Canonical URLs and language settings
+ */
 export default function RootLayout({
   children,
 }: {
@@ -26,6 +38,12 @@ export default function RootLayout({
                 {children}
               </div>
             </main>
+
+            {/* SEO Structured Data (rendered server-side) */}
+            <SEOTags />
+
+            {/* Google Analytics (rendered client-side) */}
+            <Analytics />
           </Providers>
         </ErrorBoundary>
       </body>
