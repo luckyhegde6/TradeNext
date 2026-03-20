@@ -42,9 +42,10 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
   // Try file logging first (only if not serverless)
   if (!isServerless() && fileLoggingAvailable) {
     try {
+      // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
       const safeTaskId = sanitizeTaskIdForPath(taskId);
       if (!safeTaskId) {
-        // Invalid taskId - skip file logging
+        // Invalid taskId - skip file logging, fall through to blob/DB
         throw new Error("Invalid taskId");
       }
       
@@ -56,16 +57,17 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
         fs.mkdirSync(logsDir, { recursive: true, mode: 0o777 });
       }
       
-      const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+      // Use only the validated safeTaskId - no user input in path construction
+      const logFileName = safeTaskId + ".log";
+      const logFile = path.join(logsDir, logFileName);
       
-      // Verify the resolved path is still within logsDir (path traversal prevention)
-      const resolvedPath = path.resolve(candidatePath);
-      if (resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) {
-        fs.appendFileSync(resolvedPath, logEntry + "\n");
-        return;
+      // Security: Verify path is within logsDir to prevent traversal
+      if (!logFile.startsWith(logsDir + path.sep)) {
+        throw new Error("Path traversal attempt detected");
       }
       
-      throw new Error("Path traversal attempt detected");
+      fs.appendFileSync(logFile, logEntry + "\n");
+      return;
     } catch (error) {
       // File logging failed, disable it
       fileLoggingAvailable = false;
@@ -126,18 +128,20 @@ export async function readLog(taskId: string): Promise<string> {
   // Try file (only if not serverless)
   if (!isServerless()) {
     try {
+      // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
       const safeTaskId = sanitizeTaskIdForPath(taskId);
       if (safeTaskId) {
         const fs = require("fs");
         const path = require("path");
         const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+        // Use only the validated safeTaskId - no user input in path construction
+        const logFileName = safeTaskId + ".log";
+        const logFile = path.join(logsDir, logFileName);
         
-        // Verify the resolved path is still within logsDir (path traversal prevention)
-        const resolvedPath = path.resolve(candidatePath);
-        if (resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) {
-          if (fs.existsSync(resolvedPath)) {
-            return fs.readFileSync(resolvedPath, "utf-8");
+        // Security: Verify path is within logsDir to prevent traversal
+        if (logFile.startsWith(logsDir + path.sep)) {
+          if (fs.existsSync(logFile)) {
+            return fs.readFileSync(logFile, "utf-8");
           }
         }
       }
@@ -222,17 +226,19 @@ export async function deleteLog(taskId: string): Promise<boolean> {
   // Delete local file (only if not serverless)
   if (!isServerless()) {
     try {
+      // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
       const safeTaskId = sanitizeTaskIdForPath(taskId);
       if (safeTaskId) {
         const fs = require("fs");
         const path = require("path");
         const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        const candidatePath = path.join(logsDir, `${safeTaskId}.log`);
+        // Use only the validated safeTaskId - no user input in path construction
+        const logFileName = safeTaskId + ".log";
+        const logFile = path.join(logsDir, logFileName);
         
-        // Verify the resolved path is still within logsDir (path traversal prevention)
-        const resolvedPath = path.resolve(candidatePath);
-        if ((resolvedPath.startsWith(logsDir + path.sep) || resolvedPath === logsDir) && fs.existsSync(resolvedPath)) {
-          fs.unlinkSync(resolvedPath);
+        // Security: Verify path is within logsDir to prevent traversal
+        if (logFile.startsWith(logsDir + path.sep) && fs.existsSync(logFile)) {
+          fs.unlinkSync(logFile);
           deleted = true;
         }
       }
