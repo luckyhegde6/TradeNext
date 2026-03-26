@@ -1,11 +1,22 @@
 import Link from "next/link";
+import { lazy, Suspense } from "react";
 import MarqueeBanner from "@/app/components/MarqueeBanner";
-import HomeChart from "@/app/components/HomeChart";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
 import StockSearchBar from "@/app/components/StockSearchBar";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+
+// Lazy load chart component - it's heavy (~200KB with Chart.js)
+const HomeChart = lazy(() => import("@/app/components/HomeChart"));
+
+function ChartLoader() {
+  return (
+    <div className="h-[400px] flex items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-xl">
+      <div className="animate-pulse text-gray-400">Loading chart...</div>
+    </div>
+  );
+}
 
 // Allow dynamic rendering to ensure session is checked on every request
 // This is critical for logout to work properly - users should see logged-out state immediately
@@ -63,7 +74,9 @@ export default async function Home() {
 
         {/* Full-width chart — hero element */}
         <div className="mb-6">
-          <HomeChart symbol="NIFTY 50" />
+          <Suspense fallback={<ChartLoader />}>
+            <HomeChart symbol="NIFTY 50" />
+          </Suspense>
         </div>
       </section>
 

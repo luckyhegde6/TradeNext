@@ -6,13 +6,16 @@ import cache from "@/lib/cache";
 
 const CACHE_KEY = "nse:indexes:all";
 const CACHE_TTL = 300; // 5 minutes
+const HTTP_CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=600';
 
 export async function GET() {
   try {
     // Check server cache first
     const cachedData = cache.get(CACHE_KEY);
     if (cachedData) {
-      return NextResponse.json(cachedData);
+      return NextResponse.json(cachedData, {
+        headers: { 'Cache-Control': HTTP_CACHE_CONTROL }
+      });
     }
 
     // Call NSE API
@@ -21,7 +24,9 @@ export async function GET() {
     // Cache the result
     cache.set(CACHE_KEY, data, CACHE_TTL);
 
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: { 'Cache-Control': HTTP_CACHE_CONTROL }
+    });
   } catch (e: unknown) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     console.error("nse:indexes error", (e as any)?.message ?? e);
