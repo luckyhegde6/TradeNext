@@ -6,6 +6,7 @@ import { Providers } from "./Providers";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { Analytics } from "./components/analytics";
 import { SEOTags, defaultMetadata } from "./components/seo";
+import WebVitals from "./components/analytics/WebVitals";
 
 // Apply default SEO metadata
 export const metadata = defaultMetadata;
@@ -18,6 +19,7 @@ export const metadata = defaultMetadata;
  * - JSON-LD structured data (Organization, WebSite, WebPage)
  * - OpenGraph and Twitter Card meta tags
  * - Canonical URLs and language settings
+ * - Core Web Vitals tracking
  */
 export default function RootLayout({
   children,
@@ -44,6 +46,9 @@ export default function RootLayout({
 
             {/* Google Analytics (rendered client-side) */}
             <Analytics />
+
+            {/* Core Web Vitals tracking */}
+            <WebVitals />
           </Providers>
         </ErrorBoundary>
       </body>
