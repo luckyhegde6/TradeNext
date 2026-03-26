@@ -1,15 +1,24 @@
 "use client";
 
 import { use } from "react";
+import { lazy, Suspense } from "react";
 import Link from "next/link";
 import IndexDetailsHeader from "@/app/components/IndexDetailsHeader";
-import HomeChart from "@/app/components/HomeChart";
 import IndexHeatmap from "@/app/components/IndexHeatmap";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
 import ConstituentsTable from "@/app/components/ConstituentsTable";
-// Note: CorporateAnnouncements might be specific to symbol in future, currently widget fetches generic or we can adapt it if needed.
-// But for now, let's assume widget is generic or sidebar.
+
+// Lazy load chart component
+const HomeChart = lazy(() => import("@/app/components/HomeChart"));
+
+function ChartLoader() {
+  return (
+    <div className="h-[400px] flex items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-xl">
+      <div className="animate-pulse text-gray-400">Loading chart...</div>
+    </div>
+  );
+}
 
 export default function IndexDetailPage({ params }: { params: Promise<{ index: string }> }) {
     const resolvedParams = use(params);
@@ -30,7 +39,9 @@ export default function IndexDetailPage({ params }: { params: Promise<{ index: s
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                     {/* Main Content: Chart + Heatmap & Table Side by Side */}
                     <div className="lg:col-span-3 space-y-6">
-                        <HomeChart symbol={indexKey} />
+                        <Suspense fallback={<ChartLoader />}>
+                            <HomeChart symbol={indexKey} />
+                        </Suspense>
 
                         {/* Heatmap and Table Side by Side */}
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

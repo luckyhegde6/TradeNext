@@ -48,11 +48,24 @@ function parseNseDate(dateStr: string): string {
  * Fetch deals from NSE
  */
 async function fetchDealsFromNse(): Promise<any> {
-  const raw = await nseFetch("/api/snapshot-capital-market-largedeal") as NseLargeDealResponse;
+  // NSE API supports mode parameter: bulk_deals, block_deals, short_deals
+  // Try with bulk_deals first as default, then fallback to other modes if needed
+  let raw = await nseFetch("/api/snapshot-capital-market-largedeal?mode=bulk_deals") as NseLargeDealResponse;
   
-  const bulkDeals = Array.isArray(raw?.BULK_DEALS_DATA) ? raw.BULK_DEALS_DATA : [];
-  const blockDeals = Array.isArray(raw?.BLOCK_DEALS_DATA) ? raw.BLOCK_DEALS_DATA : [];
-  const shortDeals = Array.isArray(raw?.SHORT_DEALS_DATA) ? raw.SHORT_DEALS_DATA : [];
+  logger.info({ msg: "NSE deals API response", raw: { BULK: raw?.BULK_DEALS_DATA?.length, BLOCK: raw?.BLOCK_DEALS_DATA?.length, SHORT: raw?.SHORT_DEALS_DATA?.length }});
+  
+  let bulkDeals = Array.isArray(raw?.BULK_DEALS_DATA) ? raw.BULK_DEALS_DATA : [];
+  let blockDeals = Array.isArray(raw?.BLOCK_DEALS_DATA) ? raw.BLOCK_DEALS_DATA : [];
+  let shortDeals = Array.isArray(raw?.SHORT_DEALS_DATA) ? raw.SHORT_DEALS_DATA : [];
+  
+  // If bulk deals are empty, try the general endpoint without mode
+  if (bulkDeals.length === 0 && blockDeals.length === 0 && shortDeals.length === 0) {
+    logger.info({ msg: "NSE deals empty, trying without mode param" });
+    raw = await nseFetch("/api/snapshot-capital-market-largedeal") as NseLargeDealResponse;
+    bulkDeals = Array.isArray(raw?.BULK_DEALS_DATA) ? raw.BULK_DEALS_DATA : [];
+    blockDeals = Array.isArray(raw?.BLOCK_DEALS_DATA) ? raw.BLOCK_DEALS_DATA : [];
+    shortDeals = Array.isArray(raw?.SHORT_DEALS_DATA) ? raw.SHORT_DEALS_DATA : [];
+  }
   
   const parseNum = (val: any): number => {
     if (typeof val === 'number') return val;

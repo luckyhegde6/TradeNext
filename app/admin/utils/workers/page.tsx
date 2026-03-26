@@ -229,7 +229,11 @@ export default function WorkersPage() {
     if (!confirm("Are you sure you want to delete this task?")) return;
 
     try {
-      await fetch(`/api/admin/workers?id=${id}`, { method: "DELETE" });
+      await fetch("/api/admin/workers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", taskId: id }),
+      });
       fetchData();
     } catch (error) {
       console.error("Failed to delete task:", error);
@@ -237,15 +241,73 @@ export default function WorkersPage() {
   };
 
   const handleCancel = async (id: string) => {
+    if (!confirm("Are you sure you want to cancel this task?")) return;
+    
     try {
-      await fetch(`/api/admin/workers?id=${id}`, {
-        method: "PUT",
+      await fetch("/api/admin/workers", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "cancelled" }),
+        body: JSON.stringify({ action: "cancel", taskId: id }),
       });
       fetchData();
     } catch (error) {
       console.error("Failed to cancel task:", error);
+    }
+  };
+
+  const handleRunNow = async (id: string) => {
+    if (!confirm("Run this task immediately?")) return;
+    
+    try {
+      const res = await fetch("/api/admin/workers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "runNow", taskId: id }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          alert(`Task executed successfully!\nResult: ${JSON.stringify(data.result || "Completed")}`);
+        } else {
+          alert(`Task failed: ${data.error}`);
+        }
+      } else {
+        const data = await res.json();
+        alert(`Failed to run task: ${data.error}`);
+      }
+      fetchData();
+    } catch (error) {
+      console.error("Failed to run task:", error);
+      alert("Failed to run task");
+    }
+  };
+
+  const handleRetry = async (id: string) => {
+    if (!confirm("Retry this failed task?")) return;
+    
+    try {
+      const res = await fetch("/api/admin/workers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retry", taskId: id }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          alert(`Task retried successfully!`);
+        } else {
+          alert(`Retry failed: ${data.error}`);
+        }
+      } else {
+        const data = await res.json();
+        alert(`Failed to retry task: ${data.error}`);
+      }
+      fetchData();
+    } catch (error) {
+      console.error("Failed to retry task:", error);
+      alert("Failed to retry task");
     }
   };
 
@@ -587,28 +649,52 @@ export default function WorkersPage() {
                       {new Date(task.createdAt).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex items-center gap-2">
-                        {task.status === "pending" && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Run Now - for pending or failed tasks */}
+                        {(task.status === "pending" || task.status === "failed") && (
                           <button
-                            onClick={() => handleCancel(task.id)}
-                            className="text-yellow-600 hover:text-yellow-800"
+                            onClick={() => handleRunNow(task.id)}
+                            className="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200 rounded transition-colors"
                           >
-                            Cancel
+                            ▶ Run Now
                           </button>
                         )}
+                        
+                        {/* Retry - only for failed tasks */}
+                        {task.status === "failed" && (
+                          <button
+                            onClick={() => handleRetry(task.id)}
+                            className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition-colors"
+                          >
+                            ↻ Retry
+                          </button>
+                        )}
+                        
+                        {/* Cancel - for pending or running tasks */}
+                        {(task.status === "pending" || task.status === "running") && (
+                          <button
+                            onClick={() => handleCancel(task.id)}
+                            className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded transition-colors"
+                          >
+                            ✕ Cancel
+                          </button>
+                        )}
+                        
+                        {/* Delete - for completed, failed, or cancelled tasks */}
                         {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
                           <button
                             onClick={() => handleDelete(task.id)}
-                            className="text-red-600 hover:text-red-800"
+                            className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 rounded transition-colors"
                           >
-                            Delete
+                            🗑 Delete
                           </button>
                         )}
+                        
                         <Link
                           href={`/admin/utils/tasks?taskId=${task.id}`}
-                          className="text-blue-600 hover:text-blue-700 font-medium hover:underline"
+                          className="px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
                         >
-                          Detail →
+                          Details →
                         </Link>
                       </div>
                     </td>

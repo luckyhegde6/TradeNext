@@ -344,7 +344,7 @@ export function BulkDealsTable({
                 key: "quantity",
                 label: "Quantity",
                 align: "right",
-                render: (v, row) => {
+                render: (v: unknown, row: BulkDeal): React.ReactNode => {
                   const qty = Number(v || row.quantityTraded || 0);
                   return qty?.toLocaleString("en-IN") || "0";
                 },
@@ -355,7 +355,7 @@ export function BulkDealsTable({
                   key: "price",
                   label: "Price",
                   align: "right",
-                  render: (v, row) => {
+                  render: (v: unknown, row: BulkDeal): React.ReactNode => {
                     const p = Number(v || row.tradePrice || 0);
                     return p ? `₹${p.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "-";
                   },
