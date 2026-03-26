@@ -200,6 +200,9 @@ function getFallbackGlobalNews(): NewsItem[] {
 
 export const dynamic = 'force-dynamic';
 
+// Cache for 5 minutes, stale allowed until 1 hour
+const CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=3600';
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const type = searchParams.get('type') || 'all';
@@ -264,15 +267,21 @@ export async function GET(req: Request) {
     }
 
     if (type === 'india') {
-      return NextResponse.json({ news: indiaNews });
+      return NextResponse.json({ news: indiaNews }, {
+        headers: { 'Cache-Control': CACHE_CONTROL },
+      });
     }
     if (type === 'global') {
-      return NextResponse.json({ news: globalNews });
+      return NextResponse.json({ news: globalNews }, {
+        headers: { 'Cache-Control': CACHE_CONTROL },
+      });
     }
 
     return NextResponse.json({
       india: indiaNews,
       global: globalNews,
+    }, {
+      headers: { 'Cache-Control': CACHE_CONTROL },
     });
   } catch (error) {
     console.error('Error fetching market news:', error);
