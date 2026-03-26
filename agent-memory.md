@@ -55,6 +55,20 @@ echo "" >> agent--memory.md
 
 ## Activity Log
 
+### 2026-03-21 | Worker Task Management Fix - COMPLETE
+- **Action**: Fixed worker task actions in admin panel - Run Now, Cancel, Retry, Delete buttons.
+- **Issue**: Tasks stuck in "pending" status with no way to execute from UI.
+- **Files Modified**:
+    - `app/admin/utils/workers/page.tsx` - Added action handlers and UI buttons
+- **Details**:
+    - Added `handleRunNow()` - executes pending/failed tasks immediately via PATCH API
+    - Added `handleRetry()` - retries failed tasks
+    - Fixed `handleCancel()` - now uses PATCH with action: "cancel"
+    - Fixed `handleDelete()` - now uses PATCH with action: "delete"
+    - Added styled buttons: ▶ Run Now (green), ↻ Retry (blue), ✕ Cancel (yellow), 🗑 Delete (red)
+    - All actions now use PATCH `/api/admin/workers` with { action, taskId }
+- **Status**: ✅ RESOLVED - Fixed in v1.11.1.
+
 ### 2026-03-21 | Google Analytics & SEO Enhancement - COMPLETE
 - **Action**: Added comprehensive Google Analytics 4 integration and SEO optimization.
 - **Files Created**:

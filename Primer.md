@@ -10,6 +10,18 @@
 
 ## Current Project Status
 
+### Worker Task Management Fix (v1.11.1)
+**Issue**: Worker tasks stuck in "pending" status with no way to execute them from admin UI.
+**Fix Applied**:
+- Added `handleRunNow` function to execute pending/failed tasks immediately
+- Added `handleRetry` function to retry failed tasks
+- Fixed `handleCancel` to use PATCH API instead of PUT
+- Fixed `handleDelete` to use PATCH API with action: "delete"
+- Added UI buttons: ▶ Run Now, ↻ Retry, ✕ Cancel, 🗑 Delete
+- All actions now use consistent PATCH `/api/admin/workers` endpoint
+**Files Changed**: app/admin/utils/workers/page.tsx (action handlers)
+**Status**: RESOLVED in v1.11.1.
+
 ### Google Analytics & SEO Enhancement (v1.11.0)
 **Issue**: No Google Analytics integration and limited SEO metadata.
 **Fix Applied**:

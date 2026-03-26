@@ -4,6 +4,12 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.11.1** - Worker Task Management Fix (March 21, 2026). Fixed worker task actions in admin panel:
+  - **Run Now Button**: Added to UI for pending/failed tasks - executes task immediately via PATCH API
+  - **Retry Button**: Added for failed tasks - resets and re-executes the task
+  - **Cancel Button**: Fixed to use PATCH API instead of PUT, properly updates status
+  - **Delete Button**: Fixed to use PATCH API with action: "delete"
+  - **API Endpoints**: All task actions now use consistent PATCH endpoint with action types
 - **v1.11.0** - Google Analytics & SEO Enhancement (March 21, 2026). Added comprehensive SEO and analytics integration:
   - **Google Analytics 4**: Installed `@next/third-parties`, created `app/components/analytics/GoogleAnalytics.tsx` with GA4 integration. Only loads if `NEXT_PUBLIC_GA_ID` is set and validates GA ID format.
   - **Custom Event Tracking**: Created `app/components/analytics/trackEvent.ts` with sanitized `trackEvent()`, `trackPageView()`, `trackTiming()`, and helper functions (`StockTracking`, `AdminTracking`).
