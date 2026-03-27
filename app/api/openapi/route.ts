@@ -19,8 +19,28 @@ const openapi = {
     openapi: '3.0.3',
     info: {
         title: 'TradeNext API',
-        version: '1.1.0',
-        description: 'Comprehensive API for TradeNext - Market Intelligence Platform. Provides access to NSE market data, portfolio management, user management, and administrative functions.',
+        version: '1.14.0',
+        description: `## TradeNext Market Intelligence Platform API
+
+### Quick Links
+- [MCP API](/api/mcp) - Unified NSE data queries (22 functions)
+- [API Documentation](/api/openapi) - This OpenAPI spec
+
+### For AI Agents
+This API is designed for programmatic access. Key endpoints:
+- **MCP API** (/api/mcp): Use for all NSE data - unified interface
+- **Stock Quotes**: /api/nse/stock/{symbol}/quote
+- **Market Indices**: /api/nse/indexes
+- **Corporate Actions**: /api/corporate-actions/combined
+- **Analytics**: /api/nse/gainers, /api/nse/losers, /api/nse/most-active
+
+### Authentication
+- Session-based auth via NextAuth (cookies)
+- MCP API: Optional x-api-key header (set MCP_API_KEY to enable)
+
+### Test Credentials
+- Demo: demo@tradenext6.app / demo123
+- Admin: admin@tradenext6.app / admin123`,
         contact: {
             name: 'TradeNext Support',
             email: 'support@tradenext.in'
@@ -51,6 +71,12 @@ const openapi = {
                 type: 'http',
                 scheme: 'bearer',
                 bearerFormat: 'JWT'
+            },
+            apiKeyHeader: {
+                type: 'apiKey',
+                in: 'header',
+                name: 'x-api-key',
+                description: 'Optional API key for MCP endpoints. Set MCP_API_KEY env var to enable.'
             }
         },
         schemas: {
@@ -195,6 +221,25 @@ const openapi = {
                 properties: {
                     error: { type: 'string', example: 'Validation failed' },
                     details: { type: 'array', items: { type: 'string' } }
+                }
+            },
+            McpResponse: {
+                type: 'object',
+                description: 'Standard MCP API response format',
+                properties: {
+                    success: { type: 'boolean', example: true },
+                    function: { type: 'string', example: 'getStockQuote' },
+                    data: { type: 'object', description: 'Response data from NSE API' },
+                    timestamp: { type: 'string', format: 'date-time', example: '2026-03-27T12:00:00.000Z' }
+                }
+            },
+            McpError: {
+                type: 'object',
+                description: 'MCP API error response',
+                properties: {
+                    error: { type: 'string', example: 'Bad Request' },
+                    message: { type: 'string', example: 'Missing required parameter: symbol' },
+                    function: { type: 'string', example: 'getStockQuote' }
                 }
             }
         }
@@ -1436,6 +1481,138 @@ const openapi = {
                 tags: ['Admin - Ingestion'],
                 security: securityAdmin,
                 responses: { '200': { description: 'Ingest started' } }
+            }
+        },
+
+        // ==================== MCP API (Machine Communication Protocol) ====================
+        '/api/mcp': {
+            post: {
+                summary: 'Execute MCP function',
+                description: 'Execute a Machine Communication Protocol function for NSE data. Provides unified interface for all NSE real-time data queries.',
+                tags: ['MCP API'],
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    function: { 
+                                        type: 'string', 
+                                        description: 'MCP function name to execute',
+                                        enum: [
+                                            'listFunctions', 'describe', 'schema', 'help',
+                                            'getIndexData', 'getMarketIndices', 'getStockQuote', 'getStockChart',
+                                            'getGainers', 'getLosers', 'getMostActive', 'getAdvanceDecline',
+                                            'getCorporateActions', 'getCorporateInfo', 'getMarquee', 'getDeals',
+                                            'getAnnouncements', 'getInsiderTrading', 'getEvents', 'getHeatmap',
+                                            'getSymbols', 'getTrends', 'getCorpActions', 'getAnnouncementsByIndex',
+                                            'getStockCorporate'
+                                        ]
+                                    },
+                                    parameters: { 
+                                        type: 'object', 
+                                        description: 'Function-specific parameters',
+                                        properties: {
+                                            symbol: { type: 'string', description: 'Stock symbol (e.g., RELIANCE, TCS)' },
+                                            indexName: { type: 'string', description: 'Index name (e.g., NIFTY 50, NIFTY BANK)' },
+                                            period: { type: 'string', description: 'Time period (1D, 1W, 1M, 3M, 6M, 1Y, 5Y)' },
+                                            interval: { type: 'string', description: 'Data interval (1min, 5min, 15min, 30min, 1hour, 1day)' },
+                                            mode: { type: 'string', description: 'Deals mode (block_deals, bulk_deals)' },
+                                            functionName: { type: 'string', description: 'Function name for describe/schema' },
+                                            minDividend: { type: 'number', description: 'Minimum dividend for filtering' }
+                                        }
+                                    }
+                                },
+                                required: ['function']
+                            },
+                            example: {
+                                function: 'getStockQuote',
+                                parameters: { symbol: 'RELIANCE' }
+                            }
+                        }
+                    }
+                },
+                security: [], // Optional - set MCP_API_KEY env var to enable
+                responses: {
+                    '200': { 
+                        description: 'Success',
+                        content: {
+                            'application/json': {
+                                example: {
+                                    success: true,
+                                    function: 'getStockQuote',
+                                    data: { /* NSE response data */ },
+                                    timestamp: '2026-03-27T12:00:00.000Z'
+                                }
+                            }
+                        }
+                    },
+                    '400': { description: 'Bad Request - missing required parameters' },
+                    '401': { description: 'Unauthorized - invalid API key' },
+                    '500': { description: 'Internal Server Error' }
+                }
+            },
+            get: {
+                summary: 'Query MCP via GET',
+                description: 'Access MCP functions via query parameters. Limited support - use POST for full functionality.',
+                tags: ['MCP API'],
+                parameters: [
+                    { name: 'function', in: 'query', required: true, schema: { type: 'string' }, description: 'MCP function name' },
+                    { name: 'symbol', in: 'query', schema: { type: 'string' }, description: 'Stock symbol' },
+                    { name: 'indexName', in: 'query', schema: { type: 'string' }, description: 'Index name' }
+                ],
+                responses: {
+                    '200': { description: 'Success' },
+                    '400': { description: 'Bad Request' }
+                }
+            }
+        },
+
+        // MCP Function Details - Agent-friendly documentation
+        '/api/mcp/listFunctions': {
+            get: {
+                summary: 'List all MCP functions',
+                description: 'Returns list of all available MCP functions with descriptions. Use for API discovery.',
+                tags: ['MCP API - Discovery'],
+                responses: {
+                    '200': {
+                        description: 'List of available functions',
+                        content: {
+                            'application/json': {
+                                example: [
+                                    { name: 'getIndexData', description: 'Get all market indices' },
+                                    { name: 'getStockQuote', description: 'Get real-time stock quote' },
+                                    { name: 'getGainers', description: 'Get top gainers for index' }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/api/mcp/help': {
+            get: {
+                summary: 'Get MCP help',
+                description: 'Returns comprehensive help information including usage examples and available functions.',
+                tags: ['MCP API - Discovery'],
+                responses: {
+                    '200': {
+                        description: 'Help information',
+                        content: {
+                            'application/json': {
+                                example: {
+                                    message: 'TradeNext MCP API',
+                                    version: '1.0.0',
+                                    usage: 'POST with { function, parameters } or GET ?function=name&...',
+                                    functions: [
+                                        { name: 'getStockQuote', description: 'Real-time stock quote' },
+                                        { name: 'getIndexData', description: 'All market indices' }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

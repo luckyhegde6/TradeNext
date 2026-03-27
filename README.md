@@ -4,9 +4,17 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.13.0 (March 27, 2026)
+## Latest Update - v1.14.0 (March 27, 2026)
 
-### Corporate Action Alerts
+### MCP API for External NSE Data
+- **New Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
+- **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
+- **Authentication**: Optional API key via `x-api-key` header (configurable via `MCP_API_KEY`)
+- **JSON Format**: Returns standardized response with success, function, data, timestamp
+- **Caching**: All responses cached for performance (60s-3600s)
+- **Discovery**: Built-in `listFunctions`, `describe`, `schema`, `help` for API exploration
+
+### Corporate Action Alerts (v1.13.0)
 - **New Alert Types**: Added support for dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
 - **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
 - **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
@@ -41,6 +49,7 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
 
 ## Features
 
+- **MCP API**: Unified Machine Communication Protocol API for external NSE data queries (22 functions)
 - **User Management**: Secure signup with email verification, role-based access control (Admin/User)
 - **Portfolio Engine**: Real-time P&L tracking, transaction history, cost-basis analysis
 - **Market Intelligence**: Comprehensive NSE data (quotes, charts, corporate actions)
@@ -209,3 +218,33 @@ PORT=3000
 ## License
 
 MIT
+
+## Testing
+
+### Playwright CLI Testing
+
+TradeNext uses Playwright CLI for UI/UX testing during development. See the [Agent Testing Guide](./.agents/skills/playwright-cli/AGENT-TESTING-GUIDE.md) for detailed instructions.
+
+```bash
+# Install Playwright CLI
+npm install -g playwright-cli
+
+# Start dev server
+npm run dev
+
+# Run tests
+playwright-cli open http://localhost:3000
+```
+
+### Test Credentials
+| Role | Email | Password |
+|------|-------|----------|
+| Demo | demo@tradenext6.app | demo123 |
+| Admin | admin@tradenext6.app | admin123 |
+
+### Standard Test Workflow
+1. Start dev server (`npm run dev`)
+2. Open browser with Playwright CLI
+3. Test login, navigation, forms, responsive behavior
+4. Check console for errors
+5. Close browser and stop server
