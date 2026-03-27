@@ -113,12 +113,18 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
 }
 
 /**
- * Daily Stock Sync - Syncs stocks from NIFTY TOTAL MARKET
+ * Daily Stock Sync - Syncs stocks from NSE
  */
 async function executeStockSync(payload?: Record<string, unknown>): Promise<unknown> {
   const indexName = (payload?.indexName as string) || "NIFTY TOTAL MARKET";
 
-  logger.info({ msg: "Starting stock sync", indexName });
+  logger.info({ msg: "Starting stock sync", indexName, payload });
+
+  // Ensure indexName is a string to prevent .replace() errors
+  if (typeof indexName !== 'string') {
+    logger.error({ msg: "Invalid indexName type", indexName: typeof indexName });
+    throw new Error(`Invalid indexName: expected string, got ${typeof indexName}`);
+  }
 
   // Fetch stocks from NSE
   const stocks = await getIndexStocks(indexName);

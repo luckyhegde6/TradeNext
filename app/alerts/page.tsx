@@ -46,8 +46,20 @@ export default function AlertsPage() {
   useEffect(() => {
     if (session) {
       fetchAlerts();
+      // Trigger a real-time alert check when page loads
+      // This serves as a fallback for serverless environments where background workers don't run continuously
+      checkAlertsRealTime();
     }
   }, [session]);
+
+  // Real-time alert check - fetches current prices and triggers alerts
+  const checkAlertsRealTime = async () => {
+    try {
+      await fetch('/api/alerts/check', { method: 'POST' });
+    } catch (error) {
+      console.error('Real-time alert check failed:', error);
+    }
+  };
 
   const fetchAlerts = async () => {
     try {

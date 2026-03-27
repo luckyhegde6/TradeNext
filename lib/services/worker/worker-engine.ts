@@ -161,12 +161,24 @@ async function checkScheduledJobs() {
 
     for (const job of dueJobs) {
         try {
-            logger.info({ msg: "Cron job due, spawning task", jobName: job.name, jobId: job.id });
+            logger.info({ msg: "Cron job due, spawning task", jobName: job.name, jobId: job.id, taskType: job.taskType });
+
+            // Build payload with default indexName based on task type
+            let payload = (job.config as Record<string, unknown>) || {};
+            
+            // Add default indexName if not specified in config
+            if (!payload.indexName) {
+                if (job.taskType === 'stock_sync' || job.taskType === 'market_data') {
+                    payload = { ...payload, indexName: "NIFTY TOTAL MARKET" };
+                } else if (job.taskType === 'corp_actions' || job.taskType === 'events_fetch') {
+                    payload = { ...payload, indexName: "NIFTY 50" };
+                }
+            }
 
             await spawnCronTask(job.id, {
                 name: `Scheduled: ${job.name}`,
                 taskType: job.taskType,
-                payload: (job.config as any) || {},
+                payload,
             });
 
             // Calculate and update next run time

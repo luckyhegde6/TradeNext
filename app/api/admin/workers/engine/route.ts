@@ -4,6 +4,26 @@ import { startWorker, startScheduler, stopWorkerEngine } from "@/lib/services/wo
 import logger from "@/lib/logger";
 import { auth } from "@/lib/auth";
 
+// Lazy initialization flag
+let autoStarted = false;
+
+/**
+ * Auto-start the worker engine on first request (lazy initialization)
+ * This ensures cron jobs run in production without manual admin intervention
+ */
+function autoStartEngine() {
+    if (autoStarted) return;
+    
+    try {
+        startWorker(5000); // 5s polling for tasks
+        startScheduler(60000); // 1m check for cron jobs
+        logger.info({ msg: "Worker engine auto-started on first request" });
+        autoStarted = true;
+    } catch (error) {
+        logger.error({ msg: "Failed to auto-start worker engine", error });
+    }
+}
+
 export async function POST(req: Request) {
     try {
         const session = await auth();
@@ -33,6 +53,9 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
     try {
+        // Auto-start engine on first GET request (lazy initialization)
+        autoStartEngine();
+        
         const session = await auth();
         if (!session || session.user?.role !== "admin") {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,7 +64,7 @@ export async function GET(req: Request) {
         // In a real multi-node env, this would check a global flag or local variable
         // For this implementation, we'll return a placeholder status
         return NextResponse.json({
-            isRunning: true, // Assuming it might be running if the process is alive
+            isRunning: autoStarted,
             workerId: process.pid
         });
     } catch (error) {
