@@ -4,18 +4,15 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.12.0 (March 27, 2026)
+## Latest Update - v1.13.0 (March 27, 2026)
 
-### Netlify Build Fix & Performance Optimization
-- **Secrets Scanning Fix**: Added `.opencode` and `opencode.json` to `SECRETS_SCAN_OMIT_PATHS` to prevent build failures
-- **Cache-Control Headers**: Added caching to key API routes for faster page loads
-- **Lazy Loading**: Implemented React.lazy() for charts to improve initial load time
-- **Web Vitals Monitoring**: Added Core Web Vitals tracking via Performance Observer API
-- **Bug Fixes**: 
-  - Mobile navigation now shows Calendar link
-  - NSE Deals API now returns data correctly
-  - BulkDealsTable TypeScript errors fixed
-  - Prisma migrations marked as applied
+### Corporate Action Alerts
+- **New Alert Types**: Added support for dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
+- **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
+- **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
+- **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
+- **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
+- **Real-time Fallback**: Alerts page triggers check on load for serverless environments
 
 ### Tested Features (March 2026)
 | Feature | Status | Notes |

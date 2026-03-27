@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkPriceAlerts } from "@/lib/services/alertService";
+import { checkPriceAlerts, checkCorporateActionAlerts } from "@/lib/services/alertService";
 import prisma from "@/lib/prisma";
 import { getStockQuote } from "@/lib/stock-service";
 
@@ -7,12 +7,15 @@ export const dynamic = 'force-dynamic';
 
 export async function POST() {
     try {
-        // Check both Alert and UserAlert tables
+        // Check both Alert and UserAlert tables for price alerts
         const [systemAlerts, userAlerts] = await Promise.all([
             prisma.alert.findMany({
                 where: {
                     triggered: false,
                     symbol: { not: null },
+                    type: {
+                        notIn: ["dividend_alert", "bonus_alert", "split_alert", "rights_alert", "buyback_alert", "meeting_alert"],
+                    },
                 },
                 select: { id: true, symbol: true }
             }),
@@ -22,6 +25,8 @@ export async function POST() {
             })
         ]);
 
+        // ... rest of existing code ...
+        
         // Build symbol map for system alerts
         const symbolMap = new Map<string, string[]>();
         for (const alert of systemAlerts) {
@@ -94,10 +99,14 @@ export async function POST() {
             }
         }
 
+        // Check corporate action alerts
+        const corpActionResult = await checkCorporateActionAlerts();
+
         return NextResponse.json({ 
             success: true, 
-            checked: symbolMap.size + userAlertSymbols.length,
-            triggered: triggeredCount 
+            checked: symbolMap.size + userAlertSymbols.length + corpActionResult.checked,
+            triggered: triggeredCount + corpActionResult.triggered,
+            corporateActionTriggered: corpActionResult.triggered,
         });
     } catch (err) {
         console.error('Check alerts error:', err);

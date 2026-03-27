@@ -4,6 +4,13 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.13.0** - Corporate Action Alerts (March 27, 2026). Added new alert types for corporate actions:
+  - **New Alert Types**: dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
+  - **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
+  - **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
+  - **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
+  - **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
+  - **Real-time Fallback**: Alerts page triggers check on load for serverless environments
 - **v1.12.1** - Worker Engine Auto-Start Fix (March 27, 2026). Fixed worker engine and cron jobs not running in production:
   - **Auto-Start Fix**: Worker engine now auto-starts on first admin GET request to `/api/admin/workers/engine` - no manual click needed
   - **indexName Fallback**: Added default indexName to cron job payload based on task type (stock_sync → NIFTY TOTAL MARKET, corp_actions → NIFTY 50)

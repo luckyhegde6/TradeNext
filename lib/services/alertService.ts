@@ -8,7 +8,14 @@ export type AlertType =
   | "volume_spike"
   | "price_jump"
   | "piotroski_score"
-  | "portfolio_value";
+  | "portfolio_value"
+  // Corporate Action Alert Types
+  | "dividend_alert"
+  | "bonus_alert"
+  | "split_alert"
+  | "rights_alert"
+  | "buyback_alert"
+  | "meeting_alert";
 
 export interface AlertCondition {
   symbol?: string;
@@ -16,6 +23,13 @@ export interface AlertCondition {
   period?: string;
   direction?: "above" | "below";
   changePercent?: number;
+  // Corporate action specific
+  exDateAfter?: string; // ISO date string for filtering
+  minDividend?: number;  // Minimum dividend amount
+  // Triggered action details (filled when alert is triggered)
+  triggeredAction?: string;
+  purpose?: string;
+  exDate?: string;
 }
 
 export interface Alert {
@@ -199,6 +213,13 @@ function getAlertTitle(type: string, symbol?: string | null): string {
     case "price_jump": return `${symbolPrefix}Significant Price Jump`;
     case "piotroski_score": return `${symbolPrefix}Piotroski Score Change`;
     case "portfolio_value": return `Portfolio Value Alert`;
+    // Corporate Action Alerts
+    case "dividend_alert": return `${symbolPrefix}Dividend Announced`;
+    case "bonus_alert": return `${symbolPrefix}Bonus Shares Announced`;
+    case "split_alert": return `${symbolPrefix}Stock Split Announced`;
+    case "rights_alert": return `${symbolPrefix}Rights Issue Announced`;
+    case "buyback_alert": return `${symbolPrefix}Buyback Announced`;
+    case "meeting_alert": return `${symbolPrefix}Shareholder Meeting Scheduled`;
     default: return `Alert Triggered`;
   }
 }
@@ -212,6 +233,31 @@ function getAlertMessage(type: string, symbol: string | null | undefined, condit
     case "price_jump": return `${symbol} has jumped by ${cond.changePercent}% in the last period.`;
     case "piotroski_score": return `The Piotroski F-Score for ${symbol} has changed.`;
     case "portfolio_value": return `Your portfolio value has changed by more than ${cond.changePercent}%.`;
+    // Corporate Action Alerts
+    case "dividend_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} announced dividend: ${cond.purpose}. Ex-date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has announced a dividend. Check corporate actions for details.`;
+    case "bonus_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} announced bonus shares: ${cond.purpose}. Ex-date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has announced bonus shares. Check corporate actions for details.`;
+    case "split_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} announced stock split: ${cond.purpose}. Ex-date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has announced a stock split. Check corporate actions for details.`;
+    case "rights_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} announced rights issue: ${cond.purpose}. Ex-date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has announced a rights issue. Check corporate actions for details.`;
+    case "buyback_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} announced buyback: ${cond.purpose}. Ex-date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has announced a buyback. Check corporate actions for details.`;
+    case "meeting_alert": 
+      return cond.triggeredAction 
+        ? `${symbol} has scheduled a meeting: ${cond.purpose}. Date: ${cond.exDate ? new Date(cond.exDate).toLocaleDateString() : 'TBD'}`
+        : `${symbol} has a shareholder meeting scheduled. Check corporate actions for details.`;
     default: return `An alert condition has been met.`;
   }
 }
@@ -313,4 +359,157 @@ export async function getAlertCount(userId: number): Promise<number> {
   return prisma.alert.count({
     where: { userId, seen: false },
   });
+}
+
+/**
+ * Check corporate action alerts
+ * Scans upcoming corporate actions and triggers alerts if user's stock matches
+ */
+export async function checkCorporateActionAlerts(): Promise<{ checked: number; triggered: number }> {
+  logger.info({ msg: "Checking corporate action alerts" });
+
+  // Get all active corporate action alerts that are not triggered
+  const corpActionAlerts = await prisma.alert.findMany({
+    where: {
+      triggered: false,
+      symbol: { not: null },
+      type: {
+        in: ["dividend_alert", "bonus_alert", "split_alert", "rights_alert", "buyback_alert", "meeting_alert"],
+      },
+    },
+  });
+
+  if (corpActionAlerts.length === 0) {
+    return { checked: 0, triggered: 0 };
+  }
+
+  // Get unique symbols from alerts
+  const alertSymbols = [...new Set(corpActionAlerts.map(a => a.symbol).filter(Boolean))] as string[];
+
+  // Get upcoming corporate actions for these symbols (exDate in future)
+  const now = new Date();
+  const corporateActions = await prisma.corporateAction.findMany({
+    where: {
+      symbol: { in: alertSymbols },
+      exDate: { gte: now },
+    },
+  });
+
+  if (corporateActions.length === 0) {
+    return { checked: corpActionAlerts.length, triggered: 0 };
+  }
+
+  // Map actions by symbol for quick lookup
+  const actionsBySymbol = new Map<string, typeof corporateActions>();
+  for (const action of corporateActions) {
+    const existing = actionsBySymbol.get(action.symbol) || [];
+    existing.push(action);
+    actionsBySymbol.set(action.symbol, existing);
+  }
+
+  let triggeredCount = 0;
+
+  // Check each alert against corporate actions
+  for (const alert of corpActionAlerts) {
+    if (!alert.symbol) continue;
+
+    const actions = actionsBySymbol.get(alert.symbol);
+    if (!actions || actions.length === 0) continue;
+
+    const condition = alert.condition as unknown as AlertCondition;
+    let triggered = false;
+    let triggeredAction: typeof corporateActions[0] | null = null;
+
+    // Check if any action matches the alert type
+    for (const action of actions) {
+      const actionType = (action.actionType || "").toUpperCase();
+      
+      switch (alert.type) {
+        case "dividend_alert":
+          if (actionType.includes("DIVIDEND") || actionType.includes("DISTRIBUTION")) {
+            // Optional: check minimum dividend amount
+            if (condition.minDividend && action.dividendPerShare) {
+              if (Number(action.dividendPerShare) >= condition.minDividend) {
+                triggered = true;
+                triggeredAction = action;
+              }
+            } else {
+              triggered = true;
+              triggeredAction = action;
+            }
+          }
+          break;
+          
+        case "bonus_alert":
+          if (actionType.includes("BONUS")) {
+            triggered = true;
+            triggeredAction = action;
+          }
+          break;
+          
+        case "split_alert":
+          if (actionType.includes("SPLIT")) {
+            triggered = true;
+            triggeredAction = action;
+          }
+          break;
+          
+        case "rights_alert":
+          if (actionType.includes("RIGHTS")) {
+            triggered = true;
+            triggeredAction = action;
+          }
+          break;
+          
+        case "buyback_alert":
+          if (actionType.includes("BUYBACK")) {
+            triggered = true;
+            triggeredAction = action;
+          }
+          break;
+          
+        case "meeting_alert":
+          if (actionType.includes("MEETING") || actionType.includes("AGM") || actionType.includes("EGM")) {
+            triggered = true;
+            triggeredAction = action;
+          }
+          break;
+      }
+
+      if (triggered && triggeredAction) break;
+    }
+
+    if (triggered && triggeredAction) {
+      await triggerAlert(alert.id);
+      
+      // Update alert with action details
+      await prisma.alert.update({
+        where: { id: alert.id },
+        data: {
+          condition: {
+            ...condition,
+            triggeredAction: triggeredAction.actionType,
+            exDate: triggeredAction.exDate?.toISOString(),
+            purpose: triggeredAction.subject,
+          } as any,
+        },
+      });
+      
+      triggeredCount++;
+      logger.info({ 
+        msg: "Corporate action alert triggered", 
+        alertId: alert.id, 
+        symbol: alert.symbol, 
+        actionType: triggeredAction.actionType 
+      });
+    }
+  }
+
+  logger.info({ 
+    msg: "Corporate action alerts check completed", 
+    checked: corpActionAlerts.length, 
+    triggered: triggeredCount 
+  });
+
+  return { checked: corpActionAlerts.length, triggered: triggeredCount };
 }

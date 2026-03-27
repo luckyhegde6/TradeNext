@@ -12,6 +12,10 @@ interface Alert {
     threshold?: number;
     changePercent?: number;
     direction?: string;
+    minDividend?: number;
+    triggeredAction?: string;
+    exDate?: string;
+    purpose?: string;
   };
   triggered: boolean;
   triggeredAt?: string;
@@ -25,6 +29,13 @@ const ALERT_TYPES = [
   { value: 'price_below', label: 'Price Below', description: 'Alert when price drops below target' },
   { value: 'price_jump', label: 'Price Jump', description: 'Alert on significant price change' },
   { value: 'volume_spike', label: 'Volume Spike', description: 'Alert on unusual trading volume' },
+  // Corporate Action Alerts
+  { value: 'dividend_alert', label: 'Dividend Alert', description: 'Alert when dividend is announced' },
+  { value: 'bonus_alert', label: 'Bonus Alert', description: 'Alert when bonus shares are announced' },
+  { value: 'split_alert', label: 'Stock Split Alert', description: 'Alert when stock split is announced' },
+  { value: 'rights_alert', label: 'Rights Issue Alert', description: 'Alert when rights issue is announced' },
+  { value: 'buyback_alert', label: 'Buyback Alert', description: 'Alert when buyback is announced' },
+  { value: 'meeting_alert', label: 'Meeting/AGM Alert', description: 'Alert for shareholder meetings' },
 ];
 
 export default function AlertsPage() {
@@ -38,6 +49,7 @@ export default function AlertsPage() {
     symbol: '',
     threshold: '',
     changePercent: '',
+    minDividend: '',
   });
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
@@ -99,9 +111,18 @@ export default function AlertsPage() {
   const createAlert = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const condition: Record<string, number> = {};
-      if (formData.threshold) condition.threshold = parseFloat(formData.threshold);
-      if (formData.changePercent) condition.changePercent = parseFloat(formData.changePercent);
+      const condition: Record<string, any> = {};
+      
+      // Price-based alerts need threshold or changePercent
+      if (formData.type === 'price_above' || formData.type === 'price_below') {
+        if (formData.threshold) condition.threshold = parseFloat(formData.threshold);
+      } else if (formData.type === 'price_jump' || formData.type === 'volume_spike') {
+        if (formData.changePercent) condition.changePercent = parseFloat(formData.changePercent);
+      } else if (formData.type === 'dividend_alert') {
+        // Corporate action alerts - optional min dividend
+        if (formData.minDividend) condition.minDividend = parseFloat(formData.minDividend);
+      }
+      // Corporate action alerts (dividend_alert, bonus_alert, etc.) don't need extra condition
 
       const res = await fetch('/api/alerts', {
         method: 'POST',
@@ -115,7 +136,7 @@ export default function AlertsPage() {
 
       if (res.ok) {
         setShowForm(false);
-        setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
+        setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '', minDividend: '' });
         fetchAlerts();
       }
     } catch (error) {
@@ -144,7 +165,7 @@ export default function AlertsPage() {
 
       if (res.ok) {
         setEditingAlert(null);
-        setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
+        setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '', minDividend: '' });
         fetchAlerts();
       }
     } catch (error) {
@@ -159,6 +180,7 @@ export default function AlertsPage() {
       symbol: alert.symbol || '',
       threshold: alert.condition.threshold?.toString() || '',
       changePercent: alert.condition.changePercent?.toString() || '',
+      minDividend: alert.condition.minDividend?.toString() || '',
     });
   };
 
@@ -221,7 +243,7 @@ export default function AlertsPage() {
   const closeForm = () => {
     setShowForm(false);
     setEditingAlert(null);
-    setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '' });
+    setFormData({ type: 'price_above', symbol: '', threshold: '', changePercent: '', minDividend: '' });
     setCurrentPrice(null);
   };
 
@@ -274,10 +296,12 @@ export default function AlertsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Stock Symbol</label>
+                <label className="block text-sm font-medium mb-1">
+                  Stock Symbol {['dividend_alert', 'bonus_alert', 'split_alert', 'rights_alert', 'buyback_alert', 'meeting_alert'].includes(formData.type) && <span className="text-muted-foreground">(Optional - leave empty for any)</span>}
+                </label>
                 <Autocomplete
                   onSelect={handleSymbolSelect}
-                  placeholder="e.g., RELIANCE"
+                  placeholder={['dividend_alert', 'bonus_alert', 'split_alert', 'rights_alert', 'buyback_alert', 'meeting_alert'].includes(formData.type) ? "Leave empty for any stock" : "e.g., RELIANCE"}
                   initialValue={formData.symbol}
                 />
                 {formData.symbol && (
@@ -324,6 +348,24 @@ export default function AlertsPage() {
                     onChange={(e) => setFormData({ ...formData, changePercent: e.target.value })}
                     required
                   />
+                </div>
+              )}
+
+              {/* Corporate Action Alert Options */}
+              {formData.type === 'dividend_alert' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Minimum Dividend (₹) - Optional</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="e.g., 5.00 (only alert if dividend >= this)"
+                    className="w-full p-2 border border-border rounded bg-background"
+                    value={formData.minDividend || ''}
+                    onChange={(e) => setFormData({ ...formData, minDividend: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Leave empty to get alerts for any dividend
+                  </p>
                 </div>
               )}
 
