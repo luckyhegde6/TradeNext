@@ -1,11 +1,38 @@
 import { z } from 'zod';
 
+// Alert type enum including corporate action alerts
+const AlertTypeEnum = z.enum([
+  'price_above',
+  'price_below', 
+  'volume_spike',
+  'price_jump',
+  'piotroski_score',
+  'portfolio_value',
+  // Corporate Action Alerts
+  'dividend_alert',
+  'bonus_alert',
+  'split_alert',
+  'rights_alert',
+  'buyback_alert',
+  'meeting_alert',
+]);
+
 const alertSchema = z.object({
   symbol: z.string().optional(),
-  alertType: z.enum(['price_above', 'price_below', 'volume_spike', 'custom']),
+  alertType: AlertTypeEnum,
   title: z.string().min(1),
   message: z.string().optional(),
   targetPrice: z.number().optional(),
+  // Corporate action specific
+  minDividend: z.number().optional(),
+  condition: z.object({
+    threshold: z.number().optional(),
+    changePercent: z.number().optional(),
+    minDividend: z.number().optional(),
+    triggeredAction: z.string().optional(),
+    purpose: z.string().optional(),
+    exDate: z.string().optional(),
+  }).optional(),
 });
 
 describe('User Alerts Validation', () => {
@@ -65,7 +92,7 @@ describe('User Alerts Validation', () => {
     });
 
     test('should validate all alert types', () => {
-      const alertTypes = ['price_above', 'price_below', 'volume_spike', 'custom'];
+      const alertTypes = ['price_above', 'price_below', 'volume_spike', 'price_jump', 'piotroski_score', 'portfolio_value'];
       
       alertTypes.forEach(type => {
         const alert = {
@@ -75,6 +102,93 @@ describe('User Alerts Validation', () => {
         const result = alertSchema.safeParse(alert);
         expect(result.success).toBe(true);
       });
+    });
+
+    // Corporate Action Alert Tests
+    test('should validate dividend_alert', () => {
+      const dividendAlert = {
+        symbol: 'RELIANCE',
+        alertType: 'dividend_alert',
+        title: 'RELIANCE dividend alert',
+        minDividend: 5,
+      };
+      const result = alertSchema.safeParse(dividendAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate bonus_alert', () => {
+      const bonusAlert = {
+        symbol: 'TCS',
+        alertType: 'bonus_alert',
+        title: 'TCS bonus alert',
+      };
+      const result = alertSchema.safeParse(bonusAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate split_alert', () => {
+      const splitAlert = {
+        symbol: 'INFY',
+        alertType: 'split_alert',
+        title: 'INFY split alert',
+      };
+      const result = alertSchema.safeParse(splitAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate rights_alert', () => {
+      const rightsAlert = {
+        symbol: 'BHEL',
+        alertType: 'rights_alert',
+        title: 'BHEL rights alert',
+      };
+      const result = alertSchema.safeParse(rightsAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate buyback_alert', () => {
+      const buybackAlert = {
+        symbol: 'HINDUNI',
+        alertType: 'buyback_alert',
+        title: 'HINDUNI buyback alert',
+      };
+      const result = alertSchema.safeParse(buybackAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate meeting_alert', () => {
+      const meetingAlert = {
+        symbol: 'SBIN',
+        alertType: 'meeting_alert',
+        title: 'SBIN meeting alert',
+      };
+      const result = alertSchema.safeParse(meetingAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate corporate action alert without symbol (monitor all)', () => {
+      const anyStockAlert = {
+        alertType: 'dividend_alert',
+        title: 'Any stock dividend alert',
+      };
+      const result = alertSchema.safeParse(anyStockAlert);
+      expect(result.success).toBe(true);
+    });
+
+    test('should validate corporate action alert with condition details', () => {
+      const detailedAlert = {
+        symbol: 'VEDL',
+        alertType: 'dividend_alert',
+        title: 'VEDL dividend alert',
+        condition: {
+          minDividend: 10,
+          triggeredAction: 'DIVIDEND',
+          purpose: 'Interim Dividend - Rs 11 Per Share',
+          exDate: '2026-03-28',
+        },
+      };
+      const result = alertSchema.safeParse(detailedAlert);
+      expect(result.success).toBe(true);
     });
   });
 

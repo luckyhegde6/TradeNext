@@ -93,6 +93,13 @@ export async function POST(req: NextRequest) {
       "price_jump",
       "piotroski_score",
       "portfolio_value",
+      // Corporate Action Alerts
+      "dividend_alert",
+      "bonus_alert",
+      "split_alert",
+      "rights_alert",
+      "buyback_alert",
+      "meeting_alert",
     ];
 
     if (!validTypes.includes(type)) {
@@ -150,6 +157,13 @@ export async function PUT(req: NextRequest) {
       "price_jump",
       "piotroski_score",
       "portfolio_value",
+      // Corporate Action Alerts
+      "dividend_alert",
+      "bonus_alert",
+      "split_alert",
+      "rights_alert",
+      "buyback_alert",
+      "meeting_alert",
     ];
 
     if (type && !validTypes.includes(type)) {

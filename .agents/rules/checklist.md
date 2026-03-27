@@ -3,7 +3,7 @@
 Engineering guardrails for AI agents and contributors. All changes must be validated against this checklist.
 
 ## Version
-1.0
+1.1
 
 ## Meta Rules
 
@@ -128,6 +128,44 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 - [ ] swagger_updated
 - [ ] security_reviewed
 - [ ] logs_added
+
+---
+
+## UI/UX Testing (Mandatory for UI Changes)
+
+### Playwright CLI Testing
+- [ ] start_dev_server_if_needed
+- [ ] test_login_page_loads
+- [ ] test_login_with_demo_credentials
+- [ ] test_ui_changes_render_correctly
+- [ ] check_responsive_behavior
+- [ ] verify_dark_light_mode_if_applicable
+- [ ] test_form_submissions_and_interactions
+- [ ] check_console_errors
+- [ ] cleanup_dev_server_processes
+
+### Test Credentials
+- **Demo User**: demo@tradenext6.app / demo123
+- **Admin User**: admin@tradenext6.app / admin123
+
+### Common Test Scenarios
+1. Login flow: Navigate → Fill credentials → Submit → Verify redirect
+2. Navigation: Click menu items → Verify page loads
+3. Forms: Fill fields → Submit → Verify success/error state
+4. Tables: Sort → Filter → Verify correct data
+5. Modals: Open → Interact → Close → Verify state
+
+### Testing Commands
+```bash
+# Using MCP in OpenCode
+Playwright MCP: open → navigate → click → fill → snapshot → close
+
+# Using playwright-cli locally
+npx playwright-cli open http://localhost:3000
+npx playwright-cli click e5
+npx playwright-cli snapshot
+npx playwright-cli close
+```
 
 ---
 

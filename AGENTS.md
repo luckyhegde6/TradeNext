@@ -4,6 +4,20 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.14.0** - MCP API for External NSE Data (March 27, 2026). Added unified API endpoint for external NSE data queries:
+  - **MCP Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
+  - **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
+  - **Authentication**: Optional API key via `x-api-key` header (configurable via `MCP_API_KEY`)
+  - **JSON Format**: Returns standardized response with success, function, data, timestamp
+  - **Caching**: All responses cached for performance (60s-3600s depending on data type)
+  - **Discovery**: Built-in `listFunctions`, `describe`, `schema`, `help` for API exploration
+- **v1.13.0** - Corporate Action Alerts (March 27, 2026). Added new alert types for corporate actions:
+  - **New Alert Types**: dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
+  - **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
+  - **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
+  - **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
+  - **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
+  - **Real-time Fallback**: Alerts page triggers check on load for serverless environments
 - **v1.12.1** - Worker Engine Auto-Start Fix (March 27, 2026). Fixed worker engine and cron jobs not running in production:
   - **Auto-Start Fix**: Worker engine now auto-starts on first admin GET request to `/api/admin/workers/engine` - no manual click needed
   - **indexName Fallback**: Added default indexName to cron job payload based on task type (stock_sync → NIFTY TOTAL MARKET, corp_actions → NIFTY 50)
@@ -774,6 +788,32 @@ syncService.syncFinancials(symbol, data).catch(err =>
    - Demo: demo@tradenext6.app / demo123
    - Admin: admin@tradenext6.app / admin123
 
+3. **Playwright CLI Testing Workflow** (Required for UI Changes)
+   - Start dev server if needed: `npm run dev`
+   - Open browser: `playwright-cli open http://localhost:3000`
+   - Test login flow: Fill credentials → Submit → Verify redirect
+   - Test navigation: Click menu items → Verify page loads
+   - Test forms: Fill fields → Submit → Verify success/error state
+   - Test responsive: Resize to mobile (375x667), tablet (768x1024), desktop (1920x1080)
+   - Check console errors: `playwright-cli console error`
+   - Cleanup: `playwright-cli close`
+
+4. **Required Checklist Items** (Must pass before finalizing UI changes)
+   - [ ] Start dev server if needed
+   - [ ] Test login page loads
+   - [ ] Test login with demo credentials
+   - [ ] Test UI changes render correctly
+   - [ ] Check responsive behavior
+   - [ ] Verify dark/light mode if applicable
+   - [ ] Test form submissions and interactions
+   - [ ] Check console errors
+   - [ ] Cleanup dev server processes
+
+5. **Documentation**
+   - See `.agents/skills/playwright-cli/AGENT-TESTING-GUIDE.md` for complete testing guide
+   - See `.agents/skills/playwright-cli/SKILL.md` for CLI command reference
+   - Run `npx playwright-cli --help` for available commands
+
 ### Switch Case Best Practices
 
 Always use block scope `{}` for switch cases to avoid variable hoisting:
@@ -797,4 +837,143 @@ switch (type) {
     const alerts = await getAnomalyAlerts(50, false); // Error if another case uses 'alerts'
     return NextResponse.json(alerts);
 }
+
+---
+
+## MCP API (Machine Communication Protocol)
+
+TradeNext provides a unified MCP API endpoint for external systems to query NSE data programmatically.
+
+### Endpoint
+
+```
+POST /api/mcp
+GET  /api/mcp?function=xxx&symbol=yyy
+```
+
+### Authentication
+
+Optional API key authentication via `x-api-key` header:
+
+```bash
+curl -X POST https://tradenext6.netlify.app/api/mcp \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"function": "getStockQuote", "parameters": {"symbol": "RELIANCE"}}'
+```
+
+Configure `MCP_API_KEY` in your environment to enable authentication.
+
+### Request Format
+
+**POST (JSON)**:
+```json
+{
+  "function": "getStockQuote",
+  "parameters": {
+    "symbol": "RELIANCE"
+  }
+}
+```
+
+**GET**:
+```
+GET /api/mcp?function=getStockQuote&symbol=RELIANCE
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "function": "getStockQuote",
+  "data": { ... },
+  "timestamp": "2026-03-27T12:00:00.000Z"
+}
+```
+
+### Available Functions (22 Total)
+
+| Function | Description | Parameters |
+|----------|-------------|------------|
+| `listFunctions` | List all available functions | - |
+| `help` | Get usage help and examples | - |
+| `describe` | Get function description | `functionName` |
+| `schema` | Get JSON schema for function | `functionName` |
+| `getIndexData` | All market indices | - |
+| `getMarketIndices` | Specific index data | `indexName` |
+| `getStockQuote` | Real-time quote | `symbol` (required) |
+| `getStockChart` | Historical chart | `symbol`, `period`, `interval` |
+| `getGainers` | Top gainers | `indexName` |
+| `getLosers` | Top losers | `indexName` |
+| `getMostActive` | Most active stocks | `indexName` |
+| `getAdvanceDecline` | Market breadth | `indexName` |
+| `getCorporateActions` | Corporate actions | `indexName` |
+| `getCorporateInfo` | Company info | `symbol` |
+| `getMarquee` | Scrolling data | - |
+| `getDeals` | Block/Bulk deals | `mode` |
+| `getAnnouncements` | Corporate announcements | `symbol`, `indexName` |
+| `getInsiderTrading` | Insider trading | - |
+| `getEvents` | Events calendar | - |
+| `getHeatmap` | Sector heatmap | `indexName` |
+| `getSymbols` | Index constituents | `indexName` |
+| `getTrends` | Stock trends | `symbol` |
+
+### Examples
+
+**Get stock quote:**
+```bash
+curl -X POST https://tradenext6.netlify.app/api/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"function": "getStockQuote", "parameters": {"symbol": "TCS"}}'
+```
+
+**Get market indices:**
+```bash
+curl -X POST https://tradenext6.netlify.app/api/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"function": "getIndexData"}'
+```
+
+**Get top gainers:**
+```bash
+curl -X POST https://tradenext6.netlify.app/api/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"function": "getGainers", "parameters": {"indexName": "NIFTY 50"}}'
+```
+
+**Discover available functions:**
+```bash
+curl -X POST https://tradenext6.netlify.app/api/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"function": "listFunctions"}'
+```
+
+### Caching
+
+All responses are cached for performance:
+- Stock quotes: 60 seconds
+- Market data: 2 minutes
+- Corporate actions: 5 minutes
+- Company info: 1 hour
+- Index constituents: 1 hour
+
+### Error Handling
+
+```json
+{
+  "error": "Bad Request",
+  "message": "Missing required parameter: symbol",
+  "function": "getStockQuote"
+}
+```
+
+### Integration
+
+The MCP API can be used by:
+- External trading systems
+- Mobile apps
+- Third-party dashboards
+- AI agents and chatbots
+- Custom analysis tools
 ```
