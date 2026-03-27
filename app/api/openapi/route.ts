@@ -39,8 +39,8 @@ This API is designed for programmatic access. Key endpoints:
 - MCP API: Optional x-api-key header (set MCP_API_KEY to enable)
 
 ### Test Credentials
-- Demo: demo@tradenext6.app / demo123
-- Admin: admin@tradenext6.app / admin123`,
+- Demo: demo@tradenext6.app / [password]
+- Admin: admin@tradenext6.app / [password]`,
         contact: {
             name: 'TradeNext Support',
             email: 'support@tradenext.in'
