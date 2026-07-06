@@ -58,7 +58,7 @@
     "@types/sanitize-html": "^2.16.0",
     "@types/unzipper": "^0.10.11",
     "bcryptjs": "^3.0.3",
-    "bullmq": "^5.67.2",
+    "bullmq": "^5.78.0",
     "chart.js": "^4.5.1",
     "csv-parse": "^6.1.0",
     "csv-parser": "^3.2.0",
