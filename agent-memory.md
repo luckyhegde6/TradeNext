@@ -9,8 +9,9 @@
 The post-commit hook has been created automatically as part of the Handoff File System:
 
 - **Location**: `.git/hooks/post-commit`
-- **Function**: Logs commit metadata to `agent-memory.md` and updates checkpoint in `.agents/handoffs/active/latest.md`
+- **Function**: Logs commit checkpoints to `.agents/handoffs/checkpoint.log` (non-tracked file)
 - **Automation**: Runs on every `git commit` automatically
+- **⚠️ Important**: Post-commit hook writes to a NON-TRACKED file only to avoid infinite loop. Update `agent-memory.md` manually for meaningful activity entries.
 
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
@@ -24,10 +25,10 @@ You can also manually add entries:
 
 ```bash
 # Add activity entry
-echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent--memory.md
-echo "- **Action**: Description of what was done" >> agent--memory.md
-echo "- **Files**: file1.ts, file2.ts" >> agent--memory.md
-echo "" >> agent--memory.md
+echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent-memory.md
+echo "- **Action**: Description of what was done" >> agent-memory.md
+echo "- **Files**: file1.ts, file2.ts" >> agent-memory.md
+echo "" >> agent-memory.md
 ```
 
 ---
@@ -53,7 +54,7 @@ echo "" >> agent--memory.md
     - Agent pipeline protocol: GH Helper → Integrator → QA → DevOps
     - Self-learning loop extracts patterns and promotes them to Lessons.md
     - Pre-commit hook detects console.log and hardcoded secrets
-    - Post-commit hook logs to agent-memory.md and creates checkpoint in handoff
+    - Post-commit hook logs to `.agents/handoffs/checkpoint.log` (non-tracked) to avoid infinite loop
     - Full documentation updated: AGENTS.md, Primer.md, agent-memory.md, Lessons.md
 - **Status**: RESOLVED in v1.15.0.
 
@@ -334,14 +335,4 @@ echo "" >> agent--memory.md
 - Include file names when relevant
 - Note any errors or issues encountered
 
-### 2026-07-16 04:21:03 | Branch: ph17 | Commit: 2866332
-- **Action**: Commit: feat: Implement agent handoff system with detailed flow and error recovery
-- **Files**: .agents/README.md,.agents/agents/code-reviewer.md,.agents/agents/devops.md,.agents/agents/e2e-agent.md,.agents/agents/gh-helper.md,.agents/agents/integrator.md,.agents/agents/observability.md,.agents/agents/qa.md,.agents/agents/tdd-guide.md,.agents/commands/handoff.md,.agents/commands/review-diff.md,.agents/commands/self-learn.md,.agents/handoffs/README.md,.agents/handoffs/SCHEMA.md,.agents/handoffs/active/latest.md,.agents/handoffs/flow/agent-to-agent.md,.agents/handoffs/flow/error-recovery.md,.agents/handoffs/flow/session-cycle.md,.agents/hooks/README.md,.agents/learning/README.md,.agents/learning/session-log.md,.opencode/package-lock.json,AGENTS.md,HANDOFF.md,Lessons.md,Primer.md,agent-memory.md
-- **Branch**: ph17
-
-
-### 2026-07-16 04:21:21 | Branch: ph17 | Commit: bb83e21
-- **Action**: Commit: docs: update agent memory log with latest commit details and files changed
-- **Files**: .agents/handoffs/active/latest.md,agent-memory.md
-- **Branch**: ph17
 
