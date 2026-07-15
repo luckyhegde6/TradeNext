@@ -500,6 +500,7 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 - [ ] Read Lessons.md
 - [ ] Apply all relevant rules
 - [ ] Check middleware doesn't use NextAuth (for Netlify)
+- [ ] Git hooks don't write to tracked files (check post-commit, pre-commit)
 - [ ] Verify Prisma configuration (accelerateUrl vs adapter)
 - [ ] Verify dependencies in package.json
 - [ ] Test build locally (`npm run quickbuild`)
@@ -535,7 +536,7 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-07-16 00:00
+2026-07-16 04:30
 
 ## Agent Handoff & Self-Learning System (v1.15.0)
 
@@ -588,6 +589,29 @@ priority: "high"
 - Rejects commit if potential secrets found
 - Also warns about `console.log` statements
 
+### Git Hooks Must NOT Modify Tracked Files ⚠️
+**Issue**: Post-commit hook writing to `agent-memory.md` and `latest.md` (tracked files) created an infinite loop:
+1. Commit → hook appends to tracked files → unstaged changes appear
+2. Those get committed → hook runs again → infinite loop
+3. Result: 2 auto-generated noise commits (`bb83e21`, `65ccaac`)
+
+**Solution**: Git hooks must ONLY write to NON-TRACKED files:
+```bash
+# ✅ CORRECT - write to gitignored file
+echo "checkpoint" >> .agents/handoffs/checkpoint.log  # *.log is in .gitignore
+
+# ❌ WRONG - modifies tracked files, creates infinite loop
+echo "checkpoint" >> agent-memory.md     # tracked!
+echo "checkpoint" >> latest.md           # tracked!
+```
+
+**Rule**: Before any git hook writes to a file, verify it's gitignored:
+```bash
+git check-ignore <file>  # Returns filename if ignored, empty if tracked
+```
+
+**Also**: Pre-commit hook had a minor shell bug where `grep -c` output `"0\n0"` (two lines) instead of just `0` on some systems. Fixed by using simpler integer comparison.
+
 ## SEO & Analytics Implementation (v1.11.0)
 
 ### Google Analytics 4 Setup
@@ -629,6 +653,8 @@ export function trackEvent(action: string, category: string, options?: { label?:
 ---
 
 ## Update Log
+- 2026-07-16: Added Git Hooks Must NOT Modify Tracked Files lesson (critical bugfix - infinite loop)
+- 2026-07-16: Fixed pre-commit hook shell variable handling (integer expression bug)
 - 2026-07-16: Added Agent Handoff & Self-Learning System lessons (v1.15.0)
 - 2026-07-16: Added Handoff File Protocol lesson
 - 2026-07-16: Added Session Start Protocol lesson
