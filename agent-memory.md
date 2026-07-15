@@ -4,38 +4,17 @@
 
 ---
 
-## Git Hook Setup
+## Git Hook Setup (v1.15.0)
 
-To enable automatic logging, create a post-commit hook:
+The post-commit hook has been created automatically as part of the Handoff File System:
 
-### Step 1: Create the hooks directory
-```bash
-mkdir -p .git/hooks
-```
+- **Location**: `.git/hooks/post-commit`
+- **Function**: Logs commit metadata to `agent-memory.md` and updates checkpoint in `.agents/handoffs/active/latest.md`
+- **Automation**: Runs on every `git commit` automatically
 
-### Step 2: Create post-commit hook
-Create `.git/hooks/post-commit`:
-
-```bash
-#!/bin/bash
-# Post-commit hook to log agent activity
-
-DATE=$(date '+%Y-%m-%d %H:%M:%S')
-BRANCH=$(git branch --show-current)
-COMMIT_MSG=$(git log -1 --pretty=%B)
-COMMIT_HASH=$(git log -1 --pretty=%h)
-
-echo "" >> agent--memory.md
-echo "### $DATE | Branch: $BRANCH | Commit: $COMMIT_HASH" >> agent--memory.md
-echo "- **Action**: Commit created" >> agent--memory.md
-echo "- **Message**: $COMMIT_MSG" >> agent--memory.md
-echo "" >> agent--memory.md
-```
-
-### Step 3: Make it executable
-```bash
-chmod +x .git/hooks/post-commit
-```
+The pre-commit hook is also installed at `.git/hooks/pre-commit`:
+- Checks for `console.log` statements (should use logger)
+- Detects hardcoded secrets (passwords, API keys, tokens)
 
 ---
 
@@ -54,6 +33,29 @@ echo "" >> agent--memory.md
 ---
 
 ## Activity Log
+
+### 2026-07-16 | Agent Handoff & Self-Learning System (v1.15.0) - COMPLETE
+- **Action**: Created complete agent orchestration infrastructure with handoff files, agent definitions, self-learning loop, commands, and git hooks.
+- **Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across diverse AI agents.
+- **Root Cause**: Previous system had no handoff protocol between sessions, no way for different agent types (Claude, Cursor, OpenCode) to share context, and no self-learning loop.
+- **Files Created (23 files)**:
+    - `HANDOFF.md` - Root orchestration state
+    - `.agents/handoffs/README.md`, `SCHEMA.md`, `active/latest.md`
+    - `.agents/handoffs/flow/session-cycle.md`, `agent-to-agent.md`, `error-recovery.md`
+    - `.agents/agents/gh-helper.md`, `e2e-agent.md`, `integrator.md`, `observability.md`, `devops.md`, `qa.md`
+    - `.agents/agents/code-reviewer.md` (updated), `tdd-guide.md` (updated)
+    - `.agents/commands/handoff.md`, `self-learn.md`, `review-diff.md`
+    - `.agents/learning/README.md`, `session-log.md`
+    - `.agents/hooks/README.md` (updated)
+    - `.git/hooks/pre-commit`, `post-commit`
+- **Details**:
+    - Handoff system uses YAML frontmatter with structured context, progress, decisions, blockers, learnings
+    - Agent pipeline protocol: GH Helper → Integrator → QA → DevOps
+    - Self-learning loop extracts patterns and promotes them to Lessons.md
+    - Pre-commit hook detects console.log and hardcoded secrets
+    - Post-commit hook logs to agent-memory.md and creates checkpoint in handoff
+    - Full documentation updated: AGENTS.md, Primer.md, agent-memory.md, Lessons.md
+- **Status**: RESOLVED in v1.15.0.
 
 ### 2026-03-21 | Worker Task Management Fix - COMPLETE
 - **Action**: Fixed worker task actions in admin panel - Run Now, Cancel, Retry, Delete buttons.

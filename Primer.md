@@ -2,13 +2,27 @@
 
 > Agent reads this at the start of every session to understand current state and progress
 > ⚠️ IMPORTANT: After completing ANY task, you MUST update documentation (AGENTS.md, Primer.md, agent-memory.md, Lessons.md). See Lessons.md Lesson 20 for details.
+> 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-03-21
+2026-07-16
 
 ---
 
 ## Current Project Status
+
+### Agent Handoff & Self-Learning System (v1.15.0)
+**Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across agent types (Claude, Cursor, OpenCode, etc.).
+**Fix Applied**:
+- **Handoff File System**: Created `.agents/handoffs/` with SCHEMA.md (standardized YAML frontmatter format), session lifecycle flow, agent-to-agent protocol, and error recovery strategies.
+- **Root HANDOFF.md**: Central orchestration state file that every agent reads at session start.
+- **6 Agent Definitions**: GH Helper (diff review, code verify, bug fixer), E2E Agent (Playwright flow testing), Integrator (merge/conflict resolution), Observability Checker (logging/metrics/security), DevOps (Docker/Vercel/Netlify/CI/CD), QA (test writing and E2E execution).
+- **3 Agent Commands**: `/handoff`, `/self-learn`, `/review-diff` for explicit orchestration.
+- **Self-Learning Loop**: `.agents/learning/` with session-log.md and pattern extraction workflow.
+- **Git Hooks**: pre-commit (code quality, secrets detection) and post-commit (activity logging, handoff checkpoint tracking).
+- **Updated Documentation**: AGENTS.md now documents the full orchestration system.
+**Files Created/Modified**: HANDOFF.md (new), .agents/handoffs/ (6 files), .agents/agents/ (8 agent defs), .agents/commands/ (3 commands), .agents/learning/ (2 files), .agents/hooks/ (hooks), .git/hooks/ (2 hooks)
+**Status**: RESOLVED in v1.15.0. System is ready for multi-agent workflows.
 
 ### Worker Task Management Fix (v1.11.1)
 **Issue**: Worker tasks stuck in "pending" status with no way to execute them from admin UI.
@@ -162,6 +176,18 @@
 ---
 
 ## Session History
+
+### Session 9 (July 16, 2026)
+- **Agent Handoff & Self-Learning System (v1.15.0)**: Complete agent collaboration infrastructure.
+- **Handoff System**: Created `.agents/handoffs/` with SCHEMA.md, lifecycle flow, agent-to-agent protocol, error recovery, active/archive system.
+- **Root HANDOFF.md**: Central orchestration state for all agents.
+- **Agent Definitions**: 8 specialized agents (GH Helper, E2E, Integrator, Observability, DevOps, QA, Code Reviewer, TDD Guide).
+- **Commands**: `/handoff`, `/self-learn`, `/review-diff` for explicit orchestration.
+- **Self-Learning**: `.agents/learning/` with session logs and pattern extraction.
+- **Git Hooks**: pre-commit (code quality, secrets detection) and post-commit (activity logging).
+- **Documentation**: Updated AGENTS.md, Primer.md, agent-memory.md, Lessons.md.
+- **Files Created**: HANDOFF.md, 6 files in handoffs/, 8 agents, 3 commands, 2 learning files, hooks.
+- **Status**: RESOLVED in v1.15.0.
 
 ### Session 8 (March 20, 2026)
 - **Price Alert Enhancement**: Added current stock price display in alerts.

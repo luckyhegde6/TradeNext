@@ -535,7 +535,58 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-03-21 00:00
+2026-07-16 00:00
+
+## Agent Handoff & Self-Learning System (v1.15.0)
+
+### Handoff File Protocol
+**Rule**: Always use the handoff file system for session context preservation.
+
+**Problem**: Without standardized handoff files, agent sessions lose context on restart, preventing multi-agent collaboration and self-improvement.
+
+**Solution**:
+```yaml
+# Required YAML frontmatter for all handoff files
+---
+handoff_version: "1.0"
+session_id: "sess-YYYYMMDD-HHMMSS"
+agent: "agent-type"
+timestamp: "2026-07-16T10:30:00Z"
+status: "in_progress"
+priority: "high"
+---
+```
+
+### Session Start Protocol
+**Rule**: Every agent MUST read these files in order at session start:
+1. `HANDOFF.md` - Current orchestration state
+2. `.agents/handoffs/active/latest.md` - Current handoff context
+3. `Primer.md` - Project status
+4. `Lessons.md` - Rules and corrections
+
+**Why**: Ensures that agents work with complete context even after session restarts or agent switches.
+
+### Agent Pipeline Protocol
+**Rule**: Use the defined agent pipeline for complex workflows:
+- GH Helper → Integrator → QA → DevOps
+- Observability runs cross-cutting at any stage
+
+**Why**: Each agent has specialized tools and focus. The pipeline ensures quality gates at each step.
+
+### Self-Learning Loop
+**Rule**: After every significant session, run `/self-learn` to extract patterns.
+
+**What to Extract**:
+- **Good Patterns**: Things that worked well → promote to practices
+- **Anti-Patterns**: Things that failed → add to Lessons.md
+- **Metrics**: Build success rate, test pass rate, time to first commit
+
+### Pre-Commit Secrets Detection
+**Issue**: Hardcoded credentials may leak to git history
+**Solution**: Pre-commit hook checks staged changes for:
+- `password`, `secret`, `api_key`, `auth_token` followed by long string values
+- Rejects commit if potential secrets found
+- Also warns about `console.log` statements
 
 ## SEO & Analytics Implementation (v1.11.0)
 
@@ -578,6 +629,12 @@ export function trackEvent(action: string, category: string, options?: { label?:
 ---
 
 ## Update Log
+- 2026-07-16: Added Agent Handoff & Self-Learning System lessons (v1.15.0)
+- 2026-07-16: Added Handoff File Protocol lesson
+- 2026-07-16: Added Session Start Protocol lesson
+- 2026-07-16: Added Agent Pipeline Protocol lesson
+- 2026-07-16: Added Self-Learning Loop lesson
+- 2026-07-16: Added Pre-Commit Secrets Detection lesson
 - 2026-03-21: Added SEO & Analytics lesson (v1.11.0)
 - 2026-03-20: Added lesson 23 (Path Traversal Prevention) - sanitize user inputs in file paths
 - 2026-03-20: Added lesson 22 (NSE API Field Casing) - NSE uses lowercase fields

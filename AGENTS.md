@@ -4,6 +4,14 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
 
 ## Version History
+- **v1.15.0** - Agent Handoff & Self-Learning System (July 16, 2026). Complete overhaul of agent collaboration infrastructure:
+  - **Handoff File System**: Created `.agents/handoffs/` with standardized schema, lifecycle flows, and agent-to-agent handoff protocol. Root `HANDOFF.md` orchestrates state across sessions.
+  - **Agent Definitions**: Created 6 specialized agent profiles: GH Helper (diff review, code verify, bug fix), E2E Agent (Playwright flow testing), Integrator (merge/conflict resolution), Observability Checker (logging/metrics/security audit), DevOps (Docker/Vercel/Netlify/CICD), QA (test writing and E2E execution).
+  - **Self-Learning Loop**: Created `.agents/learning/` with session logs, pattern extraction, metrics tracking. Every session feeds into continuous improvement.
+  - **Agent Commands**: Added `/handoff`, `/self-learn`, `/review-diff` commands for explicit orchestration.
+  - **Git Hooks**: Added pre-commit (code quality, secrets detection) and post-commit (activity logging, checkpoint tracking) hooks.
+  - **Documentation Update**: Expanded AGENTS.md, Primer.md, agent-memory.md, Lessons.md with handoff patterns.
+  - **Files Created**: 20+ files in `.agents/` structure (handoffs, agents, learning, commands, hooks).
 - **v1.14.0** - MCP API for External NSE Data (March 27, 2026). Added unified API endpoint for external NSE data queries:
   - **MCP Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
   - **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
@@ -647,6 +655,55 @@ When this guardrail is triggered, the AI agent must:
 
 ---
 
+## Agent Orchestration System (v1.15.0)
+
+TradeNext uses a comprehensive agent orchestration system for multi-agent collaboration:
+
+### Handoff File System (`.agents/handoffs/`)
+Standardized handoff mechanism for context transfer between sessions and agents:
+- **`SCHEMA.md`** - Handoff file format with YAML frontmatter
+- **`flow/session-cycle.md`** - Complete session lifecycle (INIT → ACTIVE → HANDOFF/COMPLETE)
+- **`flow/agent-to-agent.md`** - Agent pipeline protocol (GH Helper → Integrator → QA → DevOps)
+- **`flow/error-recovery.md`** - Recovery strategies with checkpoint system
+- **`active/latest.md`** - Current session handoff (updated in real-time)
+- **`archive/`** - Completed handoffs from past sessions
+
+### Agent Definitions (`.agents/agents/`)
+Specialized agent profiles with workflows and handoff triggers:
+| Agent | File | Purpose |
+|-------|------|---------|
+| GH Helper | `gh-helper.md` | Diff review, code verify, feature review, bug fix |
+| E2E Agent | `e2e-agent.md` | Playwright flow testing, responsive testing |
+| Integrator | `integrator.md` | Merge/conflict resolution, schema migration |
+| Observability | `observability.md` | Logging audit, metrics, security, performance |
+| DevOps | `devops.md` | Docker, Vercel, Netlify, CI/CD, environments |
+| QA | `qa.md` | Jest/Playwright testing, regression detection |
+| Code Reviewer | `code-reviewer.md` | Senior-level code quality review |
+| TDD Guide | `tdd-guide.md` | Test-driven development workflow |
+
+### Self-Learning Loop (`.agents/learning/`)
+Continuous improvement through systematic reflection:
+- **`README.md`** - Learning loop process and maturity model
+- **`session-log.md`** - Session outcome tracking with metrics
+- **`patterns/`** - Reusable patterns extracted from work
+
+### Agent Commands (`.agents/commands/`)
+| Command | File | Purpose |
+|---------|------|---------|
+| `/handoff` | `handoff.md` | Create handoff to another agent or archive session |
+| `/self-learn` | `self-learn.md` | Trigger self-learning loop and pattern extraction |
+| `/review-diff` | `review-diff.md` | Full diff review with security/quality checks |
+
+### Git Hooks (`.git/hooks/`)
+| Hook | Purpose |
+|------|---------|
+| `pre-commit` | Code quality checks, secrets detection |
+| `post-commit` | Activity logging, handoff checkpoint tracking |
+
+### Root Orchestration
+- **`HANDOFF.md`** - Central orchestration state (MUST read at session start)
+- Reads: `HANDOFF.md` → `latest.md` → `Primer.md` → `Lessons.md`
+
 ## Agent Documentation Files
 
 This project uses additional documentation for agent sessions:
@@ -656,6 +713,8 @@ This project uses additional documentation for agent sessions:
 | `Primer.md` | Session tracking - read at start of every session |
 | `agent-memory.md` | Activity log - tracks all agent work |
 | `Lessons.md` | Rules & corrections - read before every commit |
+| `HANDOFF.md` | Root orchestration state - read at start of every session |
+| `.agents/handoffs/active/latest.md` | Current session handoff state |
 
 ### ⚠️ MANDATORY: Documentation Update Rule
 
@@ -684,10 +743,10 @@ After every change (bug fix, feature, refactoring), update these files:
 
 ### Usage
 
-1. **Start of session**: Read `Primer.md` to understand current state
-2. **During work**: Log activities in `agent-memory.md`
+1. **Start of session**: Read `HANDOFF.md` to understand orchestration state
+2. **During work**: Log activities in `agent-memory.md`, update `latest.md` handoff
 3. **Before commit**: Read `Lessons.md` to apply rules
-4. **End of session**: Update `Primer.md` with progress
+4. **End of session**: Update `Primer.md` with progress, archive handoff
 
 ---
 
