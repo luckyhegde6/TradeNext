@@ -36,8 +36,10 @@
 | Advanced Screener (v1.16.0) | [x] Complete |
 | Alert Engine (v2.1.0) | [x] Complete |
 | Admin Alert Config (v2.2.0) | [x] Complete |
-| Portfolio Analytics | [ ] Pending |
-| Stock Compare | [ ] Pending |
+| Portfolio Export (CSV) | [x] Complete |
+| P&L Over Time Chart | [x] Complete |
+| Portfolio Analytics (Risk Metrics) | [ ] Pending |
+| Stock Compare + Benchmark | [ ] Pending |
 
 ## v1.8.0 - Security Enhancements
 
@@ -286,8 +288,16 @@
 - [ ] Risk metrics (beta, volatility)
 
 ### Comparison Tool - ⏳ PENDING
-- [ ] Compare stocks
+- [ ] Compare stocks (table exists, needs chart overlay + historical perf)
 - [ ] Compare portfolio vs benchmark (NIFTY 50)
+
+### Quick Wins Completed (v3.0.0)
+- [x] Portfolio CSV Export API (`/api/portfolio/export?type=fy-report|detailed-pnl`)
+- [x] Download FY Report button wired in PortfolioClient
+- [x] Detailed P&L (CSV) button wired in PortfolioClient
+- [x] P&L Over Time chart (`PnLChart.tsx`) with Overview/Timeline toggle
+- [x] Portfolio value history service (`lib/services/portfolioHistoryService.ts`)
+- [x] Historical portfolio value API (`/api/portfolio/history`)
 
 ---
 

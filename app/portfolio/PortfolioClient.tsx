@@ -128,6 +128,25 @@ export default function PortfolioClient() {
         }
     };
 
+    const downloadCSV = async (type: "fy-report" | "detailed-pnl") => {
+        try {
+            const res = await fetch(`/api/portfolio/export?type=${type}&fy=2024-25`);
+            if (!res.ok) { const err = await res.json(); alert(err.error || "Export failed"); return; }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `portfolio-${type}-2024-25.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error("CSV export error:", e);
+            alert("Failed to export portfolio data");
+        }
+    };
+
     const fetchTransactions = async () => {
         try {
             setLoadingTransactions(true);
@@ -284,13 +303,19 @@ export default function PortfolioClient() {
                             <option value="2022-23">FY 2022 - 2023</option>
                         </select>
                     </div>
-                    <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white font-bold rounded-lg shadow-md hover:opacity-90 active:scale-95 transition-all">
+                    <button
+                        onClick={() => downloadCSV("fy-report")}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white font-bold rounded-lg shadow-md hover:opacity-90 active:scale-95 transition-all"
+                    >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Download FY Report
                     </button>
-                    <button className="flex items-center gap-2 px-6 py-2.5 border border-border text-surface-foreground/60 font-bold rounded-lg hover:bg-primary/5 transition-all">
+                    <button
+                        onClick={() => downloadCSV("detailed-pnl")}
+                        className="flex items-center gap-2 px-6 py-2.5 border border-border text-surface-foreground/60 font-bold rounded-lg hover:bg-primary/5 transition-all"
+                    >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
