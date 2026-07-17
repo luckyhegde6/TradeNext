@@ -519,17 +519,20 @@ model AdminAnnouncement {
 }
 
 model Notification {
-  id          String    @id @default(uuid())
-  userId      Int
-  type        String    // alert_triggered | recommendation | system | watchlist | contact_message
-  title       String
-  message     String
-  link        String?
-  isRead      Boolean   @default(false)
-  isAddressed Boolean   @default(false)
-  addressedAt DateTime?
-  addressedBy Int?
-  createdAt   DateTime  @default(now())
+  id              String    @id @default(uuid())
+  userId          Int
+  type            String    // alert_triggered | recommendation | system | watchlist | contact_message
+  title           String
+  message         String
+  link            String?
+  isRead          Boolean   @default(false)
+  isAddressed     Boolean   @default(false)
+  addressedAt     DateTime?
+  addressedBy     Int?
+  channelId       String?   // Reference to AlertChannel if delivered via channel
+  deliveryStatus  String?   // delivered | failed | pending — tracks channel delivery
+  acknowledgedAt  DateTime? // When user acknowledged the notification
+  createdAt       DateTime  @default(now())
 
   @@index([userId])
   @@index([isRead])
@@ -1047,4 +1050,68 @@ model UserSession {
   @@index([isActive])
   @@index([expiresAt])
   @@map("user_sessions")
+}
+
+// ============================================
+// Phase 2: Enterprise Alert Engine (v2.1.0)
+// ============================================
+
+// Delivery channel configuration (email, webhook, telegram, push)
+model AlertChannel {
+  id        String   @id @default(uuid())
+  userId    Int
+  type      String   // email | webhook | telegram | push
+  name      String
+  config    Json     // Type-specific config (smtp, url, bot_token, etc.)
+  isActive  Boolean  @default(true)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@map("alert_channels")
+}
+
+// Multi-condition alert rules using FilterGroup from Phase 1
+model AlertRule {
+  id              String    @id @default(uuid())
+  userId          Int
+  name            String
+  description     String?
+  condition       Json      // FilterGroup tree — reuses screener condition tree
+  channels        String[]  // References to AlertChannel IDs
+  schedule        Json?     // Active hours, days, cooldown minutes
+  escalation      Json?     // Escalation rules (delay, channels to escalate to)
+  action          Json?     // One-click action config (buy/sell/paper_trade)
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  triggerCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  events          AlertEvent[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("alert_rules")
+}
+
+// Alert trigger event history
+model AlertEvent {
+  id              String    @id @default(uuid())
+  ruleId          String
+  triggeredAt     DateTime  @default(now())
+  channel         String    // Which channel delivered: email | webhook | telegram | push | in_app
+  status          String    // delivered | failed | pending
+  error           String?
+  metadata        Json?     // Trigger details (symbol, price, values at trigger time)
+  acknowledgedAt  DateTime?
+
+  rule            AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, triggeredAt])
+  @@index([channel])
+  @@index([status])
+  @@map("alert_events")
 }
