@@ -34,7 +34,8 @@
 | DB Session Tracking (v1.8.0) | [x] Complete |
 | Admin Session Management (v1.8.0) | [x] Complete |
 | Advanced Screener (v1.16.0) | [x] Complete |
-| Enhanced Alerts | [ ] Pending |
+| Alert Engine (v2.1.0) | [x] Complete |
+| Admin Alert Config (v2.2.0) | [x] Complete |
 | Portfolio Analytics | [ ] Pending |
 | Stock Compare | [ ] Pending |
 
@@ -251,17 +252,29 @@
 
 ---
 
-## Phase 2: Enhanced Alerts
+## Phase 2: Enhanced Alerts — ✅ COMPLETE (v2.1.0 + v2.2.0)
 
-### Notification System - ⏳ PENDING
-- [ ] In-app notifications
-- [ ] Email notifications
-- [ ] SMS alerts (optional)
+### Notification System
+- [x] In-app notifications (`lib/alerts/delivery/index.ts` → `createInAppNotification()`)
+- [x] Email notifications (`lib/alerts/delivery/email.ts` → `sendEmailAlert()` via nodemailer SMTP)
+- [x] Webhook notifications (`lib/alerts/delivery/webhook.ts` → Slack/Discord/Generic)
+- [x] Telegram notifications (`lib/alerts/delivery/telegram.ts` → Bot API)
+- [ ] SMS alerts (optional — not implemented)
 
-### Smart Alerts - ⏳ PENDING
-- [ ] Price target alerts
-- [ ] Percentage change alerts
-- [ ] Volume spike alerts
+### Smart Alerts
+- [x] Price target alerts (above/below via FilterGroup conditions & legacy alertService)
+- [x] Percentage change alerts (price_jump / change_percent fields)
+- [x] Volume spike alerts (volume_spike type + volume/relative_volume fields)
+
+### Alert Engine
+- [x] FilterGroup-based condition evaluation against live quotes
+- [x] Schedule restrictions (active hours/days)
+- [x] Cooldown enforcement
+- [x] Delivery Manager routing to multiple channels
+- [x] Delivery event tracking (AlertEvent + DeliveryLog)
+- [x] Admin management UI: Channels, Secrets, Delivery Logs
+- [x] AES-256-GCM encrypted credential storage (Secret model)
+- [x] 28 tests (email: 9, webhook: 8, alert-engine: 11)
 
 ---
 

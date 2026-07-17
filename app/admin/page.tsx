@@ -55,7 +55,7 @@ export default function AdminDashboardPage() {
     },
     {
       title: "Alerts Management",
-      description: "Manage user alerts and notifications",
+      description: "User alerts, delivery channels, secrets, and delivery logs",
       href: "/admin/alerts",
       icon: "🔔",
       color: "bg-yellow-500",

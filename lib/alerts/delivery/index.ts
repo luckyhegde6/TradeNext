@@ -1,7 +1,7 @@
 /**
  * Alert Delivery Manager — routes alert notifications to configured channels.
  *
- * Supports: in_app (DB notification), email (SMTP), webhook (HTTP POST)
+ * Supports: in_app (DB notification), email (SMTP), webhook (HTTP POST), telegram
  *
  * Each channel is configured via the AlertChannel model.
  */
@@ -10,6 +10,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { sendEmailAlert, buildAlertEmailHtml, type EmailConfig } from "./email";
 import { sendWebhookAlert, type WebhookConfig } from "./webhook";
+import { sendTelegramAlert, type TelegramConfig } from "./telegram";
 
 export interface AlertContext {
   ruleId: string;
@@ -29,10 +30,12 @@ export interface DeliveryResult {
   success: boolean;
   error?: string;
   messageId?: string;
+  statusCode?: number;
+  durationMs?: number;
 }
 
 /**
- * Route an alert to all active channels for a rule, and record events.
+ * Route an alert to all active channels for a rule, and record events + delivery logs.
  */
 export async function deliverAlert(
   context: AlertContext,
@@ -40,6 +43,7 @@ export async function deliverAlert(
   userId: number
 ): Promise<DeliveryResult[]> {
   const results: DeliveryResult[] = [];
+  const now = new Date();
 
   // 1. Always create an in-app notification
   await createInAppNotification(context, userId);
@@ -50,23 +54,33 @@ export async function deliverAlert(
       where: {
         id: { in: channelIds },
         isActive: true,
-        userId,
+        OR: [{ userId }, { userId: 0 }], // match user-owned OR system-wide channels
       },
     });
 
     for (const channel of channels) {
+      const startTime = Date.now();
       const result = await deliverToChannel(channel, context);
+      result.durationMs = Date.now() - startTime;
       results.push(result);
 
       // Record AlertEvent
       await prisma.alertEvent.create({
         data: {
           ruleId: context.ruleId,
-          channel: channel.type,
+          channelId: channel.id,
+          channelType: channel.type,
           status: result.success ? "delivered" : "failed",
           error: result.error,
-          metadata: context.metadata as any || {},
-          acknowledgedAt: null,
+          metadata: {
+            ...(context.metadata as Record<string, unknown> || {}),
+            symbol: context.symbol,
+            price: context.price,
+            message: context.message,
+            durationMs: result.durationMs,
+          },
+          attemptedAt: now,
+          deliveredAt: result.success ? now : null,
         },
       });
     }
@@ -76,7 +90,7 @@ export async function deliverAlert(
 }
 
 /**
- * Deliver to a single channel.
+ * Deliver to a single channel — includes delivery log tracking.
  */
 async function deliverToChannel(
   channel: { id: string; type: string; config: any },
@@ -122,10 +136,7 @@ async function deliverToChannel(
           "% Change": context.pChange ? `${context.pChange >= 0 ? "+" : ""}${context.pChange.toFixed(2)}%` : "N/A",
           Link: context.link || "N/A",
         },
-        color:
-          (context.change || 0) >= 0
-            ? "green"
-            : "red",
+        color: (context.change || 0) >= 0 ? "green" : "red",
       };
       const result = await sendWebhookAlert(webhookConfig, payload);
       return {
@@ -133,19 +144,30 @@ async function deliverToChannel(
         channelType: "webhook",
         success: result.success,
         error: result.error,
+        statusCode: result.statusCode,
       };
     }
 
-    case "telegram":
+    case "telegram": {
+      const tgConfig = config as TelegramConfig;
+      const text = `*${context.ruleName}*\n${context.message}${context.symbol ? `\nSymbol: ${context.symbol}` : ""}${context.price ? `\nPrice: ₹${context.price.toLocaleString("en-IN")}` : ""}`;
+      const result = await sendTelegramAlert(tgConfig, text, context.link);
+      return {
+        channelId: channel.id,
+        channelType: "telegram",
+        success: result.success,
+        error: result.error,
+      };
+    }
+
     case "push":
-      // Placeholder for future channels
       logger.info({
-        msg: "Channel type not yet implemented",
+        msg: "Push channel type not yet implemented",
         channelType: channel.type,
       });
       return {
         channelId: channel.id,
-        channelType: channel.type,
+        channelType: "push",
         success: false,
         error: `Channel type '${channel.type}' not yet implemented`,
       };
@@ -213,4 +235,61 @@ export async function acknowledgeAlert(
     },
     data: { isRead: true, acknowledgedAt: now },
   });
+}
+
+/**
+ * Get delivery statistics for monitoring/observability.
+ */
+export async function getDeliveryStats(options?: {
+  userId?: number;
+  hours?: number;
+  channelType?: string;
+  status?: string;
+}) {
+  const hours = options?.hours || 24;
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  const where: any = {
+    attemptedAt: { gte: since },
+  };
+  if (options?.channelType) where.channelType = options.channelType;
+  if (options?.status) where.status = options.status;
+  if (options?.userId) {
+    where.rule = { userId: options.userId };
+  }
+
+  const [total, byStatus, byChannel, byHour, failures] = await Promise.all([
+    prisma.alertEvent.count({ where, ...(options?.channelType ? {} : {}) }),
+    prisma.alertEvent.groupBy({
+      by: ["status"],
+      where,
+      _count: true,
+    }),
+    prisma.alertEvent.groupBy({
+      by: ["channelType"],
+      where,
+      _count: true,
+    }),
+    // Hourly breakdown
+    prisma.alertEvent.groupBy({
+      by: ["status"],
+      where: { attemptedAt: { gte: since } },
+      _count: true,
+    }),
+    // Recent failures
+    prisma.alertEvent.findMany({
+      where: { ...where, status: "failed" },
+      orderBy: { attemptedAt: "desc" },
+      take: 20,
+      include: { rule: { select: { name: true, userId: true } } },
+    }),
+  ]);
+
+  return {
+    total,
+    since,
+    byStatus: byStatus.map((s) => ({ status: s.status, count: s._count })),
+    byChannel: byChannel.map((c) => ({ channelType: c.channelType, count: c._count })),
+    recentFailures: failures,
+  };
 }

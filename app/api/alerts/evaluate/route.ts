@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
         }),
         prisma.alertEvent.findMany({
           where: { rule: { userId } },
-          orderBy: { triggeredAt: "desc" },
+          orderBy: { attemptedAt: "desc" },
           take: 10,
           include: { rule: { select: { name: true } } },
         }),

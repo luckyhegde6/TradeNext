@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
       const [events, total] = await Promise.all([
         prisma.alertEvent.findMany({
           where: ruleId ? { ruleId, status: status || undefined } : { ruleId: { in: userRuleIds }, status: status || undefined },
-          orderBy: { triggeredAt: "desc" },
+          orderBy: { attemptedAt: "desc" },
           take: Math.min(limit, 100),
           skip: offset,
         }),

@@ -1058,15 +1058,16 @@ model UserSession {
 
 // Delivery channel configuration (email, webhook, telegram, push)
 model AlertChannel {
-  id        String   @id @default(uuid())
-  userId    Int
-  type      String   // email | webhook | telegram | push
-  name      String
-  config    Json     // Type-specific config (smtp, url, bot_token, etc.)
-  isActive  Boolean  @default(true)
-  verified  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  userId      Int      @default(0)  // 0 = system-wide (admin), >0 = user-owned
+  type        String   // email | webhook | telegram | push
+  name        String
+  config      Json     // Type-specific config (smtp, url, bot_token, etc.)
+  isActive    Boolean  @default(true)
+  verified    Boolean  @default(false)
+  lastTestedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([userId])
   @@index([type])
@@ -1101,17 +1102,54 @@ model AlertRule {
 model AlertEvent {
   id              String    @id @default(uuid())
   ruleId          String
-  triggeredAt     DateTime  @default(now())
-  channel         String    // Which channel delivered: email | webhook | telegram | push | in_app
+  channelId       String?   // Reference to AlertChannel ID
+  channelType     String    // email | webhook | telegram | push | in_app
   status          String    // delivered | failed | pending
   error           String?
   metadata        Json?     // Trigger details (symbol, price, values at trigger time)
+  deliveredAt     DateTime?
+  attemptedAt     DateTime  @default(now())
   acknowledgedAt  DateTime?
 
   rule            AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
-  @@index([ruleId, triggeredAt])
-  @@index([channel])
+  @@index([ruleId, attemptedAt])
+  @@index([channelType])
   @@index([status])
   @@map("alert_events")
+}
+
+// Encrypted secrets for delivery channel credentials
+model Secret {
+  id        String   @id @default(uuid())
+  name      String   @unique   // Unique key: "smtp_gmail", "telegram_bot", "slack_webhook"
+  type      String   // smtp_password | api_key | bot_token | webhook_secret
+  value     String   // Encrypted value (AES-256-GCM)
+  hint      String?  // Visible hint (e.g., "user@***.com" or "token ending with XXXX")
+  metadata  Json?    // Additional metadata (expiry, rotation, last used)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@map("secrets")
+}
+
+// Delivery attempt log for observability
+model DeliveryLog {
+  id          String   @id @default(uuid())
+  eventId     String   // Reference to AlertEvent
+  channelId   String?  // Reference to AlertChannel
+  channelType String   // email | webhook | telegram | push
+  attempt     Int      @default(1)   // Which attempt number
+  status      String   // success | failed | pending
+  statusCode  Int?     // HTTP status code or SMTP response code
+  response    String?  // Response body or error message
+  durationMs  Int?     // How long the delivery took
+  attemptedAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([status])
+  @@map("delivery_logs")
 }

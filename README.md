@@ -12,7 +12,7 @@
 - **Backtest Engine**: OHLCV-based trade simulator with profit target, stop-loss, trailing stop, position sizing, Sharpe ratio
 - **FilterBuilder UI**: Category-organized field dropdowns, validation hints, multi-value input for list operators
 - **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
-- **Templates**: 25 pre-built Chartink-inspired scans (Large Cap, RSI Oversold, High Volume Breakout, etc.)
+- **Templates**: 98 pre-built Chartink-inspired scans across 9 categories (Fundamental, Technical, Candlestick, Range Breakout, Crossover, Bullish, Bearish, Intraday Bullish, Intraday Bearish)
 - **Scan Configs**: Save/load scans with inline editing, share links, public/private toggle
 - **Backtest Dialog**: Config form, equity curve SVG chart, performance metrics, trade history table
 - **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
