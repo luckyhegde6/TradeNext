@@ -59,3 +59,13 @@ worker_logs/
 
 #server logs
 server_logs/
+
+# E2E walkthrough screenshots (generated during testing)
+/e2e-screenshots/
+
+# playwright test results (generated during testing)
+/playwright-report/
+.playwright-report/
+.playwright-mcp
+test-results/
+.playwright

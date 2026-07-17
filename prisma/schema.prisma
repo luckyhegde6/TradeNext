@@ -317,12 +317,23 @@ model Alert {
 }
 
 model AIInsight {
-  id        String   @id @default(uuid())
-  snapshotId String
-  summary   String
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid())
+  snapshotId   String    // Reference to the source data (taskId, reportId, scanId)
+  summary     String
+  symbol      String?   // Associated stock symbol (if any)
+  source      String?   // "agent_market" | "agent_pattern" | "agent_document" | "agent_sentiment" | "system"
+  agentType   String?   // "market_analyst" | "pattern_scout" | "document_analyst" | "sentiment"
+  confidence  Decimal?  @db.Decimal(5,4) // 0.0 to 1.0 confidence score
+  metadata    Json?     // Additional structured data (extracted metrics, patterns, etc.)
+  createdAt   DateTime  @default(now())
+
+  @@index([symbol])
+  @@index([source])
+  @@index([createdAt])
+  @@map("ai_insights")
 }
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanConfig / ScanResult / ScanResultItem
 model SavedScreen {
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -724,6 +735,7 @@ model StockSnapshot {
 // Screener Models
 // ============================================
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanConfig
 model ScreenerConfig {
   id              String    @id @default(uuid())
   name            String
@@ -741,6 +753,7 @@ model ScreenerConfig {
   @@map("screener_configs")
 }
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanResult + ScanResultItem
 model ScreenerResult {
   id              String    @id @default(uuid())
   configId        String
@@ -783,6 +796,114 @@ model DailyScreenerSync {
 
   @@index([syncDate])
   @@map("daily_screener_syncs")
+}
+
+// ============================================
+// Phase 1: Advanced Screener Models (v2.0.0)
+// ============================================
+
+model ScanConfig {
+  id          String    @id @default(uuid())
+  userId      Int       // Owner of the config
+  name        String
+  description String?
+  filters     Json      // FilterGroup condition tree
+  columns     Json?     // Custom column selection for results
+  schedule    String?   // Cron expression for auto-run (optional)
+  isPublic    Boolean   @default(false)
+  lastRunAt   DateTime?
+  runCount    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  results     ScanResult[]
+
+  @@index([userId])
+  @@index([isPublic])
+  @@map("scan_configs")
+}
+
+model ScanResult {
+  id          String    @id @default(uuid())
+  configId    String
+  runAt       DateTime  @default(now())
+  matchCount  Int
+  totalCount  Int       @default(0)
+  executionMs Int?      // How long the scan took
+  status      String    @default("completed") // running | completed | failed
+  error       String?
+
+  config      ScanConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  items       ScanResultItem[]
+
+  @@index([configId, runAt])
+  @@map("scan_results")
+}
+
+model ScanResultItem {
+  id        String     @id @default(uuid())
+  resultId  String
+  symbol    String
+  name      String?
+  price     Decimal?   @db.Decimal(30,6)
+  change    Decimal?   @db.Decimal(30,6)
+  pChange   Decimal?   @db.Decimal(30,6)
+  volume    BigInt?
+  data      Json?      // Full snapshot of all fields at scan time (key-value pairs)
+
+  result    ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([symbol])
+  @@map("scan_result_items")
+}
+
+model BacktestRun {
+  id              String        @id @default(uuid())
+  userId          Int
+  name            String
+  strategyId      String?       // Optional: link to a TradingStrategy (Phase 3)
+  configId        String?       // Optional: link to a ScanConfig
+  entryFilter     Json          // Entry condition tree
+  exitFilter      Json?         // Exit condition tree (optional, manual exit)
+  startDate       DateTime
+  endDate         DateTime
+  initialCapital  Decimal?      @db.Decimal(30,2) @default(1000000)
+  totalTrades     Int           @default(0)
+  winRate         Decimal?      @db.Decimal(10,4)
+  totalPnl        Decimal?      @db.Decimal(30,2)
+  maxDrawdown     Decimal?      @db.Decimal(10,4)
+  sharpeRatio     Decimal?      @db.Decimal(10,4)
+  status          String        @default("pending") // pending | running | completed | failed
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  trades          BacktestTrade[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("backtest_runs")
+}
+
+model BacktestTrade {
+  id          String    @id @default(uuid())
+  runId       String
+  symbol      String
+  entryDate   DateTime
+  exitDate    DateTime?
+  entryPrice  Decimal?  @db.Decimal(30,2)
+  exitPrice   Decimal?  @db.Decimal(30,2)
+  quantity    Int?
+  pnl         Decimal?  @db.Decimal(30,2)
+  pnlPercent  Decimal?  @db.Decimal(10,4)
+  entryReason String?   // What triggered the entry
+  exitReason  String?   // What triggered the exit
+
+  run         BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([symbol])
+  @@map("backtest_trades")
 }
 
 // Market Cache - stores cached NSE data with smart refresh logic

@@ -33,6 +33,7 @@
 | Security Enhancements (v1.8.0) | [x] Complete |
 | DB Session Tracking (v1.8.0) | [x] Complete |
 | Admin Session Management (v1.8.0) | [x] Complete |
+| Advanced Screener (v1.16.0) | [x] Complete |
 | Enhanced Alerts | [ ] Pending |
 | Portfolio Analytics | [ ] Pending |
 | Stock Compare | [ ] Pending |

@@ -4,23 +4,20 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.14.0 (March 27, 2026)
+## Latest Update - v1.16.0 (July 16, 2026)
 
-### MCP API for External NSE Data
-- **New Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
-- **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
-- **Authentication**: Optional API key via `x-api-key` header (configurable via `MCP_API_KEY`)
-- **JSON Format**: Returns standardized response with success, function, data, timestamp
-- **Caching**: All responses cached for performance (60s-3600s)
-- **Discovery**: Built-in `listFunctions`, `describe`, `schema`, `help` for API exploration
-
-### Corporate Action Alerts (v1.13.0)
-- **New Alert Types**: Added support for dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
-- **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
-- **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
-- **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
-- **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
-- **Real-time Fallback**: Alerts page triggers check on load for serverless environments
+### Advanced Screener — Chartink-Like Scanning
+- **Filter Condition Tree**: 40+ filter fields with recursive AND/OR groups, numeric and string operators
+- **Technical Analysis Library**: RSI, MACD, SMA, EMA, Bollinger Bands, ADX, ATR, candlestick patterns
+- **Backtest Engine**: OHLCV-based trade simulator with profit target, stop-loss, trailing stop, position sizing, Sharpe ratio
+- **FilterBuilder UI**: Category-organized field dropdowns, validation hints, multi-value input for list operators
+- **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
+- **Templates**: 25 pre-built Chartink-inspired scans (Large Cap, RSI Oversold, High Volume Breakout, etc.)
+- **Scan Configs**: Save/load scans with inline editing, share links, public/private toggle
+- **Backtest Dialog**: Config form, equity curve SVG chart, performance metrics, trade history table
+- **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
+- **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
+- **Chartink Reverse-Engineered**: Analyzed Chartink's DSL, API, and 150,000+ community screeners. Built native TradingView-based equivalent without middleman dependencies.
 
 ### Tested Features (March 2026)
 | Feature | Status | Notes |

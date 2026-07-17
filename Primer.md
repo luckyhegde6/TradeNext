@@ -11,6 +11,26 @@
 
 ## Current Project Status
 
+### Advanced Screener System (v1.16.0)
+**Issue**: No Chartink-like multi-condition screener with technical analysis and backtesting.
+**Fix Applied**:
+- **Filter Grammar Engine**: Recursive FilterGroup/FilterCondition types, 40+ fields, Zod schemas
+- **Filter Evaluation Engine**: Numeric/string operators, recursive tree evaluation, batch filtering
+- **Technical Analysis Library**: SMA, EMA, RSI, MACD, Bollinger Bands, candlestick patterns
+- **Backtest Engine**: OHLCV-based simulator with profit target, stop-loss, trailing stop, Sharpe ratio
+- **TradingView Service**: Enhanced with advancedScan(), 46 column constants
+- **6 Prisma Models**: ScanConfig, ScanResult, ScanResultItem, BacktestRun, BacktestTrade (deprecated 3 old)
+- **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
+- **FilterBuilder UI**: Recursive condition tree editor with validation hints, multi-value input
+- **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
+- **ScanConfigsManager**: Inline edit/delete/share configs with public/private toggle
+- **TemplatesPanel**: 25 Chartink-inspired presets with category filters and search
+- **BacktestDialog**: Config form, equity curve SVG, metrics cards, trade history table
+- **Chartink Reverse-Engineered**: Analyzed DSL, API, and 150,000+ community screeners
+- **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
+**Files Created**: 25+ files across lib/screener/, app/api/screener/, app/api/backtest/, app/components/screener/
+**Status**: RESOLVED in v1.16.0.
+
 ### Agent Handoff & Self-Learning System (v1.15.0)
 **Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across agent types (Claude, Cursor, OpenCode, etc.).
 **Fix Applied**:

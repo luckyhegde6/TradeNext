@@ -505,6 +505,13 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 - [ ] Verify dependencies in package.json
 - [ ] Test build locally (`npm run quickbuild`)
 - [ ] Check for console.log in critical paths (debugging)
+- [ ] **CODE HYGIENE: Clean up artifacts before commit**:
+      - [ ] Run `git status` — review ALL untracked and modified files
+      - [ ] Delete junk artifacts: Playwright snapshots (`*.yaml`), screenshots, temp logs
+      - [ ] Verify `.gitignore` covers common artifact patterns (`.yaml`, `.log`, `test-results/`)
+      - [ ] Ensure no dead code, commented-out code, or debug `console.log` statements
+      - [ ] Check no secrets/tokens/passwords appear in the diff
+      - [ ] Review diff size — if unexpectedly large, investigate each file
 - [ ] **MANDATORY: Update ALL documentation files**:
       - [ ] **AGENTS.md** - Version history + detailed change section
       - [ ] **Primer.md** - Current status + session history
@@ -536,9 +543,9 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-07-16 04:30
+2026-07-16 08:25
 
-## Agent Handoff & Self-Learning System (v1.15.0)
+## Advanced Screener Lessons (v1.16.0)
 
 ### Handoff File Protocol
 **Rule**: Always use the handoff file system for session context preservation.
@@ -573,6 +580,54 @@ priority: "high"
 - Observability runs cross-cutting at any stage
 
 **Why**: Each agent has specialized tools and focus. The pipeline ensures quality gates at each step.
+
+### Advanced Screener Lessons (v1.16.0)
+
+**Chartink Architecture**: Chartink is a TradingView wrapper — `POST /screener/process` with DSL like `( {cash} ( market cap > 10000 ) )`, returns DataTables format. Our direct TV integration is architecturally superior: no middleman, no session cookies, no ToS concerns.
+
+**FilterBuilder Type Safety**: `ConditionValue` is a union type; use `as any` on the full condition object in helper functions rather than fighting TypeScript union narrowing.
+
+**Dev Server Management**: Use `start /B cmd /c "npx next dev -p 3000" > next-dev.log 2>&1` from cmd.exe to background the process. Never run long-lived processes in the main agent shell.
+
+**Multi-Value Input**: For "in"/"not_in" operators, use comma-separated text with onBlur commit to array. Split, trim, filter empty. Simplest UX for list operators.
+
+**Backtest Scope**: Backtest runs per-symbol against DailyPrice data, not a full scan set. UI flow: scan → select stock → backtest.
+
+### Playwright Snapshot Cleanup & Code Hygiene (v1.16.0)
+
+**Issue**: Playwright CLI `snapshot` command dumps `.yaml` files in the current working directory by default. These are artifacts, NOT source code, and must not be committed.
+
+**Root Cause**: Calling `npx playwright-cli snapshot` without `--filename=` flag creates timestamped `.yaml` files in the root directory. These files are not covered by `.gitignore` and show up as untracked.
+
+**Solution**:
+1. **Always use `--filename=` flag** with a path inside a temp/ignored directory:
+   ```bash
+   npx playwright-cli snapshot --filename=.playwright-cli/snapshots/test-1.yaml
+   ```
+2. **If snapshots end up in root**, delete them immediately:
+   ```bash
+   del /f /q *.yaml
+   ```
+3. **Before committing, always run `git status`** to check for:
+   - Junk artifact files (`.yaml`, `.png`, `.log`, etc.)
+   - Unexpected untracked files
+   - Stale build artifacts
+
+**Code Hygiene Checklist Before Commit**:
+```markdown
+- [ ] Run `git status` — review all untracked and modified files
+- [ ] Delete junk artifacts: Playwright snapshots (*.yaml), screenshots, temp logs
+- [ ] Verify `.gitignore` covers common artifact patterns
+- [ ] Ensure no dead code, commented-out code, or console.log statements remain
+- [ ] Check no secrets/tokens/passwords in the diff
+- [ ] Review diff line count — if unexpectedly large, investigate
+```
+
+**Why This Matters**:
+- Junk files in git history bloat the repository forever
+- Playwright snapshots contain volatile element IDs that change on every run
+- Clean diffs make code review faster and more reliable
+- Future agents trust the repository state — don't pollute it
 
 ### Self-Learning Loop
 **Rule**: After every significant session, run `/self-learn` to extract patterns.
@@ -653,10 +708,12 @@ export function trackEvent(action: string, category: string, options?: { label?:
 ---
 
 ## Update Log
+- 2026-07-18: Added Playwright Snapshot Cleanup & Code Hygiene lesson (v1.16.1) — mandatory pre-commit cleanup checklist
 - 2026-07-16: Added Git Hooks Must NOT Modify Tracked Files lesson (critical bugfix - infinite loop)
 - 2026-07-16: Fixed pre-commit hook shell variable handling (integer expression bug)
 - 2026-07-16: Added Agent Handoff & Self-Learning System lessons (v1.15.0)
 - 2026-07-16: Added Handoff File Protocol lesson
+- 2026-07-16: Added Advanced Screener lessons (v1.16.0): Chartink architecture, FilterBuilder type safety, dev server management, multi-value input patterns, backtest scope
 - 2026-07-16: Added Session Start Protocol lesson
 - 2026-07-16: Added Agent Pipeline Protocol lesson
 - 2026-07-16: Added Self-Learning Loop lesson
