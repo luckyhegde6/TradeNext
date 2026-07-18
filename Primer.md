@@ -2,13 +2,47 @@
 
 > Agent reads this at the start of every session to understand current state and progress
 > ⚠️ IMPORTANT: After completing ANY task, you MUST update documentation (AGENTS.md, Primer.md, agent-memory.md, Lessons.md). See Lessons.md Lesson 20 for details.
+> 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-03-21
+2026-07-18
 
 ---
 
 ## Current Project Status
+
+### Advanced Screener System (v1.16.0)
+**Issue**: No Chartink-like multi-condition screener with technical analysis and backtesting.
+**Fix Applied**:
+- **Filter Grammar Engine**: Recursive FilterGroup/FilterCondition types, 40+ fields, Zod schemas
+- **Filter Evaluation Engine**: Numeric/string operators, recursive tree evaluation, batch filtering
+- **Technical Analysis Library**: SMA, EMA, RSI, MACD, Bollinger Bands, candlestick patterns
+- **Backtest Engine**: OHLCV-based simulator with profit target, stop-loss, trailing stop, Sharpe ratio
+- **TradingView Service**: Enhanced with advancedScan(), 46 column constants
+- **6 Prisma Models**: ScanConfig, ScanResult, ScanResultItem, BacktestRun, BacktestTrade (deprecated 3 old)
+- **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
+- **FilterBuilder UI**: Recursive condition tree editor with validation hints, multi-value input
+- **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
+- **ScanConfigsManager**: Inline edit/delete/share configs with public/private toggle
+- **TemplatesPanel**: 25 Chartink-inspired presets with category filters and search
+- **BacktestDialog**: Config form, equity curve SVG, metrics cards, trade history table
+- **Chartink Reverse-Engineered**: Analyzed DSL, API, and 150,000+ community screeners
+- **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
+**Files Created**: 25+ files across lib/screener/, app/api/screener/, app/api/backtest/, app/components/screener/
+**Status**: RESOLVED in v1.16.0.
+
+### Agent Handoff & Self-Learning System (v1.15.0)
+**Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across agent types (Claude, Cursor, OpenCode, etc.).
+**Fix Applied**:
+- **Handoff File System**: Created `.agents/handoffs/` with SCHEMA.md (standardized YAML frontmatter format), session lifecycle flow, agent-to-agent protocol, and error recovery strategies.
+- **Root HANDOFF.md**: Central orchestration state file that every agent reads at session start.
+- **6 Agent Definitions**: GH Helper (diff review, code verify, bug fixer), E2E Agent (Playwright flow testing), Integrator (merge/conflict resolution), Observability Checker (logging/metrics/security), DevOps (Docker/Vercel/Netlify/CI/CD), QA (test writing and E2E execution).
+- **3 Agent Commands**: `/handoff`, `/self-learn`, `/review-diff` for explicit orchestration.
+- **Self-Learning Loop**: `.agents/learning/` with session-log.md and pattern extraction workflow.
+- **Git Hooks**: pre-commit (code quality, secrets detection) and post-commit (activity logging, handoff checkpoint tracking).
+- **Updated Documentation**: AGENTS.md now documents the full orchestration system.
+**Files Created/Modified**: HANDOFF.md (new), .agents/handoffs/ (6 files), .agents/agents/ (8 agent defs), .agents/commands/ (3 commands), .agents/learning/ (2 files), .agents/hooks/ (hooks), .git/hooks/ (2 hooks)
+**Status**: RESOLVED in v1.15.0. System is ready for multi-agent workflows.
 
 ### Worker Task Management Fix (v1.11.1)
 **Issue**: Worker tasks stuck in "pending" status with no way to execute them from admin UI.
@@ -140,6 +174,24 @@
 
 ## Current Project Status
 
+### Telegram Bot Alert Delivery (v3.2.0)
+**Issue**: No real-time alert delivery via Telegram — users couldn't receive alerts on their phone.
+**Fix Applied**:
+- **telegramBotService.ts**: Centralized command handler with 6 commands (`/start`, `/chatid`, `/help`, `/recommendations`, `/alerts`, `/updates`), per-chat rate limiting (5/min, 20/hr), user verification via 6-digit code, audit logging, `sendAlertToUser()`, `broadcastToSubscribers()`
+- **Telegram Webhook**: `/api/telegram/webhook` delegates to `handleBotCommand()`
+- **Subscription UI**: Alerts → Telegram Bot tab with register → verify → test flow
+- **Verify API**: `/api/user/telegram/verify` with send/confirm actions
+- **Test API**: `/api/user/telegram/test` sends test message
+- **Bug Fix — Corp Actions Price/Yield**: Fixed price enrichment from `daily_prices` and yield formula
+- **Build Fix — Rebalancer imports**: Extracted types to `rebalancerTypes.ts` to avoid client-side Prisma bundling
+- **Build Fix — Dev server startup**: Fixed detach pattern for non-blocking LLM startup
+**Files Created**: `lib/services/telegramBotService.ts`, `app/api/user/telegram/test/route.ts`, `app/api/user/telegram/verify/route.ts`, `app/components/alerts/TelegramSubscription.tsx`, `lib/services/rebalancerTypes.ts`
+**Files Modified**: `app/api/telegram/webhook/route.ts`, `app/alerts/page.tsx`, `app/contact/page.tsx`, `README.md`, `AGENTS.md`, `TODO.md`, 3 rebalancer component files, `next.config.ts`
+**Tests**: 190/190 pass, 0 errors in E2E testing (Dashboard, Alerts→Telegram, Contact, Dividends, Rebalance, Webhook API, Mobile)
+**Build**: ✅ Compiles successfully
+**Deploy**: Ready to push to git trigger Netlify CD
+**Status**: RESOLVED in v3.2.0.
+
 ### Secure Join Request Flow (v1.9.2)
 **Issue**: Insecure direct signup via `/users/new`.
 **Fix Applied**: 
@@ -162,6 +214,30 @@
 ---
 
 ## Session History
+
+### Session 10 (July 18, 2026)
+- **Telegram Bot Alert Delivery (v3.2.0)**: Full-featured Telegram bot with command routing, rate limiting, user verification, and alert delivery.
+- **Files Created**: `lib/services/telegramBotService.ts`, verify/test API routes, `TelegramSubscription.tsx` UI component, `rebalancerTypes.ts`
+- **Files Modified**: webhook route, alerts page, contact page, docs (README, AGENTS, TODO), 3 rebalancer components, next.config.ts
+- **Bug Fix — Corp Actions Price/Yield**: Fetched live prices from `daily_prices`, fixed yield formula to `(dividendPerShare / currentPrice) * 100`
+- **Build Fix — Rebalancer imports**: Extracted types to `rebalancerTypes.ts` to stop Prisma bundling in client components (was importing `pg` through `rebalancerService.ts`)
+- **Build Fix — Dev server**: Fixed `start /B` blocking the LLM; switched to PowerShell `ProcessStartInfo` with `CreateNoWindow`
+- **E2E Tested**: Dashboard, Alerts→Telegram tab, Contact FAQ, Dividends calendar, Portfolio Rebalance, Telegram webhook API, mobile responsive (375px) — 0 console errors
+- **Tests**: 190/190 pass
+- **Build**: ✅ Compiles with `npm run quickbuild`
+- **Status**: Pending git push to trigger Netlify CD deploy
+
+### Session 9 (July 16, 2026)
+- **Agent Handoff & Self-Learning System (v1.15.0)**: Complete agent collaboration infrastructure.
+- **Handoff System**: Created `.agents/handoffs/` with SCHEMA.md, lifecycle flow, agent-to-agent protocol, error recovery, active/archive system.
+- **Root HANDOFF.md**: Central orchestration state for all agents.
+- **Agent Definitions**: 8 specialized agents (GH Helper, E2E, Integrator, Observability, DevOps, QA, Code Reviewer, TDD Guide).
+- **Commands**: `/handoff`, `/self-learn`, `/review-diff` for explicit orchestration.
+- **Self-Learning**: `.agents/learning/` with session logs and pattern extraction.
+- **Git Hooks**: pre-commit (code quality, secrets detection) and post-commit (activity logging).
+- **Documentation**: Updated AGENTS.md, Primer.md, agent-memory.md, Lessons.md.
+- **Files Created**: HANDOFF.md, 6 files in handoffs/, 8 agents, 3 commands, 2 learning files, hooks.
+- **Status**: RESOLVED in v1.15.0.
 
 ### Session 8 (March 20, 2026)
 - **Price Alert Enhancement**: Added current stock price display in alerts.

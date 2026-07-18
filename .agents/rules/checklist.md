@@ -131,6 +131,16 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 
 ---
 
+## Cleanup & Code Hygiene (Pre-Commit)
+
+- [ ] git_status_reviewed
+- [ ] junk_artifacts_deleted
+- [ ] no_secrets_in_diff
+- [ ] no_dead_code_or_console_log
+- [ ] gitignore_covers_artifacts
+
+---
+
 ## UI/UX Testing (Mandatory for UI Changes)
 
 ### Playwright CLI Testing
@@ -163,9 +173,14 @@ Playwright MCP: open → navigate → click → fill → snapshot → close
 # Using playwright-cli locally
 npx playwright-cli open http://localhost:3000
 npx playwright-cli click e5
-npx playwright-cli snapshot
+npx playwright-cli snapshot --filename=.playwright-cli/snapshots/test.yaml  # ALWAYS use --filename to avoid root junk
 npx playwright-cli close
 ```
+
+### ⚠️ Cleanup After Testing
+- Snapshots without `--filename` land in the project root as `*.yaml` — DELETE them
+- Always run `git status` after testing to catch stray files
+- Kill any dev servers you started (check port 3000/3001)
 
 ---
 

@@ -12,7 +12,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (status === "loading") return;
     if (!session || !session.user || (session.user as any).role !== "admin") {
-      router.push("/");
+      router.push("/admin/access-denied");
     }
   }, [session, status, router]);
 
@@ -55,10 +55,45 @@ export default function AdminDashboardPage() {
     },
     {
       title: "Alerts Management",
-      description: "Manage user alerts and notifications",
+      description: "User alerts, delivery channels, secrets, and delivery logs",
       href: "/admin/alerts",
       icon: "🔔",
       color: "bg-yellow-500",
+    },
+    {
+      title: "Dividend Management",
+      description: "Manage dividend records, sync status, and manual entries",
+      href: "/admin/dividends",
+      icon: "💰",
+      color: "bg-green-500",
+    },
+    {
+      title: "Live Prices (SSE)",
+      description: "Monitor real-time price streaming infrastructure",
+      href: "/admin/live-prices",
+      icon: "⚡",
+      color: "bg-cyan-500",
+    },
+    {
+      title: "Tax Management",
+      description: "Capital gains overview across all users",
+      href: "/admin/tax",
+      icon: "🧾",
+      color: "bg-red-500",
+    },
+    {
+      title: "Rebalancer",
+      description: "Rebalancer configuration usage across users",
+      href: "/admin/rebalance",
+      icon: "⚖️",
+      color: "bg-purple-500",
+    },
+    {
+      title: "AI Agents",
+      description: "Configure LangChain/LangGraph AI agents with OpenRouter",
+      href: "/admin/ai",
+      icon: "🤖",
+      color: "bg-indigo-500",
     },
     {
       title: "Audit Logs",

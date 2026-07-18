@@ -106,6 +106,21 @@ export default function MarketsPage() {
                         Showing all {INDICES.length} indices
                     </div>
                 )}
+
+                {/* Screener Link */}
+                <div className="mt-8 text-center">
+                  <Link
+                    href="/markets/screener"
+                    className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <span>🔎</span>
+                    Open Stock Screener
+                    <span>→</span>
+                  </Link>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Filter 2000+ NSE stocks by price, volume, fundamentals &amp; technicals
+                  </p>
+                </div>
             </div>
         </div>
     );

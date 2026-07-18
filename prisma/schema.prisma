@@ -29,6 +29,10 @@ model User {
   // Account status
   isBlocked              Boolean   @default(false)
   
+  // Telegram subscription for alert delivery
+  telegramChatId         String?
+  telegramVerified       Boolean   @default(false)
+  
   // Session management - increment to invalidate all sessions
   tokenVersion           Int       @default(1)
   
@@ -40,6 +44,10 @@ model User {
   updatedAt DateTime @updatedAt
   portfolios Portfolio[] 
   sessions UserSession[]
+  rebalancerConfigs RebalancerConfig[]
+  foPositions       FOPosition[]
+  aiAnalyses        AIAnalysis[]
+  aiConversations   AIConversation[]
 }
 
 model JoinRequest {
@@ -317,12 +325,23 @@ model Alert {
 }
 
 model AIInsight {
-  id        String   @id @default(uuid())
-  snapshotId String
-  summary   String
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid())
+  snapshotId   String    // Reference to the source data (taskId, reportId, scanId)
+  summary     String
+  symbol      String?   // Associated stock symbol (if any)
+  source      String?   // "agent_market" | "agent_pattern" | "agent_document" | "agent_sentiment" | "system"
+  agentType   String?   // "market_analyst" | "pattern_scout" | "document_analyst" | "sentiment"
+  confidence  Decimal?  @db.Decimal(5,4) // 0.0 to 1.0 confidence score
+  metadata    Json?     // Additional structured data (extracted metrics, patterns, etc.)
+  createdAt   DateTime  @default(now())
+
+  @@index([symbol])
+  @@index([source])
+  @@index([createdAt])
+  @@map("ai_insights")
 }
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanConfig / ScanResult / ScanResultItem
 model SavedScreen {
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -508,17 +527,20 @@ model AdminAnnouncement {
 }
 
 model Notification {
-  id          String    @id @default(uuid())
-  userId      Int
-  type        String    // alert_triggered | recommendation | system | watchlist | contact_message
-  title       String
-  message     String
-  link        String?
-  isRead      Boolean   @default(false)
-  isAddressed Boolean   @default(false)
-  addressedAt DateTime?
-  addressedBy Int?
-  createdAt   DateTime  @default(now())
+  id              String    @id @default(uuid())
+  userId          Int
+  type            String    // alert_triggered | recommendation | system | watchlist | contact_message
+  title           String
+  message         String
+  link            String?
+  isRead          Boolean   @default(false)
+  isAddressed     Boolean   @default(false)
+  addressedAt     DateTime?
+  addressedBy     Int?
+  channelId       String?   // Reference to AlertChannel if delivered via channel
+  deliveryStatus  String?   // delivered | failed | pending — tracks channel delivery
+  acknowledgedAt  DateTime? // When user acknowledged the notification
+  createdAt       DateTime  @default(now())
 
   @@index([userId])
   @@index([isRead])
@@ -724,6 +746,7 @@ model StockSnapshot {
 // Screener Models
 // ============================================
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanConfig
 model ScreenerConfig {
   id              String    @id @default(uuid())
   name            String
@@ -741,6 +764,7 @@ model ScreenerConfig {
   @@map("screener_configs")
 }
 
+// ⚠️ DEPRECATED in v2.0.0 — replaced by ScanResult + ScanResultItem
 model ScreenerResult {
   id              String    @id @default(uuid())
   configId        String
@@ -783,6 +807,114 @@ model DailyScreenerSync {
 
   @@index([syncDate])
   @@map("daily_screener_syncs")
+}
+
+// ============================================
+// Phase 1: Advanced Screener Models (v2.0.0)
+// ============================================
+
+model ScanConfig {
+  id          String    @id @default(uuid())
+  userId      Int       // Owner of the config
+  name        String
+  description String?
+  filters     Json      // FilterGroup condition tree
+  columns     Json?     // Custom column selection for results
+  schedule    String?   // Cron expression for auto-run (optional)
+  isPublic    Boolean   @default(false)
+  lastRunAt   DateTime?
+  runCount    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  results     ScanResult[]
+
+  @@index([userId])
+  @@index([isPublic])
+  @@map("scan_configs")
+}
+
+model ScanResult {
+  id          String    @id @default(uuid())
+  configId    String
+  runAt       DateTime  @default(now())
+  matchCount  Int
+  totalCount  Int       @default(0)
+  executionMs Int?      // How long the scan took
+  status      String    @default("completed") // running | completed | failed
+  error       String?
+
+  config      ScanConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  items       ScanResultItem[]
+
+  @@index([configId, runAt])
+  @@map("scan_results")
+}
+
+model ScanResultItem {
+  id        String     @id @default(uuid())
+  resultId  String
+  symbol    String
+  name      String?
+  price     Decimal?   @db.Decimal(30,6)
+  change    Decimal?   @db.Decimal(30,6)
+  pChange   Decimal?   @db.Decimal(30,6)
+  volume    BigInt?
+  data      Json?      // Full snapshot of all fields at scan time (key-value pairs)
+
+  result    ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([symbol])
+  @@map("scan_result_items")
+}
+
+model BacktestRun {
+  id              String        @id @default(uuid())
+  userId          Int
+  name            String
+  strategyId      String?       // Optional: link to a TradingStrategy (Phase 3)
+  configId        String?       // Optional: link to a ScanConfig
+  entryFilter     Json          // Entry condition tree
+  exitFilter      Json?         // Exit condition tree (optional, manual exit)
+  startDate       DateTime
+  endDate         DateTime
+  initialCapital  Decimal?      @db.Decimal(30,2) @default(1000000)
+  totalTrades     Int           @default(0)
+  winRate         Decimal?      @db.Decimal(10,4)
+  totalPnl        Decimal?      @db.Decimal(30,2)
+  maxDrawdown     Decimal?      @db.Decimal(10,4)
+  sharpeRatio     Decimal?      @db.Decimal(10,4)
+  status          String        @default("pending") // pending | running | completed | failed
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  trades          BacktestTrade[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("backtest_runs")
+}
+
+model BacktestTrade {
+  id          String    @id @default(uuid())
+  runId       String
+  symbol      String
+  entryDate   DateTime
+  exitDate    DateTime?
+  entryPrice  Decimal?  @db.Decimal(30,2)
+  exitPrice   Decimal?  @db.Decimal(30,2)
+  quantity    Int?
+  pnl         Decimal?  @db.Decimal(30,2)
+  pnlPercent  Decimal?  @db.Decimal(10,4)
+  entryReason String?   // What triggered the entry
+  exitReason  String?   // What triggered the exit
+
+  run         BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([symbol])
+  @@map("backtest_trades")
 }
 
 // Market Cache - stores cached NSE data with smart refresh logic
@@ -907,6 +1039,58 @@ model AnomalyAlert {
 // Session Management - Track User Sessions
 // ============================================
 
+// ============================================
+// Phase 4: Portfolio Rebalancer (v3.2.0)
+// ============================================
+
+model RebalancerConfig {
+  id              String   @id @default(uuid())
+  userId          Int
+  name            String   @default("Default")
+  categories      Json     // Array of { name, targetPercent, type }
+  driftThreshold  Decimal  @default(5.0) @db.Decimal(5,2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("rebalancer_configs")
+}
+
+// ============================================
+// Phase 4: Options/F&O Analytics (v3.2.0)
+// ============================================
+
+model FOPosition {
+  id          String    @id @default(uuid())
+  userId      Int
+  symbol      String    // Underlying (e.g., "NIFTY", "BANKNIFTY", "RELIANCE")
+  type        String    // FUTURES | CALL | PUT
+  direction   String    // LONG | SHORT
+  quantity    Int
+  entryPrice  Decimal   @db.Decimal(30,6)
+  currentPrice Decimal? @db.Decimal(30,6)
+  premium     Decimal?  @db.Decimal(30,6) // Premium paid/received (options only)
+  strike      Decimal?  @db.Decimal(30,6) // Strike price (options only)
+  expiry      DateTime? // Contract expiry date
+  status      String    @default("OPEN") // OPEN | CLOSED
+  closePrice  Decimal?  @db.Decimal(30,6)
+  closeDate   DateTime?
+  pnl         Decimal?  @db.Decimal(30,6)
+  notes       String?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([symbol])
+  @@index([status])
+  @@index([expiry])
+  @@map("fo_positions")
+}
+
 model UserSession {
   id              String    @id @default(uuid())
   userId          Int
@@ -926,4 +1110,174 @@ model UserSession {
   @@index([isActive])
   @@index([expiresAt])
   @@map("user_sessions")
+}
+
+// ============================================
+// Phase 2: Enterprise Alert Engine (v2.1.0)
+// ============================================
+
+// Delivery channel configuration (email, webhook, telegram, push)
+model AlertChannel {
+  id          String   @id @default(uuid())
+  userId      Int      @default(0)  // 0 = system-wide (admin), >0 = user-owned
+  type        String   // email | webhook | telegram | push
+  name        String
+  config      Json     // Type-specific config (smtp, url, bot_token, etc.)
+  isActive    Boolean  @default(true)
+  verified    Boolean  @default(false)
+  lastTestedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@map("alert_channels")
+}
+
+// Multi-condition alert rules using FilterGroup from Phase 1
+model AlertRule {
+  id              String    @id @default(uuid())
+  userId          Int
+  name            String
+  description     String?
+  condition       Json      // FilterGroup tree — reuses screener condition tree
+  channels        String[]  // References to AlertChannel IDs
+  schedule        Json?     // Active hours, days, cooldown minutes
+  escalation      Json?     // Escalation rules (delay, channels to escalate to)
+  action          Json?     // One-click action config (buy/sell/paper_trade)
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  triggerCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  events          AlertEvent[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("alert_rules")
+}
+
+// Alert trigger event history
+model AlertEvent {
+  id              String    @id @default(uuid())
+  ruleId          String
+  channelId       String?   // Reference to AlertChannel ID
+  channelType     String    // email | webhook | telegram | push | in_app
+  status          String    // delivered | failed | pending
+  error           String?
+  metadata        Json?     // Trigger details (symbol, price, values at trigger time)
+  deliveredAt     DateTime?
+  attemptedAt     DateTime  @default(now())
+  acknowledgedAt  DateTime?
+
+  rule            AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, attemptedAt])
+  @@index([channelType])
+  @@index([status])
+  @@map("alert_events")
+}
+
+// Encrypted secrets for delivery channel credentials
+model Secret {
+  id        String   @id @default(uuid())
+  name      String   @unique   // Unique key: "smtp_gmail", "telegram_bot", "slack_webhook"
+  type      String   // smtp_password | api_key | bot_token | webhook_secret
+  value     String   // Encrypted value (AES-256-GCM)
+  hint      String?  // Visible hint (e.g., "user@***.com" or "token ending with XXXX")
+  metadata  Json?    // Additional metadata (expiry, rotation, last used)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@map("secrets")
+}
+
+// Delivery attempt log for observability
+model DeliveryLog {
+  id          String   @id @default(uuid())
+  eventId     String   // Reference to AlertEvent
+  channelId   String?  // Reference to AlertChannel
+  channelType String   // email | webhook | telegram | push
+  attempt     Int      @default(1)   // Which attempt number
+  status      String   // success | failed | pending
+  statusCode  Int?     // HTTP status code or SMTP response code
+  response    String?  // Response body or error message
+  durationMs  Int?     // How long the delivery took
+  attemptedAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([status])
+  @@map("delivery_logs")
+}
+
+// ============================================
+// AI Agent Infrastructure (v3.2.0)
+// ============================================
+
+// Stores all AI analysis results for persistence and correlation
+model AIAnalysis {
+  id            String   @id @default(uuid())
+  userId        Int
+  analysisType  String   // screener | dividend | portfolio | market | alert | custom
+  query         String   // The original query/prompt
+  result        String   // The AI response (markdown)
+  model         String   // Model used (e.g., openrouter/free)
+  tokensUsed    Int      @default(0)
+  executionTime Int      @default(0) // ms
+  success       Boolean  @default(true)
+  errorMessage  String?
+  metadata      Json?    // Additional data (correlation keys, stock symbols, etc.)
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  AIConversation?   @relation(fields: [conversationId], references: [id])
+  conversationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([analysisType])
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("ai_analyses")
+}
+
+// Stores conversation context for multi-turn interactions
+model AIConversation {
+  id            String   @id @default(uuid())
+  userId        Int
+  analysisType  String   // screener | dividend | portfolio | market | alert
+  title         String?  // Auto-generated or user-provided title
+  messages      Json     // Array of { role, content, tokens, timestamp }
+  tokenCount    Int      @default(0) // Total tokens across all messages
+  messageCount  Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses      AIAnalysis[]
+
+  @@index([userId])
+  @@index([updatedAt])
+  @@map("ai_conversations")
+}
+
+// Tracks per-user and per-IP rate limiting for AI endpoints
+model AIRateLimit {
+  id            String    @id @default(uuid())
+  key           String    @unique // "user:123" or "ip:192.168.1.1"
+  userId        Int?
+  ipAddress     String?
+  violations    Int       @default(0)
+  tokenUsage    Int       @default(0)
+  cooldownUntil DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([key])
+  @@index([updatedAt])
+  @@map("ai_rate_limits")
 }

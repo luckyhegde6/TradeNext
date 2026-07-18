@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { useModal } from "@/app/components/providers/ModalProvider";
 
 interface StockFilter {
   // Basic filters
@@ -93,6 +95,7 @@ const MARKET_CAP_RANGES = [
 
 export default function StockScreener() {
   const { data: session } = useSession();
+  const { openLoginModal } = useModal();
   const [filters, setFilters] = useState<StockFilter>({ preset: 'all' });
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(false);
@@ -231,12 +234,30 @@ export default function StockScreener() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowSaveDialog(true)}
-            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
-          >
-            Save Screen
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/markets/screener/advanced"
+              className="px-4 py-2 text-sm font-medium border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-950 transition-colors"
+            >
+              Advanced Screener →
+            </Link>
+            {session ? (
+              <button
+                onClick={() => setShowSaveDialog(true)}
+                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
+              >
+                Save Screen
+              </button>
+            ) : (
+              <button
+                onClick={openLoginModal}
+                className="px-4 py-2 border border-dashed border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+                title="Sign in to save your screen configurations"
+              >
+                🔒 Sign in to Save
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">

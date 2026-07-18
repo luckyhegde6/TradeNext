@@ -216,6 +216,131 @@ export async function scanStocks(filters?: Record<string, unknown>): Promise<Tra
 }
 
 /**
+ * Advanced scan — full-featured TradingView scanner with custom columns.
+ * Supports technical indicators, dynamic column lists, and large result sets.
+ */
+export async function advancedScan(
+  filters: Record<string, unknown>[],
+  columns: string[],
+  range: { from: number; to: number } = { from: 0, to: 2000 }
+): Promise<Record<string, unknown>[]> {
+  const cacheKey = `tradingview:advanced:${JSON.stringify({ filters, columns, range })}`;
+  const cached = staticCache.get(cacheKey);
+  if (cached) return cached as Record<string, unknown>[];
+
+  try {
+    const response = await fetch(`${TRADINGVIEW_API_BASE}/india/scan?label-product=screener-stock`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      body: JSON.stringify({
+        filter: [
+          { left: "exchange", operation: "equal", right: "NSE" },
+          ...filters,
+        ],
+        options: { lang: "en", active_symbols_only: true },
+        sort: { sortBy: "market_cap_basic", sortOrder: "desc" },
+        range: [range.from, range.to],
+        columns,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`TradingView advanced scan error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const results: Record<string, unknown>[] = Array.isArray(data?.data)
+      ? data.data.map((item: { s: string; d: unknown[] }) => {
+          const row: Record<string, unknown> = {
+            symbol: item.s,
+            exchange: item.s.split(':')[0] || 'NSE',
+          };
+          // Map columns dynamically by position
+          for (let i = 0; i < columns.length; i++) {
+            const col = columns[i];
+            const val = item.d[i];
+            // Handle objects returned by TV (name/description metadata)
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+              const obj = val as Record<string, unknown>;
+              row[col] = obj.name ?? obj.description ?? val;
+              // Also set friendly aliases
+              if (col === 'name' && obj.description) row['description'] = obj.description;
+            } else {
+              row[col] = val;
+            }
+          }
+          return row;
+        })
+      : [];
+
+    // Cache for 2 minutes (dynamic data)
+    staticCache.set(cacheKey, results, 120);
+
+    logger.info({ msg: "TradingView advanced scan", count: results.length, columns: columns.length });
+    return results;
+  } catch (error) {
+    logger.error({ msg: "Failed TradingView advanced scan", error });
+    return [];
+  }
+}
+
+/**
+ * Default columns for basic screener (all fundamental + price data).
+ */
+export const DEFAULT_COLUMNS = [
+  "name", "close", "change", "change_percent", "volume",
+  "market_cap_basic", "price_earnings_ttm", "dividend_yield_recent",
+  "sector", "industry", "price_book_ratio", "relative_volume_10d_calc",
+  "return_on_equity_fq", "debt_to_equity_fq",
+];
+
+/**
+ * Technical indicator columns available from TradingView scanner.
+ * These can be requested alongside basic columns for advanced scanning.
+ */
+export const TECHNICAL_COLUMNS = [
+  "RSI",
+  "MACD.macd",
+  "MACD.signal",
+  "MACD.histogram",
+  "SMA20",
+  "SMA50",
+  "SMA200",
+  "EMA20",
+  "BB.upper",
+  "BB.middle",
+  "BB.lower",
+  "BB.percent_b",
+  "VolSMA20",
+  "ADX",
+  "ADX.positive_di",
+  "ADX.negative_di",
+  "Williams_R",
+  "AO",
+  "Stoch.K",
+  "Stoch.D",
+  "Stoch.RSI.K",
+  "ATR",
+  "Chaikin_Money_Flow",
+  "Beta_3Y",
+  "Perf.W",
+  "Perf.M",
+  "Perf.3M",
+  "Perf.6M",
+  "Perf.YTD",
+  "Perf.12M",
+  "technical_rating",
+  "analyst_rating",
+  "recommendation",
+  "EPS_ttm",
+  "total_revenue",
+];
+
+/**
  * Get top gainers/losers from TradingView
  */
 export async function getTopMovers(type: "gainers" | "losers" | "active", limit = 20): Promise<TradingViewScanResult[]> {

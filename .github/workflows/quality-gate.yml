@@ -39,7 +39,7 @@ jobs:
             exit 1
           fi
 
-          if grep -R "process.env.NEXT_PUBLIC_.*KEY" . --exclude-dir=.github --exclude-dir=node_modules; then
+          if grep -R "process.env.NEXT_PUBLIC_.*KEY" . --exclude-dir=.github --exclude-dir=node_modules --exclude-dir=.next; then
             echo "❌ Public env contains secret-like key"
             exit 1
           fi

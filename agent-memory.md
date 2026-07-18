@@ -4,38 +4,18 @@
 
 ---
 
-## Git Hook Setup
+## Git Hook Setup (v1.15.0)
 
-To enable automatic logging, create a post-commit hook:
+The post-commit hook has been created automatically as part of the Handoff File System:
 
-### Step 1: Create the hooks directory
-```bash
-mkdir -p .git/hooks
-```
+- **Location**: `.git/hooks/post-commit`
+- **Function**: Logs commit checkpoints to `.agents/handoffs/checkpoint.log` (non-tracked file)
+- **Automation**: Runs on every `git commit` automatically
+- **⚠️ Important**: Post-commit hook writes to a NON-TRACKED file only to avoid infinite loop. Update `agent-memory.md` manually for meaningful activity entries.
 
-### Step 2: Create post-commit hook
-Create `.git/hooks/post-commit`:
-
-```bash
-#!/bin/bash
-# Post-commit hook to log agent activity
-
-DATE=$(date '+%Y-%m-%d %H:%M:%S')
-BRANCH=$(git branch --show-current)
-COMMIT_MSG=$(git log -1 --pretty=%B)
-COMMIT_HASH=$(git log -1 --pretty=%h)
-
-echo "" >> agent--memory.md
-echo "### $DATE | Branch: $BRANCH | Commit: $COMMIT_HASH" >> agent--memory.md
-echo "- **Action**: Commit created" >> agent--memory.md
-echo "- **Message**: $COMMIT_MSG" >> agent--memory.md
-echo "" >> agent--memory.md
-```
-
-### Step 3: Make it executable
-```bash
-chmod +x .git/hooks/post-commit
-```
+The pre-commit hook is also installed at `.git/hooks/pre-commit`:
+- Checks for `console.log` statements (should use logger)
+- Detects hardcoded secrets (passwords, API keys, tokens)
 
 ---
 
@@ -45,15 +25,67 @@ You can also manually add entries:
 
 ```bash
 # Add activity entry
-echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent--memory.md
-echo "- **Action**: Description of what was done" >> agent--memory.md
-echo "- **Files**: file1.ts, file2.ts" >> agent--memory.md
-echo "" >> agent--memory.md
+echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent-memory.md
+echo "- **Action**: Description of what was done" >> agent-memory.md
+echo "- **Files**: file1.ts, file2.ts" >> agent-memory.md
+echo "" >> agent-memory.md
 ```
 
 ---
 
 ## Activity Log
+
+### 2026-07-18 | Telegram Bot Alert Delivery (v3.2.0) - COMPLETE
+- **Action**: Built complete Telegram bot alert delivery system with @tradenext6Bot.
+- **Problem**: Users couldn't receive real-time alerts on their phone; no Telegram integration existed.
+- **Files Created (5)**:
+  - `lib/services/telegramBotService.ts` — Centralized bot command handler with 6 commands, rate limiter (5/min, 20/hr, 3s cooldown), user verification via 6-digit code, audit logging, sendAlertToUser(), broadcastToSubscribers()
+  - `app/api/user/telegram/test/route.ts` — POST test endpoint that sends "Test Message" to user's registered Telegram
+  - `app/api/user/telegram/verify/route.ts` — POST with send (generates code) and confirm (validates code) actions; 10-min TTL
+  - `app/components/alerts/TelegramSubscription.tsx` — 3-step subscription UI: Register → Verify → Done, with test/unsubscribe buttons
+  - `lib/services/rebalancerTypes.ts` — Extracted types from rebalancerService.ts to avoid bundling Prisma/node modules in client components
+- **Files Modified (8)**:
+  - `app/api/telegram/webhook/route.ts` — Now delegates to handleBotCommand()
+  - `app/alerts/page.tsx` — Added Telegram Bot as 5th tab
+  - `app/contact/page.tsx` — Added FAQ: "How do I receive real-time alerts via Telegram?"
+  - `app/components/rebalancer/AllocationTable.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TargetAllocationEditor.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TradeSuggestionList.tsx` — Changed import to rebalancerTypes
+  - `next.config.ts` — Added pg, pg-native, pgpass to serverExternalPackages
+  - `README.md`, `AGENTS.md`, `TODO.md` — Documentation updates
+- **Bug Fix — Corp Actions Price/Yield**:
+  - Added price enrichment from `daily_prices` (DISTINCT ON ticker for latest close)
+  - Fixed yield formula: `(dividendPerShare / currentPrice) * 100` (was using face value)
+- **Build Fixes**:
+  - Extracted types to `rebalancerTypes.ts` to fix client-side Prisma bundling (was trying to resolve `pg`, `dns`)
+  - Used PowerShell `ProcessStartInfo` for non-blocking dev server startup
+- **Secrets Management**: Removed hardcoded Telegram secrets from README.md; stored only in .env + Netlify env vars
+- **Testing**: Jest 190/190 pass; E2E Playwright on Dashboard, Alerts→Telegram tab, Contact FAQ, Dividends calendar, Portfolio Rebalance, Telegram webhook API, mobile responsive (375px) — 0 console errors
+- **Build**: `npm run quickbuild` compiles successfully
+- **Status**: ✅ RESOLVED — Code committed, needs git push to trigger Netlify CD deploy
+
+### 2026-07-16 | Agent Handoff & Self-Learning System (v1.15.0) - COMPLETE
+- **Action**: Created complete agent orchestration infrastructure with handoff files, agent definitions, self-learning loop, commands, and git hooks.
+- **Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across diverse AI agents.
+- **Root Cause**: Previous system had no handoff protocol between sessions, no way for different agent types (Claude, Cursor, OpenCode) to share context, and no self-learning loop.
+- **Files Created (23 files)**:
+    - `HANDOFF.md` - Root orchestration state
+    - `.agents/handoffs/README.md`, `SCHEMA.md`, `active/latest.md`
+    - `.agents/handoffs/flow/session-cycle.md`, `agent-to-agent.md`, `error-recovery.md`
+    - `.agents/agents/gh-helper.md`, `e2e-agent.md`, `integrator.md`, `observability.md`, `devops.md`, `qa.md`
+    - `.agents/agents/code-reviewer.md` (updated), `tdd-guide.md` (updated)
+    - `.agents/commands/handoff.md`, `self-learn.md`, `review-diff.md`
+    - `.agents/learning/README.md`, `session-log.md`
+    - `.agents/hooks/README.md` (updated)
+    - `.git/hooks/pre-commit`, `post-commit`
+- **Details**:
+    - Handoff system uses YAML frontmatter with structured context, progress, decisions, blockers, learnings
+    - Agent pipeline protocol: GH Helper → Integrator → QA → DevOps
+    - Self-learning loop extracts patterns and promotes them to Lessons.md
+    - Pre-commit hook detects console.log and hardcoded secrets
+    - Post-commit hook logs to `.agents/handoffs/checkpoint.log` (non-tracked) to avoid infinite loop
+    - Full documentation updated: AGENTS.md, Primer.md, agent-memory.md, Lessons.md
+- **Status**: RESOLVED in v1.15.0.
 
 ### 2026-03-21 | Worker Task Management Fix - COMPLETE
 - **Action**: Fixed worker task actions in admin panel - Run Now, Cancel, Retry, Delete buttons.
@@ -331,3 +363,5 @@ echo "" >> agent--memory.md
 - Keep entries concise but informative
 - Include file names when relevant
 - Note any errors or issues encountered
+
+

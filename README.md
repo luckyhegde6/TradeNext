@@ -4,29 +4,45 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
-## Latest Update - v1.14.0 (March 27, 2026)
+## Latest Update - v3.2.0 (July 18, 2026)
 
-### MCP API for External NSE Data
-- **New Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
-- **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
-- **Authentication**: Optional API key via `x-api-key` header (configurable via `MCP_API_KEY`)
-- **JSON Format**: Returns standardized response with success, function, data, timestamp
-- **Caching**: All responses cached for performance (60s-3600s)
-- **Discovery**: Built-in `listFunctions`, `describe`, `schema`, `help` for API exploration
+### Telegram Bot Alert Delivery
+- **@tradenext6Bot**: Telegram bot for real-time alert delivery and interactive commands
+- **Bot commands**: `/start`, `/chatid`, `/help`, `/recommendations`, `/alerts`, `/updates`
+- **User subscription system**: Register and verify your Telegram Chat ID via Alerts → Telegram Bot tab
+- **Verification flow**: 6-digit code sent to Telegram for secure chat ID verification
+- **Test endpoint**: Send a test message to verify subscription works
+- **Rate limiting**: 5 commands/minute, 20/hour, 3-second cooldown per chat
+- **User verification**: Commands only return your own data after verified linking
+- **Audit logging**: All bot commands logged for security audit
+- **Alert routing**: Triggered alerts can be pushed to verified Telegram subscribers
+- **Broadcast support**: Admin can send announcements to all subscribers
+- **Bot info** endpoint: `/api/telegram/webhook` (GET) for health check
+- **Test message**: `/api/user/telegram/test` (POST) for quick verification
+- **Verify API**: `/api/user/telegram/verify` (POST) with send/confirm actions
 
-### Corporate Action Alerts (v1.13.0)
-- **New Alert Types**: Added support for dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
-- **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
-- **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
-- **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
-- **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
-- **Real-time Fallback**: Alerts page triggers check on load for serverless environments
+## Latest Update - v1.16.0 (July 16, 2026)
 
-### Tested Features (March 2026)
+### Advanced Screener — Chartink-Like Scanning
+- **Filter Condition Tree**: 40+ filter fields with recursive AND/OR groups, numeric and string operators
+- **Technical Analysis Library**: RSI, MACD, SMA, EMA, Bollinger Bands, ADX, ATR, candlestick patterns
+- **Backtest Engine**: OHLCV-based trade simulator with profit target, stop-loss, trailing stop, position sizing, Sharpe ratio
+- **FilterBuilder UI**: Category-organized field dropdowns, validation hints, multi-value input for list operators
+- **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
+- **Templates**: 98 pre-built Chartink-inspired scans across 9 categories (Fundamental, Technical, Candlestick, Range Breakout, Crossover, Bullish, Bearish, Intraday Bullish, Intraday Bearish)
+- **Scan Configs**: Save/load scans with inline editing, share links, public/private toggle
+- **Backtest Dialog**: Config form, equity curve SVG chart, performance metrics, trade history table
+- **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
+- **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
+- **Chartink Reverse-Engineered**: Analyzed Chartink's DSL, API, and 150,000+ community screeners. Built native TradingView-based equivalent without middleman dependencies.
+
+### Tested Features (July 2026)
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Authentication | ✅ Working | Demo: demo@tradenext6.app / demo123 |
 | Admin | ✅ Working | Admin: admin@tradenext6.app / admin123 |
+| Telegram Bot | ✅ Working | @tradenext6Bot — real-time alerts with rate limiting & auth |
+| Telegram Subscription | ✅ Working | Register & verify Chat ID from Alerts page |
 | Portfolio | ✅ Working | Holdings (5 stocks), P&L tracking |
 | Markets Overview | ✅ Working | NIFTY 50, BANK, IT, MIDCAP, SMALLCAP, AUTO, PHARMA |
 | Analytics | ✅ Working | 14 tabs including Financial Results |
@@ -37,7 +53,7 @@
 | News | ✅ Working | Market news, India/Global filters |
 | Stock Screener | ✅ Working | 2000+ stocks, multiple filters |
 | Watchlist | ✅ UI Ready | Empty state (expected) |
-| Alerts | ✅ UI Ready | Empty state (expected) |
+| Alerts | ✅ Working | Multi-tab: Simple, Rules, Channels, Events, Telegram Bot |
 | Financial Results | ✅ Working | NSE format (quarters as columns) |
 | TradingView | ✅ Working | Links on dashboard charts |
 | Session Management | ✅ Working | Admin can view/invalidate sessions |
@@ -59,7 +75,8 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
   - **Date Formatting**: Supports both ISO and DD-MMM-YYYY formats with day-of-week display
 - **Technical Analysis**: Piotroski F-Score, technical indicators (RSI, MACD, Bollinger Bands, SMA, EMA)
 - **Stock Screening**: Advanced filtering with multiple criteria
-- **Alert System**: Price alerts and recommendation subscriptions
+- **Alert System**: Price alerts, multi-condition rules, and recommendation subscriptions
+- **Telegram Bot (@tradenext6Bot)**: Real-time alert delivery via Telegram with interactive commands, rate limiting, user verification, and audit logging
 - **Watchlist**: Quick price tracking and management
 - **Data Import**: CSV/Excel transaction import
 - **Docker-ready**: Local development with PostgreSQL/TimescaleDB + Redis
@@ -210,6 +227,10 @@ AUTH_SECRET=your-secret-key
 # Admin (optional - defaults provided)
 ADMIN_EMAIL=admin@tradenext6.app
 ADMIN_PASSWORD=admin123
+
+# Telegram Bot (for real-time alert delivery) — set these in your .env file, never commit them
+# TELEGRAM_SECRET=    Get bot token from @BotFather on Telegram
+# TELEGRAM_CHATID=    Your Telegram chat ID (get from @tradenext6Bot with /start)
 
 # Server
 PORT=3000

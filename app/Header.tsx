@@ -157,16 +157,16 @@ export default function Header() {
             <NavLink href="/markets/calendar" active={isActive("/markets/calendar")}>
               Calendar
             </NavLink>
+            <NavLink href="/dividends" active={isActive("/dividends")}>
+              Dividends
+            </NavLink>
             <NavLink href="/news" active={isActive("/news")}>
               News
             </NavLink>
 
-            {/* Screener – logged in only */}
-            {isLoggedIn && (
-              <NavLink href="/markets/screener" active={isActive("/markets/screener")}>
-                Screener
-              </NavLink>
-            )}
+            <NavLink href="/markets/screener" active={isActive("/markets/screener")}>
+              Screener
+            </NavLink>
 
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
@@ -330,8 +330,9 @@ export default function Header() {
               <MobileNavLink href="/markets" active={isActive("/markets")} onClick={() => setIsMobileMenuOpen(false)}>Markets</MobileNavLink>
               <MobileNavLink href="/markets/analytics" active={isActive("/markets/analytics")} onClick={() => setIsMobileMenuOpen(false)}>Analytics</MobileNavLink>
               <MobileNavLink href="/markets/calendar" active={isActive("/markets/calendar")} onClick={() => setIsMobileMenuOpen(false)}>Calendar</MobileNavLink>
+              <MobileNavLink href="/dividends" active={isActive("/dividends")} onClick={() => setIsMobileMenuOpen(false)}>Dividends</MobileNavLink>
               <MobileNavLink href="/news" active={isActive("/news")} onClick={() => setIsMobileMenuOpen(false)}>News</MobileNavLink>
-              {isLoggedIn && <MobileNavLink href="/markets/screener" active={isActive("/markets/screener")} onClick={() => setIsMobileMenuOpen(false)}>Screener</MobileNavLink>}
+              <MobileNavLink href="/markets/screener" active={isActive("/markets/screener")} onClick={() => setIsMobileMenuOpen(false)}>Screener</MobileNavLink>
               <MobileNavLink href="/watchlist" active={isActive("/watchlist")} onClick={() => setIsMobileMenuOpen(false)}>Watchlist</MobileNavLink>
             </div>
           </div>
