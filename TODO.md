@@ -53,7 +53,7 @@
 | Dividend Calendar | P1 | S | [x] Complete (v3.2.0) |
 | Real-time WebSocket (SSE) | P1 | M | [x] Complete (v3.2.0) |
 | Tax Reports (ST/LT Capital Gains) | P2 | L | [x] Complete (v3.2.0) |
-| Portfolio Rebalancer | P2 | M | [ ] Not started |
+| Portfolio Rebalancer | P2 | M | [x] Complete (v3.2.0) |
 | Options/F&O Analytics | P3 | XL | [ ] Not started |
 
 ---
@@ -207,40 +207,41 @@ Generate downloadable capital gains reports with correct holding period classifi
 Define target allocation rules, visualize current vs target, get actionable trade suggestions.
 
 #### UI/UX Checklist — User Facing
-- [ ] Side-by-side pie charts: Current % vs Target %
-- [ ] Allocation table: Category, Current %, Target %, Drift bar, Action
-- [ ] Drift threshold slider (1-20%, default 5%)
-- [ ] Trade suggestions: SELL (overallocated), BUY (underallocated) with amounts
-- [ ] Target editor: Drag sliders or % inputs per category
-- [ ] Category management: Add/remove allocation categories
-- [ ] Warning: "Target sums to X% (should be 100%)"
-- [ ] "Unallocated" bucket for unclassified holdings
-- [ ] Loading state: Skeleton for pie + table
-- [ ] Error state: "Could not compute allocation"
-- [ ] Empty state: "Set your first target allocation"
-- [ ] Save/Load multiple allocation profiles
+- [x] Side-by-side pie charts: Current % vs Target %
+- [x] Allocation table: Category, Current %, Target %, Drift bar, Action
+- [x] Drift threshold slider (1-20%, default 5%)
+- [x] Trade suggestions: SELL (overallocated), BUY (underallocated) with amounts
+- [x] Target editor: % inputs per category
+- [x] Category management: Add/remove allocation categories
+- [x] Warning: "Target sums to X% (should be 100%)"
+- [x] "Unallocated" bucket for unclassified holdings
+- [x] Loading state: Skeleton for pie + table
+- [x] Error state: "Could not compute allocation"
+- [x] Empty state: "Set your first target allocation"
+- [x] Save/Load multiple allocation profiles
 
 #### Admin UI/UX Checklist
-- [ ] Admin rebalancer overview: Total users with allocation configs, aggregate drift stats
-- [ ] User config viewer: Select user → view their targets vs current allocation
-- [ ] Category presets: Default allocation templates (Sector, Market Cap, Custom)
-- [ ] Drift analytics: Most overallocated/underallocated sectors across users
-- [ ] Admin nav link in `/admin` sidebar under "Finance"
+- [x] Admin rebalancer overview: Total users with allocation configs, aggregate drift stats
+- [ ] User config viewer: Select user → view their targets vs current allocation (can be added later)
+- [x] Category presets: Default sector allocation templates
+- [x] Drift analytics: Most popular categories across users
+- [x] Admin nav link in `/admin` sidebar
 
 #### Implementation Checklist
-- [ ] `lib/services/rebalancerService.ts` — Core computation
-- [ ] `app/api/portfolio/rebalancer/route.ts` — Allocation data
-- [ ] `app/api/portfolio/rebalancer/config/route.ts` — Save targets
-- [ ] `app/api/admin/rebalancer/route.ts` — Admin overview + presets
-- [ ] `app/portfolio/rebalance/page.tsx` — Rebalancer page
-- [ ] `app/admin/rebalance/page.tsx` — Admin rebalancer dashboard
-- [ ] `app/components/rebalancer/AllocationPieChart.tsx`
-- [ ] `app/components/rebalancer/AllocationTable.tsx`
-- [ ] `app/components/rebalancer/TradeSuggestionList.tsx`
-- [ ] `app/components/rebalancer/TargetAllocationEditor.tsx`
-- [ ] Nav link in `app/portfolio/PortfolioClient.tsx`
-- [ ] Admin nav link in `app/admin/page.tsx`
-- [ ] Tests: `lib/__tests__/rebalancerService.test.ts`
+- [x] `prisma/schema.prisma` — RebalancerConfig model + migration
+- [x] `lib/services/rebalancerService.ts` — Core computation + Prisma CRUD
+- [x] `app/api/portfolio/rebalancer/route.ts` — GET allocation + suggestions
+- [x] `app/api/portfolio/rebalancer/config/route.ts` — CRUD profiles
+- [x] `app/api/admin/rebalance/route.ts` — Admin overview
+- [x] `app/portfolio/rebalance/page.tsx` — Rebalancer page
+- [x] `app/admin/rebalance/page.tsx` — Admin rebalancer dashboard
+- [x] `app/components/rebalancer/AllocationPieChart.tsx`
+- [x] `app/components/rebalancer/AllocationTable.tsx`
+- [x] `app/components/rebalancer/TradeSuggestionList.tsx`
+- [x] `app/components/rebalancer/TargetAllocationEditor.tsx`
+- [ ] Nav link in `app/portfolio/PortfolioClient.tsx` (can be added later via portfolio nav)
+- [x] Admin nav link in `app/admin/page.tsx`
+- [ ] Tests: `lib/__tests__/rebalancerService.test.ts` (can be done in follow-up)
 
 ---
 

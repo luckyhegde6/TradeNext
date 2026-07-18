@@ -82,6 +82,13 @@ export default function AdminDashboardPage() {
       color: "bg-red-500",
     },
     {
+      title: "Rebalancer",
+      description: "Rebalancer configuration usage across users",
+      href: "/admin/rebalance",
+      icon: "⚖️",
+      color: "bg-purple-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",
