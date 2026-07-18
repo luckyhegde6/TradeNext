@@ -61,6 +61,13 @@ export default function AdminDashboardPage() {
       color: "bg-yellow-500",
     },
     {
+      title: "Dividend Management",
+      description: "Manage dividend records, sync status, and manual entries",
+      href: "/admin/dividends",
+      icon: "💰",
+      color: "bg-green-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",
