@@ -22,7 +22,7 @@ export async function GET(
 
         return NextResponse.json(data);
     } catch (e) {
-        console.error(`Error fetching chart for ${decodedIndex} with timeframe ${timeframe}:`, e);
+        console.error("Error fetching chart for %s with timeframe %s:", decodedIndex, timeframe, e);
         return NextResponse.json({ error: "failed to fetch chart" }, { status: 502 });
     }
 }
