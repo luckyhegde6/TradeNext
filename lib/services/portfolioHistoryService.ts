@@ -21,6 +21,14 @@ export interface PortfolioValueHistory {
   totalPnl: number;
   totalPnlPercent: number;
   history: PortfolioValuePoint[];
+  benchmark?: BenchmarkSeries; // NIFTY 50 comparison
+}
+
+export interface BenchmarkSeries {
+  name: string;
+  points: { date: string; value: number }[];
+  totalReturn: number;
+  totalReturnPercent: number;
 }
 
 /**
@@ -175,6 +183,50 @@ export async function getPortfolioValueHistory(
   const totalPnl = latestValue - latestInvested;
   const totalPnlPercent = latestInvested > 0 ? (totalPnl / latestInvested) * 100 : 0;
 
+  // Fetch NIFTY 50 benchmark data for the same date range
+  let benchmark: BenchmarkSeries | undefined;
+  if (history.length > 1) {
+    const firstDate = history[0].date;
+    const lastDate = history[history.length - 1].date;
+
+    try {
+      const indexCloses = await prisma.indexClose.findMany({
+        where: {
+          indexName: "NIFTY 50",
+          asOf: { gte: new Date(firstDate + "T00:00:00.000Z"), lte: new Date(lastDate + "T23:59:59.000Z") },
+          close: { not: null },
+        },
+        orderBy: { asOf: "asc" },
+        select: { asOf: true, close: true },
+      });
+
+      if (indexCloses.length > 1) {
+        const firstClose = Number(indexCloses[0].close);
+        const lastClose = Number(indexCloses[indexCloses.length - 1].close);
+        const totalReturn = lastClose - firstClose;
+        const totalReturnPercent = firstClose > 0 ? (totalReturn / firstClose) * 100 : 0;
+
+        const bmPoints = indexCloses.map((ic) => ({
+          date: ic.asOf.toISOString().split("T")[0],
+          value: Math.round(Number(ic.close) * 100) / 100,
+        }));
+
+        benchmark = {
+          name: "NIFTY 50",
+          points: bmPoints,
+          totalReturn: Math.round(totalReturn * 100) / 100,
+          totalReturnPercent: Math.round(totalReturnPercent * 100) / 100,
+        };
+      }
+    } catch (err) {
+      logger.warn({
+        msg: "Failed to fetch benchmark data",
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return {
     portfolioName: portfolio.name,
     totalInvested: Math.round(latestInvested * 100) / 100,
@@ -182,6 +234,7 @@ export async function getPortfolioValueHistory(
     totalPnl: Math.round(totalPnl * 100) / 100,
     totalPnlPercent: Math.round(totalPnlPercent * 100) / 100,
     history,
+    benchmark,
   };
 }
 

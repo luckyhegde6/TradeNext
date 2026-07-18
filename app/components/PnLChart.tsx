@@ -93,34 +93,63 @@ export default function PnLChart({ portfolio }: PnLChartProps) {
     const invested = history.history.map((p) => p.invested);
     const isProfit = history.totalPnl >= 0;
 
-    return {
-      labels: dates,
-      datasets: [
-        {
-          label: "Portfolio Value",
-          data: values,
-          borderColor: isProfit ? "rgb(16, 185, 129)" : "rgb(239, 68, 68)",
-          backgroundColor: isProfit ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)",
-          fill: true,
-          tension: 0.2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          borderWidth: 2,
-        },
-        {
-          label: "Total Invested",
-          data: invested,
-          borderColor: "rgb(99, 102, 241)",
-          backgroundColor: "rgba(99, 102, 241, 0.05)",
-          fill: false,
-          tension: 0.2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          borderWidth: 1.5,
-          borderDash: [5, 5],
-        },
-      ],
-    };
+    // Normalize NIFTY 50 to same baseline as portfolio value
+    const hasBenchmark = history.benchmark && history.benchmark.points.length > 1;
+    let bmPoints: number[] | undefined;
+    if (hasBenchmark && history.benchmark) {
+      // Align benchmark dates to our chart dates
+      const firstPortfolioValue = values[0] || 1;
+      const firstBmClose = history.benchmark.points[0]?.value || 1;
+      bmPoints = dates.map((d) => {
+        const match = history.benchmark!.points.find((p) => p.date === d);
+        if (match) return (match.value / firstBmClose) * firstPortfolioValue;
+        return 0;
+      });
+    }
+
+    const datasets: any[] = [
+      {
+        label: "Portfolio Value",
+        data: values,
+        borderColor: isProfit ? "rgb(16, 185, 129)" : "rgb(239, 68, 68)",
+        backgroundColor: isProfit ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)",
+        fill: true,
+        tension: 0.2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+      },
+      {
+        label: "Total Invested",
+        data: invested,
+        borderColor: "rgb(99, 102, 241)",
+        backgroundColor: "rgba(99, 102, 241, 0.05)",
+        fill: false,
+        tension: 0.2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        borderWidth: 1.5,
+        borderDash: [5, 5],
+      },
+    ];
+
+    // Add NIFTY 50 benchmark if available
+    if (hasBenchmark && bmPoints) {
+      datasets.push({
+        label: "NIFTY 50",
+        data: bmPoints,
+        borderColor: "rgb(245, 158, 11)",
+        backgroundColor: "rgba(245, 158, 11, 0.05)",
+        fill: false,
+        tension: 0.2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        borderWidth: 1.5,
+        borderDash: [3, 3],
+      });
+    }
+
+    return { labels: dates, datasets };
   }, [history]);
 
   // ---------- Empty state ----------
@@ -252,23 +281,63 @@ export default function PnLChart({ portfolio }: PnLChartProps) {
 
       {/* Timeline Stats */}
       {view === "timeline" && history && history.history.length > 1 && (
-        <div className="grid grid-cols-3 gap-3 mt-4">
-          <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Data Points</p>
-            <p className="text-lg font-bold text-gray-900 dark:text-white">{history.history.length}</p>
+        <div className="space-y-3 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Data Points</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">{history.history.length}</p>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">From</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">
+                {history.history[0]?.date || "-"}
+              </p>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">To</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">
+                {history.history[history.history.length - 1]?.date || "-"}
+              </p>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Portfolio Return</p>
+              <p className={`text-lg font-bold ${history.totalPnlPercent >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {history.totalPnlPercent >= 0 ? "+" : ""}{history.totalPnlPercent.toFixed(1)}%
+              </p>
+            </div>
           </div>
-          <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">From</p>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">
-              {history.history[0]?.date || "-"}
-            </p>
-          </div>
-          <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">To</p>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">
-              {history.history[history.history.length - 1]?.date || "-"}
-            </p>
-          </div>
+
+          {/* Benchmark Comparison */}
+          {history.benchmark && (
+            <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">vs NIFTY 50</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <p className="text-[10px] text-gray-400">Benchmark Return</p>
+                  <p className={`text-sm font-bold ${history.benchmark.totalReturnPercent >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {history.benchmark.totalReturnPercent >= 0 ? "+" : ""}{history.benchmark.totalReturnPercent.toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400">Portfolio Return</p>
+                  <p className={`text-sm font-bold ${history.totalPnlPercent >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {history.totalPnlPercent >= 0 ? "+" : ""}{history.totalPnlPercent.toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400">Alpha (Excess)</p>
+                  <p className={`text-sm font-bold ${(history.totalPnlPercent - history.benchmark.totalReturnPercent) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {(history.totalPnlPercent - history.benchmark.totalReturnPercent) >= 0 ? "+" : ""}
+                    {(history.totalPnlPercent - history.benchmark.totalReturnPercent).toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400">Data Points</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white">{history.benchmark.points.length}</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

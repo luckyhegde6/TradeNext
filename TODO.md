@@ -38,8 +38,8 @@
 | Admin Alert Config (v2.2.0) | [x] Complete |
 | Portfolio Export (CSV) | [x] Complete |
 | P&L Over Time Chart | [x] Complete |
-| Portfolio Analytics (Risk Metrics) | [ ] Pending |
-| Stock Compare + Benchmark | [ ] Pending |
+| Portfolio Analytics (Risk Metrics) | [x] Complete |
+| Stock Compare + Benchmark | [x] Complete |
 
 ## v1.8.0 - Security Enhancements
 
@@ -282,14 +282,22 @@
 
 ## Phase 3: Portfolio Enhancements
 
-### Advanced Analytics - ⏳ PENDING
-- [ ] P&L visualization
-- [ ] Sector-wise allocation pie chart
-- [ ] Risk metrics (beta, volatility)
+### Advanced Analytics — ✅ COMPLETE (v3.1.0)
+- [x] P&L visualization (PnLChart: Overview + Timeline modes)
+- [x] Sector-wise allocation pie chart (SectorAllocationChart: Doughnut with % labels)
+- [x] Risk metrics (RiskMetricsCards: Sharpe, Max Drawdown, Volatility, CAGR, Beta, Win Rate)
 
-### Comparison Tool - ⏳ PENDING
-- [ ] Compare stocks (table exists, needs chart overlay + historical perf)
-- [ ] Compare portfolio vs benchmark (NIFTY 50)
+### Comparison Tool — ✅ COMPLETE (v3.1.0)
+- [x] Compare stocks with chart overlay (historical perf, normalized to 100)
+- [x] Compare portfolio vs benchmark (NIFTY 50 overlay on PnLChart timeline)
+- [x] Benchmark stats card (Alpha, Benchmark Return, Data Points)
+
+### v3.1.0 — Risk Metrics + Benchmark + Compare Chart (July 18, 2026)
+- Risk Metrics Service with Sharpe, Max Drawdown, Volatility, CAGR, Beta, Win Rate
+- NIFTY 50 benchmark overlay in PnLChart timeline mode
+- Alpha (excess return) display in benchmark comparison card
+- Stock compare chart overlay with normalized performance (base 100)
+- All Phase 3 items completed
 
 ### Quick Wins Completed (v3.0.0)
 - [x] Portfolio CSV Export API (`/api/portfolio/export?type=fy-report|detailed-pnl`)

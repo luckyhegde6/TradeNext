@@ -6,6 +6,7 @@ import { PortfolioSummary } from '@/lib/services/portfolioService';
 import MetricsCards from '../components/MetricsCards';
 import AllocationChart from '../components/AllocationChart';
 import PnLChart from '../components/PnLChart';
+import RiskMetricsCards from '../components/RiskMetricsCards';
 import SectorAllocationChart from '../components/SectorAllocationChart';
 import HoldingsTable from '../components/HoldingsTable';
 import NSEStockChart from '../components/NSEStockChart';
@@ -336,6 +337,9 @@ export default function PortfolioClient() {
                     <SectorAllocationChart holdings={data.holdings} />
                 </div>
             </div>
+
+            {/* Risk Metrics */}
+            <RiskMetricsCards />
 
             {/* Stock Allocation & Price Chart Row */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
