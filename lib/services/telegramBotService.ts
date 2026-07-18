@@ -424,8 +424,12 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   const ctx: BotCommandContext = { chatId, command, args, firstName };
 
   // 3. Route to handler
-  const handler = COMMAND_MAP[command];
-  if (!handler) {
+  // Validate the user-supplied command is a real, own-property handler
+  // before dispatching — prevents untrusted input from invoking an
+  // unexpected target (CWE-470).
+  const hasCommand = Object.prototype.hasOwnProperty.call(COMMAND_MAP, command);
+  const candidate = hasCommand ? COMMAND_MAP[command] : undefined;
+  if (typeof candidate !== "function") {
     const result = await handleUnknown(ctx);
     await sendBotMessage(chatId, result.text || "");
     // Audit log
@@ -434,7 +438,7 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   }
 
   // 4. Execute
-  const result = await handler(ctx);
+  const result = await candidate(ctx);
 
   // 5. Send response
   if (result.text) {
