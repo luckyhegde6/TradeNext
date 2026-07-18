@@ -41,6 +41,7 @@ model User {
   portfolios Portfolio[] 
   sessions UserSession[]
   rebalancerConfigs RebalancerConfig[]
+  foPositions       FOPosition[]
 }
 
 model JoinRequest {
@@ -1049,6 +1050,39 @@ model RebalancerConfig {
 
   @@index([userId])
   @@map("rebalancer_configs")
+}
+
+// ============================================
+// Phase 4: Options/F&O Analytics (v3.2.0)
+// ============================================
+
+model FOPosition {
+  id          String    @id @default(uuid())
+  userId      Int
+  symbol      String    // Underlying (e.g., "NIFTY", "BANKNIFTY", "RELIANCE")
+  type        String    // FUTURES | CALL | PUT
+  direction   String    // LONG | SHORT
+  quantity    Int
+  entryPrice  Decimal   @db.Decimal(30,6)
+  currentPrice Decimal? @db.Decimal(30,6)
+  premium     Decimal?  @db.Decimal(30,6) // Premium paid/received (options only)
+  strike      Decimal?  @db.Decimal(30,6) // Strike price (options only)
+  expiry      DateTime? // Contract expiry date
+  status      String    @default("OPEN") // OPEN | CLOSED
+  closePrice  Decimal?  @db.Decimal(30,6)
+  closeDate   DateTime?
+  pnl         Decimal?  @db.Decimal(30,6)
+  notes       String?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([symbol])
+  @@index([status])
+  @@index([expiry])
+  @@map("fo_positions")
 }
 
 model UserSession {

@@ -54,7 +54,8 @@
 | Real-time WebSocket (SSE) | P1 | M | [x] Complete (v3.2.0) |
 | Tax Reports (ST/LT Capital Gains) | P2 | L | [x] Complete (v3.2.0) |
 | Portfolio Rebalancer | P2 | M | [x] Complete (v3.2.0) |
-| Options/F&O Analytics | P3 | XL | [ ] Not started |
+| Options/F&O Analytics | P3 | XL | [x] Partial (v3.2.0) — Services + API + Schema, UI pending |
+| AI Agent Layer (LangChain/LangGraph) | P1 | XL | [ ] Not started — Screener agent + Alert agent + Admin model config with OpenRouter |
 
 ---
 
