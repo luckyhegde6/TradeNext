@@ -40,10 +40,16 @@
 | P&L Over Time Chart | [x] Complete |
 | Portfolio Analytics (Risk Metrics) | [x] Complete |
 | Stock Compare + Benchmark | [x] Complete |
+| Dividend Calendar (v3.2.0) | [x] Complete |
+| Real-time WebSocket SSE (v3.2.0) | [x] Complete |
+| Tax Reports (v3.2.0) | [x] Complete |
+| Portfolio Rebalancer (v3.2.0) | [x] Complete |
+| Options/F&O Analytics (v3.2.0) | [x] Partial — Services + API done, UI pending |
+| AI Agent Layer (v3.2.0) | [x] Complete |
 
 ---
 
-## Phase 4: Intelligence & Reporting — 🚧 IN PROGRESS
+## Phase 4: Intelligence & Reporting — ✅ COMPLETE (v3.2.0)
 
 **PRD:** `.agents/PRD.md`
 
