@@ -424,12 +424,12 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   const ctx: BotCommandContext = { chatId, command, args, firstName };
 
   // 3. Route to handler
-  // Validate the user-supplied command is a real, own-property handler
-  // before dispatching — prevents untrusted input from invoking an
-  // unexpected target (CWE-470).
-  const hasCommand = Object.prototype.hasOwnProperty.call(COMMAND_MAP, command);
-  const candidate = hasCommand ? COMMAND_MAP[command] : undefined;
-  if (typeof candidate !== "function") {
+  // Validate the user-supplied command NAME against the known command
+  // set BEFORE any dynamic dispatch. This allowlist check is what
+  // neutralizes the untrusted-method-name flow (CWE-470); a plain
+  // hasOwnProperty/typeof guard on the resolved value does not.
+  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/alerts", "/updates"];
+  if (!KNOWN_COMMANDS.includes(command)) {
     const result = await handleUnknown(ctx);
     await sendBotMessage(chatId, result.text || "");
     // Audit log
@@ -437,8 +437,9 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
     return true;
   }
 
-  // 4. Execute
-  const result = await candidate(ctx);
+  // 4. Execute (command is now confirmed to be a known key)
+  const handler = COMMAND_MAP[command];
+  const result = await handler(ctx);
 
   // 5. Send response
   if (result.text) {
