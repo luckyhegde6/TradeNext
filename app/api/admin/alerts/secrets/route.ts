@@ -12,15 +12,17 @@ export const runtime = "nodejs";
 
 const ALGORITHM = "aes-256-gcm";
 const ENCRYPTION_KEY = process.env.SECRETS_ENCRYPTION_KEY || process.env.AUTH_SECRET;
-if (!ENCRYPTION_KEY) {
-  throw new Error(
-    "SECRETS_ENCRYPTION_KEY (or AUTH_SECRET) environment variable must be set for secrets encryption"
-  );
-}
 
 function deriveKey(seed: string | undefined): Buffer {
-  // Derive a 32-byte key using SHA-256 (seed is always defined, checked at module init)
-  return crypto.createHash("sha256").update(seed!).digest();
+  // Derive a 32-byte key using SHA-256.
+  // Lazy check: only fails at request time (inside a handler's try/catch),
+  // not at module import — so `next build` can evaluate this route.
+  if (!seed) {
+    throw new Error(
+      "SECRETS_ENCRYPTION_KEY (or AUTH_SECRET) environment variable must be set for secrets encryption"
+    );
+  }
+  return crypto.createHash("sha256").update(seed).digest();
 }
 
 function encrypt(plaintext: string): string {
