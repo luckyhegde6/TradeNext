@@ -75,6 +75,13 @@ export default function AdminDashboardPage() {
       color: "bg-cyan-500",
     },
     {
+      title: "Tax Management",
+      description: "Capital gains overview across all users",
+      href: "/admin/tax",
+      icon: "🧾",
+      color: "bg-red-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",

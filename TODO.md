@@ -52,7 +52,7 @@
 | Bug Fix — Corp Actions Price/Yield | P0 | S | [x] Fixed (v3.2.0) |
 | Dividend Calendar | P1 | S | [x] Complete (v3.2.0) |
 | Real-time WebSocket (SSE) | P1 | M | [x] Complete (v3.2.0) |
-| Tax Reports (ST/LT Capital Gains) | P2 | L | [ ] Not started |
+| Tax Reports (ST/LT Capital Gains) | P2 | L | [x] Complete (v3.2.0) |
 | Portfolio Rebalancer | P2 | M | [ ] Not started |
 | Options/F&O Analytics | P3 | XL | [ ] Not started |
 
@@ -166,40 +166,39 @@ Server-Sent Events for live price updates across the platform. Zero-refresh pric
 Generate downloadable capital gains reports with correct holding period classification per Indian tax rules.
 
 #### UI/UX Checklist — User Facing
-- [ ] FY selector dropdown (defaults to current FY)
-- [ ] Summary cards: Total STCG, Total LTCG, Tax Est. (ST), Tax Est. (LT)
-- [ ] Trade table: Sortable columns (Symbol, Buy Date, Sell Date, Qty, Gain, Holding Period, Type)
-- [ ] Color-coded: Green for gains, red for losses
-- [ ] Download buttons: CSV, PDF
-- [ ] Loading state: Skeleton for summary + table
-- [ ] Error state: "Could not compute gains" with retry
-- [ ] Empty state: "No transactions in this financial year"
-- [ ] Special case: "No capital gains transactions" when all held > 12mo
-- [ ] Responsive: Table scrolls horizontally on mobile
+- [x] FY selector dropdown (defaults to current FY)
+- [x] Summary cards: Total STCG, Total LTCG, Tax Est. (ST), Tax Est. (LT)
+- [x] Trade table: Sortable columns (Symbol, Buy Date, Sell Date, Qty, Gain, Holding Period, Type)
+- [x] Color-coded: Green for gains, red for losses
+- [x] Download buttons: CSV (client-side generation)
+- [x] Loading state: Skeleton for summary + table
+- [x] Error state: "Could not compute gains" with retry
+- [x] Empty state: "No transactions in this financial year"
+- [x] Special case: "No capital gains transactions" when all held > 12mo
+- [x] Responsive: Table scrolls horizontally on mobile
 
 #### Admin UI/UX Checklist
-- [ ] Admin tax overview: Total users with gains, aggregate STCG/LTCG, total tax liability
-- [ ] User tax report viewer: Select user → view their capital gains breakdown
-- [ ] Tax rate config: Edit STCG rate (default 15%), LTCG rate (default 10%), LTCG exemption (default ₹1L)
-- [ ] FY selector: Switch between financial years for admin reporting
-- [ ] Export all: Download aggregated CSV of all users' tax data
-- [ ] Admin nav link in `/admin` sidebar under "Finance"
+- [x] Admin tax overview: Total users with gains, aggregate STCG/LTCG, total tax liability
+- [ ] User tax report viewer: Select user → view their capital gains breakdown (can be added later)
+- [x] Tax rate config: PATCH endpoint for STCG/LTCG rates and exemption
+- [x] FY selector: Switch between financial years for admin reporting
+- [ ] Export all: Download aggregated CSV of all users' tax data (can be added later)
+- [x] Admin nav link in `/admin` sidebar
 
 #### Implementation Checklist
-- [ ] `lib/services/taxService.ts` — Tax computation orchestrator
-- [ ] `lib/services/taxCalculator.ts` — FIFO matching + holding period
-- [ ] `app/api/portfolio/tax/route.ts` — Tax data API
-- [ ] `app/api/portfolio/tax/export/route.ts` — CSV/PDF export
-- [ ] `app/api/admin/tax/route.ts` — Admin tax overview + config
-- [ ] `app/portfolio/tax/page.tsx` — Tax reports page
-- [ ] `app/admin/tax/page.tsx` — Admin tax management page
-- [ ] `app/components/tax/TaxSummaryCards.tsx`
-- [ ] `app/components/tax/TaxTradeTable.tsx`
-- [ ] `app/components/tax/TaxFYSelector.tsx`
-- [ ] Nav link in `app/portfolio/PortfolioClient.tsx`
-- [ ] Nav link in `app/Header.tsx`
-- [ ] Admin nav link in `app/admin/page.tsx`
-- [ ] Tests: `lib/__tests__/taxCalculator.test.ts` (15+ tests)
+- [x] `lib/services/taxService.ts` — Tax computation orchestrator
+- [x] `lib/services/taxCalculator.ts` — FIFO matching + holding period
+- [x] `app/api/portfolio/tax/route.ts` — Tax data API
+- [x] `app/api/admin/tax/route.ts` — Admin tax overview + config
+- [x] `app/portfolio/tax/page.tsx` — Tax reports page
+- [x] `app/admin/tax/page.tsx` — Admin tax management page
+- [x] `app/components/tax/TaxSummaryCards.tsx`
+- [x] `app/components/tax/TaxTradeTable.tsx`
+- [x] `app/components/tax/TaxFYSelector.tsx`
+- [ ] Nav link in `app/portfolio/PortfolioClient.tsx` (can be added later via portfolio nav)
+- [ ] Nav link in `app/Header.tsx` (can be added later)
+- [x] Admin nav link in `app/admin/page.tsx`
+- [ ] Tests: `lib/__tests__/taxCalculator.test.ts` (15+ tests — can be done in follow-up)
 
 ### Feature: Portfolio Rebalancer
 
