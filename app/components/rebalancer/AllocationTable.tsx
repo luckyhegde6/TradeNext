@@ -1,6 +1,6 @@
 "use client";
 
-import { RebalancerAction } from "@/lib/services/rebalancerService";
+import { RebalancerAction } from "@/lib/services/rebalancerTypes";
 
 interface Props {
   actions: RebalancerAction[];

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, lazy, Suspense, useEffect } from "react";
+import { useState, lazy, Suspense, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import Autocomplete from "@/app/components/ui/Autocomplete";
 import RuleList from "@/app/components/alerts/RuleList";
 import ChannelConfig from "@/app/components/alerts/ChannelConfig";
 import EventHistory from "@/app/components/alerts/EventHistory";
+import AiActionButton from "@/app/components/AiActionButton";
+import TelegramSubscription from "@/app/components/alerts/TelegramSubscription";
 
 // ============================================================
 // Types
@@ -49,13 +51,14 @@ const ALERT_TYPES = [
 // Tabs
 // ============================================================
 
-type Tab = "simple-alerts" | "rules" | "channels" | "events";
+type Tab = "simple-alerts" | "rules" | "channels" | "events" | "telegram";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "simple-alerts", label: "My Alerts" },
   { key: "rules", label: "Alert Rules" },
   { key: "channels", label: "Channels" },
   { key: "events", label: "Event History" },
+  { key: "telegram", label: "Telegram Bot" },
 ];
 
 // ============================================================
@@ -78,6 +81,13 @@ function SimpleAlertsTab() {
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const [alertPrices, setAlertPrices] = useState<Record<string, number>>({});
+
+  // AI Analysis state
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiRateLimit, setAiRateLimit] = useState<{ remaining: number; limit: number } | null>(null);
+  const [showAiAnalysis, setShowAiAnalysis] = useState(false);
 
   useEffect(() => {
     if (session) {
@@ -215,6 +225,65 @@ function SimpleAlertsTab() {
     }
   };
 
+  // ─── AI Alert Analysis ─────────────────────────────────────────────────
+  const analyzeAlertsWithAI = useCallback(async (): Promise<{ remaining: number | null; limit: number | null }> => {
+    const triggeredAlerts = alerts.filter(a => a.triggered);
+    if (triggeredAlerts.length === 0) {
+      setAiError("No triggered alerts to analyze.");
+      setShowAiAnalysis(true);
+      return { remaining: null, limit: null };
+    }
+
+    setAiLoading(true);
+    setAiResult(null);
+    setAiError(null);
+    setAiRateLimit(null);
+    setShowAiAnalysis(true);
+
+    let remaining: number | null = null;
+    let limit: number | null = null;
+
+    try {
+      const alertSummary = triggeredAlerts.map(a =>
+        `${a.symbol || "Any"} - ${a.type} (Threshold: ${a.condition.threshold || a.condition.changePercent || "N/A"})`
+      ).join("\n");
+
+      const query = `Here are my triggered stock alerts. Analyze them and provide recommendations:\n\n${alertSummary}\n\nFor each alert, explain what might be happening and what action to consider. Also highlight any patterns across multiple alerts.`;
+
+      const res = await fetch("/api/ai/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, analysisType: "alert" }),
+      });
+
+      // Read rate limit headers
+      remaining = parseInt(res.headers.get("X-RateLimit-Remaining") || "", 10) || null;
+      limit = parseInt(res.headers.get("X-RateLimit-Limit") || "", 10) || null;
+      if (remaining !== null && limit !== null) {
+        setAiRateLimit({ remaining, limit });
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.success && data.data?.analysis) {
+        setAiResult(data.data.analysis);
+      } else if (data.data?.filteredAnalysis) {
+        setAiResult(data.data.filteredAnalysis);
+      } else {
+        setAiResult(data.analysis || "No analysis returned.");
+      }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiLoading(false);
+    }
+    return { remaining, limit };
+  }, [alerts]);
+
   const getAlertTypeLabel = (type: string) => {
     return ALERT_TYPES.find((t) => t.value === type)?.label || type;
   };
@@ -256,21 +325,78 @@ function SimpleAlertsTab() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold">Simple Price & Corporate Action Alerts</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={markAllSeen}
-            className="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted"
-          >
-            Mark All Seen
-          </button>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary/90"
-          >
-            {showForm ? "Cancel" : "Create Alert"}
-          </button>
-        </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={markAllSeen}
+                  className="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted"
+                >
+                  Mark All Seen
+                </button>
+                <AiActionButton onClick={analyzeAlertsWithAI} size="small">
+                  Analyze with AI
+                </AiActionButton>
+                <button
+                  onClick={() => setShowForm(!showForm)}
+                  className="px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary/90"
+                >
+                  {showForm ? "Cancel" : "Create Alert"}
+                </button>
+              </div>
       </div>
+
+      {/* AI Analysis Results */}
+      {showAiAnalysis && (
+        <div className="bg-card border border-border rounded-lg p-4 mb-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-semibold">AI Alert Analysis</h3>
+            <button
+              onClick={() => { setShowAiAnalysis(false); setAiResult(null); setAiError(null); }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          {aiRateLimit && (
+            <div className={`text-xs mb-3 px-3 py-1.5 rounded ${
+              aiRateLimit.remaining > 0
+                ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
+                : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+            }`}>
+              {aiRateLimit.remaining > 0
+                ? `Rate limit: ${aiRateLimit.remaining} of ${aiRateLimit.limit} requests remaining`
+                : `Rate limit reached (${aiRateLimit.limit}/${aiRateLimit.limit}). Please wait.`}
+            </div>
+          )}
+
+          {aiLoading && (
+            <div className="flex items-center justify-center py-6">
+              <div className="text-center">
+                <div className="animate-spin h-6 w-6 border-2 border-purple-500 border-t-transparent rounded-full mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">Analyzing alerts...</p>
+              </div>
+            </div>
+          )}
+
+          {aiError && !aiLoading && (
+            <div className="text-center py-4">
+              <p className="text-sm text-red-500 mb-2">{aiError}</p>
+              <button
+                onClick={analyzeAlertsWithAI}
+                className="text-xs text-purple-600 hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {aiResult && !aiLoading && (
+            <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+              {aiResult}
+            </div>
+          )}
+        </div>
+      )}
 
       {(showForm || editingAlert) && (
         <div className="bg-card border border-border rounded-lg p-6 mb-6">
@@ -486,6 +612,7 @@ export default function AlertsPage() {
         {activeTab === "rules" && <RuleList />}
         {activeTab === "channels" && <ChannelConfig />}
         {activeTab === "events" && <EventHistory />}
+        {activeTab === "telegram" && <TelegramSubscription />}
       </div>
     </div>
   );

@@ -15,6 +15,9 @@ export interface TelegramConfig {
   botToken: string;
   chatId: string;
   parseMode?: "Markdown" | "HTML";
+  /** Optional message ID to edit an existing message instead of sending a new one.
+   *  Uses editMessageText API. Useful for pinning/updating a single message. */
+  messageId?: string;
 }
 
 export interface DeliveryResult {
@@ -35,7 +38,62 @@ export function validateTelegramConfig(config: TelegramConfig): string | null {
 }
 
 /**
+ * Edit an existing Telegram message using editMessageText API.
+ * Used when TELEGRAM_MESSAGEID is configured — replaces sendMessage with edit.
+ */
+async function editTelegramMessage(
+  config: TelegramConfig,
+  text: string
+): Promise<DeliveryResult> {
+  try {
+    const url = `${TELEGRAM_API_BASE}/bot${config.botToken}/editMessageText`;
+    const payload: Record<string, unknown> = {
+      chat_id: config.chatId,
+      message_id: config.messageId,
+      text,
+      parse_mode: config.parseMode || "Markdown",
+      disable_web_page_preview: false,
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !data.ok) {
+      const errorMsg = data.description || `HTTP ${response.status}`;
+      logger.error({
+        msg: "Telegram editMessageText failed",
+        chatId: config.chatId,
+        messageId: config.messageId,
+        error: errorMsg,
+      });
+      return { success: false, error: errorMsg };
+    }
+
+    logger.info({
+      msg: "Telegram message edited",
+      chatId: config.chatId,
+      messageId: config.messageId,
+    });
+
+    return { success: true };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error({
+      msg: "Telegram editMessageText exception",
+      error: errorMsg,
+    });
+    return { success: false, error: errorMsg };
+  }
+}
+
+/**
  * Send an alert via Telegram bot.
+ * If config.messageId is set, uses editMessageText to update an existing message.
  */
 export async function sendTelegramAlert(
   config: TelegramConfig,
@@ -46,10 +104,17 @@ export async function sendTelegramAlert(
     const validateErr = validateTelegramConfig(config);
     if (validateErr) return { success: false, error: validateErr };
 
+    const fullText = text + (link ? `\n\n[View Details](${link})` : "");
+
+    // If messageId is provided, edit existing message instead of sending new one
+    if (config.messageId) {
+      return await editTelegramMessage(config, fullText);
+    }
+
     // Build message with optional link button
     const message: Record<string, unknown> = {
       chat_id: config.chatId,
-      text: text + (link ? `\n\n[View Details](${link})` : ""),
+      text: fullText,
       parse_mode: config.parseMode || "Markdown",
       disable_web_page_preview: false,
     };

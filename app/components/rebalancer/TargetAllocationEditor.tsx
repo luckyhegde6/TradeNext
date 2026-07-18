@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AllocationCategory, DEFAULT_SECTOR_TARGETS } from "@/lib/services/rebalancerService";
+import { AllocationCategory, DEFAULT_SECTOR_TARGETS } from "@/lib/services/rebalancerTypes";
 
 interface Props {
   categories: AllocationCategory[];

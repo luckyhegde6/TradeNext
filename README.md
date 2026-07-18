@@ -4,6 +4,23 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
+## Latest Update - v3.2.0 (July 18, 2026)
+
+### Telegram Bot Alert Delivery
+- **@tradenext6Bot**: Telegram bot for real-time alert delivery and interactive commands
+- **Bot commands**: `/start`, `/chatid`, `/help`, `/recommendations`, `/alerts`, `/updates`
+- **User subscription system**: Register and verify your Telegram Chat ID via Alerts → Telegram Bot tab
+- **Verification flow**: 6-digit code sent to Telegram for secure chat ID verification
+- **Test endpoint**: Send a test message to verify subscription works
+- **Rate limiting**: 5 commands/minute, 20/hour, 3-second cooldown per chat
+- **User verification**: Commands only return your own data after verified linking
+- **Audit logging**: All bot commands logged for security audit
+- **Alert routing**: Triggered alerts can be pushed to verified Telegram subscribers
+- **Broadcast support**: Admin can send announcements to all subscribers
+- **Bot info** endpoint: `/api/telegram/webhook` (GET) for health check
+- **Test message**: `/api/user/telegram/test` (POST) for quick verification
+- **Verify API**: `/api/user/telegram/verify` (POST) with send/confirm actions
+
 ## Latest Update - v1.16.0 (July 16, 2026)
 
 ### Advanced Screener — Chartink-Like Scanning
@@ -19,11 +36,13 @@
 - **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
 - **Chartink Reverse-Engineered**: Analyzed Chartink's DSL, API, and 150,000+ community screeners. Built native TradingView-based equivalent without middleman dependencies.
 
-### Tested Features (March 2026)
+### Tested Features (July 2026)
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Authentication | ✅ Working | Demo: demo@tradenext6.app / demo123 |
 | Admin | ✅ Working | Admin: admin@tradenext6.app / admin123 |
+| Telegram Bot | ✅ Working | @tradenext6Bot — real-time alerts with rate limiting & auth |
+| Telegram Subscription | ✅ Working | Register & verify Chat ID from Alerts page |
 | Portfolio | ✅ Working | Holdings (5 stocks), P&L tracking |
 | Markets Overview | ✅ Working | NIFTY 50, BANK, IT, MIDCAP, SMALLCAP, AUTO, PHARMA |
 | Analytics | ✅ Working | 14 tabs including Financial Results |
@@ -34,7 +53,7 @@
 | News | ✅ Working | Market news, India/Global filters |
 | Stock Screener | ✅ Working | 2000+ stocks, multiple filters |
 | Watchlist | ✅ UI Ready | Empty state (expected) |
-| Alerts | ✅ UI Ready | Empty state (expected) |
+| Alerts | ✅ Working | Multi-tab: Simple, Rules, Channels, Events, Telegram Bot |
 | Financial Results | ✅ Working | NSE format (quarters as columns) |
 | TradingView | ✅ Working | Links on dashboard charts |
 | Session Management | ✅ Working | Admin can view/invalidate sessions |
@@ -56,7 +75,8 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
   - **Date Formatting**: Supports both ISO and DD-MMM-YYYY formats with day-of-week display
 - **Technical Analysis**: Piotroski F-Score, technical indicators (RSI, MACD, Bollinger Bands, SMA, EMA)
 - **Stock Screening**: Advanced filtering with multiple criteria
-- **Alert System**: Price alerts and recommendation subscriptions
+- **Alert System**: Price alerts, multi-condition rules, and recommendation subscriptions
+- **Telegram Bot (@tradenext6Bot)**: Real-time alert delivery via Telegram with interactive commands, rate limiting, user verification, and audit logging
 - **Watchlist**: Quick price tracking and management
 - **Data Import**: CSV/Excel transaction import
 - **Docker-ready**: Local development with PostgreSQL/TimescaleDB + Redis
@@ -207,6 +227,10 @@ AUTH_SECRET=your-secret-key
 # Admin (optional - defaults provided)
 ADMIN_EMAIL=admin@tradenext6.app
 ADMIN_PASSWORD=admin123
+
+# Telegram Bot (for real-time alert delivery) — set these in your .env file, never commit them
+# TELEGRAM_SECRET=    Get bot token from @BotFather on Telegram
+# TELEGRAM_CHATID=    Your Telegram chat ID (get from @tradenext6Bot with /start)
 
 # Server
 PORT=3000

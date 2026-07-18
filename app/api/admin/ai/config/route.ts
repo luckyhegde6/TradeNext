@@ -38,7 +38,6 @@ export async function GET() {
       enabled: dbConfig?.enabled ?? envConfig.enabled,
       availableModels: AVAILABLE_MODELS,
       envModel: envConfig.model,
-      apiKeyPrefix: envConfig.apiKey ? `${envConfig.apiKey.slice(0, 8)}...` : null,
     });
   } catch (err) {
     logger.error({ msg: "Failed to get AI config", error: err });

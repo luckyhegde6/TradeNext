@@ -1,9 +1,9 @@
 /**
- * LangGraph-based alert analysis agent.
+ * Alert analysis agent using @openrouter/agent SDK.
  * Analyzes triggered alerts and provides market context and actionable insights.
+ * No tool calling needed — uses direct prompt for simplicity.
  */
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { getLLM, directPrompt } from "./llm-provider";
+import { directPrompt } from "./llm-provider";
 import { ALERT_SYSTEM_PROMPT, getAlertAnalysisPrompt } from "./prompts";
 import type { AIConfig } from "./config";
 import logger from "@/lib/logger";

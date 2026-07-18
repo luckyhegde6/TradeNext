@@ -225,9 +225,48 @@ function DeliveryChannelsTab() {
   const [showForm, setShowForm] = useState(false);
   const [stats, setStats] = useState<Record<string, number> | null>(null);
 
+  // Telegram env status
+  const [tgStatus, setTgStatus] = useState<{
+    configured: boolean;
+    chatId: string;
+    hasBotToken: boolean;
+    hasMessageId: boolean;
+    botUsername?: string;
+    lastVerified?: string;
+    error?: string;
+  } | null>(null);
+  const [tgVerifying, setTgVerifying] = useState(false);
+
   const [form, setForm] = useState({ name: "", type: "email", config: "", isActive: true });
 
-  useEffect(() => { fetchChannels(); }, []);
+  useEffect(() => { fetchChannels(); fetchTelegramStatus(); }, []);
+
+  const fetchTelegramStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/alerts/telegram-status");
+      if (res.ok) {
+        const data = await res.json();
+        setTgStatus(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch Telegram status:", e);
+    }
+  };
+
+  const verifyTelegram = async () => {
+    setTgVerifying(true);
+    try {
+      const res = await fetch("/api/admin/alerts/telegram-status?verify=true");
+      if (res.ok) {
+        const data = await res.json();
+        setTgStatus(data);
+      }
+    } catch (e) {
+      console.error("Failed to verify Telegram:", e);
+    } finally {
+      setTgVerifying(false);
+    }
+  };
 
   const fetchChannels = async () => {
     try {
@@ -307,7 +346,8 @@ function DeliveryChannelsTab() {
             <p className="text-xs font-bold text-green-600 uppercase">Active</p>
             <p className="text-2xl font-black text-green-600">{stats.active || 0}</p>
           </div>
-          {Object.entries(stats).filter(([k]) => k !== "total" && k !== "active" && k !== "systemChannels").map(([type, count]) => (
+          {/* Only render numeric stat entries (filter out objects like byType) */}
+          {Object.entries(stats).filter(([k, v]) => typeof v === "number" && k !== "total" && k !== "active" && k !== "systemChannels").map(([type, count]) => (
             <div key={type} className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-4">
               <p className="text-xs font-bold text-gray-500 uppercase">{channelTypeLabels[type] || type}</p>
               <p className="text-2xl font-black">{count}</p>
@@ -315,6 +355,97 @@ function DeliveryChannelsTab() {
           ))}
         </div>
       )}
+
+      {/* System Telegram Config (from env vars) */}
+      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl p-5">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-lg">
+              ✈️
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white">System Telegram (Env Config)</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Configured via <code className="text-blue-600 dark:text-blue-400 text-[10px] bg-blue-50 dark:bg-blue-900/20 px-1 rounded">TELEGRAM_SECRET</code>, <code className="text-blue-600 dark:text-blue-400 text-[10px] bg-blue-50 dark:bg-blue-900/20 px-1 rounded">TELEGRAM_CHATID</code>{tgStatus?.hasMessageId ? `, ` : ``}{tgStatus?.hasMessageId && <code className="text-blue-600 dark:text-blue-400 text-[10px] bg-blue-50 dark:bg-blue-900/20 px-1 rounded">TELEGRAM_MESSAGEID</code>}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={verifyTelegram}
+            disabled={tgVerifying}
+            className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {tgVerifying ? "Verifying..." : "Verify & Test"}
+          </button>
+        </div>
+
+        {tgStatus && (
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</p>
+              <p className={`text-sm font-bold mt-0.5 ${
+                tgStatus.configured
+                  ? "text-green-600 dark:text-green-400"
+                  : "text-red-600 dark:text-red-400"
+              }`}>
+                {tgStatus.configured ? "Configured" : "Not Configured"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Chat ID</p>
+              <p className="text-sm font-mono mt-0.5 text-gray-900 dark:text-white">
+                {tgStatus.chatId}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Bot Token</p>
+              <p className="text-sm font-mono mt-0.5 text-gray-900 dark:text-white">
+                {tgStatus.hasBotToken ? "✓ Configured (masked)" : "✗ Missing"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Message ID</p>
+              <p className="text-sm font-mono mt-0.5 text-gray-900 dark:text-white">
+                {tgStatus.hasMessageId ? "✓ Set (edit mode)" : "— (send mode)"}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {tgStatus?.botUsername && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+            <span>✓ Bot @{tgStatus.botUsername} verified</span>
+            {tgStatus.lastVerified && (
+              <span className="text-gray-400">
+                at {new Date(tgStatus.lastVerified).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        )}
+
+        {tgStatus?.error && !tgStatus.configured && (
+          <div className="mt-3 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg">
+            {tgStatus.error}
+            <p className="text-gray-500 dark:text-gray-400 mt-1">
+              Set <code className="text-blue-600 text-[10px]">TELEGRAM_SECRET</code> (bot token) and{' '}
+              <code className="text-blue-600 text-[10px]">TELEGRAM_CHATID</code> in your .env file to enable Telegram alerts.
+            </p>
+          </div>
+        )}
+
+        {tgStatus?.error && tgStatus.configured && (
+          <div className="mt-3 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">
+            Verification failed: {tgStatus.error}
+          </div>
+        )}
+
+        {tgStatus?.configured && !tgStatus.error && (
+          <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            This Telegram channel is auto-configured from environment variables and will be used
+            as fallback for alert delivery when no explicit Telegram channel is set on a rule.
+          </div>
+        )}
+      </div>
 
       {/* Add Channel Button */}
       <div className="flex justify-end">

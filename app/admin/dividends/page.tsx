@@ -52,7 +52,7 @@ export default function AdminDividendsPage() {
   useEffect(() => {
     if (status === "loading") return;
     if (!session || !session.user || (session.user as any).role !== "admin") {
-      router.push("/");
+      router.push("/admin/access-denied");
     }
   }, [session, status, router]);
 

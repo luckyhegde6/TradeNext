@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { analyzeAlerts } from "@/lib/services/ai/alert-agent";
 import { getDefaultConfig, hasValidConfig } from "@/lib/services/ai/config";
+import { trackAiCall, persistAiCallToDb } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -11,6 +12,9 @@ export const runtime = "nodejs";
  * Body: { alerts: AlertEvent[] }
  */
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+  let status: "success" | "error" = "error";
+
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -34,6 +38,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.alerts.length === 0) {
+      status = "success";
       return NextResponse.json({
         success: true,
         analysis: "No alerts to analyze.",
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await analyzeAlerts(body.alerts, config);
+    status = "success";
     return NextResponse.json(result);
   } catch (err) {
     logger.error({ msg: "AI alert analysis API failed", error: err });
@@ -56,5 +62,17 @@ export async function POST(req: NextRequest) {
       { error: "Failed to analyze alerts. Please try again." },
       { status: 500 }
     );
+  } finally {
+    const responseTimeMs = Date.now() - startTime;
+    const entry = {
+      timestamp: new Date().toISOString(),
+      action: "alerts" as const,
+      model: (getDefaultConfig().model) || "openrouter/free",
+      status,
+      tokensUsed: 0,
+      responseTimeMs,
+    };
+    trackAiCall(entry);
+    persistAiCallToDb(entry).catch(() => {});
   }
 }

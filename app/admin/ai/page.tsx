@@ -4,12 +4,6 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
-interface AIModel {
-  id: string;
-  name: string;
-  provider: string;
-}
-
 interface AIConfigData {
   configured: boolean;
   hasApiKey: boolean;
@@ -17,9 +11,8 @@ interface AIConfigData {
   temperature: number;
   maxTokens: number;
   enabled: boolean;
-  availableModels: AIModel[];
+  availableModels: { id: string; name: string }[];
   envModel: string;
-  apiKeyPrefix: string | null;
 }
 
 export default function AdminAIPage() {
@@ -39,7 +32,7 @@ export default function AdminAIPage() {
   useEffect(() => {
     if (status === "loading") return;
     if (!session || !session.user || (session.user as any).role !== "admin") {
-      router.push("/");
+      router.push("/admin/access-denied");
     }
   }, [session, status, router]);
 
@@ -102,7 +95,7 @@ export default function AdminAIPage() {
         setMessage({ type: "error", text: data.analysis || "AI failed to respond" });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Connection failed. Check your API key." });
+      setMessage({ type: "error", text: "Connection failed. Verify that your .env file has a valid OPENROUTERKEY." });
     }
   };
 
@@ -139,7 +132,7 @@ export default function AdminAIPage() {
                 </p>
                 <p className="text-xs mt-1">
                   {config.hasApiKey
-                    ? `Configured (${config.apiKeyPrefix}...)`
+                    ? "Configured"
                     : "Not configured — add OPENROUTERKEY to .env file"}
                 </p>
               </div>
@@ -164,7 +157,7 @@ export default function AdminAIPage() {
               >
                 {config.availableModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} ({m.provider})
+                    {m.name}
                   </option>
                 ))}
               </select>

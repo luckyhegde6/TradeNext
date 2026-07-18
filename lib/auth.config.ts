@@ -33,11 +33,18 @@ export const authConfig: NextAuthConfig = {
             const isLoggedIn = !!auth?.user;
             const isAuthPage = nextUrl.pathname.startsWith("/auth");
             const isAdminPage = nextUrl.pathname.startsWith("/admin") || nextUrl.pathname.startsWith("/users");
+            const isAccessDeniedPage = nextUrl.pathname === "/admin/access-denied";
 
-            if (isAdminPage) {
+            if (isAdminPage && !isAccessDeniedPage) {
                 if (isLoggedIn && (auth.user as any).role === "admin") return true;
-                const callbackUrl = nextUrl.pathname;
-                return Response.redirect(new URL(`/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`, nextUrl));
+                const callbackUrl = encodeURIComponent(nextUrl.pathname);
+
+                if (isLoggedIn) {
+                    // Logged in but not admin → access denied
+                    return Response.redirect(new URL("/admin/access-denied", nextUrl));
+                }
+                // Not logged in → sign in
+                return Response.redirect(new URL(`/auth/signin?callbackUrl=${callbackUrl}`, nextUrl));
             }
 
             if (isAuthPage) {

@@ -11,6 +11,7 @@ import logger from "@/lib/logger";
 import { sendEmailAlert, buildAlertEmailHtml, type EmailConfig } from "./email";
 import { sendWebhookAlert, type WebhookConfig } from "./webhook";
 import { sendTelegramAlert, type TelegramConfig } from "./telegram";
+import { getTelegramEnvConfig, buildTelegramChannelConfig } from "./telegram-env";
 
 export interface AlertContext {
   ruleId: string;
@@ -149,7 +150,22 @@ async function deliverToChannel(
     }
 
     case "telegram": {
-      const tgConfig = config as TelegramConfig;
+      // Try channel config first, fall back to env-based Telegram config
+      let tgConfig = config as TelegramConfig;
+
+      // If channel has no explicit config but env vars are set, use those
+      if (!tgConfig.botToken || !tgConfig.chatId) {
+        const envConfig = getTelegramEnvConfig();
+        if (envConfig?.configured) {
+          tgConfig = {
+            botToken: envConfig.botToken,
+            chatId: envConfig.chatId,
+            parseMode: "Markdown",
+            messageId: envConfig.messageId,
+          };
+        }
+      }
+
       const text = `*${context.ruleName}*\n${context.message}${context.symbol ? `\nSymbol: ${context.symbol}` : ""}${context.price ? `\nPrice: ₹${context.price.toLocaleString("en-IN")}` : ""}`;
       const result = await sendTelegramAlert(tgConfig, text, context.link);
       return {

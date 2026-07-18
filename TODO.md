@@ -44,6 +44,7 @@
 | Real-time WebSocket SSE (v3.2.0) | [x] Complete |
 | Tax Reports (v3.2.0) | [x] Complete |
 | Portfolio Rebalancer (v3.2.0) | [x] Complete |
+| Telegram Bot (v3.2.0) | [x] Complete |
 | Options/F&O Analytics (v3.2.0) | [x] Partial — Services + API done, UI pending |
 | AI Agent Layer (v3.2.0) | [x] Complete |
 
@@ -60,6 +61,7 @@
 | Real-time WebSocket (SSE) | P1 | M | [x] Complete (v3.2.0) |
 | Tax Reports (ST/LT Capital Gains) | P2 | L | [x] Complete (v3.2.0) |
 | Portfolio Rebalancer | P2 | M | [x] Complete (v3.2.0) |
+| **Telegram Bot (@tradenext6Bot)** | **P1** | **M** | **[x] Complete (v3.2.0)** |
 | Options/F&O Analytics | P3 | XL | [x] Partial (v3.2.0) — Services + API + Schema, UI pending |
 | AI Agent Layer (LangChain/LangGraph) | P1 | XL | [x] Complete (v3.2.0) — Screener agent + Alert agent + Admin model config with OpenRouter |
 

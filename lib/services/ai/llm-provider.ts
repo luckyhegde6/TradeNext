@@ -1,14 +1,19 @@
 /**
- * OpenRouter LLM Provider using LangChain.
- * OpenRouter exposes an OpenAI-compatible API, so we use ChatOpenAI with a custom base URL.
+ * OpenRouter LLM Provider using @openrouter/agent SDK.
+ *
+ * Two modes:
+ * 1. `callModel()` — Multi-turn agent with tools, auto-execution, stop conditions
+ * 2. `directPrompt()` — Simple Q&A (no tools, single turn)
+ *
+ * Both use the agent SDK's OpenRouter client under the hood.
  */
-import { ChatOpenAI } from "@langchain/openai";
+import { OpenRouter } from "@openrouter/agent";
 import { getDefaultConfig, type AIConfig } from "./config";
 import logger from "@/lib/logger";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-let cachedModel: ChatOpenAI | null = null;
+let cachedClient: OpenRouter | null = null;
 let cachedConfigHash = "";
 
 function configHash(cfg: AIConfig): string {
@@ -16,60 +21,48 @@ function configHash(cfg: AIConfig): string {
 }
 
 /**
- * Get or create a cached ChatOpenAI instance configured for OpenRouter.
+ * Get or create a cached OpenRouter Agent SDK client.
  * Re-creates if config changes.
  */
-export function getLLM(config?: AIConfig): ChatOpenAI {
+export function getClient(config?: AIConfig): OpenRouter {
   const cfg = config || getDefaultConfig();
   const hash = configHash(cfg);
 
-  if (cachedModel && cachedConfigHash === hash) {
-    return cachedModel;
+  if (cachedClient && cachedConfigHash === hash) {
+    return cachedClient;
   }
 
   if (!cfg.apiKey) {
     logger.warn({ msg: "No OpenRouter API key configured. AI features will be disabled." });
   }
 
-  let modelName = cfg.model;
-  // Map openrouter/xxx to the actual model ID for the API
-  if (modelName.startsWith("openrouter/")) {
-    modelName = modelName.replace("openrouter/", "");
-    // Default to a well-known free model if just "openrouter/free"
-    if (modelName === "free") {
-      modelName = "openai/gpt-4o-mini";
-    }
-  }
-
-  cachedModel = new ChatOpenAI({
-    modelName,
-    temperature: cfg.temperature,
-    maxTokens: cfg.maxTokens,
-    openAIApiKey: cfg.apiKey,
-    configuration: {
-      baseURL: OPENROUTER_BASE_URL,
-      defaultHeaders: {
-        "HTTP-Referer": process.env.NEXT_PUBLIC_BASE_URL || "https://tradenext6.app",
-        "X-Title": "TradeNext AI",
-      },
-    },
+  cachedClient = new OpenRouter({
+    apiKey: cfg.apiKey,
   });
 
   cachedConfigHash = hash;
-  return cachedModel;
+  return cachedClient;
 }
 
 /**
- * Reset the cached LLM instance (e.g., when config changes).
+ * Reset the cached client instance (e.g., when config changes).
  */
-export function resetLLM(): void {
-  cachedModel = null;
+export function resetClient(): void {
+  cachedClient = null;
   cachedConfigHash = "";
 }
 
 /**
- * Simple direct fetch to OpenRouter (bypasses LangChain for quick calls).
- * Useful for simple completions without tool calling.
+ * Alias for backward compatibility.
+ * @deprecated Use getClient() instead.
+ */
+export const getLLM = getClient;
+/** @deprecated Use resetClient() instead. */
+export const resetLLM = resetClient;
+
+/**
+ * Simple direct fetch to OpenRouter (bypasses Agent SDK for quick calls).
+ * Useful for simple completions without tool calling or agent setup.
  */
 export async function directPrompt(
   prompt: string,
@@ -91,7 +84,7 @@ export async function directPrompt(
         "X-Title": "TradeNext AI",
       },
       body: JSON.stringify({
-        model: cfg.model === "openrouter/free" ? "openai/gpt-4o-mini" : cfg.model,
+        model: cfg.model,
         messages: [{ role: "user", content: prompt }],
         temperature: cfg.temperature,
         max_tokens: cfg.maxTokens,

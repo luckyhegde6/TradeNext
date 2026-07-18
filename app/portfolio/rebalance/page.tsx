@@ -12,7 +12,7 @@ import {
   RebalancerProfile,
   RebalancerResult,
   DEFAULT_SECTOR_TARGETS,
-} from "@/lib/services/rebalancerService";
+} from "@/lib/services/rebalancerTypes";
 
 export default function RebalancePage() {
   const { data: session, status } = useSession();

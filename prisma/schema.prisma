@@ -29,6 +29,10 @@ model User {
   // Account status
   isBlocked              Boolean   @default(false)
   
+  // Telegram subscription for alert delivery
+  telegramChatId         String?
+  telegramVerified       Boolean   @default(false)
+  
   // Session management - increment to invalidate all sessions
   tokenVersion           Int       @default(1)
   
@@ -42,6 +46,8 @@ model User {
   sessions UserSession[]
   rebalancerConfigs RebalancerConfig[]
   foPositions       FOPosition[]
+  aiAnalyses        AIAnalysis[]
+  aiConversations   AIConversation[]
 }
 
 model JoinRequest {
@@ -1206,4 +1212,72 @@ model DeliveryLog {
   @@index([eventId])
   @@index([status])
   @@map("delivery_logs")
+}
+
+// ============================================
+// AI Agent Infrastructure (v3.2.0)
+// ============================================
+
+// Stores all AI analysis results for persistence and correlation
+model AIAnalysis {
+  id            String   @id @default(uuid())
+  userId        Int
+  analysisType  String   // screener | dividend | portfolio | market | alert | custom
+  query         String   // The original query/prompt
+  result        String   // The AI response (markdown)
+  model         String   // Model used (e.g., openrouter/free)
+  tokensUsed    Int      @default(0)
+  executionTime Int      @default(0) // ms
+  success       Boolean  @default(true)
+  errorMessage  String?
+  metadata      Json?    // Additional data (correlation keys, stock symbols, etc.)
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  AIConversation?   @relation(fields: [conversationId], references: [id])
+  conversationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([analysisType])
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("ai_analyses")
+}
+
+// Stores conversation context for multi-turn interactions
+model AIConversation {
+  id            String   @id @default(uuid())
+  userId        Int
+  analysisType  String   // screener | dividend | portfolio | market | alert
+  title         String?  // Auto-generated or user-provided title
+  messages      Json     // Array of { role, content, tokens, timestamp }
+  tokenCount    Int      @default(0) // Total tokens across all messages
+  messageCount  Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses      AIAnalysis[]
+
+  @@index([userId])
+  @@index([updatedAt])
+  @@map("ai_conversations")
+}
+
+// Tracks per-user and per-IP rate limiting for AI endpoints
+model AIRateLimit {
+  id            String    @id @default(uuid())
+  key           String    @unique // "user:123" or "ip:192.168.1.1"
+  userId        Int?
+  ipAddress     String?
+  violations    Int       @default(0)
+  tokenUsage    Int       @default(0)
+  cooldownUntil DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([key])
+  @@index([updatedAt])
+  @@map("ai_rate_limits")
 }
