@@ -5,7 +5,7 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-07-16
+2026-07-18
 
 ---
 
@@ -174,6 +174,24 @@
 
 ## Current Project Status
 
+### Telegram Bot Alert Delivery (v3.2.0)
+**Issue**: No real-time alert delivery via Telegram — users couldn't receive alerts on their phone.
+**Fix Applied**:
+- **telegramBotService.ts**: Centralized command handler with 6 commands (`/start`, `/chatid`, `/help`, `/recommendations`, `/alerts`, `/updates`), per-chat rate limiting (5/min, 20/hr), user verification via 6-digit code, audit logging, `sendAlertToUser()`, `broadcastToSubscribers()`
+- **Telegram Webhook**: `/api/telegram/webhook` delegates to `handleBotCommand()`
+- **Subscription UI**: Alerts → Telegram Bot tab with register → verify → test flow
+- **Verify API**: `/api/user/telegram/verify` with send/confirm actions
+- **Test API**: `/api/user/telegram/test` sends test message
+- **Bug Fix — Corp Actions Price/Yield**: Fixed price enrichment from `daily_prices` and yield formula
+- **Build Fix — Rebalancer imports**: Extracted types to `rebalancerTypes.ts` to avoid client-side Prisma bundling
+- **Build Fix — Dev server startup**: Fixed detach pattern for non-blocking LLM startup
+**Files Created**: `lib/services/telegramBotService.ts`, `app/api/user/telegram/test/route.ts`, `app/api/user/telegram/verify/route.ts`, `app/components/alerts/TelegramSubscription.tsx`, `lib/services/rebalancerTypes.ts`
+**Files Modified**: `app/api/telegram/webhook/route.ts`, `app/alerts/page.tsx`, `app/contact/page.tsx`, `README.md`, `AGENTS.md`, `TODO.md`, 3 rebalancer component files, `next.config.ts`
+**Tests**: 190/190 pass, 0 errors in E2E testing (Dashboard, Alerts→Telegram, Contact, Dividends, Rebalance, Webhook API, Mobile)
+**Build**: ✅ Compiles successfully
+**Deploy**: Ready to push to git trigger Netlify CD
+**Status**: RESOLVED in v3.2.0.
+
 ### Secure Join Request Flow (v1.9.2)
 **Issue**: Insecure direct signup via `/users/new`.
 **Fix Applied**: 
@@ -196,6 +214,18 @@
 ---
 
 ## Session History
+
+### Session 10 (July 18, 2026)
+- **Telegram Bot Alert Delivery (v3.2.0)**: Full-featured Telegram bot with command routing, rate limiting, user verification, and alert delivery.
+- **Files Created**: `lib/services/telegramBotService.ts`, verify/test API routes, `TelegramSubscription.tsx` UI component, `rebalancerTypes.ts`
+- **Files Modified**: webhook route, alerts page, contact page, docs (README, AGENTS, TODO), 3 rebalancer components, next.config.ts
+- **Bug Fix — Corp Actions Price/Yield**: Fetched live prices from `daily_prices`, fixed yield formula to `(dividendPerShare / currentPrice) * 100`
+- **Build Fix — Rebalancer imports**: Extracted types to `rebalancerTypes.ts` to stop Prisma bundling in client components (was importing `pg` through `rebalancerService.ts`)
+- **Build Fix — Dev server**: Fixed `start /B` blocking the LLM; switched to PowerShell `ProcessStartInfo` with `CreateNoWindow`
+- **E2E Tested**: Dashboard, Alerts→Telegram tab, Contact FAQ, Dividends calendar, Portfolio Rebalance, Telegram webhook API, mobile responsive (375px) — 0 console errors
+- **Tests**: 190/190 pass
+- **Build**: ✅ Compiles with `npm run quickbuild`
+- **Status**: Pending git push to trigger Netlify CD deploy
 
 ### Session 9 (July 16, 2026)
 - **Agent Handoff & Self-Learning System (v1.15.0)**: Complete agent collaboration infrastructure.

@@ -35,6 +35,35 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-07-18 | Telegram Bot Alert Delivery (v3.2.0) - COMPLETE
+- **Action**: Built complete Telegram bot alert delivery system with @tradenext6Bot.
+- **Problem**: Users couldn't receive real-time alerts on their phone; no Telegram integration existed.
+- **Files Created (5)**:
+  - `lib/services/telegramBotService.ts` — Centralized bot command handler with 6 commands, rate limiter (5/min, 20/hr, 3s cooldown), user verification via 6-digit code, audit logging, sendAlertToUser(), broadcastToSubscribers()
+  - `app/api/user/telegram/test/route.ts` — POST test endpoint that sends "Test Message" to user's registered Telegram
+  - `app/api/user/telegram/verify/route.ts` — POST with send (generates code) and confirm (validates code) actions; 10-min TTL
+  - `app/components/alerts/TelegramSubscription.tsx` — 3-step subscription UI: Register → Verify → Done, with test/unsubscribe buttons
+  - `lib/services/rebalancerTypes.ts` — Extracted types from rebalancerService.ts to avoid bundling Prisma/node modules in client components
+- **Files Modified (8)**:
+  - `app/api/telegram/webhook/route.ts` — Now delegates to handleBotCommand()
+  - `app/alerts/page.tsx` — Added Telegram Bot as 5th tab
+  - `app/contact/page.tsx` — Added FAQ: "How do I receive real-time alerts via Telegram?"
+  - `app/components/rebalancer/AllocationTable.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TargetAllocationEditor.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TradeSuggestionList.tsx` — Changed import to rebalancerTypes
+  - `next.config.ts` — Added pg, pg-native, pgpass to serverExternalPackages
+  - `README.md`, `AGENTS.md`, `TODO.md` — Documentation updates
+- **Bug Fix — Corp Actions Price/Yield**:
+  - Added price enrichment from `daily_prices` (DISTINCT ON ticker for latest close)
+  - Fixed yield formula: `(dividendPerShare / currentPrice) * 100` (was using face value)
+- **Build Fixes**:
+  - Extracted types to `rebalancerTypes.ts` to fix client-side Prisma bundling (was trying to resolve `pg`, `dns`)
+  - Used PowerShell `ProcessStartInfo` for non-blocking dev server startup
+- **Secrets Management**: Removed hardcoded Telegram secrets from README.md; stored only in .env + Netlify env vars
+- **Testing**: Jest 190/190 pass; E2E Playwright on Dashboard, Alerts→Telegram tab, Contact FAQ, Dividends calendar, Portfolio Rebalance, Telegram webhook API, mobile responsive (375px) — 0 console errors
+- **Build**: `npm run quickbuild` compiles successfully
+- **Status**: ✅ RESOLVED — Code committed, needs git push to trigger Netlify CD deploy
+
 ### 2026-07-16 | Agent Handoff & Self-Learning System (v1.15.0) - COMPLETE
 - **Action**: Created complete agent orchestration infrastructure with handoff files, agent definitions, self-learning loop, commands, and git hooks.
 - **Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across diverse AI agents.

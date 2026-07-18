@@ -707,7 +707,56 @@ export function trackEvent(action: string, category: string, options?: { label?:
 
 ---
 
+### 24. Dev Server Startup — Avoid Blocking the LLM (v3.2.0)
+**Issue**: Running `npm run dev` in a shell via `start /B` or `Start-Process -NoNewWindow` blocks the LLM tool call, preventing further operations.
+
+**Root Cause**: The shell tool waits for the process to exit. Even background processes that redirect output can hold the shell open if not properly detached.
+
+**Solution**: Use PowerShell `System.Diagnostics.ProcessStartInfo` with `CreateNoWindow = $true` and `UseShellExecute = $false`:
+```powershell
+$psi = New-Object System.Diagnostics.ProcessStartInfo;
+$psi.FileName = 'cmd.exe';
+$psi.Arguments = '/c cd /d <PROJECT_DIR> && npm run dev > <PROJECT_DIR>\dev-server.log 2>&1';
+$psi.UseShellExecute = $false;
+$psi.CreateNoWindow = $true;
+$psi.RedirectStandardOutput = $false;
+$psi.RedirectStandardError = $false;
+$p = [System.Diagnostics.Process]::Start($psi);
+Write-Output $p.Id
+```
+This returns immediately with the PID, and the dev server runs independently.
+
+**Cleanup**: Kill the process when done:
+```bash
+taskkill /PID <PID> /F
+```
+
+### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0)
+**Issue**: Build fails with `Module not found: Can't resolve 'dns'` or `pg` when client components import from service files that import Prisma.
+
+**Root Cause**: Next.js client bundle attempts to resolve all imports from a client component, including Node.js built-in modules and database drivers used by services. Even though client components only use types, the bundler follows the entire import chain.
+
+**Solution**: Extract type definitions and constants into a separate `rebalancerTypes.ts` file that has ZERO server-side imports:
+```typescript
+// lib/services/rebalancerTypes.ts — Client-safe types
+export interface AllocationCategory { ... }
+export interface RebalancerAction { ... }
+export const DEFAULT_SECTOR_TARGETS = [ ... ];
+
+// lib/services/rebalancerService.ts — Server-only logic (imports Prisma)
+import { PrismaClient } from '@prisma/client';
+import { AllocationCategory } from './rebalancerTypes';
+```
+
+**Key Rules**:
+1. Client components ONLY import from the `*Types.ts` file
+2. Server API routes import from the main service file
+3. NEVER import Prisma, database adapters, or Node.js modules in files that client components import
+4. Check all client component imports of a service file when introducing a new one
+
 ## Update Log
+- 2026-07-18: Added Lesson 24 (Dev Server Detach) — PowerShell Start-Process for non-blocking startup
+- 2026-07-18: Added Lesson 25 (Client-Server Separation) — extract types to avoid bundling Node.js modules
 - 2026-07-18: Added Playwright Snapshot Cleanup & Code Hygiene lesson (v1.16.1) — mandatory pre-commit cleanup checklist
 - 2026-07-16: Added Git Hooks Must NOT Modify Tracked Files lesson (critical bugfix - infinite loop)
 - 2026-07-16: Fixed pre-commit hook shell variable handling (integer expression bug)

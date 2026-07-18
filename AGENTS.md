@@ -19,8 +19,10 @@ TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and
   - **Documentation Updated**: README.md, AGENTS.md, Contact FAQ page with Telegram bot info
   - **PRD Created**: `.agents/PRD.md` — Comprehensive product requirements doc covering all Phase 4 features
   - **TODO.md Updated**: Full roadmap with PRD reference and UI/UX testing checklists
-  - **Files Created**: `lib/services/telegramBotService.ts`, `app/api/user/telegram/test/route.ts`, `app/api/user/telegram/verify/route.ts`, `app/components/alerts/TelegramSubscription.tsx`
-  - **Files Modified**: `app/api/telegram/webhook/route.ts`, `app/alerts/page.tsx`, `app/contact/page.tsx`, `README.md`
+  - **Build Fix — Rebalancer Client Import**: Extracted types (`AllocationCategory`, `RebalancerAction`, `DEFAULT_SECTOR_TARGETS`) from `lib/services/rebalancerService.ts` to `lib/services/rebalancerTypes.ts` to prevent Next.js client bundle from resolving `pg`, `dns`, etc. Updated `TargetAllocationEditor.tsx`, `AllocationTable.tsx`, `TradeSuggestionList.tsx` imports.
+  - **Dev Server Lesson**: PowerShell `ProcessStartInfo` with `CreateNoWindow=true` avoids LLM blocking; `start /B` with output redirection does not.
+  - **Files Created**: `lib/services/telegramBotService.ts`, `app/api/user/telegram/test/route.ts`, `app/api/user/telegram/verify/route.ts`, `app/components/alerts/TelegramSubscription.tsx`, `lib/services/rebalancerTypes.ts`
+  - **Files Modified**: `app/api/telegram/webhook/route.ts`, `app/alerts/page.tsx`, `app/contact/page.tsx`, `README.md`, `AGENTS.md`, `next.config.ts`, `app/components/rebalancer/AllocationTable.tsx`, `app/components/rebalancer/TargetAllocationEditor.tsx`, `app/components/rebalancer/TradeSuggestionList.tsx`
 - **v3.1.0** - Phase 3 Complete — Risk Metrics + Benchmark + Compare Chart (July 18, 2026). All Phase 3 portfolio enhancement features delivered:
   - **Risk Metrics Service**: `lib/services/portfolioRiskMetricsService.ts` — Computes Sharpe Ratio (annualized), Max Drawdown, Annualized Volatility, CAGR, Beta vs NIFTY 50, Win Rate from portfolio value history and IndexClose data.
   - **Risk Metrics API**: `app/api/portfolio/risk-metrics/route.ts` — Serves risk metrics with auth guard, error handling.
