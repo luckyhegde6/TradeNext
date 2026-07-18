@@ -68,6 +68,13 @@ export default function AdminDashboardPage() {
       color: "bg-green-500",
     },
     {
+      title: "Live Prices (SSE)",
+      description: "Monitor real-time price streaming infrastructure",
+      href: "/admin/live-prices",
+      icon: "⚡",
+      color: "bg-cyan-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",
