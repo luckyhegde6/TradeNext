@@ -89,6 +89,13 @@ export default function AdminDashboardPage() {
       color: "bg-purple-500",
     },
     {
+      title: "AI Agents",
+      description: "Configure LangChain/LangGraph AI agents with OpenRouter",
+      href: "/admin/ai",
+      icon: "🤖",
+      color: "bg-indigo-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",
