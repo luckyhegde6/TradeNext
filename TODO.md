@@ -80,7 +80,7 @@
 
 A dedicated dividend calendar page showing upcoming ex-dates, amounts, and estimated income based on user holdings.
 
-#### UI/UX Checklist
+#### UI/UX Checklist — User Facing
 - [ ] Month calendar with dividend dots on ex-dates
 - [ ] Hover popup shows: Symbol, Amount, Yield, Ex-Date, Record Date
 - [ ] List view: Chronological, sortable, filterable
@@ -92,16 +92,28 @@ A dedicated dividend calendar page showing upcoming ex-dates, amounts, and estim
 - [ ] Responsive: Works on mobile (375px+)
 - [ ] Dark/light mode support
 
+#### Admin UI/UX Checklist
+- [ ] Admin dividend overview: Total dividends tracked, upcoming this month/quarter
+- [ ] Dividend source status: Last NSE sync timestamp, total records, sync status
+- [ ] Manual dividend entry form: Symbol, Amount, Ex-Date, Record Date, Type (Interim/Final)
+- [ ] Dividend data table: All dividends with search, filter by year/status, bulk actions
+- [ ] Sync trigger button: Force re-sync dividends from NSE
+- [ ] Yield audit view: See which dividends have missing prices (yield = null)
+- [ ] Admin nav link in `/admin` sidebar under "Market Data"
+
 #### Implementation Checklist
 - [ ] `lib/services/dividendCalendarService.ts` — Fetch + enrich dividends
 - [ ] `app/api/dividends/calendar/route.ts` — API endpoint
+- [ ] `app/api/admin/dividends/route.ts` — Admin CRUD + sync management
 - [ ] `app/dividends/page.tsx` — Calendar page
+- [ ] `app/admin/dividends/page.tsx` — Admin dividend management page
 - [ ] `app/components/dividends/DividendMonthView.tsx`
 - [ ] `app/components/dividends/DividendListView.tsx`
 - [ ] `app/components/dividends/DividendSummaryCards.tsx`
 - [ ] `app/components/dividends/DividendIncomeChart.tsx`
 - [ ] Tests: `lib/__tests__/dividendCalendarService.test.ts`
 - [ ] Nav link in `app/Header.tsx`
+- [ ] Admin nav link in `app/admin/page.tsx` or sidebar
 
 ### Feature: Real-time WebSocket (SSE)
 
@@ -109,7 +121,7 @@ A dedicated dividend calendar page showing upcoming ex-dates, amounts, and estim
 
 Server-Sent Events for live price updates across the platform. Zero-refresh price updates on portfolio, watchlist, and dashboard.
 
-#### UI/UX Checklist
+#### UI/UX Checklist — User Facing
 - [ ] LivePriceBadge: Green/red flash on price change
 - [ ] Portfolio holdings show live prices
 - [ ] Watchlist shows live prices
@@ -120,13 +132,22 @@ Server-Sent Events for live price updates across the platform. Zero-refresh pric
 - [ ] Fallback: Graceful degradation to polling when SSE unsupported
 - [ ] Responsive: Compact badge works on all screen sizes
 
+#### Admin UI/UX Checklist
+- [ ] SSE dashboard: Connected clients count, symbols tracked, data rate
+- [ ] Connection log: Client IP, symbols subscribed, uptime, disconnect reason
+- [ ] SSE config form: Poll interval (seconds), batch size limit, heartbeat interval
+- [ ] Market hours override: Force market open/closed status for testing
+- [ ] Admin nav link in `/admin` sidebar under "System"
+
 #### Implementation Checklist
 - [ ] `lib/services/priceSyncService.ts` — Price broadcast service
 - [ ] `lib/services/priceCache.ts` — In-memory price store
 - [ ] `app/api/prices/stream/route.ts` — SSE endpoint
+- [ ] `app/api/admin/sse/route.ts` — SSE admin stats/config
 - [ ] `lib/hooks/useLivePrice.ts` — Single symbol hook
 - [ ] `lib/hooks/useLivePrices.ts` — Batch symbol hook
 - [ ] `app/components/LivePriceBadge.tsx` — Price display component
+- [ ] `app/admin/live-prices/page.tsx` — Admin SSE dashboard
 - [ ] Wire into `app/portfolio/PortfolioClient.tsx`
 - [ ] Wire into `app/components/HoldingsTable.tsx`
 - [ ] Wire into `app/page.tsx` (dashboard)
@@ -144,7 +165,7 @@ Server-Sent Events for live price updates across the platform. Zero-refresh pric
 
 Generate downloadable capital gains reports with correct holding period classification per Indian tax rules.
 
-#### UI/UX Checklist
+#### UI/UX Checklist — User Facing
 - [ ] FY selector dropdown (defaults to current FY)
 - [ ] Summary cards: Total STCG, Total LTCG, Tax Est. (ST), Tax Est. (LT)
 - [ ] Trade table: Sortable columns (Symbol, Buy Date, Sell Date, Qty, Gain, Holding Period, Type)
@@ -156,17 +177,28 @@ Generate downloadable capital gains reports with correct holding period classifi
 - [ ] Special case: "No capital gains transactions" when all held > 12mo
 - [ ] Responsive: Table scrolls horizontally on mobile
 
+#### Admin UI/UX Checklist
+- [ ] Admin tax overview: Total users with gains, aggregate STCG/LTCG, total tax liability
+- [ ] User tax report viewer: Select user → view their capital gains breakdown
+- [ ] Tax rate config: Edit STCG rate (default 15%), LTCG rate (default 10%), LTCG exemption (default ₹1L)
+- [ ] FY selector: Switch between financial years for admin reporting
+- [ ] Export all: Download aggregated CSV of all users' tax data
+- [ ] Admin nav link in `/admin` sidebar under "Finance"
+
 #### Implementation Checklist
 - [ ] `lib/services/taxService.ts` — Tax computation orchestrator
 - [ ] `lib/services/taxCalculator.ts` — FIFO matching + holding period
 - [ ] `app/api/portfolio/tax/route.ts` — Tax data API
 - [ ] `app/api/portfolio/tax/export/route.ts` — CSV/PDF export
+- [ ] `app/api/admin/tax/route.ts` — Admin tax overview + config
 - [ ] `app/portfolio/tax/page.tsx` — Tax reports page
+- [ ] `app/admin/tax/page.tsx` — Admin tax management page
 - [ ] `app/components/tax/TaxSummaryCards.tsx`
 - [ ] `app/components/tax/TaxTradeTable.tsx`
 - [ ] `app/components/tax/TaxFYSelector.tsx`
 - [ ] Nav link in `app/portfolio/PortfolioClient.tsx`
 - [ ] Nav link in `app/Header.tsx`
+- [ ] Admin nav link in `app/admin/page.tsx`
 - [ ] Tests: `lib/__tests__/taxCalculator.test.ts` (15+ tests)
 
 ### Feature: Portfolio Rebalancer
@@ -175,7 +207,7 @@ Generate downloadable capital gains reports with correct holding period classifi
 
 Define target allocation rules, visualize current vs target, get actionable trade suggestions.
 
-#### UI/UX Checklist
+#### UI/UX Checklist — User Facing
 - [ ] Side-by-side pie charts: Current % vs Target %
 - [ ] Allocation table: Category, Current %, Target %, Drift bar, Action
 - [ ] Drift threshold slider (1-20%, default 5%)
@@ -189,16 +221,26 @@ Define target allocation rules, visualize current vs target, get actionable trad
 - [ ] Empty state: "Set your first target allocation"
 - [ ] Save/Load multiple allocation profiles
 
+#### Admin UI/UX Checklist
+- [ ] Admin rebalancer overview: Total users with allocation configs, aggregate drift stats
+- [ ] User config viewer: Select user → view their targets vs current allocation
+- [ ] Category presets: Default allocation templates (Sector, Market Cap, Custom)
+- [ ] Drift analytics: Most overallocated/underallocated sectors across users
+- [ ] Admin nav link in `/admin` sidebar under "Finance"
+
 #### Implementation Checklist
 - [ ] `lib/services/rebalancerService.ts` — Core computation
 - [ ] `app/api/portfolio/rebalancer/route.ts` — Allocation data
 - [ ] `app/api/portfolio/rebalancer/config/route.ts` — Save targets
+- [ ] `app/api/admin/rebalancer/route.ts` — Admin overview + presets
 - [ ] `app/portfolio/rebalance/page.tsx` — Rebalancer page
+- [ ] `app/admin/rebalance/page.tsx` — Admin rebalancer dashboard
 - [ ] `app/components/rebalancer/AllocationPieChart.tsx`
 - [ ] `app/components/rebalancer/AllocationTable.tsx`
 - [ ] `app/components/rebalancer/TradeSuggestionList.tsx`
 - [ ] `app/components/rebalancer/TargetAllocationEditor.tsx`
 - [ ] Nav link in `app/portfolio/PortfolioClient.tsx`
+- [ ] Admin nav link in `app/admin/page.tsx`
 - [ ] Tests: `lib/__tests__/rebalancerService.test.ts`
 
 ---
@@ -211,7 +253,7 @@ Define target allocation rules, visualize current vs target, get actionable trad
 
 Track F&O positions (Futures + Options), compute P&L, show option Greeks, display expiry calendar.
 
-#### UI/UX Checklist
+#### UI/UX Checklist — User Facing
 - [ ] Positions table: Symbol, Type, Direction, Qty, Entry Price, Current Price, P&L, Greeks
 - [ ] Option Chain Viewer: Strike, Bid, Ask, OI, Volume, IV, Greeks
 - [ ] Expiry Calendar: Countdown to next expiry
@@ -223,6 +265,14 @@ Track F&O positions (Futures + Options), compute P&L, show option Greeks, displa
 - [ ] Empty state: "Add your first F&O position"
 - [ ] Responsive: Table scrolls horizontally (many columns)
 
+#### Admin UI/UX Checklist
+- [ ] Admin F&O overview: Total users with positions, aggregate P&L, open/closed counts
+- [ ] User position viewer: Select user → view their F&O positions and P&L
+- [ ] NSE F&O sync: Force sync options chain data from NSE
+- [ ] Contract spec management: View/edit lot sizes, expiry dates, index names
+- [ ] F&O market data status: Data freshness indicator, last sync timestamp
+- [ ] Admin nav link in `/admin` sidebar under "Market Data"
+
 #### Implementation Checklist
 - [ ] `prisma/schema.prisma` — Add FOPosition model + migration
 - [ ] `lib/services/foService.ts` — F&O CRUD operations
@@ -231,12 +281,15 @@ Track F&O positions (Futures + Options), compute P&L, show option Greeks, displa
 - [ ] `app/api/fo/positions/route.ts` — Positions CRUD
 - [ ] `app/api/fo/chain/route.ts` — Option chain data
 - [ ] `app/api/fo/expiries/route.ts` — Expiry dates
+- [ ] `app/api/admin/fo/route.ts` — Admin F&O overview + sync
 - [ ] `app/fo/page.tsx` — F&O dashboard
+- [ ] `app/admin/fo/page.tsx` — Admin F&O management page
 - [ ] `app/components/fo/FOPositionTable.tsx`
 - [ ] `app/components/fo/OptionChainViewer.tsx`
 - [ ] `app/components/fo/ExpiryCalendar.tsx`
 - [ ] `app/components/fo/FOPnlChart.tsx`
 - [ ] Nav link in `app/Header.tsx`
+- [ ] Admin nav link in `app/admin/page.tsx`
 - [ ] Tests: `lib/__tests__/foPnlService.test.ts`
 
 ---
