@@ -305,12 +305,46 @@ export async function GET(req: Request) {
       dividendYield: a.dividendYield ? Number(a.dividendYield) : null,
     }));
 
+    // Enrich with latest stock prices for currentPrice + correct dividend yield
+    const uniqueSymbols = [...new Set(formatted.map(a => a.symbol).filter(Boolean))];
+    let priceMap = new Map<string, number | null>();
+
+    if (uniqueSymbols.length > 0) {
+      try {
+        const priceRows = await prisma.$queryRaw<Array<{ ticker: string; close: number }>>`
+          SELECT DISTINCT ON (ticker) ticker, close::float8 as close
+          FROM daily_prices
+          WHERE ticker = ANY(${uniqueSymbols})
+          ORDER BY ticker, trade_date DESC
+        `;
+        for (const row of priceRows) {
+          priceMap.set(row.ticker, row.close);
+        }
+        logger.debug({ msg: 'Enriched corporate actions with prices', count: priceRows.length });
+      } catch (priceError) {
+        logger.warn({ msg: 'Failed to fetch latest prices for corporate actions', error: priceError });
+      }
+    }
+
+    const enriched = formatted.map(a => {
+      const currentPrice = priceMap.get(a.symbol) ?? null;
+      return {
+        ...a,
+        currentPrice,
+        // Recompute dividend yield using current price (correct formula)
+        // instead of the stored value which was incorrectly computed against face value
+        dividendYield: a.dividendPerShare && currentPrice && currentPrice > 0
+          ? (a.dividendPerShare / currentPrice) * 100
+          : null,
+      };
+    });
+
     // Apply pagination if requested
     if (page !== undefined && limit !== undefined) {
-      const total = formatted.length;
+      const total = enriched.length;
       const totalPages = Math.ceil(total / limit);
       const offset = (page - 1) * limit;
-      const paginated = formatted.slice(offset, offset + limit);
+      const paginated = enriched.slice(offset, offset + limit);
       
       return NextResponse.json({ 
         data: paginated, 
@@ -325,7 +359,7 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json({ 
-      data: formatted, 
+      data: enriched, 
       source: cacheResult.source,
       lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
       cached: !cacheResult.needsRefresh

@@ -1,9 +1,14 @@
 # AGENTS.md - TradeNext Development Guide
 
 ## Overview
-TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization and portfolio management for NSE (India).
+TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization, portfolio management, capital gains tax reporting, F&O analytics, dividend tracking, and portfolio rebalancing for NSE (India).
 
 ## Version History
+- **v3.2.0** — Phase 4: Intelligence & Reporting — PRD & Roadmap Created (July 18, 2026). Defined next 5 features with detailed implementation plans:
+  - **Bug Fix**: Corporate Actions Price/Yield columns now correctly fetch live prices from `daily_prices` and compute yield using `(dividendPerShare / currentPrice) * 100`
+  - **PRD Created**: `.agents/PRD.md` — Comprehensive product requirements doc covering all Phase 4 features
+  - **TODO.md Updated**: Full roadmap with PRD reference and UI/UX testing checklists
+  - **Planned Features**: Real-time WebSocket (SSE), Tax Reports (ST/LT capital gains), Options/F&O Analytics, Dividend Calendar, Portfolio Rebalancer
 - **v3.1.0** - Phase 3 Complete — Risk Metrics + Benchmark + Compare Chart (July 18, 2026). All Phase 3 portfolio enhancement features delivered:
   - **Risk Metrics Service**: `lib/services/portfolioRiskMetricsService.ts` — Computes Sharpe Ratio (annualized), Max Drawdown, Annualized Volatility, CAGR, Beta vs NIFTY 50, Win Rate from portfolio value history and IndexClose data.
   - **Risk Metrics API**: `app/api/portfolio/risk-metrics/route.ts` — Serves risk metrics with auth guard, error handling.
