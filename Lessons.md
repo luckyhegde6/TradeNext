@@ -815,9 +815,58 @@ export async function GET() { const session = await auth(); if (!session) return
 **Issue**: Multiple screeners returning same stock causes duplicates in recommendations.
 **Solution**: Deduplicate by symbol, track which screeners found each stock (screenerAttribution), sort by screenerCount (more screeners = stronger signal).
 
+### 36. SWC + jest.mock() — TDZ Pattern for Complex Mocks ⚠️
+**Issue**: `import { jest } from "@jest/globals"` prevents SWC from hoisting `jest.mock()` calls. Also, complex mock objects (with Prisma) cause TDZ ReferenceError because SWC hoists the `jest.mock()` call ABOVE the `const` declaration.
+**Root Cause**: SWC transformer hoists `jest.mock()` to top of file, but `const` variables are in temporal dead zone until their declaration line.
+**Solution**: Define mock objects INSIDE the `jest.mock()` factory function (which runs at import time), then retrieve them via `require()` after imports:
+```typescript
+jest.mock("@/lib/prisma", () => {
+  const mockPrisma = {
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
+    // ... other methods
+  };
+  return { __esModule: true, default: mockPrisma };
+});
+
+// After all imports:
+const prisma = require("@/lib/prisma").default;
+beforeEach(() => {
+  prisma.user.findUnique.mockResolvedValue(null);
+});
+```
+**Key Rules**:
+1. NEVER use `import { jest } from "@jest/globals"` — use global `jest`
+2. Complex mocks (Prisma, services) MUST be defined inside factory
+3. Retrieve via `require()` after imports for `beforeEach` reset
+4. Always add `{ __esModule: true }` for default exports
+
+### 37. CodeQL Modulo Bias in Random Code Generation
+**Issue**: `crypto.randomBytes(4).readUInt32BE(0) % 1000000` has modulo bias because 2^32 is not evenly divisible by 1000000.
+**Impact**: Some 6-digit codes are slightly more probable than others (high-severity CodeQL alert).
+**Solution**: Use `crypto.randomInt(1000000)` — cryptographically secure, no modulo bias, cleaner code.
+**Alternative**: `Math.floor(Math.random() * 1000000).toString().padStart(6, '0')` for non-crypto contexts.
+
+### 38. AI Response Parsing — Symbol Matching Priority
+**Issue**: `parseAIResponse` in recommendation-agent.ts used `parsed[idx] || symbolMatch`, so when AI returns results in different order than input, symbol matching was deprioritized.
+**Root Cause**: AI models (especially smaller ones) may return BUY/HOLD/SELL in arbitrary order, not matching input stock order.
+**Solution**: Swap to `symbolMatch || parsed[idx]` — symbol matching is ALWAYS prioritized over positional matching.
+**Lesson**: When parsing AI responses, never assume order matches input. Always match by content (symbol name) first.
+
+### 39. Retry Mock Count Must Match RETRY_MAX
+**Issue**: Test for batch retry failure only provided 1 `mockRejectedValueOnce()` but RETRY_MAX=2, so batch actually succeeded after first retry.
+**Root Cause**: With RETRY_MAX=2, a batch fails twice before giving up. Need exactly 2 rejection mocks.
+**Solution**: Match mock count to retry configuration:
+```typescript
+for (let i = 0; i < BATCHES; i++) {
+  mockReject(2); // RETRY_MAX = 2
+}
+```
+**Rule**: Always check retry configuration before writing retry failure tests.
+
 ---
 
 ## Update Log
+- 2026-07-19: Added Lessons 36-39 (Test Fixes & Security) — SWC TDZ mock pattern, CodeQL modulo bias, AI response parsing priority, retry mock count matching
 - 2026-07-19: Added Lessons 26-35 (Daily Recommendations) — hybrid API fallback, AI batch processing, cron timezone, public/auth routes, tracker entity, circuit breaker, unified events, prediction tracking, prompt versioning, screener deduplication
 - 2026-07-18: Added Lesson 24 (Dev Server Detach) — PowerShell Start-Process for non-blocking startup
 - 2026-07-18: Added Lesson 25 (Client-Server Separation) — extract types to avoid bundling Node.js modules

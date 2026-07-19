@@ -35,6 +35,31 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-07-19 | Daily Recommendations — Test Fixes, Security Hardening & PR #62 MERGED
+- **Action**: Fixed 3 failing test suites, applied CodeQL security fix, created PR, documented learnings.
+- **Branch**: `ph18` — PR #62 created and merged (commit `2f95531`).
+- **Test Fixes (68 tests, 0 failures)**:
+  - `chartinkService.test.ts` (25/25): Fixed `hasValidConfig` mock — was checking wrong path; updated to mock config service correctly.
+  - `recommendation-agent.test.ts` (24/24): Fixed `parseAIResponse` source bug — swapped `parsed[idx] || symbolMatch` to `symbolMatch || parsed[idx]` so symbol matching is prioritized. Fixed batch retry test — added 2 `mockRejectedValueOnce` calls to match RETRY_MAX=2.
+  - `dailyRecommendationService.test.ts` (19/19): Complete rewrite using TDZ-safe mock pattern — mock Prisma inside `jest.mock()` factory, retrieve via `require()`. Resolved complex object hoisting issues.
+- **CodeQL High-Severity Fix**:
+  - `app/api/user/telegram/verify/route.ts`: `crypto.randomBytes(4).readUInt32BE(0) % 1000000` → `crypto.randomInt(1000000)` — eliminates modulo bias in 6-digit verification code generation.
+- **Source Bug Fix**:
+  - `lib/services/ai/recommendation-agent.ts` line 271: Swapped symbol matching priority so AI responses in different order are matched correctly by symbol name, not position.
+- **Full Test Suite**: 269/269 pass, 0 failures, 21/21 suites (1 skipped).
+- **E2E Screenshots**: Captured `recommendations-todays-picks.png`, `recommendations-history.png`, `dashboard.png` in `screenshots/` directory.
+- **Documentation Updated**: Lessons.md (36-39), TODO.md (Sprints 4-5 marked complete), AGENTS.md (v3.3.0 in version history), agent-memory.md (this entry), Primer.md (v3.3.0 status).
+- **Files Changed**:
+  - `lib/__tests__/chartinkService.test.ts` — mock fix
+  - `lib/__tests__/recommendation-agent.test.ts` — parseAIResponse fix, retry mocks
+  - `lib/__tests__/dailyRecommendationService.test.ts` — full rewrite with TDZ-safe pattern
+  - `lib/services/ai/recommendation-agent.ts` — source fix line 271
+  - `app/api/user/telegram/verify/route.ts` — CodeQL modulo bias fix
+  - `Lessons.md` — 4 new lessons (36-39)
+  - `TODO.md` — Sprints 4-5 marked complete
+  - `agent-memory.md` — this entry
+- **Status**: ✅ COMPLETE — v3.3.0 (Daily Recommendations + Self-Heal + Audit) fully implemented and merged
+
 ### 2026-07-19 | Daily Recommendations + Self-Heal + Audit (v3.3.0) — PLANNING COMPLETE
 - **Action**: Created comprehensive implementation plan for Daily Recommendations Engine, Self-Heal AI Agents, and Unified Audit Logging.
 - **Branch**: `ph18` created from `main`.
