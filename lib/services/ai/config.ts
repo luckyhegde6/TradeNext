@@ -2,12 +2,14 @@
  * AI Agent configuration.
  * Model selection and provider settings, configurable by admin.
  *
- * All models listed here are FREE on OpenRouter and support tool calling (tools ✅).
+ * Models are FREE on OpenRouter. Prefer WEEKLY free models (higher quotas)
+ * over daily free models (which hit rate limits quickly).
  * See: https://openrouter.ai/models?order=pricing-low-to-high
  */
 import logger from "@/lib/logger";
 
-export const DEFAULT_MODEL = "openrouter/free";
+/** Default model — weekly free model with high quota */
+export const DEFAULT_MODEL = "tencent/hy3:free";
 
 export interface ModelInfo {
   id: string;
@@ -16,6 +18,8 @@ export interface ModelInfo {
   description?: string;
   /** Estimated context window in tokens */
   contextLength?: number;
+  /** Billing period: "weekly" = weekly free quota, "daily" = daily free quota, "auto" = OpenRouter auto-route */
+  billingPeriod?: "weekly" | "daily" | "auto";
 }
 
 /**
@@ -26,49 +30,69 @@ export interface ModelInfo {
  * - supports "tools" and "tool_choice" parameters
  * - no imminent expiration date
  * - diverse range of capabilities
+ *
+ * WEEKLY free models (tencent/hy3:free) are preferred because they have
+ * higher request quotas than daily free models.
  */
 export const AVAILABLE_MODELS: ModelInfo[] = [
+  // ── Weekly Free Models (preferred — higher quotas) ─────────────────────
   {
-    id: "openrouter/free",
-    name: "OpenRouter Free (Auto-Router)",
-    description: "Routes to the best free model for each request. Recommended default.",
-    contextLength: 200_000,
+    id: "tencent/hy3:free",
+    name: "Tencent HY3 (Weekly Free)",
+    description: "295B MoE, reasoning + tools + structured outputs. Recommended default.",
+    contextLength: 262_144,
+    billingPeriod: "weekly",
   },
+  // ── Daily Free Models (lower quotas, use as fallback) ──────────────────
   {
     id: "nvidia/nemotron-3-super-120b-a12b:free",
-    name: "Nemotron 3 Super 120B",
+    name: "Nemotron 3 Super 120B (Daily)",
     description: "Strong reasoning, 1M context, structured outputs",
     contextLength: 1_000_000,
+    billingPeriod: "daily",
   },
   {
     id: "nvidia/nemotron-3-ultra-550b-a55b:free",
-    name: "Nemotron 3 Ultra 550B",
-    description: "Highest quality free model, 1M context",
+    name: "Nemotron 3 Ultra 550B (Daily)",
+    description: "Highest quality free model, 1M context, best benchmarks",
     contextLength: 1_000_000,
+    billingPeriod: "daily",
   },
   {
-    id: "nvidia/nemotron-3-nano-30b-a3b:free",
-    name: "Nemotron 3 Nano 30B",
-    description: "Fast and efficient, 256K context",
-    contextLength: 256_000,
-  },
-  {
-    id: "google/gemma-4-31b-it:free",
-    name: "Gemma 4 31B",
-    description: "Google's latest open model, 262K context",
+    id: "qwen/qwen3-next-80b-a3b-instruct:free",
+    name: "Qwen3 Next 80B (Daily)",
+    description: "Good reasoning, structured outputs, 262K context",
     contextLength: 262_144,
+    billingPeriod: "daily",
   },
   {
     id: "openai/gpt-oss-20b:free",
-    name: "GPT-OSS 20B",
-    description: "OpenAI's open-source model, 131K context",
+    name: "GPT-OSS 20B (Daily)",
+    description: "OpenAI's open-source model, reasoning + tools",
     contextLength: 131_072,
+    billingPeriod: "daily",
   },
   {
-    id: "nvidia/nemotron-nano-9b-v2:free",
-    name: "Nemotron Nano 9B V2",
-    description: "Lightweight and fast, 128K context",
-    contextLength: 128_000,
+    id: "nvidia/nemotron-3-nano-30b-a3b:free",
+    name: "Nemotron 3 Nano 30B (Daily)",
+    description: "Fast and efficient, 256K context",
+    contextLength: 256_000,
+    billingPeriod: "daily",
+  },
+  {
+    id: "google/gemma-4-31b-it:free",
+    name: "Gemma 4 31B (Daily)",
+    description: "Google's latest open model, 262K context",
+    contextLength: 262_144,
+    billingPeriod: "daily",
+  },
+  // ── Auto Router ───────────────────────────────────────────────────────
+  {
+    id: "openrouter/free",
+    name: "OpenRouter Free (Auto-Router)",
+    description: "Routes to random free model. Unreliable quotas.",
+    contextLength: 200_000,
+    billingPeriod: "auto",
   },
 ];
 

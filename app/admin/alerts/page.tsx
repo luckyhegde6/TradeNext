@@ -891,16 +891,334 @@ function DeliveryLogsTab() {
 }
 
 // ============================================================
+// Telegram Subscribers Tab
+// ============================================================
+
+interface TelegramSubscriber {
+  id: string;
+  userId: number;
+  chatId: string;
+  isActive: boolean;
+  notifyOn: string;
+  createdAt: string;
+  updatedAt: string;
+  user: { id: number; email: string; name: string | null } | null;
+}
+
+interface TelegramStats {
+  totalSubscribers: number;
+  activeSubscribers: number;
+  inactiveSubscribers: number;
+  totalTelegramEvents: number;
+  totalAIEvents: number;
+  recentSubscribers: { id: string; userId: number; chatId: string; isActive: boolean; createdAt: string }[];
+}
+
+interface TelegramDelivery {
+  id: string;
+  action: string;
+  userEmail: string | null;
+  resource: string | null;
+  metadata: Record<string, unknown> | null;
+  responseStatus: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+function TelegramSubscribersTab() {
+  const [stats, setStats] = useState<TelegramStats | null>(null);
+  const [subscribers, setSubscribers] = useState<TelegramSubscriber[]>([]);
+  const [deliveries, setDeliveries] = useState<TelegramDelivery[]>([]);
+  const [calls, setCalls] = useState<TelegramDelivery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [subSection, setSubSection] = useState<"overview" | "subscribers" | "deliveries" | "calls">("overview");
+
+  useEffect(() => { fetchAll(); }, []);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const [statsRes, subsRes, delRes, callsRes] = await Promise.all([
+        fetch("/api/admin/alerts/telegram?section=stats"),
+        fetch("/api/admin/alerts/telegram?section=subscribers&limit=200"),
+        fetch("/api/admin/alerts/telegram?section=deliveries&limit=100"),
+        fetch("/api/admin/alerts/telegram?section=calls&limit=100"),
+      ]);
+
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (subsRes.ok) { const d = await subsRes.json(); setSubscribers(d.subscribers || []); }
+      if (delRes.ok) { const d = await delRes.json(); setDeliveries(d.deliveries || []); }
+      if (callsRes.ok) { const d = await callsRes.json(); setCalls(d.calls || []); }
+    } catch (e) { console.error("Failed to fetch Telegram data:", e); }
+    finally { setLoading(false); }
+  };
+
+  const actionLabels: Record<string, string> = {
+    TELEGRAM_SUBSCRIBE: "Subscribe",
+    TELEGRAM_UNSUBSCRIBE: "Unsubscribe",
+    TELEGRAM_COMMAND: "Command",
+    TELEGRAM_BROADCAST: "Broadcast",
+    AI_AGENT_TRIGGER: "AI Trigger",
+    AI_AGENT_SUCCESS: "AI Success",
+    AI_AGENT_FAILURE: "AI Failure",
+    AI_AGENT_FALLBACK: "AI Fallback",
+  };
+
+  const actionColors: Record<string, string> = {
+    TELEGRAM_SUBSCRIBE: "bg-green-100 text-green-800",
+    TELEGRAM_UNSUBSCRIBE: "bg-red-100 text-red-800",
+    TELEGRAM_COMMAND: "bg-blue-100 text-blue-800",
+    TELEGRAM_BROADCAST: "bg-purple-100 text-purple-800",
+    AI_AGENT_TRIGGER: "bg-cyan-100 text-cyan-800",
+    AI_AGENT_SUCCESS: "bg-green-100 text-green-800",
+    AI_AGENT_FAILURE: "bg-red-100 text-red-800",
+    AI_AGENT_FALLBACK: "bg-yellow-100 text-yellow-800",
+  };
+
+  if (loading) return <div className="flex justify-center p-12"><p>Loading Telegram data...</p></div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Sub-navigation */}
+      <div className="flex flex-wrap gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg">
+        {(["overview", "subscribers", "deliveries", "calls"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setSubSection(s)}
+            className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${
+              subSection === s
+                ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview */}
+      {subSection === "overview" && stats && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Subscribers</p>
+              <p className="text-2xl font-black text-gray-900 dark:text-white">{stats.totalSubscribers}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+              <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Active</p>
+              <p className="text-2xl font-black text-green-600">{stats.activeSubscribers}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+              <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">Telegram Events</p>
+              <p className="text-2xl font-black text-blue-600">{stats.totalTelegramEvents}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+              <p className="text-xs font-bold text-purple-600 uppercase tracking-widest">AI Agent Events</p>
+              <p className="text-2xl font-black text-purple-600">{stats.totalAIEvents}</p>
+            </div>
+          </div>
+
+          {/* Recent subscribers */}
+          {stats.recentSubscribers.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-gray-100 dark:border-slate-800">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Recent Subscribers</h3>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">User ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Chat ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recentSubscribers.map((s) => (
+                    <tr key={s.id} className="border-t border-gray-100 dark:border-slate-800">
+                      <td className="px-4 py-3 font-mono text-xs">{s.userId}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{s.chatId}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          s.isActive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                        }`}>
+                          {s.isActive ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{new Date(s.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Subscribers list */}
+      {subSection === "subscribers" && (
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">All Telegram Subscribers ({subscribers.length})</h3>
+            <button onClick={fetchAll} className="px-3 py-1.5 text-xs font-bold bg-gray-200 dark:bg-slate-700 rounded-lg hover:bg-gray-300">
+              Refresh
+            </button>
+          </div>
+          {subscribers.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">No Telegram subscribers yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Chat ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Notify</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subscribers.map((s) => (
+                    <tr key={s.id} className="border-t border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30">
+                      <td className="px-4 py-3">
+                        <p className="font-bold text-gray-900 dark:text-white">{s.user?.name || "Unknown"}</p>
+                        <p className="text-xs text-gray-500">{s.user?.email}</p>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-300">{s.chatId}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-full text-[10px] font-bold uppercase">
+                          {s.notifyOn}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          s.isActive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                        }`}>
+                          {s.isActive ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{new Date(s.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Deliveries */}
+      {subSection === "deliveries" && (
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-gray-100 dark:border-slate-800">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Telegram Delivery Events ({deliveries.length})</h3>
+          </div>
+          {deliveries.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">No Telegram delivery events yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Resource</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveries.map((d) => (
+                    <tr key={d.id} className="border-t border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30">
+                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{new Date(d.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${actionColors[d.action] || "bg-gray-100"}`}>
+                          {actionLabels[d.action] || d.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{d.userEmail || "-"}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{d.resource || "-"}</td>
+                      <td className="px-4 py-3">
+                        {d.responseStatus ? (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            d.responseStatus >= 200 && d.responseStatus < 300
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}>
+                            {d.responseStatus}
+                          </span>
+                        ) : <span className="text-gray-400">-</span>}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-red-600 max-w-[200px] truncate">{d.errorMessage || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Calls */}
+      {subSection === "calls" && (
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-gray-100 dark:border-slate-800">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">AI Agent Call Log ({calls.length})</h3>
+          </div>
+          {calls.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">No AI agent calls yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Metadata</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calls.map((c) => (
+                    <tr key={c.id} className="border-t border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30">
+                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{new Date(c.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${actionColors[c.action] || "bg-gray-100"}`}>
+                          {actionLabels[c.action] || c.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{c.userEmail || "-"}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500 max-w-[300px] truncate">
+                        {c.metadata ? JSON.stringify(c.metadata).substring(0, 100) : "-"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-red-600 max-w-[200px] truncate">{c.errorMessage || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // Main Page
 // ============================================================
 
-type TabKey = "alerts" | "channels" | "secrets" | "logs";
+type TabKey = "alerts" | "channels" | "secrets" | "logs" | "telegram";
 
 const TABS: { key: TabKey; label: string; desc: string }[] = [
   { key: "alerts", label: "User Alerts", desc: "Monitor and manage user price alerts" },
   { key: "channels", label: "Delivery Channels", desc: "Email, Webhook, Telegram config" },
   { key: "secrets", label: "Secrets", desc: "Encrypted credential storage" },
   { key: "logs", label: "Delivery Logs", desc: "Delivery event tracking & observability" },
+  { key: "telegram", label: "Telegram", desc: "Subscribers, delivery logs, AI calls" },
 ];
 
 export default function AdminAlertsPage() {
@@ -941,6 +1259,7 @@ export default function AdminAlertsPage() {
         {activeTab === "channels" && <DeliveryChannelsTab />}
         {activeTab === "secrets" && <SecretsTab />}
         {activeTab === "logs" && <DeliveryLogsTab />}
+        {activeTab === "telegram" && <TelegramSubscribersTab />}
       </div>
     </div>
   );

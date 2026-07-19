@@ -62,6 +62,7 @@ server_logs/
 
 # E2E walkthrough screenshots (generated during testing)
 /e2e-screenshots/
+/screenshots/
 
 # playwright test results (generated during testing)
 /playwright-report/

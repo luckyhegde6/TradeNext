@@ -194,12 +194,14 @@ async function handleHelp(ctx: BotCommandContext): Promise<BotCommandResult> {
   const user = await lookupUserByChatId(ctx.chatId);
 
   const commands = user
-    ? `📈 */recommendations* — Current stock recommendations & picks\n`
+    ? `📊 */daily-recommendations* — Today's AI-analyzed stock picks\n`
+      + `📈 */recommendations* — Current stock recommendations & picks\n`
       + `🔔 */alerts* — Check your triggered alerts\n`
       + `📢 */updates* — Latest admin announcements\n`
       + `❓ */help* — Show this message`
     : `📋 */start* — Welcome & subscription instructions\n`
       + `📋 */chatid* — Show your Chat ID\n`
+      + `📊 */daily-recommendations* — Today's AI stock picks (no auth needed)\n`
       + `❓ */help* — Show this message\n\n`
       + `*⚠️ Not linked yet?*\n`
       + `Use /start to get your Chat ID, then link it on the TradeNext website.`;
@@ -260,6 +262,62 @@ async function handleRecommendations(ctx: BotCommandContext): Promise<BotCommand
   } catch (err) {
     logger.error({ msg: "Bot: /recommendations failed", userId: user.id, error: err });
     return { ok: true, text: "⚠️ Could not fetch recommendations. Please try again later." };
+  }
+}
+
+/**
+ * /daily-recommendations — Fetch today's AI-analyzed stock recommendations from the daily recommendation engine.
+ * Shows latest run results with AI recommendation, confidence, target, stop loss.
+ * No auth required — this is public data.
+ */
+async function handleDailyRecommendations(ctx: BotCommandContext): Promise<BotCommandResult> {
+  try {
+    const { getLatestRecommendations } = await import("@/lib/services/dailyRecommendationService");
+    const { run, stocks } = await getLatestRecommendations();
+
+    if (!run || stocks.length === 0) {
+      return {
+        ok: true,
+        text: `📊 *Daily Recommendations*\n\nNo recommendations yet. Next scan runs at 10:00 AM IST daily.\n\nVisit TradeNext → Recommendations for more.`,
+      };
+    }
+
+    const runDate = new Date(run.runDate).toLocaleDateString("en-IN", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+
+    const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
+
+    const lines = stocks.slice(0, 10).map((s) => {
+      const icon = recIcons[s.aiRecommendation ?? "HOLD"] || "⚪";
+      const conf = `${s.confidence}%`;
+      const price = s.price ? `₹${s.price.toFixed(2)}` : "";
+      const target = s.targetPrice ? `Tgt ₹${s.targetPrice.toFixed(2)}` : "";
+      const sl = s.stopLoss ? `SL ₹${s.stopLoss.toFixed(2)}` : "";
+      const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+      const sources = s.screenerAttribution || "";
+      return `${icon} *${s.symbol}* — ${s.aiRecommendation ?? "HOLD"} (${conf})\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
+    });
+
+    let text = `📊 *Daily Recommendations* — ${runDate}\n`
+      + `${stocks.length} stocks analyzed from ${run.successfulScreeners}/${run.totalScreeners} screeners\n\n`
+      + lines.join("\n\n");
+
+    if (stocks.length > 10) {
+      text += `\n\n_...and ${stocks.length - 10} more. View all on TradeNext → Recommendations_`;
+    }
+
+    if (text.length > 4000) {
+      text = text.slice(0, 3990) + "\n\n*(truncated)*";
+    }
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /daily-recommendations failed", chatId: ctx.chatId, error: err });
+    return { ok: true, text: "⚠️ Could not fetch daily recommendations. Please try again later." };
   }
 }
 
@@ -389,6 +447,7 @@ const COMMAND_MAP: Record<string, (ctx: BotCommandContext) => Promise<BotCommand
   "/chatid": handleChatId,
   "/help": handleHelp,
   "/recommendations": handleRecommendations,
+  "/daily-recommendations": handleDailyRecommendations,
   "/alerts": handleAlerts,
   "/updates": handleUpdates,
 };
@@ -428,7 +487,7 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   // set BEFORE any dynamic dispatch. This allowlist check is what
   // neutralizes the untrusted-method-name flow (CWE-470); a plain
   // hasOwnProperty/typeof guard on the resolved value does not.
-  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/alerts", "/updates"];
+  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates"];
   if (!KNOWN_COMMANDS.includes(command)) {
     const result = await handleUnknown(ctx);
     await sendBotMessage(chatId, result.text || "");

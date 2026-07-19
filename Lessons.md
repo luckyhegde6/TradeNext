@@ -754,7 +754,120 @@ import { AllocationCategory } from './rebalancerTypes';
 3. NEVER import Prisma, database adapters, or Node.js modules in files that client components import
 4. Check all client component imports of a service file when introducing a new one
 
+## Lessons from Daily Recommendations Implementation (v3.3.0)
+
+### 26. Hybrid API Fallback Pattern
+**Issue**: External APIs (Chartink) may be unreliable or have rate limits.
+**Solution**: Always implement fallback to equivalent data source.
+**Example**: Try Chartink `POST /screener/process` first, fall back to TradingView screener templates with equivalent filters.
+**Trade-off**: More code to maintain, but significantly higher reliability.
+
+### 27. AI Batch Processing for Token Limits
+**Issue**: Processing many stocks in a single AI call exceeds token limits.
+**Solution**: Process in batches of 5 stocks, accumulate results, handle partial failures gracefully.
+**Pattern**: 
+```typescript
+for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
+  const batch = stocks.slice(i, i + BATCH_SIZE);
+  try { const results = await analyzeBatch(batch); allResults.push(...results); }
+  catch (e) { logger.warn({ msg: 'Batch failed', batchIndex: i/BATCH_SIZE }); }
+}
+```
+
+### 28. Cron Job Timezone Handling
+**Issue**: Cron expressions in UTC cause confusion for IST-based schedules.
+**Solution**: Always document timezone in comments and use UTC offset with clear mapping:
+- 10 AM IST = 04:30 UTC
+- 3:30 PM IST = 10:00 UTC
+
+### 29. Public vs Authenticated API Routes
+**Issue**: Some routes need auth, others don't, but NextAuth middleware can't distinguish easily.
+**Solution**: Define auth at the route handler level, not middleware:
+```typescript
+// Public route - no auth check
+export async function GET() { return NextResponse.json(data); }
+// Protected route - explicit auth check
+export async function GET() { const session = await auth(); if (!session) return 401; }
+```
+
+### 30. Tracker Entity Pattern
+**Issue**: Recommendation status needs to be tracked over time (active → target_achieved / stop_loss_hit / expired).
+**Solution**: Use separate `RecommendationTracker` (long-lived) + `DailyRecommendationStock` (per-run) + `RecommendationStatusHistory` (audit trail). Don't cram status into a single model.
+
+### 31. Circuit Breaker for External Services
+**Issue**: AI provider failures cascade and block entire system.
+**Solution**: Implement circuit breaker with 3 states (CLOSED → OPEN → HALF_OPEN), auto-recovery after cooldown period.
+**Pattern**: Track failure count, reset on success, open circuit at threshold (3 failures), close after successful half-open probe.
+
+### 32. Unified Event Model for Audit
+**Issue**: Multiple event types (Telegram, AI, screener, system health) scattered across different models.
+**Solution**: Create single `UnifiedEvent` model with `eventType` discriminator. Easier to query, paginate, and detect anomalies across all event types.
+
+### 33. Prediction Accuracy Tracking
+**Issue**: No way to measure if AI recommendations are actually good.
+**Solution**: Track entry price vs current price after 1 week, 1 month, 3 months. Classify as win (>5%), breakeven (±5%), loss (>5% negative). Calculate overall accuracy and trigger prompt adjustment when accuracy drops below 40%.
+
+### 34. Prompt Versioning with Auto-Adjustment
+**Issue**: AI prompts degrade over time as market conditions change.
+**Solution**: Version every prompt, track accuracy per version, auto-adjust when: (a) accuracy drops below 40%, (b) consecutive losses exceed 5, (c) 30 days have passed since last adjustment. Fall back to previous version if new version performs worse.
+
+### 35. Screener Deduplication by Symbol
+**Issue**: Multiple screeners returning same stock causes duplicates in recommendations.
+**Solution**: Deduplicate by symbol, track which screeners found each stock (screenerAttribution), sort by screenerCount (more screeners = stronger signal).
+
+### 36. SWC + jest.mock() — TDZ Pattern for Complex Mocks ⚠️
+**Issue**: `import { jest } from "@jest/globals"` prevents SWC from hoisting `jest.mock()` calls. Also, complex mock objects (with Prisma) cause TDZ ReferenceError because SWC hoists the `jest.mock()` call ABOVE the `const` declaration.
+**Root Cause**: SWC transformer hoists `jest.mock()` to top of file, but `const` variables are in temporal dead zone until their declaration line.
+**Solution**: Define mock objects INSIDE the `jest.mock()` factory function (which runs at import time), then retrieve them via `require()` after imports:
+```typescript
+jest.mock("@/lib/prisma", () => {
+  const mockPrisma = {
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
+    // ... other methods
+  };
+  return { __esModule: true, default: mockPrisma };
+});
+
+// After all imports:
+const prisma = require("@/lib/prisma").default;
+beforeEach(() => {
+  prisma.user.findUnique.mockResolvedValue(null);
+});
+```
+**Key Rules**:
+1. NEVER use `import { jest } from "@jest/globals"` — use global `jest`
+2. Complex mocks (Prisma, services) MUST be defined inside factory
+3. Retrieve via `require()` after imports for `beforeEach` reset
+4. Always add `{ __esModule: true }` for default exports
+
+### 37. CodeQL Modulo Bias in Random Code Generation
+**Issue**: `crypto.randomBytes(4).readUInt32BE(0) % 1000000` has modulo bias because 2^32 is not evenly divisible by 1000000.
+**Impact**: Some 6-digit codes are slightly more probable than others (high-severity CodeQL alert).
+**Solution**: Use `crypto.randomInt(1000000)` — cryptographically secure, no modulo bias, cleaner code.
+**Alternative**: `Math.floor(Math.random() * 1000000).toString().padStart(6, '0')` for non-crypto contexts.
+
+### 38. AI Response Parsing — Symbol Matching Priority
+**Issue**: `parseAIResponse` in recommendation-agent.ts used `parsed[idx] || symbolMatch`, so when AI returns results in different order than input, symbol matching was deprioritized.
+**Root Cause**: AI models (especially smaller ones) may return BUY/HOLD/SELL in arbitrary order, not matching input stock order.
+**Solution**: Swap to `symbolMatch || parsed[idx]` — symbol matching is ALWAYS prioritized over positional matching.
+**Lesson**: When parsing AI responses, never assume order matches input. Always match by content (symbol name) first.
+
+### 39. Retry Mock Count Must Match RETRY_MAX
+**Issue**: Test for batch retry failure only provided 1 `mockRejectedValueOnce()` but RETRY_MAX=2, so batch actually succeeded after first retry.
+**Root Cause**: With RETRY_MAX=2, a batch fails twice before giving up. Need exactly 2 rejection mocks.
+**Solution**: Match mock count to retry configuration:
+```typescript
+for (let i = 0; i < BATCHES; i++) {
+  mockReject(2); // RETRY_MAX = 2
+}
+```
+**Rule**: Always check retry configuration before writing retry failure tests.
+
+---
+
 ## Update Log
+- 2026-07-19: Added Lessons 36-39 (Test Fixes & Security) — SWC TDZ mock pattern, CodeQL modulo bias, AI response parsing priority, retry mock count matching
+- 2026-07-19: Added Lessons 26-35 (Daily Recommendations) — hybrid API fallback, AI batch processing, cron timezone, public/auth routes, tracker entity, circuit breaker, unified events, prediction tracking, prompt versioning, screener deduplication
 - 2026-07-18: Added Lesson 24 (Dev Server Detach) — PowerShell Start-Process for non-blocking startup
 - 2026-07-18: Added Lesson 25 (Client-Server Separation) — extract types to avoid bundling Node.js modules
 - 2026-07-18: Added Playwright Snapshot Cleanup & Code Hygiene lesson (v1.16.1) — mandatory pre-commit cleanup checklist

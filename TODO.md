@@ -47,6 +47,9 @@
 | Telegram Bot (v3.2.0) | [x] Complete |
 | Options/F&O Analytics (v3.2.0) | [x] Partial — Services + API done, UI pending |
 | AI Agent Layer (v3.2.0) | [x] Complete |
+| Daily Recommendations (v3.3.0) | [x] Complete |
+| Self-Heal AI Agents (v3.3.0) | [x] Complete |
+| Comprehensive Audit Logging (v3.3.0) | [x] Complete |
 
 ---
 
@@ -300,6 +303,93 @@ Track F&O positions (Futures + Options), compute P&L, show option Greeks, displa
 - [ ] Nav link in `app/Header.tsx`
 - [ ] Admin nav link in `app/admin/page.tsx`
 - [ ] Tests: `lib/__tests__/foPnlService.test.ts`
+
+---
+
+## Sprint 4: Daily Recommendations Engine (v3.3.0)
+
+**PRD Reference:** See `.agents/PRD.md` — Feature 6
+
+### Feature: Daily Recommendations Engine
+
+AI-powered daily stock recommendations from 7 Chartink screeners with performance tracking.
+
+#### UI/UX Checklist — User Facing
+- [x] Recommendations page loads (public, no auth required)
+- [x] Today's Picks tab shows latest recommendations
+- [x] Stock cards show: symbol, price, change, AI recommendation, confidence, target, stop loss
+- [x] Category filter pills: All, Short Term, Medium Term, Long Term
+- [x] Screener source badges show which screeners found each stock
+- [x] Expandable AI analysis section per stock
+- [x] Stock links navigate to `/company/[symbol]`
+- [x] History tab shows past recommendations with performance
+- [x] Performance tracking: entry price vs current price, return %
+- [x] Status badges: Active, Target Achieved, Stop Loss Hit, Expired
+- [x] Dividends tab (moved from `/dividends`) works correctly
+- [x] Subscribe tab shows Telegram subscription wizard
+- [x] Loading state: Skeleton cards
+- [x] Empty state: "No recommendations yet. Next scan at 10:00 AM IST tomorrow."
+- [x] Error state: Retry button
+- [x] Responsive: Works on mobile (375px+)
+- [x] Dark/light mode support
+
+#### Admin UI/UX Checklist
+- [x] Admin recommendations overview: total stocks, active, performance stats
+- [x] Manual trigger button: Force run daily recommendations
+- [x] Run history: List of all daily runs with status, stock count, execution time
+- [x] Admin nav link in `/admin` sidebar
+
+#### Implementation Checklist
+- [x] `prisma/schema.prisma` — 8 new models + migration
+- [x] `lib/services/chartinkService.ts` — Chartink API + TradingView fallback
+- [x] `lib/services/dailyRecommendationService.ts` — Orchestration service
+- [x] `lib/services/ai/recommendation-agent.ts` — AI analysis agent
+- [x] `app/api/recommendations/route.ts` — Public API
+- [x] `app/api/recommendations/history/route.ts` — Historical data API
+- [x] `app/api/recommendations/[symbol]/route.ts` — Stock detail API
+- [x] `app/api/user/recommendations/subscribe/route.ts` — Subscription API
+- [x] `app/api/admin/recommendations/route.ts` — Admin API
+- [x] `app/recommendations/page.tsx` — Tabbed recommendations page
+- [x] `app/components/recommendations/DailyPicksTab.tsx`
+- [x] `app/components/recommendations/HistoryTab.tsx`
+- [x] `app/components/recommendations/SubscribeTab.tsx`
+- [x] `app/components/recommendations/RecommendationCard.tsx`
+- [x] `lib/services/worker/worker-service.ts` — Implement executeRecommendations()
+- [x] `lib/services/telegramBotService.ts` — Add /daily-recommendations command
+- [x] `app/Header.tsx` — Replace Dividends with Recommendations
+- [x] `app/admin/page.tsx` — Update admin nav
+- [x] Tests: `lib/__tests__/chartinkService.test.ts`
+- [x] Tests: `lib/__tests__/dailyRecommendationService.test.ts`
+- [x] Tests: `lib/__tests__/recommendation-agent.test.ts`
+
+---
+
+## Sprint 5: Self-Heal AI + Audit Logging (v3.3.0)
+
+**PRD Reference:** See `.agents/PRD.md` — Features 7 + 8
+
+### Feature: Self-Heal & Self-Improve AI Agent
+
+AI agents that monitor their own performance, auto-adjust, and learn from market outcomes.
+
+#### Implementation Checklist
+- [x] `lib/services/ai/circuit-breaker.ts` — Circuit breaker for AI provider
+- [x] `lib/services/ai/performance-monitor.ts` — Degradation detection
+- [x] `lib/services/ai/prediction-tracker.ts` — Accuracy tracking
+- [x] `lib/services/ai/prompt-manager.ts` — Prompt versioning
+- [x] `lib/services/ai/self-learning.ts` — Feed-back loop
+
+### Feature: Comprehensive Audit Logging
+
+Unified event stream for all system events with anomaly detection.
+
+#### Implementation Checklist
+- [x] `lib/services/unifiedEventService.ts` — Unified event logging
+- [x] `lib/services/systemHealthService.ts` — System health monitoring
+- [x] `app/api/system/events/route.ts` — Unified events API
+- [x] `lib/audit.ts` — Add 20+ new action types
+- [x] `lib/services/telegramBotService.ts` — Add event tracking
+- [x] `lib/services/ai/orchestrator.ts` — Add circuit breaker
 
 ---
 
