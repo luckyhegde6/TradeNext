@@ -19,7 +19,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { getTelegramEnvConfig } from "@/lib/alerts/delivery/telegram-env";
-import { randomBytes } from "crypto";
+import { randomInt } from "crypto";
 
 export const runtime = "nodejs";
 
@@ -38,9 +38,8 @@ const confirmAttempts = new Map<number, number>(); // userId → attempts on cur
  * Generate a cryptographically secure 6-digit code.
  */
 function generateSecureCode(): string {
-  const buf = randomBytes(4);
-  const num = buf.readUInt32BE(0);
-  return String(num % 1000000).padStart(CODE_LENGTH, "0");
+  const num = randomInt(1000000);
+  return String(num).padStart(CODE_LENGTH, "0");
 }
 
 /**
