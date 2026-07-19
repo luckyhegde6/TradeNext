@@ -230,30 +230,33 @@ async function handleRecommendations(ctx: BotCommandContext): Promise<BotCommand
   }
 
   try {
-    // Fetch active stock recommendations (global recommendations visible to user)
-    const recs = await prisma.stockRecommendation.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-    });
+    // Fetch latest daily recommendations from the AI-powered recommendation engine
+    const { getLatestRecommendations } = await import("@/lib/services/dailyRecommendationService");
+    const { run, stocks } = await getLatestRecommendations();
 
-    if (recs.length === 0) {
+    if (!run || stocks.length === 0) {
       return { ok: true, text: `📈 *Recommendations*\n\nNo active recommendations available right now. Check back later!` };
     }
 
-    const lines = recs.map(r => {
-      const dirIcons: Record<string, string> = { BUY: "🟢", ACCUMULATE: "🟡", HOLD: "⚪", SELL: "🔴", NEUTRAL: "🔵" };
-      const icon = dirIcons[r.recommendation] || "⚪";
-      const target = r.targetPrice ? `Target: ₹${r.targetPrice}` : "";
-      const entry = r.entryRange ? `Entry: ₹${r.entryRange}` : "";
-      const st = r.shortTerm ? `ST: ${r.shortTerm}` : "";
-      const lt = r.longTerm ? `LT: ${r.longTerm}` : "";
-      const details = [entry, target, st, lt].filter(Boolean).join(" | ");
-      return `${icon} *${r.symbol}* — ${r.recommendation}\n  ${details}\n  ${new Date(r.createdAt).toLocaleDateString()}`;
+    const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
+
+    const lines = stocks.slice(0, 10).map((s) => {
+      const icon = recIcons[s.aiRecommendation ?? "HOLD"] || "⚪";
+      const conf = `${s.confidence}%`;
+      const price = s.price ? `₹${s.price.toFixed(2)}` : "";
+      const target = s.targetPrice ? `Tgt ₹${s.targetPrice.toFixed(2)}` : "";
+      const sl = s.stopLoss ? `SL ₹${s.stopLoss.toFixed(2)}` : "";
+      const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+      const sources = s.screenerAttribution || "";
+      return `${icon} *${s.symbol}* — ${s.aiRecommendation ?? "HOLD"}\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
     });
 
-    // Truncate if too long (Telegram max 4096 chars)
-    let text = `📈 *Current Stock Recommendations*\n\n${lines.join("\n\n")}`;
+    let text = `📈 *Daily Recommendations*\n\n${lines.join("\n\n")}`;
+
+    if (stocks.length > 10) {
+      text += `\n\n_...and ${stocks.length - 10} more. View all on TradeNext → Recommendations_`;
+    }
+
     if (text.length > 4000) {
       text = text.slice(0, 3990) + "\n\n*(truncated — view full list on TradeNext)*";
     }
