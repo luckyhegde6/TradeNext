@@ -35,6 +35,25 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-07-19 | Daily Recommendations + Self-Heal + Audit (v3.3.0) — PLANNING COMPLETE
+- **Action**: Created comprehensive implementation plan for Daily Recommendations Engine, Self-Heal AI Agents, and Unified Audit Logging.
+- **Branch**: `ph18` created from `main`.
+- **PRD Updated**: `.agents/PRD.md` — Features 6, 7, 8 added with full specifications.
+- **TODO Updated**: Sprints 4 and 5 added with all UI/UX and implementation checklists.
+- **AGENTS.md Updated**: v3.3.0 version history with complete file lists and feature descriptions.
+- **HANDOFF.md Updated**: Status set to `in_progress`.
+- **Key Design Decisions**:
+  - Hybrid approach: Try Chartink API first, fall back to TradingView screener templates
+  - Public page access (no auth for viewing), auth required for Telegram subscription
+  - Extend existing OpenRouter Agent SDK (reuses llm-provider.ts, orchestrator.ts)
+  - Separate cron jobs: 10 AM IST for generation, 3:30 PM IST for performance tracking
+  - UnifiedEvent model for comprehensive audit logging
+  - Circuit breaker pattern for AI provider resilience
+- **8 New Prisma Models**: RecommendationTracker, DailyRecommendationRun, DailyRecommendationStock, RecommendationStatusHistory, RecommendationAlertSubscription, AgentPerformanceLog, ScreenerRunLog, SystemHealthLog, UnifiedEvent
+- **Files to Create**: 25+ new files across services, APIs, UI, agent defs, skills
+- **Files to Modify**: 16 existing files (schema, worker, telegram, header, audit, etc.)
+- **Status**: ✅ Planning complete — ready for code implementation starting with Prisma schema
+
 ### 2026-07-18 | Telegram Bot Alert Delivery (v3.2.0) - COMPLETE
 - **Action**: Built complete Telegram bot alert delivery system with @tradenext6Bot.
 - **Problem**: Users couldn't receive real-time alerts on their phone; no Telegram integration existed.

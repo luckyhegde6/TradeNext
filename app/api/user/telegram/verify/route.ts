@@ -3,42 +3,65 @@
  *
  * POST /api/user/telegram/verify
  *   Body: { action: "send" }
- *     → Generates a 6-digit code and sends it to the user's registered Telegram chat
+ *     → Generates a 6-digit code (crypto.randomBytes) and sends it to the user's Telegram
  *   Body: { action: "confirm", code: "123456" }
  *     → Confirms the code and marks the Telegram subscription as verified
  *
- * Flow:
- *   1. User registers chat ID via POST /api/user/telegram
- *   2. User clicks "Send Code" → verification code sent to their Telegram
- *   3. User reads the code from Telegram, enters it on the website
- *   4. User clicks "Verify" → code matched, telegramVerified = true
+ * Security:
+ *   - Verification codes stored in DB (survives serverless cold starts)
+ *   - Code generated with crypto.randomBytes (CSPRNG)
+ *   - Rate limited: max 3 send attempts per 10 minutes per user
+ *   - Max 5 confirm attempts per code before requiring a new code
+ *   - Codes expire after 10 minutes
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { getTelegramEnvConfig } from "@/lib/alerts/delivery/telegram-env";
+import { randomBytes } from "crypto";
 
 export const runtime = "nodejs";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
+const CODE_LENGTH = 6;
+const CODE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_SEND_ATTEMPTS = 3;
+const SEND_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CONFIRM_ATTEMPTS = 5;
 
-// In-memory verification code store (codes expire after 10 minutes)
-// Key: userId, Value: { code: string, expiresAt: number }
-const verificationCodes = new Map<number, { code: string; expiresAt: number }>();
+// In-memory rate limit tracker (lightweight, resets on cold start — acceptable for rate limiting)
+const sendAttempts = new Map<number, { count: number; windowStart: number }>();
+const confirmAttempts = new Map<number, number>(); // userId → attempts on current code
 
-// Clean up expired codes every 5 minutes
-setInterval(() => {
+/**
+ * Generate a cryptographically secure 6-digit code.
+ */
+function generateSecureCode(): string {
+  const buf = randomBytes(4);
+  const num = buf.readUInt32BE(0);
+  return String(num % 1000000).padStart(CODE_LENGTH, "0");
+}
+
+/**
+ * Check rate limit for send action.
+ */
+function checkSendRateLimit(userId: number): { allowed: boolean; retryAfterMs?: number } {
   const now = Date.now();
-  for (const [userId, entry] of verificationCodes.entries()) {
-    if (entry.expiresAt < now) {
-      verificationCodes.delete(userId);
-    }
-  }
-}, 5 * 60 * 1000);
+  const existing = sendAttempts.get(userId);
 
-function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  if (!existing || now - existing.windowStart > SEND_WINDOW_MS) {
+    sendAttempts.set(userId, { count: 1, windowStart: now });
+    return { allowed: true };
+  }
+
+  if (existing.count >= MAX_SEND_ATTEMPTS) {
+    const retryAfterMs = SEND_WINDOW_MS - (now - existing.windowStart);
+    return { allowed: false, retryAfterMs };
+  }
+
+  existing.count++;
+  return { allowed: true };
 }
 
 /**
@@ -46,7 +69,10 @@ function generateCode(): string {
  */
 async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
   const envConfig = getTelegramEnvConfig();
-  if (!envConfig?.configured) return false;
+  if (!envConfig?.configured || !envConfig.botToken) {
+    logger.warn({ msg: "Telegram bot not configured, cannot send verification code" });
+    return false;
+  }
 
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/bot${envConfig.botToken}/sendMessage`, {
@@ -85,7 +111,13 @@ export async function POST(req: NextRequest) {
     // Get user's Telegram subscription
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { telegramChatId: true, telegramVerified: true, name: true },
+      select: {
+        telegramChatId: true,
+        telegramVerified: true,
+        name: true,
+        verificationCode: true,
+        verificationExpiry: true,
+      },
     });
 
     if (!user?.telegramChatId) {
@@ -95,14 +127,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (action === "send") {
-      // Generate and send verification code
-      const code = generateCode();
-      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-      verificationCodes.set(userId, { code, expiresAt });
+    if (user.telegramVerified) {
+      return NextResponse.json({
+        success: true,
+        message: "Your Telegram account is already verified.",
+        alreadyVerified: true,
+      });
+    }
 
+    if (action === "send") {
+      // Rate limit check
+      const rateCheck = checkSendRateLimit(userId);
+      if (!rateCheck.allowed) {
+        const retryMin = Math.ceil((rateCheck.retryAfterMs || 0) / 60000);
+        return NextResponse.json(
+          { error: `Too many attempts. Please try again in ${retryMin} minute(s).` },
+          { status: 429 }
+        );
+      }
+
+      // Check if bot is configured
       const envConfig = getTelegramEnvConfig();
-      const botName = envConfig?.botToken ? `@${envConfig.botToken.split(":")[0]}` : "TradeNext Bot";
+      if (!envConfig?.configured) {
+        return NextResponse.json(
+          { error: "Telegram bot is not configured on the server. Please contact admin." },
+          { status: 503 }
+        );
+      }
+
+      // Generate and store verification code in DB
+      const code = generateSecureCode();
+      const expiresAt = new Date(Date.now() + CODE_EXPIRY_MS);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          verificationCode: code,
+          verificationExpiry: expiresAt,
+        },
+      });
+
+      // Reset confirm attempts
+      confirmAttempts.delete(userId);
 
       const ok = await sendTelegramMessage(
         user.telegramChatId,
@@ -124,7 +190,7 @@ export async function POST(req: NextRequest) {
         });
       } else {
         return NextResponse.json(
-          { error: "Failed to send verification code. Check that your chat ID is correct." },
+          { error: "Failed to send verification code. Check that your chat ID is correct and the bot is running." },
           { status: 502 }
         );
       }
@@ -133,40 +199,64 @@ export async function POST(req: NextRequest) {
     if (action === "confirm") {
       const { code } = body;
 
-      if (!code || typeof code !== "string" || code.trim().length !== 6) {
-        return NextResponse.json({ error: "Verification code must be 6 digits." }, { status: 400 });
+      if (!code || typeof code !== "string" || code.trim().length !== CODE_LENGTH) {
+        return NextResponse.json({ error: `Verification code must be ${CODE_LENGTH} digits.` }, { status: 400 });
       }
 
-      const stored = verificationCodes.get(userId);
-      if (!stored) {
+      // Check confirm attempt limit
+      const attempts = confirmAttempts.get(userId) || 0;
+      if (attempts >= MAX_CONFIRM_ATTEMPTS) {
+        confirmAttempts.delete(userId);
+        return NextResponse.json(
+          { error: "Too many failed attempts. Click 'Send Code' to get a new code." },
+          { status: 429 }
+        );
+      }
+      confirmAttempts.set(userId, attempts + 1);
+
+      // Read from DB
+      const current = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { verificationCode: true, verificationExpiry: true },
+      });
+
+      if (!current?.verificationCode || !current?.verificationExpiry) {
         return NextResponse.json(
           { error: "No verification code found. Click 'Send Code' first." },
           { status: 400 }
         );
       }
 
-      if (Date.now() > stored.expiresAt) {
-        verificationCodes.delete(userId);
+      if (new Date() > current.verificationExpiry) {
+        // Clear expired code
+        await prisma.user.update({
+          where: { id: userId },
+          data: { verificationCode: null, verificationExpiry: null },
+        });
         return NextResponse.json(
           { error: "Verification code expired. Click 'Send Code' to get a new one." },
           { status: 400 }
         );
       }
 
-      if (code.trim() !== stored.code) {
+      if (code.trim() !== current.verificationCode) {
         return NextResponse.json(
           { error: "Incorrect verification code. Check your Telegram and try again." },
           { status: 400 }
         );
       }
 
-      // Code correct — mark user as verified
+      // Code correct — mark user as verified and clear code
       await prisma.user.update({
         where: { id: userId },
-        data: { telegramVerified: true },
+        data: {
+          telegramVerified: true,
+          verificationCode: null,
+          verificationExpiry: null,
+        },
       });
 
-      verificationCodes.delete(userId);
+      confirmAttempts.delete(userId);
 
       // Send confirmation message
       await sendTelegramMessage(

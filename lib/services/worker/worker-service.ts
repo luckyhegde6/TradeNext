@@ -40,6 +40,9 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "recommendations":
         result = await executeRecommendations(payload);
         break;
+      case "recommendation_performance":
+        result = await executeRecommendationPerformance(payload);
+        break;
       case "market_data":
         result = await executeMarketDataSync(payload);
         break;
@@ -459,15 +462,39 @@ async function executeScreener(payload?: Record<string, unknown>): Promise<unkno
 }
 
 /**
- * Recommendations - Generate stock recommendations
+ * Recommendations - Generate daily stock recommendations via Chartink screeners + AI analysis
  */
 async function executeRecommendations(payload?: Record<string, unknown>): Promise<unknown> {
-  logger.info({ msg: "Starting recommendations generation" });
+  logger.info({ msg: "Starting daily recommendations generation" });
 
-  // This would typically analyze stock data and generate recommendations
-  // For now, return a placeholder
+  try {
+    const { runDailyRecommendations } = await import("@/lib/services/dailyRecommendationService");
+    const result = await runDailyRecommendations();
+    logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId });
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ msg: "Daily recommendations failed", error: errMsg });
+    throw error;
+  }
+}
 
-  return { message: "Recommendations generation not yet implemented" };
+/**
+ * Recommendation Performance - Track active recommendations against targets/stop-losses
+ */
+async function executeRecommendationPerformance(payload?: Record<string, unknown>): Promise<unknown> {
+  logger.info({ msg: "Starting recommendation performance tracking" });
+
+  try {
+    const { checkRecommendationPerformance } = await import("@/lib/services/dailyRecommendationService");
+    const result = await checkRecommendationPerformance();
+    logger.info({ msg: "Performance tracking completed", checked: result.checked, success: true });
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ msg: "Performance tracking failed", error: errMsg });
+    throw error;
+  }
 }
 
 /**

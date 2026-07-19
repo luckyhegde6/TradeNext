@@ -1281,3 +1281,238 @@ model AIRateLimit {
   @@index([updatedAt])
   @@map("ai_rate_limits")
 }
+
+// ============================================
+// Daily Recommendations Engine (v3.3.0)
+// ============================================
+
+// Long-lived tracker for a stock recommendation — one per symbol
+model RecommendationTracker {
+  id              String   @id @default(uuid())
+  symbol          String
+  status          String   @default("active") // active | target_achieved | stop_loss_hit | expired
+  entryPrice      Float
+  currentPrice    Float?
+  targetPrice     Float
+  stopLoss        Float
+  timeHorizon     String   // short | medium | long
+  confidence      Float
+  aiRecommendation String  // BUY | HOLD | SELL
+  reasoning       String?
+  riskFactors     Json?
+  screenerAttribution Json? // Array of screener names that found this stock
+  lastCheckedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  dailyStocks     DailyRecommendationStock[]
+  statusHistory   RecommendationStatusHistory[]
+
+  @@unique([symbol, createdAt])
+  @@index([symbol])
+  @@index([status])
+  @@index([createdAt])
+  @@map("recommendation_trackers")
+}
+
+// Per-run record — one per daily execution
+model DailyRecommendationRun {
+  id              String   @id @default(uuid())
+  runDate         DateTime @default(now())
+  status          String   @default("running") // running | completed | failed
+  totalScreeners  Int      @default(0)
+  successfulScreeners Int  @default(0)
+  totalStocks     Int      @default(0)
+  uniqueStocks    Int      @default(0)
+  aiProcessed     Int      @default(0)
+  aiFailed        Int      @default(0)
+  executionTimeMs Int?
+  errorMessage    String?
+  metadata        Json?    // Screener run details, timing, etc.
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  stocks          DailyRecommendationStock[]
+
+  @@index([runDate])
+  @@index([status])
+  @@map("daily_recommendation_runs")
+}
+
+// Per-stock entry within a daily run
+model DailyRecommendationStock {
+  id              String   @id @default(uuid())
+  runId           String
+  trackerId       String
+  symbol          String
+  price           Float
+  change          Float?
+  changePercent   Float?
+  volume          BigInt?
+  // Screener attribution
+  screenerAttribution Json? // Array of screener names
+  screenerCount   Int      @default(0)
+  // AI analysis
+  aiRecommendation String? // BUY | HOLD | SELL
+  confidence      Float?
+  targetPrice     Float?
+  stopLoss        Float?
+  timeHorizon     String?  // short | medium | long
+  reasoning       String?
+  riskFactors     Json?
+  // Execution metadata
+  aiTokensUsed    Int      @default(0)
+  aiExecutionMs   Int      @default(0)
+  aiSuccess       Boolean  @default(false)
+  aiError         String?
+
+  run             DailyRecommendationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  tracker         RecommendationTracker  @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now())
+
+  @@unique([runId, symbol])
+  @@index([runId])
+  @@index([trackerId])
+  @@index([symbol])
+  @@index([aiRecommendation])
+  @@map("daily_recommendation_stocks")
+}
+
+// Audit trail for recommendation status changes
+model RecommendationStatusHistory {
+  id              String   @id @default(uuid())
+  trackerId       String
+  previousStatus  String?
+  newStatus       String
+  triggerSource   String   // cron_check | manual | api
+  metadata        Json?    // Price at time of check, etc.
+  createdAt       DateTime @default(now())
+
+  tracker         RecommendationTracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+
+  @@index([trackerId])
+  @@index([newStatus])
+  @@index([createdAt])
+  @@map("recommendation_status_history")
+}
+
+// User subscription for recommendation alerts via Telegram
+model RecommendationAlertSubscription {
+  id              String   @id @default(uuid())
+  userId          Int
+  chatId          String
+  isActive        Boolean  @default(true)
+  notifyOn        String   @default("all") // all | buy_only | sell_only | status_changes
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId])
+  @@unique([chatId])
+  @@index([userId])
+  @@index([chatId])
+  @@index([isActive])
+  @@map("recommendation_alert_subscriptions")
+}
+
+// ============================================
+// Self-Heal AI Infrastructure (v3.3.0)
+// ============================================
+
+// Tracks AI prediction accuracy for self-improvement
+model AgentPerformanceLog {
+  id              String   @id @default(uuid())
+  agentType       String   // recommendation | screener | alert | chat
+  symbol          String?
+  prediction      String   // BUY | HOLD | SELL
+  confidence      Float
+  entryPrice      Float
+  targetPrice     Float?
+  stopLoss        Float?
+  // Outcome tracking (filled later)
+  currentPrice    Float?
+  outcome         String?  // win | loss | breakeven | pending
+  returnPercent   Float?
+  checkedAt       DateTime?
+  checkInterval   String?  // 1w | 1m | 3m
+  // Prompt version for A/B tracking
+  promptVersion   String?
+  modelUsed       String?
+  // Metadata
+  runId           String?  // Link to DailyRecommendationRun
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([agentType])
+  @@index([symbol])
+  @@index([outcome])
+  @@index([promptVersion])
+  @@index([createdAt])
+  @@map("agent_performance_logs")
+}
+
+// Tracks screener execution for monitoring
+model ScreenerRunLog {
+  id              String   @id @default(uuid())
+  screenerId      String   // Chartink screener ID or TradingView template ID
+  screenerName    String
+  source          String   // chartink | tradingview
+  status          String   @default("pending") // pending | running | completed | failed
+  stockCount      Int      @default(0)
+  executionTimeMs Int?
+  errorMessage    String?
+  fallbackUsed    Boolean  @default(false)
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  @@index([screenerId])
+  @@index([source])
+  @@index([status])
+  @@index([createdAt])
+  @@map("screener_run_logs")
+}
+
+// System health metrics for monitoring
+model SystemHealthLog {
+  id              String   @id @default(uuid())
+  metricType      String   // ai_response_time | screener_duration | delivery_rate | db_query_time | uptime
+  metricName      String
+  value           Float
+  unit            String   // ms | percent | count | seconds
+  source          String   // recommendation_agent | chartink | telegram | system
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([metricType])
+  @@index([source])
+  @@index([createdAt])
+  @@map("system_health_logs")
+}
+
+// ============================================
+// Comprehensive Audit Logging (v3.3.0)
+// ============================================
+
+// Unified event stream for all system events
+model UnifiedEvent {
+  id              String   @id @default(uuid())
+  eventType       String   // telegram | ai_agent | screener | system_health | audit
+  eventSubtype    String   // subscribe, trigger, run_start, health_check, etc.
+  source          String   // telegram_bot | recommendation_agent | chartink | system
+  userId          Int?
+  symbol          String?
+  severity        String   @default("info") // info | warning | critical
+  message         String
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([eventType])
+  @@index([eventSubtype])
+  @@index([source])
+  @@index([userId])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("unified_events")
+}

@@ -3,7 +3,7 @@
 Engineering guardrails for AI agents and contributors. All changes must be validated against this checklist.
 
 ## Version
-1.1
+1.2
 
 ## Meta Rules
 
@@ -193,3 +193,93 @@ This checklist is a **hard contract** for all AI agents. Before proposing or fin
 3. Refuse to finalize if any required rule is violated
 
 Reference: `ai/checklist.yml` for machine-readable version
+
+---
+
+## Daily Recommendations Engine (v3.3.0)
+
+### Data Pipeline
+- [ ] chartink_api_try_first
+- [ ] tradingview_fallback_on_failure
+- [ ] deduplication_by_symbol
+- [ ] screener_attribution_tracked
+- [ ] ai_batch_processing (5 stocks per batch)
+
+### Database
+- [ ] recommendation_tracker_model (long-lived)
+- [ ] daily_recommendation_stock_model (per-run)
+- [ ] recommendation_status_history_model (audit trail)
+- [ ] upsert_with_correct_unique_constraint
+
+### Cron Jobs
+- [ ] generation_at_10_am_ist (04:30 utc)
+- [ ] performance_tracking_at_3_30_pm_ist (10:00 utc)
+- [ ] timezone_documented_in_comments
+
+### API Routes
+- [ ] public_api_no_auth_for_viewing
+- [ ] protected_api_auth_for_subscription
+- [ ] error_handling_returns_safe_defaults
+
+### UI
+- [ ] tabbed_layout (today's picks, history, dividends, subscribe)
+- [ ] skeleton_loading_state
+- [ ] empty_state_message
+- [ ] responsive_design (375px+)
+
+---
+
+## Self-Heal AI Agents (v3.3.0)
+
+### Circuit Breaker
+- [ ] three_states (closed, open, half_open)
+- [ ] failure_threshold (3 failures → open)
+- [ ] cooldown_period (30s → half_open)
+- [ ] success_resets_to_closed
+
+### Performance Monitoring
+- [ ] success_rate_tracking
+- [ ] degradation_detection (<80% warning, <60% critical)
+- [ ] response_time_monitoring
+- [ ] token_usage_tracking
+
+### Prediction Tracking
+- [ ] entry_price_recorded
+- [ ] current_price_checked (1w, 1m, 3m)
+- [ ] win_loss_breakeven_classification
+- [ ] accuracy_threshold_trigger (40%)
+
+### Prompt Versioning
+- [ ] version_number_per_prompt
+- [ ] accuracy_tracked_per_version
+- [ ] auto_adjustment_triggers
+- [ ] fallback_to_previous_version
+
+### Model Fallback Chain
+- [ ] primary_model_configured
+- [ ] secondary_model_fallback
+- [ ] tertiary_model_fallback
+- [ ] rule_based_skip_ai_last_resort
+
+---
+
+## Comprehensive Audit Logging (v3.3.0)
+
+### Unified Event Model
+- [ ] event_type_discriminator
+- [ ] event_subtype_for_granularity
+- [ ] source_tracking
+- [ ] severity_levels (info, warning, critical)
+- [ ] metadata_json_field
+
+### Event Categories
+- [ ] telegram_events (subscribe, unsubscribe, verify, command, broadcast)
+- [ ] ai_agent_events (trigger, success, failure, fallback)
+- [ ] screener_events (run_start, run_complete, run_failed, dedup)
+- [ ] system_health_events (health_check, anomaly_detected, provider_outage)
+
+### Anomaly Detection
+- [ ] accuracy_drop_detection (<40%)
+- [ ] delivery_failure_detection (>10%)
+- [ ] provider_outage_detection (3+ failures)
+- [ ] response_time_alerting (>30s avg)

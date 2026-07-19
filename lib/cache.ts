@@ -28,8 +28,17 @@ const staticCache = new NodeCache({
   deleteOnExpire: true,
 });
 
+// Cache for daily recommendations (23hr TTL — runs once daily at 10 AM IST)
+const recommendationsCache = new NodeCache({
+  stdTTL: 82800,      // 23 hours in seconds (23 * 60 * 60)
+  checkperiod: 3600,  // Check every hour
+  maxKeys: 10,        // Very small — only latest + history
+  useClones: false,
+  deleteOnExpire: true,
+});
+
 // Export cache instances
-export { hotCache, staticCache };
+export { hotCache, staticCache, recommendationsCache };
 export default cache;
 
 // Cache monitoring utilities
@@ -49,6 +58,11 @@ export const getCacheMetrics = () => ({
     stats: staticCache.getStats(),
     hitRate: staticCache.getStats().hits / (staticCache.getStats().hits + staticCache.getStats().misses) || 0,
   },
+  recommendationsCache: {
+    keys: recommendationsCache.keys().length,
+    stats: recommendationsCache.getStats(),
+    hitRate: recommendationsCache.getStats().hits / (recommendationsCache.getStats().hits + recommendationsCache.getStats().misses) || 0,
+  },
 });
 
 // Cache cleanup utilities
@@ -63,6 +77,7 @@ export const clearAllCaches = () => {
   cache.flushAll();
   hotCache.flushAll();
   staticCache.flushAll();
+  recommendationsCache.flushAll();
 };
 
 // Cache statistics for monitoring
@@ -78,5 +93,9 @@ export const getCacheStats = () => ({
   static: {
     keys: staticCache.keys().length,
     stats: staticCache.getStats(),
+  },
+  recommendations: {
+    keys: recommendationsCache.keys().length,
+    stats: recommendationsCache.getStats(),
   },
 });

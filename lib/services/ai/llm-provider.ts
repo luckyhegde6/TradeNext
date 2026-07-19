@@ -89,6 +89,7 @@ export async function directPrompt(
         temperature: cfg.temperature,
         max_tokens: cfg.maxTokens,
       }),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {

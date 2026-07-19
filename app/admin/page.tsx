@@ -41,10 +41,17 @@ export default function AdminDashboardPage() {
     },
     {
       title: "Recommendations",
-      description: "Manage stock recommendations for users",
+      description: "Manage manual stock picks and recommendations",
       href: "/admin/recommendations",
       icon: "📈",
       color: "bg-purple-500",
+    },
+    {
+      title: "Daily Recommendations",
+      description: "Monitor daily screener runs, AI analysis, and performance tracking",
+      href: "/admin/recommendations/daily",
+      icon: "🎯",
+      color: "bg-indigo-500",
     },
     {
       title: "Holdings Management",

@@ -5,11 +5,20 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-07-18
+2026-07-19
 
 ---
 
 ## Current Project Status
+
+### Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0) — IN PROGRESS
+**Issue**: No daily stock recommendation engine; no self-healing AI agents; no unified audit logging.
+**Branch**: `ph18` — comprehensive implementation of all three features.
+**Approach**: Hybrid Chartink (API-first, TradingView fallback) + OpenRouter Agent SDK extension + UnifiedEvent model for audit.
+**Cron Schedule**: Daily at 10 AM IST (generation), 3:30 PM IST (performance tracking).
+**Files to Create**: 25+ new files (services, APIs, UI, agent defs, skills).
+**Files to Modify**: 16 existing files (schema, worker, telegram, header, audit).
+**Status**: Planning complete. Documentation updates in progress. Code implementation pending.
 
 ### Advanced Screener System (v1.16.0)
 **Issue**: No Chartink-like multi-condition screener with technical analysis and backtesting.
@@ -214,6 +223,17 @@
 ---
 
 ## Session History
+
+### Session 11 (July 19, 2026)
+- **Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0)**: Planning and documentation complete.
+- **Branch**: `ph18` created from `main`.
+- **PRD**: Updated with Features 6 (Recommendations), 7 (Self-Heal), 8 (Audit).
+- **TODO**: Added Sprints 4 (Recommendations) and 5 (Self-Heal + Audit).
+- **AGENTS.md**: Added v3.3.0 version history with all files and features.
+- **HANDOFF.md**: Set to `in_progress` with feature `ph18-daily-recommendations`.
+- **Primer.md**: Updated current status and session history.
+- **Key Decisions**: Hybrid Chartink+TradingView, public page access, extend OpenRouter SDK, separate cron for performance tracking.
+- **Status**: Ready for code implementation starting with Prisma schema changes.
 
 ### Session 10 (July 18, 2026)
 - **Telegram Bot Alert Delivery (v3.2.0)**: Full-featured Telegram bot with command routing, rate limiting, user verification, and alert delivery.
