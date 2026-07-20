@@ -40,7 +40,7 @@ jobs:
           CI: true
 
       - name: Build application
-        run: npm run build
+        run: npm run quickbuild
         env:
           NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
