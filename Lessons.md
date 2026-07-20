@@ -865,7 +865,23 @@ for (let i = 0; i < BATCHES; i++) {
 
 ---
 
+### 40. Production Build Must Include Prisma Migrate Deploy
+**Issue**: Netlify build used `quickbuild` (`next build`) which only generates the Prisma client but never applies schema migrations to the database. Production had 29 missing tables from v3.3.0, causing 500 errors on `/api/recommendations` and empty pages.
+**Root Cause**: `netlify.toml` build command was `npx prisma generate && npm run quickbuild`. The `quickbuild` script was introduced for faster local builds but was accidentally used in production.
+**Solution**: Use `npm run build` which runs `npx prisma migrate deploy && next build`.
+**Rule**: **NEVER** use `quickbuild` in production build configs. Always ensure `prisma migrate deploy` runs before `next build` in any production/deployment pipeline.
+**Pattern**:
+```toml
+# netlify.toml
+[build]
+  command = "npm run build"  # ✅ runs migrate deploy + next build
+  # command = "npm run quickbuild"  # ❌ skips migrations!
+```
+
+---
+
 ## Update Log
+- 2026-07-20: Added Lesson 40 (Production Migration) — quickbuild skips prisma migrate deploy, causes missing tables in production
 - 2026-07-19: Added Lessons 36-39 (Test Fixes & Security) — SWC TDZ mock pattern, CodeQL modulo bias, AI response parsing priority, retry mock count matching
 - 2026-07-19: Added Lessons 26-35 (Daily Recommendations) — hybrid API fallback, AI batch processing, cron timezone, public/auth routes, tracker entity, circuit breaker, unified events, prediction tracking, prompt versioning, screener deduplication
 - 2026-07-18: Added Lesson 24 (Dev Server Detach) — PowerShell Start-Process for non-blocking startup
