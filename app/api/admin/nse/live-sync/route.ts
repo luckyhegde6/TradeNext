@@ -188,11 +188,10 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
     }
 
     // Step 2: Update existing records in batches (only changed fields)
+    const uniqueSymbols = [...new Set(insertData.map(a => a.symbol))];
     const existingRecords = await prisma.corporateAction.findMany({
       where: {
-        symbol_actionType_exDate: {
-          symbol: { in: insertData.map(a => a.symbol) },
-        }
+        symbol: { in: uniqueSymbols },
       },
       select: { symbol: true, actionType: true, exDate: true },
     });
@@ -209,11 +208,9 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
         batch.map(a =>
           prisma.corporateAction.updateMany({
             where: {
-              symbol_actionType_exDate: {
-                symbol: a.symbol,
-                actionType: a.actionType,
-                exDate: a.exDate,
-              }
+              symbol: a.symbol,
+              actionType: a.actionType,
+              exDate: a.exDate,
             },
             data: {
               companyName: a.companyName,
