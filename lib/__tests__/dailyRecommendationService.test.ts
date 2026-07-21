@@ -37,6 +37,7 @@ jest.mock("@/lib/prisma", () => {
     },
     dailyRecommendationStock: {
       create: jest.fn(),
+      createMany: jest.fn(),
       update: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -44,6 +45,7 @@ jest.mock("@/lib/prisma", () => {
     },
     recommendationTracker: {
       create: jest.fn(),
+      createMany: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
       findFirst: jest.fn(),
@@ -53,6 +55,7 @@ jest.mock("@/lib/prisma", () => {
       create: jest.fn(),
     },
     $queryRaw: jest.fn(),
+    $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
   };
   return { __esModule: true, default: mock };
 });
@@ -202,13 +205,24 @@ describe("dailyRecommendationService", () => {
       symbol: "RELIANCE",
       entryPrice: 2500,
     });
+    mockPrisma.recommendationTracker.createMany.mockResolvedValue({ count: 0 });
     mockPrisma.recommendationTracker.findFirst.mockResolvedValue(null);
+    mockPrisma.recommendationTracker.findMany.mockResolvedValue([]);
+    mockPrisma.recommendationTracker.update.mockResolvedValue({});
+    mockPrisma.recommendationTracker.updateMany.mockResolvedValue({});
     mockPrisma.dailyRecommendationStock.findFirst.mockResolvedValue({
       id: "stock-1",
       symbol: "RELIANCE",
       runId: "run-123",
     });
+    mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([
+      { id: "stock-1", symbol: "RELIANCE", runId: "run-123" },
+    ]);
     mockPrisma.dailyRecommendationStock.update.mockResolvedValue({});
+    mockPrisma.dailyRecommendationStock.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.recommendationStatusHistory.create.mockResolvedValue({});
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+    mockPrisma.$transaction.mockImplementation((ops: any[]) => Promise.all(ops));
   });
 
   // ── runDailyRecommendations ──────────────────────────────────────────
@@ -251,18 +265,35 @@ describe("dailyRecommendationService", () => {
     });
 
     test("creates stock entries for each screener result", async () => {
-      mockRunDailyScreeners.mockResolvedValue([
+      const screenerResults = [
         makeScreenerResult({ symbol: "RELIANCE" }),
         makeScreenerResult({ symbol: "TCS", price: 3800 }),
-      ]);
+      ];
+      mockRunDailyScreeners.mockResolvedValue(screenerResults);
       mockAnalyzeStocks.mockResolvedValue([
         makeAIResult({ symbol: "RELIANCE" }),
         makeAIResult({ symbol: "TCS", price: 3800 }),
       ]);
 
+      // First findMany (pre-fetch) returns empty, then createMany creates,
+      // then second findMany (re-fetch) returns the new trackers
+      mockPrisma.recommendationTracker.findMany
+        .mockResolvedValueOnce([]) // pre-fetch: no existing trackers
+        .mockResolvedValueOnce([ // re-fetch after createMany: return created trackers
+          { id: "tracker-1", symbol: "RELIANCE", status: "active" },
+          { id: "tracker-2", symbol: "TCS", status: "active" },
+        ]);
+
+      // Mock stock entries findMany for AI update step
+      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([
+        { id: "stock-1", symbol: "RELIANCE", runId: "run-123" },
+        { id: "stock-2", symbol: "TCS", runId: "run-123" },
+      ]);
+
       await runDailyRecommendations();
 
-      expect(mockPrisma.dailyRecommendationStock.create).toHaveBeenCalledTimes(2);
+      // Batched: createMany called instead of N individual creates
+      expect(mockPrisma.dailyRecommendationStock.createMany).toHaveBeenCalled();
     });
 
     test("upserts recommendation tracker for each stock", async () => {
@@ -271,9 +302,9 @@ describe("dailyRecommendationService", () => {
 
       await runDailyRecommendations();
 
-      // findFirst (check existing) → create (no existing)
-      expect(mockPrisma.recommendationTracker.findFirst).toHaveBeenCalled();
-      expect(mockPrisma.recommendationTracker.create).toHaveBeenCalled();
+      // Batched: findMany (check existing) → createMany (no existing)
+      expect(mockPrisma.recommendationTracker.findMany).toHaveBeenCalled();
+      expect(mockPrisma.recommendationTracker.createMany).toHaveBeenCalled();
     });
 
     test("updates stock entry with AI results", async () => {
@@ -385,10 +416,18 @@ describe("dailyRecommendationService", () => {
       );
       mockRunDailyScreeners.mockResolvedValue(manyStocks);
       // AI gets called with only 100
-      mockAnalyzeStocks.mockResolvedValue(
-        Array.from({ length: 100 }, (_, i) =>
-          makeAIResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
-        ),
+      const aiResults = Array.from({ length: 100 }, (_, i) =>
+        makeAIResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
+      );
+      mockAnalyzeStocks.mockResolvedValue(aiResults);
+
+      // Mock findMany to return entries for all 120 stocks
+      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue(
+        Array.from({ length: 120 }, (_, i) => ({
+          id: `stock-${i + 1}`,
+          symbol: `STOCK${i + 1}`,
+          runId: "run-123",
+        })),
       );
 
       const result = await runDailyRecommendations();

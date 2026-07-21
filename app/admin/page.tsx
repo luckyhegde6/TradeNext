@@ -103,6 +103,13 @@ export default function AdminDashboardPage() {
       color: "bg-indigo-500",
     },
     {
+      title: "Telegram",
+      description: "Bot management, broadcasts, subscribers, and delivery logs",
+      href: "/admin/telegram",
+      icon: "📨",
+      color: "bg-blue-500",
+    },
+    {
       title: "Audit Logs",
       description: "View system audit trail and logs",
       href: "/admin/audit",

@@ -1211,14 +1211,13 @@ function TelegramSubscribersTab() {
 // Main Page
 // ============================================================
 
-type TabKey = "alerts" | "channels" | "secrets" | "logs" | "telegram";
+type TabKey = "alerts" | "channels" | "secrets" | "logs";
 
 const TABS: { key: TabKey; label: string; desc: string }[] = [
   { key: "alerts", label: "User Alerts", desc: "Monitor and manage user price alerts" },
   { key: "channels", label: "Delivery Channels", desc: "Email, Webhook, Telegram config" },
   { key: "secrets", label: "Secrets", desc: "Encrypted credential storage" },
   { key: "logs", label: "Delivery Logs", desc: "Delivery event tracking & observability" },
-  { key: "telegram", label: "Telegram", desc: "Subscribers, delivery logs, AI calls" },
 ];
 
 export default function AdminAlertsPage() {
@@ -1228,13 +1227,21 @@ export default function AdminAlertsPage() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
-            Alert Management
-          </h1>
-          <p className="text-gray-500 dark:text-slate-400 mt-1 font-medium">
-            Alerts config, delivery channels, secrets, and event observability
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              Alert Management
+            </h1>
+            <p className="text-gray-500 dark:text-slate-400 mt-1 font-medium">
+              Alerts config, delivery channels, secrets, and event observability
+            </p>
+          </div>
+          <a
+            href="/admin/telegram"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm whitespace-nowrap"
+          >
+            📨 Telegram Admin →
+          </a>
         </div>
 
         {/* Tabs */}
@@ -1259,7 +1266,6 @@ export default function AdminAlertsPage() {
         {activeTab === "channels" && <DeliveryChannelsTab />}
         {activeTab === "secrets" && <SecretsTab />}
         {activeTab === "logs" && <DeliveryLogsTab />}
-        {activeTab === "telegram" && <TelegramSubscribersTab />}
       </div>
     </div>
   );

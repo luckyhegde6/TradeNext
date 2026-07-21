@@ -144,6 +144,9 @@ export default function Header() {
                 <NavLink href="/watchlist" active={isActive("/watchlist")}>
                   Watchlist
                 </NavLink>
+                <NavLink href="/profile" active={isActive("/profile")}>
+                  Profile
+                </NavLink>
               </>
             )}
 
@@ -342,6 +345,9 @@ export default function Header() {
             <div className="grid grid-cols-1 gap-1">
               <MobileNavLink href="/posts" active={isActive("/posts")} onClick={() => setIsMobileMenuOpen(false)}>Community</MobileNavLink>
               <MobileNavLink href="/contact" active={isActive("/contact")} onClick={() => setIsMobileMenuOpen(false)}>Contact</MobileNavLink>
+              {isLoggedIn && (
+                <MobileNavLink href="/profile" active={isActive("/profile")} onClick={() => setIsMobileMenuOpen(false)}>Profile Settings</MobileNavLink>
+              )}
             </div>
           </div>
 

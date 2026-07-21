@@ -87,6 +87,37 @@ export async function deliverAlert(
     }
   }
 
+  // 3. Also send to user's linked Telegram account (if verified and not already covered by a Telegram channel)
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { telegramChatId: true, telegramVerified: true },
+    });
+
+    if (user?.telegramChatId && user.telegramVerified) {
+      // Check if a Telegram channel already handled delivery
+      const alreadyDeliveredViaTelegram = results.some(
+        (r) => r.channelType === "telegram" && r.success
+      );
+
+      if (!alreadyDeliveredViaTelegram) {
+        const { sendAlertToUser } = await import("@/lib/services/telegramBotService");
+        const text = `*${context.ruleName}*\n${context.message}${context.symbol ? `\nSymbol: ${context.symbol}` : ""}${context.price ? `\nPrice: ₹${context.price.toLocaleString("en-IN")}` : ""}`;
+        const sent = await sendAlertToUser(user.telegramChatId, context.ruleName, text, context.link);
+
+        results.push({
+          channelId: "telegram-direct",
+          channelType: "telegram",
+          success: sent,
+          error: sent ? undefined : "Failed to send Telegram message",
+        });
+      }
+    }
+  } catch (tgErr) {
+    // Non-critical: log but don't fail the delivery
+    logger.warn({ msg: "Direct Telegram delivery failed (non-critical)", userId, error: tgErr });
+  }
+
   return results;
 }
 

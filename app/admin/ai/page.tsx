@@ -168,22 +168,76 @@ export default function AdminAIPage() {
     }
   };
 
+  // Test connection state
+  const [testing, setTesting] = useState(false);
+  const [testPrompt, setTestPrompt] = useState("");
+  const [testResponse, setTestResponse] = useState<string | null>(null);
+  const [showTestPrompt, setShowTestPrompt] = useState(false);
+
   const testConnection = async () => {
+    setTesting(true);
     setMessage(null);
+    setTestResponse(null);
     try {
-      const res = await fetch("/api/ai/screener", {
+      const res = await fetch("/api/admin/ai/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "What is the current NIFTY 50 index value?" }),
+        body: JSON.stringify({ prompt: "What is 2 + 2? Reply with just the number." }),
       });
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: "success", text: "Connection successful! AI responded correctly." });
+        setMessage({ type: "success", text: `Connection successful! (${data.elapsed}ms)` });
+        setTestResponse(data.response);
       } else {
-        setMessage({ type: "error", text: data.analysis || "AI failed to respond" });
+        setMessage({ type: "error", text: data.response || data.error || "AI failed to respond" });
       }
-    } catch (err) {
-      setMessage({ type: "error", text: "Connection failed. Verify that your .env file has a valid OPENROUTERKEY." });
+    } catch {
+      setMessage({ type: "error", text: "Connection failed. Verify your .env has a valid OPENROUTERKEY." });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testWithPrompt = async () => {
+    if (!testPrompt.trim()) {
+      setMessage({ type: "error", text: "Enter a prompt to test" });
+      return;
+    }
+    setTesting(true);
+    setMessage(null);
+    setTestResponse(null);
+    try {
+      const res = await fetch("/api/admin/ai/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: testPrompt }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMessage({ type: "success", text: `Response received (${data.elapsed}ms)` });
+        setTestResponse(data.response);
+      } else {
+        setMessage({ type: "error", text: data.response || data.error || "AI failed" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Test failed" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const clearBuffer = async () => {
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/clear-buffer", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setMessage({ type: "success", text: "AI call buffer cleared." });
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to clear" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to clear buffer" });
     }
   };
 
@@ -381,7 +435,7 @@ export default function AdminAIPage() {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={saveConfig}
               disabled={saving}
@@ -391,12 +445,51 @@ export default function AdminAIPage() {
             </button>
             <button
               onClick={testConnection}
-              disabled={!config.hasApiKey || saving}
+              disabled={!config.hasApiKey || testing}
+              className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              {testing ? "Testing..." : "Test Connection"}
+            </button>
+            <button
+              onClick={() => setShowTestPrompt(!showTestPrompt)}
+              disabled={!config.hasApiKey}
               className="px-4 py-2 bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-slate-500 disabled:opacity-50 transition-colors"
             >
-              Test Connection
+              {showTestPrompt ? "Hide Test" : "Test Model"}
+            </button>
+            <button
+              onClick={clearBuffer}
+              className="px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-sm font-medium rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+            >
+              Clear Buffer
             </button>
           </div>
+
+          {/* Test Model with custom prompt */}
+          {showTestPrompt && (
+            <div className="bg-white dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Test with Custom Prompt</h4>
+              <textarea
+                value={testPrompt}
+                onChange={(e) => setTestPrompt(e.target.value)}
+                placeholder="e.g., What are the top 3 NSE gainers today?"
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 h-20 resize-none"
+              />
+              <button
+                onClick={testWithPrompt}
+                disabled={!config.hasApiKey || testing || !testPrompt.trim()}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {testing ? "Running..." : "Run Test"}
+              </button>
+              {testResponse && (
+                <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 border border-gray-200 dark:border-slate-700">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Response:</p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{testResponse}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Custom Models */}
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 border border-gray-200 dark:border-slate-700 space-y-4">

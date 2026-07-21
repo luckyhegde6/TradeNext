@@ -86,7 +86,10 @@ export default function AdminLayout({
   // For /admin/utils/* pages, the utils layout already provides its own sidebar
   const isUtilsPage = pathname.startsWith("/admin/utils");
 
-  if (isUtilsPage) {
+  // For /admin/telegram/* pages, the telegram layout already provides its own sidebar
+  const isTelegramPage = pathname.startsWith("/admin/telegram");
+
+  if (isUtilsPage || isTelegramPage) {
     return <>{children}</>;
   }
 

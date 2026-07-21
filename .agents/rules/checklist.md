@@ -84,6 +84,9 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 - [ ] no_n_plus_one_queries
 - [ ] cache_used_where_applicable
 - [ ] timeseries_use_timescale
+- [ ] batch_db_operations (use createMany/findMany instead of N individual queries)
+- [ ] parallelize_independent_queries (use Promise.all for independent DB calls)
+- [ ] avoid_queries_in_loops (pre-fetch data, then look up in-memory)
 
 ---
 

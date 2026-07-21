@@ -4,6 +4,31 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization, portfolio management, capital gains tax reporting, F&O analytics, dividend tracking, and portfolio rebalancing for NSE (India).
 
 ## Version History
+- **v3.4.0** — Telegram Bot Integration + Admin Panel + Notifications (July 22, 2026):
+  - **Admin Users Telegram Column**: Added "Telegram" column to `/admin/users` showing Linked (green), Pending (yellow), or Not Linked (gray) badges, Chat ID display, and Unlink button. Updated Zod schema in `/api/admin/users/[id]` to accept `telegramChatId` and `telegramVerified` fields.
+  - **Telegram Recommendations Broadcast**: Wired `broadcastToSubscribers()` into `dailyRecommendationService.ts` — after daily run completes, sends formatted BUY/SELL recommendations to all verified Telegram subscribers. Non-critical (catches errors).
+  - **Telegram Direct Alert Delivery**: Modified `lib/alerts/delivery/index.ts` `deliverAlert()` to send alerts directly to a user's linked Telegram account if no Telegram channel has already delivered the alert. Queries `prisma.user` for `telegramChatId` + `telegramVerified`.
+  - **User Profile Page**: Created `/profile` page with account info card and `TelegramSubscription` component. Added "Profile" link to Header nav (desktop + mobile).
+  - **Admin Telegram Section**: Full `/admin/telegram` section with sidebar layout and 5 sub-pages:
+    - **Overview** (`/admin/telegram`): Stats dashboard (subscribers, events), quick action buttons, bot commands reference.
+    - **Broadcast** (`/admin/telegram/broadcast`): Compose and send announcements to all verified subscribers, recent broadcasts list.
+    - **Subscribers** (`/admin/telegram/subscribers`): Full subscriber table with All/Active/Inactive filters, user info, Chat ID, notify type.
+    - **Delivery Logs** (`/admin/telegram/deliveries`): Action-type filter tabs, delivery event table with status/error.
+    - **Settings** (`/admin/telegram/settings`): Bot config status (bot token, chat ID, username verification), env vars guide, setup instructions.
+  - **Admin Layout Pass-through**: Updated `app/admin/layout.tsx` to skip admin sidebar for `/admin/telegram` routes (like `/admin/utils`).
+  - **Removed Telegram Tab from Alerts**: Deleted `TelegramSubscribersTab`, removed "telegram" from `TabKey` type, added "Telegram Admin →" link in header pointing to `/admin/telegram`.
+  - **New API Endpoints**: `GET /api/admin/telegram/subscribers` (subscriber stats), `POST /api/admin/telegram/broadcast` (send broadcast message).
+  - **Telegram Bot Mismatch Lesson**: When user links Chat ID on local server but bot webhook hits production server, the production database won't have the link. Always verify both databases have the same telegramChatId. Fix: re-link on production or use local webhook via tunnel.
+  - **Files Created**: `app/profile/page.tsx`, `app/profile/metadata.ts`, `app/admin/telegram/layout.tsx`, `app/admin/telegram/page.tsx`, `app/admin/telegram/broadcast/page.tsx`, `app/admin/telegram/subscribers/page.tsx`, `app/admin/telegram/deliveries/page.tsx`, `app/admin/telegram/settings/page.tsx`, `app/api/admin/telegram/subscribers/route.ts`, `app/api/admin/telegram/broadcast/route.ts`
+  - **Files Modified**: `app/admin/users/page.tsx`, `app/api/admin/users/[id]/route.ts`, `app/api/admin/users/route.ts`, `app/admin/alerts/page.tsx`, `app/admin/layout.tsx`, `app/admin/page.tsx`, `app/Header.tsx`, `lib/alerts/delivery/index.ts`, `lib/services/dailyRecommendationService.ts`
+- **v3.3.1** — Bug Fixes: Dividends tab, AI admin, History tab, Prisma raw SQL (July 21, 2026):
+  - **Dividends Tab Fix**: Fixed 500 error on `/api/dividends/calendar` and `/api/corporate-actions/combined`. Root cause: raw SQL used `trade_date` but actual DB column is `"tradeDate"` (camelCase from Prisma). Fixed in `lib/services/dividendCalendarService.ts` and `app/api/corporate-actions/combined/route.ts`.
+  - **AI Admin Page Redesigned**: Replaced single "Run Test" button with 4 dedicated actions: Save Configuration, Test Connection (lightweight `directPrompt()` with DB config), Test Model (custom prompt textarea), Clear Buffer (resets in-memory ring buffer). New endpoints: `/api/admin/ai/test` (POST), `/api/admin/ai/clear-buffer` (POST).
+  - **Recommendations History Tab Rewritten**: Changed from displaying run jobs to showing top 20 individual stock recommendations (deduplicated by symbol, latest wins). New API `/api/recommendations/top-stocks` with `DISTINCT ON (symbol)`, proper `@@map` table names, filter/sort/pagination.
+  - **Prisma createMany Bug Fix**: Removed invalid fields `screenerCount`, `firstSeenAt`, `lastSeenAt` from `RecommendationTracker.createMany()` in `dailyRecommendationService.ts` — these fields don't exist on the Prisma model.
+  - **New Lessons**: Prisma `@@map` table names vs model names, camelCase column naming in raw SQL, AI test endpoint pattern.
+  - **Files Created**: `app/api/admin/ai/test/route.ts`, `app/api/admin/ai/clear-buffer/route.ts`, `app/api/recommendations/top-stocks/route.ts`
+  - **Files Modified**: `app/admin/ai/page.tsx`, `app/components/recommendations/HistoryTab.tsx`, `lib/services/dailyRecommendationService.ts`, `lib/services/dividendCalendarService.ts`, `app/api/corporate-actions/combined/route.ts`
 - **v3.3.0** — Phase 5: Daily Recommendations Engine + Self-Heal AI + Audit Logging (July 19, 2026):
   - **Chartink Integration**: Hybrid approach — tries Chartink's `POST /screener/process` API first, falls back to equivalent TradingView screener templates. Runs 7 specific screeners daily: Short Term Breakouts, RSI Overbought/Oversold, BOSS Scanner BTST, Bullish Momentum, Bullish Marubozu 15min, Potential Breakouts, First 15min Breakout.
   - **Deduplication Engine**: Merges results across 7 screeners, tracks screener attribution (which screeners found each stock), sorts by screenerCount (stronger signal = more screeners agree).
