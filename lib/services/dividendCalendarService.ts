@@ -246,7 +246,7 @@ async function enrichWithPrices(dividends: DividendEvent[]): Promise<DividendEve
       SELECT DISTINCT ON (ticker) ticker, close::float8 as close
       FROM daily_prices
       WHERE ticker = ANY(${uniqueSymbols})
-      ORDER BY ticker, trade_date DESC
+      ORDER BY ticker, "tradeDate" DESC
     `;
     for (const row of priceRows) {
       priceMap.set(row.ticker, row.close);

@@ -707,13 +707,14 @@ export function trackEvent(action: string, category: string, options?: { label?:
 
 ---
 
-### 24. Dev Server Startup — Avoid Blocking the LLM (v3.2.0)
+### 24. Dev Server Startup — Avoid Blocking the LLM (v3.2.0, updated v3.3.1)
 **Issue**: Running `npm run dev` in a shell via `start /B` or `Start-Process -NoNewWindow` blocks the LLM tool call, preventing further operations.
 
-**Root Cause**: The shell tool waits for the process to exit. Even background processes that redirect output can hold the shell open if not properly detached.
+**Root Cause**: The shell tool waits for the process to exit. Even background processes that redirect output can hold the shell open if not properly detached. `start /B cmd /C "npm run dev > file.log 2>&1"` still blocks because Next.js keeps file handles open.
 
-**Solution**: Use PowerShell `System.Diagnostics.ProcessStartInfo` with `CreateNoWindow = $true` and `UseShellExecute = $false`:
+**Solution (v3.3.1 — Recommended)**: Use PowerShell `System.Diagnostics.ProcessStartInfo` with `CreateNoWindow = $true`:
 ```powershell
+# scripts/start-dev-bg.ps1
 $psi = New-Object System.Diagnostics.ProcessStartInfo;
 $psi.FileName = 'cmd.exe';
 $psi.Arguments = '/c cd /d <PROJECT_DIR> && npm run dev > <PROJECT_DIR>\dev-server.log 2>&1';
@@ -725,6 +726,8 @@ $p = [System.Diagnostics.Process]::Start($psi);
 Write-Output $p.Id
 ```
 This returns immediately with the PID, and the dev server runs independently.
+
+**npm script**: `"dev:bg": "powershell -ExecutionPolicy Bypass -File scripts/start-dev-bg.ps1"`
 
 **Cleanup**: Kill the process when done:
 ```bash
@@ -880,7 +883,64 @@ for (let i = 0; i < BATCHES; i++) {
 
 ---
 
+### 41. Prisma @@map Table Names vs Model Names in Raw SQL
+**Issue**: Raw SQL queries used model names (`daily_recommendation_runs`, `daily_recommendation_stocks`) but Prisma `@@map` renames them to different table names (`daily_recommendation_runs` → `daily_recommendation_runs` BUT `RecommendationTracker` → `recommendation_trackers`, `DailyRecommendationStock` → `daily_recommendation_stocks`).
+**Root Cause**: Prisma model names and DB table names diverge when `@@map` is used. Prisma Client uses the model name, but raw SQL must use the actual DB table name from `@@map`.
+**Solution**: Always check `prisma/schema.prisma` for `@@map()` directives before writing raw SQL. The pattern is:
+```prisma
+model DailyRecommendationStock {  // ← Prisma model name
+  @@map("daily_recommendation_stocks")  // ← Actual DB table name
+}
+```
+**Rule**: Raw SQL = `@@map` name. Prisma Client = model name. Never assume they match.
+
+### 42. Prisma Column Naming — camelCase vs snake_case
+**Issue**: Raw SQL queries used `trade_date` but the actual column in the DB is `"tradeDate"` (camelCase). Caused 500 errors on dividend calendar and corporate actions endpoints.
+**Root Cause**: Prisma preserves the TypeScript field name as the column name by default. When the Prisma field is `tradeDate Date @map("tradeDate")`, the DB column is `"tradeDate"` (with quotes for camelCase). Raw SQL must use the exact column name including case.
+**Solution**: Check the Prisma migration files or `prisma db pull` output for exact column names. When Prisma uses camelCase, raw SQL must quote it: `"tradeDate"`, not `trade_date`.
+**Rule**: Before writing raw SQL against a Prisma-managed table, always verify exact column names from migration files or schema introspection.
+
+### 43. AI Admin Test — Use directPrompt() Not Full Agent
+**Issue**: AI admin "Test Connection" button called `/api/ai/screener` which runs the full agent pipeline with tools (DB writes, stock fetching). Connection test should be lightweight.
+**Solution**: Create a dedicated `/api/admin/ai/test` endpoint that uses `directPrompt()` from `llm-provider.ts` — sends a simple "Say hello" message with DB-saved config. Returns `{ success, response, model, elapsed }`.
+**Pattern**: For config test endpoints, always use the simplest possible prompt and skip all tool execution. Save DB writes for actual production runs.
+
+### 44. Telegram Bot Webhook vs Local Database Mismatch
+**Issue**: User links Chat ID on local dev server, but Telegram bot webhook hits production server — bot responds "Account not linked" because production DB has no record.
+
+**Root Cause**: User linked Chat ID on `localhost:3000` (local PostgreSQL), but Telegram webhook was set to `tradenext6.netlify.app/api/telegram/webhook` (production Prisma Accelerate DB). Different databases = missing record.
+
+**Solution**: Either (a) set webhook to local via tunnel (`ngrok http 3000`), or (b) re-link Chat ID on the production site so both databases have the record.
+
+**Diagnostic Query**: To verify linking, query the User table for `telegramChatId`:
+```typescript
+await prisma.user.findMany({
+  where: { telegramChatId: { not: null } },
+  select: { id: true, name: true, email: true, telegramChatId: true, telegramVerified: true }
+});
+```
+
+**Rule**: When testing Telegram bot locally, always verify which database the webhook is hitting. Use `ngrok` or similar tunnel for local webhook testing.
+
+### 45. Prisma 7 Requires Adapter for External Scripts
+**Issue**: Creating a `PrismaClient` without adapter in a standalone script fails with `PrismaClientInitializationError`.
+
+**Root Cause**: Prisma 7 with driver adapters (e.g., `@prisma/adapter-pg`) requires the adapter to be passed during construction. Plain `new PrismaClient()` doesn't work when the project uses `PrismaPg` adapter.
+
+**Solution**: For standalone scripts, always create a Pool + PrismaPg adapter:
+```typescript
+const { PrismaClient } = require('.prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const client = new PrismaClient({ adapter: new PrismaPg(pool) });
+```
+
+---
+
 ## Update Log
+- 2026-07-22: Added Lessons 44-45 (Telegram webhook vs local DB mismatch, Prisma 7 adapter for scripts); added v3.4.0 Telegram bot integration lessons
+- 2026-07-21: Added Lessons 41-43 (Prisma @@map table names, camelCase column naming, AI test endpoint pattern); updated Lesson 24 (dev:bg PowerShell script for reliable agent startup)
 - 2026-07-20: Added Lesson 40 (Production Migration) — quickbuild skips prisma migrate deploy, causes missing tables in production
 - 2026-07-19: Added Lessons 36-39 (Test Fixes & Security) — SWC TDZ mock pattern, CodeQL modulo bias, AI response parsing priority, retry mock count matching
 - 2026-07-19: Added Lessons 26-35 (Daily Recommendations) — hybrid API fallback, AI batch processing, cron timezone, public/auth routes, tracker entity, circuit breaker, unified events, prediction tracking, prompt versioning, screener deduplication

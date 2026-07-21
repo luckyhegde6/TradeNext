@@ -11,6 +11,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:bg": "powershell -ExecutionPolicy Bypass -File scripts/start-dev-bg.ps1",
     "stage": "netlify dev",
     "dev:local": "node scripts/dev-local-cross.js",
     "dev:clean": "bash scripts/dev-clean.sh",

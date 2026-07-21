@@ -176,9 +176,6 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
         status: "active",
         timeHorizon: "medium" as const,
         screenerAttribution: r.screenerNames,
-        screenerCount: r.screenerCount,
-        firstSeenAt: todayMidnight,
-        lastSeenAt: todayMidnight,
         targetPrice: r.price * 1.2, // Default 20% target
         stopLoss: r.price * 0.95, // Default 5% stop loss
         confidence: 0,
@@ -496,7 +493,41 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     // Invalidate cache so next API request gets fresh data
     invalidateRecommendationsCache();
 
-    // Broadcast to Telegram subscribers will be wired in Phase 6
+    // Broadcast to Telegram subscribers
+    try {
+      const { broadcastToSubscribers } = await import("./telegramBotService");
+
+      const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
+      const topStocks = aiResults
+        .filter((r) => r.aiRecommendation.recommendation !== "HOLD")
+        .slice(0, 8);
+
+      if (topStocks.length > 0) {
+        const lines = topStocks.map((r) => {
+          const icon = recIcons[r.aiRecommendation.recommendation] || "⚪";
+          const conf = `${r.aiRecommendation.confidence}%`;
+          const price = r.price ? `₹${r.price.toFixed(2)}` : "";
+          const target = r.aiRecommendation.targetPrice ? `Tgt ₹${r.aiRecommendation.targetPrice.toFixed(2)}` : "";
+          const sl = r.aiRecommendation.stopLoss ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}` : "";
+          const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+          return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
+        });
+
+        let tgMessage = `📈 *Daily Recommendations — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}*\n\n`;
+        tgMessage += lines.join("\n\n");
+        tgMessage += `\n\n_View all ${aiResults.length} recommendations on TradeNext → /recommendations_`;
+
+        if (tgMessage.length > 4000) {
+          tgMessage = tgMessage.slice(0, 3990) + "\n\n*(truncated)*";
+        }
+
+        const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
+        logger.info({ msg: "Telegram broadcast for recommendations", sent });
+      }
+    } catch (tgErr) {
+      // Non-critical: log but don't fail the run
+      logger.warn({ msg: "Telegram broadcast failed (non-critical)", error: tgErr });
+    }
 
     logger.info({
       msg: "Daily recommendation run finished",
