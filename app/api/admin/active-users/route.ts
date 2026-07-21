@@ -17,33 +17,25 @@ export async function GET() {
         const oneDayAgo = new Date();
         oneDayAgo.setHours(oneDayAgo.getHours() - 24);
 
-        const recentUsers = await prisma.user.findMany({
-            where: {
-                updatedAt: {
-                    gte: oneDayAgo
-                }
-            },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                role: true,
-                updatedAt: true
-            },
-            orderBy: { updatedAt: 'desc' },
-            take: 20
-        });
-
-        // Get recent activity stats
+        // Parallelize all queries
         const oneHourAgo = new Date();
         oneHourAgo.setHours(oneHourAgo.getHours() - 1);
 
-        const recentActivity = {
-            lastHour: await prisma.user.count({
-                where: { updatedAt: { gte: oneHourAgo } }
+        const [recentUsers, lastHour, totalUsers] = await Promise.all([
+            prisma.user.findMany({
+                where: { updatedAt: { gte: oneDayAgo } },
+                select: { id: true, name: true, email: true, role: true, updatedAt: true },
+                orderBy: { updatedAt: 'desc' },
+                take: 20,
             }),
+            prisma.user.count({ where: { updatedAt: { gte: oneHourAgo } } }),
+            prisma.user.count(),
+        ]);
+
+        const recentActivity = {
+            lastHour,
             last24Hours: recentUsers.length,
-            totalUsers: await prisma.user.count()
+            totalUsers,
         };
 
         return NextResponse.json({

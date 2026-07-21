@@ -152,45 +152,101 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       0,
     );
 
-    // 5 & 6. Upsert trackers and create stock entries
+    // 5 & 6. Batch upsert trackers and create stock entries
+    // Instead of N individual upserts+creates, we batch:
+    // 1 findMany for existing trackers, then batch create/update
     const stockEntries: StockAnalysisInput[] = [];
+    const BATCH_SIZE = 100;
 
-    for (const result of screenerResults) {
-      try {
-        // Upsert RecommendationTracker (long-lived record per symbol)
-        const tracker = await upsertTracker(result, todayMidnight);
+    // Pre-fetch existing trackers in one query
+    const symbols = screenerResults.map(r => r.symbol);
+    const existingTrackers = await prisma.recommendationTracker.findMany({
+      where: { symbol: { in: symbols } },
+      select: { id: true, symbol: true, status: true },
+    });
+    const trackerMap = new Map(existingTrackers.map(t => [t.symbol, t]));
 
-        // Create DailyRecommendationStock entry for this run
-        await prisma.dailyRecommendationStock.create({
-          data: {
-            runId: run.id,
-            trackerId: tracker.id,
-            symbol: result.symbol,
-            price: result.price,
-            change: result.change,
-            changePercent: result.changePercent,
-            volume: BigInt(Math.round(result.volume)),
-            screenerAttribution: result.screenerNames,
-            screenerCount: result.screenerCount,
-          },
-        });
+    // Batch create new trackers
+    const newTrackerData = screenerResults
+      .filter(r => !trackerMap.has(r.symbol))
+      .map(r => ({
+        symbol: r.symbol,
+        entryPrice: r.price,
+        currentPrice: r.price,
+        status: "active",
+        timeHorizon: "medium" as const,
+        screenerAttribution: r.screenerNames,
+        screenerCount: r.screenerCount,
+        firstSeenAt: todayMidnight,
+        lastSeenAt: todayMidnight,
+        targetPrice: r.price * 1.2, // Default 20% target
+        stopLoss: r.price * 0.95, // Default 5% stop loss
+        confidence: 0,
+        aiRecommendation: "HOLD" as const,
+      }));
 
-        stockEntries.push({
-          symbol: result.symbol,
-          price: result.price,
-          change: result.change,
-          changePercent: result.changePercent,
-          volume: result.volume,
-          screenerNames: result.screenerNames,
-        });
-      } catch (e) {
-        logger.error({
-          msg: "Failed to create stock entry",
-          symbol: result.symbol,
-          error: e instanceof Error ? e.message : String(e),
-        });
-        // Continue with other stocks — don't let one failure block the run
+    if (newTrackerData.length > 0) {
+      for (let i = 0; i < newTrackerData.length; i += BATCH_SIZE) {
+        const batch = newTrackerData.slice(i, i + BATCH_SIZE);
+        await prisma.recommendationTracker.createMany({ data: batch, skipDuplicates: true });
       }
+      // Re-fetch to get IDs for new trackers
+      const refreshed = await prisma.recommendationTracker.findMany({
+        where: { symbol: { in: symbols } },
+        select: { id: true, symbol: true, status: true },
+      });
+      refreshed.forEach(t => trackerMap.set(t.symbol, t));
+    }
+
+    // Update existing tracker in batch
+    const existingToUpdate = screenerResults
+      .filter(r => trackerMap.has(r.symbol))
+      .map(r =>
+        prisma.recommendationTracker.updateMany({
+          where: { symbol: r.symbol, status: "active" },
+          data: {
+            currentPrice: r.price,
+            screenerAttribution: r.screenerNames,
+            lastCheckedAt: new Date(),
+          },
+        })
+      );
+    if (existingToUpdate.length > 0) {
+      await prisma.$transaction(existingToUpdate.slice(0, 50)); // Transaction limit safety
+    }
+
+    // Batch create stock entries
+    const stockCreateData = screenerResults.map(r => {
+      const tracker = trackerMap.get(r.symbol);
+      if (!tracker) return null;
+      return {
+        runId: run.id,
+        trackerId: tracker.id,
+        symbol: r.symbol,
+        price: r.price,
+        change: r.change,
+        changePercent: r.changePercent,
+        volume: BigInt(Math.round(r.volume)),
+        screenerAttribution: r.screenerNames,
+        screenerCount: r.screenerCount,
+      };
+    }).filter((d): d is NonNullable<typeof d> => d !== null);
+
+    for (let i = 0; i < stockCreateData.length; i += BATCH_SIZE) {
+      const batch = stockCreateData.slice(i, i + BATCH_SIZE);
+      await prisma.dailyRecommendationStock.createMany({ data: batch });
+    }
+
+    // Build stockEntries for AI analysis
+    for (const result of screenerResults) {
+      stockEntries.push({
+        symbol: result.symbol,
+        price: result.price,
+        change: result.change,
+        changePercent: result.changePercent,
+        volume: result.volume,
+        screenerNames: result.screenerNames,
+      });
     }
 
     // Update run with screener stats
@@ -296,78 +352,86 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       }));
     }
 
-    // 8 & 9 & 10. Update stock entries, trackers, and record predictions
+    // 8 & 9 & 10. Batch update stock entries, trackers, and record predictions
     let aiProcessed = 0;
     let aiFailed = 0;
 
+    // Pre-fetch all stock entries for this run in one query (instead of N findFirst)
+    const allStockEntries = await prisma.dailyRecommendationStock.findMany({
+      where: { runId: run.id },
+      select: { id: true, symbol: true },
+    });
+    const stockEntryMap = new Map(allStockEntries.map(e => [e.symbol, e.id]));
+
+    // Batch update stock entries and trackers concurrently
+    const stockUpdates: Promise<any>[] = [];
+    const trackerUpdates: Promise<any>[] = [];
+
     for (const aiResult of aiResults) {
-      try {
-        // Find the stock entry for this symbol in this run
-        const stockEntry = await prisma.dailyRecommendationStock.findFirst({
-          where: { runId: run.id, symbol: aiResult.symbol },
-        });
+      const stockEntryId = stockEntryMap.get(aiResult.symbol);
+      if (!stockEntryId) {
+        aiFailed++;
+        continue;
+      }
 
-        if (stockEntry) {
-          // 8. Update DailyRecommendationStock with AI results
-          await prisma.dailyRecommendationStock.update({
-            where: { id: stockEntry.id },
-            data: {
-              aiRecommendation: aiResult.aiRecommendation.recommendation,
-              confidence: aiResult.aiRecommendation.confidence,
-              targetPrice: aiResult.aiRecommendation.targetPrice,
-              stopLoss: aiResult.aiRecommendation.stopLoss,
-              timeHorizon: aiResult.aiRecommendation.timeHorizon,
-              reasoning: aiResult.aiRecommendation.reasoning,
-              riskFactors: aiResult.aiRecommendation.riskFactors,
-              aiTokensUsed: aiResult.tokensUsed,
-              aiExecutionMs: aiResult.executionMs,
-              aiSuccess: aiResult.success,
-              aiError: aiResult.error ?? null,
-            },
-          });
-
-          // 9. Update RecommendationTracker with latest AI analysis
-          await prisma.recommendationTracker.updateMany({
-            where: { symbol: aiResult.symbol, status: "active" },
-            data: {
-              aiRecommendation: aiResult.aiRecommendation.recommendation,
-              confidence: aiResult.aiRecommendation.confidence,
-              targetPrice: aiResult.aiRecommendation.targetPrice,
-              stopLoss: aiResult.aiRecommendation.stopLoss,
-              timeHorizon: aiResult.aiRecommendation.timeHorizon,
-              reasoning: aiResult.aiRecommendation.reasoning,
-              riskFactors: aiResult.aiRecommendation.riskFactors,
-              currentPrice: aiResult.price,
-            },
-          });
-
-          // 10. Record prediction for outcome tracking
-          await recordPrediction({
-            agentType: "recommendation",
-            symbol: aiResult.symbol,
-            prediction: aiResult.aiRecommendation.recommendation,
+      // 8. Update DailyRecommendationStock with AI results
+      stockUpdates.push(
+        prisma.dailyRecommendationStock.update({
+          where: { id: stockEntryId },
+          data: {
+            aiRecommendation: aiResult.aiRecommendation.recommendation,
             confidence: aiResult.aiRecommendation.confidence,
-            entryPrice: aiResult.price,
             targetPrice: aiResult.aiRecommendation.targetPrice,
             stopLoss: aiResult.aiRecommendation.stopLoss,
-            runId: run.id,
-          });
+            timeHorizon: aiResult.aiRecommendation.timeHorizon,
+            reasoning: aiResult.aiRecommendation.reasoning,
+            riskFactors: aiResult.aiRecommendation.riskFactors,
+            aiTokensUsed: aiResult.tokensUsed,
+            aiExecutionMs: aiResult.executionMs,
+            aiSuccess: aiResult.success,
+            aiError: aiResult.error ?? null,
+          },
+        })
+      );
 
-          if (aiResult.success) {
-            aiProcessed++;
-          } else {
-            aiFailed++;
-          }
-        }
-      } catch (e) {
-        logger.error({
-          msg: "Failed to update AI results for stock",
-          symbol: aiResult.symbol,
-          error: e instanceof Error ? e.message : String(e),
-        });
+      // 9. Update RecommendationTracker with latest AI analysis
+      trackerUpdates.push(
+        prisma.recommendationTracker.updateMany({
+          where: { symbol: aiResult.symbol, status: "active" },
+          data: {
+            aiRecommendation: aiResult.aiRecommendation.recommendation,
+            confidence: aiResult.aiRecommendation.confidence,
+            targetPrice: aiResult.aiRecommendation.targetPrice,
+            stopLoss: aiResult.aiRecommendation.stopLoss,
+            timeHorizon: aiResult.aiRecommendation.timeHorizon,
+            reasoning: aiResult.aiRecommendation.reasoning,
+            riskFactors: aiResult.aiRecommendation.riskFactors,
+            currentPrice: aiResult.price,
+          },
+        })
+      );
+
+      // 10. Record prediction for outcome tracking
+      await recordPrediction({
+        agentType: "recommendation",
+        symbol: aiResult.symbol,
+        prediction: aiResult.aiRecommendation.recommendation,
+        confidence: aiResult.aiRecommendation.confidence,
+        entryPrice: aiResult.price,
+        targetPrice: aiResult.aiRecommendation.targetPrice,
+        stopLoss: aiResult.aiRecommendation.stopLoss,
+        runId: run.id,
+      });
+
+      if (aiResult.success) {
+        aiProcessed++;
+      } else {
         aiFailed++;
       }
     }
+
+    // Execute batched updates concurrently
+    await Promise.all([...stockUpdates, ...trackerUpdates]);
 
     // 11. Complete run
     const executionTimeMs = Date.now() - startTime;
@@ -528,73 +592,81 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
   logger.info({ msg: "Performance check starting" });
 
-  // Get all active trackers
+  // Batch fetch all active trackers and their latest prices in one query each
+  // Instead of N individual price queries, we do 1 query with DISTINCT ON
   const activeTrackers = await prisma.recommendationTracker.findMany({
     where: { status: "active" },
   });
+
+  if (activeTrackers.length === 0) {
+    return { checked: 0, targetAchieved: 0, stopLossHit: 0, expired: 0, executionTimeMs: 0 };
+  }
+
+  // Get all unique symbols
+  const trackerSymbols = activeTrackers.map(t => t.symbol);
+
+  // Batch fetch latest prices for ALL trackers in ONE query
+  const latestPrices = await prisma.$queryRaw<{ ticker: string; close: number | null }[]>`
+    SELECT DISTINCT ON (ticker) ticker, close
+    FROM daily_prices
+    WHERE ticker = ANY(${trackerSymbols})
+    ORDER BY ticker, "tradeDate" DESC
+  `;
+
+  // Build price lookup map
+  const priceMap = new Map(latestPrices.filter(p => p.close !== null).map(p => [p.ticker, Number(p.close)]));
 
   let checked = 0;
   let targetAchieved = 0;
   let stopLossHit = 0;
   let expired = 0;
 
+  // Batch status updates and history creation
+  const statusUpdates: Promise<any>[] = [];
+  const historyCreates: Promise<any>[] = [];
+
   for (const tracker of activeTrackers) {
-    try {
-      checked++;
+    checked++;
 
-      // Fetch current price from daily_prices
-      const latestPrice = await prisma.$queryRaw<{ close: number | null }[]>`
-        SELECT close FROM daily_prices
-        WHERE ticker = ${tracker.symbol}
-        ORDER BY "tradeDate" DESC
-        LIMIT 1
-      `;
+    const currentPrice = priceMap.get(tracker.symbol);
+    if (currentPrice === undefined) {
+      logger.warn({ msg: "No price data found for tracker symbol", symbol: tracker.symbol, trackerId: tracker.id });
+      continue;
+    }
 
-      if (!latestPrice || latestPrice.length === 0 || latestPrice[0].close === null) {
-        logger.warn({
-          msg: "No price data found for tracker symbol",
-          symbol: tracker.symbol,
-          trackerId: tracker.id,
-        });
-        continue;
+    let newStatus: string | null = null;
+
+    // Check conditions in priority order
+    if (currentPrice >= tracker.targetPrice) {
+      newStatus = "target_achieved";
+      targetAchieved++;
+    } else if (currentPrice <= tracker.stopLoss) {
+      newStatus = "stop_loss_hit";
+      stopLossHit++;
+    } else {
+      const daysSinceCreation = Math.floor(
+        (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (daysSinceCreation >= EXPIRY_DAYS) {
+        newStatus = "expired";
+        expired++;
       }
+    }
 
-      const currentPrice = Number(latestPrice[0].close);
-      let newStatus: string | null = null;
+    if (newStatus) {
+      const previousStatus = tracker.status;
 
-      // Check conditions in priority order
-      if (currentPrice >= tracker.targetPrice) {
-        newStatus = "target_achieved";
-        targetAchieved++;
-      } else if (currentPrice <= tracker.stopLoss) {
-        newStatus = "stop_loss_hit";
-        stopLossHit++;
-      } else {
-        // Check expiry (30+ days since creation)
-        const daysSinceCreation = Math.floor(
-          (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
-        );
-        if (daysSinceCreation >= EXPIRY_DAYS) {
-          newStatus = "expired";
-          expired++;
-        }
-      }
-
-      if (newStatus) {
-        const previousStatus = tracker.status;
-
-        // Update tracker status
-        await prisma.recommendationTracker.update({
+      // Batch update tracker
+      statusUpdates.push(
+        prisma.recommendationTracker.update({
           where: { id: tracker.id },
-          data: {
-            status: newStatus,
-            currentPrice,
-            lastCheckedAt: new Date(),
-          },
-        });
+          data: { status: newStatus, currentPrice, lastCheckedAt: new Date() },
+        })
+      );
 
-        // Create status history entry
-        await prisma.recommendationStatusHistory.create({
+      // Batch create status history
+      historyCreates.push(
+        prisma.recommendationStatusHistory.create({
           data: {
             trackerId: tracker.id,
             previousStatus,
@@ -606,61 +678,26 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
               targetPrice: tracker.targetPrice,
               stopLoss: tracker.stopLoss,
               daysSinceCreation: Math.floor(
-                (Date.now() - tracker.createdAt.getTime()) /
-                  (1000 * 60 * 60 * 24),
+                (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
               ),
             },
           },
-        });
+        })
+      );
 
-        // Record event
-        const emoji =
-          newStatus === "target_achieved"
-            ? "TARGET"
-            : newStatus === "stop_loss_hit"
-              ? "STOP_LOSS"
-              : "EXPIRED";
-        await recordAIEvent(
-          "status_change",
-          `[${emoji}] ${tracker.symbol}: ${previousStatus} -> ${newStatus} at price ${currentPrice}`,
-          {
-            symbol: tracker.symbol,
-            currentPrice,
-            previousStatus,
-            newStatus,
-            entryPrice: tracker.entryPrice,
-            targetPrice: tracker.targetPrice,
-            stopLoss: tracker.stopLoss,
-          },
-        );
-
-        logger.info({
-          msg: "Recommendation status changed",
-          symbol: tracker.symbol,
-          previousStatus,
-          newStatus,
-          currentPrice,
-          entryPrice: tracker.entryPrice,
-        });
-      } else {
-        // No status change — just update current price and lastCheckedAt
-        await prisma.recommendationTracker.update({
-          where: { id: tracker.id },
-          data: {
-            currentPrice,
-            lastCheckedAt: new Date(),
-          },
-        });
-      }
-    } catch (e) {
-      logger.error({
-        msg: "Failed to check tracker performance",
-        symbol: tracker.symbol,
-        trackerId: tracker.id,
-        error: e instanceof Error ? e.message : String(e),
+      // Record event
+      const emoji = newStatus === "target_achieved" ? "TARGET" : newStatus === "stop_loss_hit" ? "STOP_LOSS" : "EXPIRED";
+      await recordAIEvent("status_change", `[${emoji}] ${tracker.symbol}: ${previousStatus} -> ${newStatus} at price ${currentPrice}`, {
+        symbol: tracker.symbol, currentPrice, previousStatus, newStatus,
+        entryPrice: tracker.entryPrice, targetPrice: tracker.targetPrice, stopLoss: tracker.stopLoss,
       });
+
+      logger.info({ msg: "Recommendation status changed", symbol: tracker.symbol, previousStatus, newStatus, currentPrice });
     }
   }
+
+  // Execute batched updates
+  await Promise.all([...statusUpdates, ...historyCreates]);
 
   const executionMs = Date.now() - startTime;
 
