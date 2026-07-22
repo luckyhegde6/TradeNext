@@ -3,7 +3,7 @@
   publish = ".next"
 
 [build.environment]
-  SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md"
+  SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md,scripts/check-remote-db.ts"
 
 [functions]
   directory = "netlify/functions"

@@ -142,6 +142,31 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 - [ ] no_dead_code_or_console_log
 - [ ] gitignore_covers_artifacts
 
+### Netlify Secrets Scanning
+- [ ] no_hardcoded_passwords_in_repo
+- [ ] secrets_scan_omit_paths_updated_if_needed
+- [ ] netlify_build_passes_without_secrets_scan_failure
+
+**⚠️ Netlify scans ALL repo files for secrets (passwords, API keys).** If you add scripts or test files with hardcoded demo/admin passwords, the build will fail with "Secrets scanning found secrets in build."
+
+**Fix:** Add the offending file to `SECRETS_SCAN_OMIT_PATHS` in `netlify.toml`:
+```toml
+[build.environment]
+  SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,...,scripts/your-file.ts"
+```
+
+**Files that commonly trip the scanner:**
+| File | Reason | Action |
+|------|--------|--------|
+| `scripts/check-remote-db.ts` | Hardcoded DEMO_PASSWORD, ADMIN_PASSWORD | Add to omit paths |
+| `prisma/seed.ts` | Hardcoded demo credentials | Already in omit paths |
+| Test fixtures with passwords | Embedded test data | Add to omit paths or use env vars |
+
+**Prevention checklist before adding any file with credentials:**
+1. Use `process.env.VARIABLE` instead of hardcoded values where possible
+2. If hardcoded is necessary (e.g., scripts, seeds), add the file to `SECRETS_SCAN_OMIT_PATHS`
+3. Never commit real production credentials — only demo/sandbox values
+
 ---
 
 ## UI/UX Testing (Mandatory for UI Changes)
