@@ -917,6 +917,27 @@ model BacktestTrade {
   @@map("backtest_trades")
 }
 
+// Temporary historical OHLCV cache for backtesting.
+// Stores NSE-fetched bars keyed by (symbol, from, to, series) so the main
+// daily_prices table is never bloated with ad-hoc backtest fetches.
+// Rows are age-pruned (see lib/services/backtestDataService.ts) — this is a
+// disposable cache, NOT the source of truth.
+model BacktestHistory {
+  id        String   @id @default(uuid())
+  symbol    String
+  fromDate  String   // DD-MM-YYYY inclusive
+  toDate    String   // DD-MM-YYYY inclusive
+  series    String   @default("EQ")
+  ohlcv     Json     // OHLCV[] bars: [{timestamp, open, high, low, close, volume}]
+  barCount  Int      @default(0)
+  fetchedAt DateTime @default(now())
+
+  @@unique([symbol, fromDate, toDate, series])
+  @@index([symbol])
+  @@index([fetchedAt])
+  @@map("backtest_history")
+}
+
 // Market Cache - stores cached NSE data with smart refresh logic
 model MarketCache {
   id              String    @id @default(uuid())

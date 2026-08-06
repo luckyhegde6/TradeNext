@@ -1,58 +1,56 @@
 ---
 handoff_version: "1.0"
-session_id: "sess-20260719-1000"
+session_id: "sess-20260806-nse-historical"
 agent: "system"
-timestamp: "2026-07-19T10:00:00Z"
+timestamp: "2026-08-06T17:00:00Z"
 status: "in_progress"
 priority: "high"
 parent_session: null
 child_sessions: []
-checkpoint: "ph18"
+checkpoint: "ph20-backtest-historical"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0)
-- **Branch**: ph18
-- **PRD**: `.agents/PRD.md` — Features 6, 7, 8
-- **Total Files**: ~57 files (25 new code + 16 modified code + 16 docs)
+- **Task**: NSE Historical Data for Backtesting + Cache/DB-Sync Refactor + HTML Architecture Docs
+- **Branch**: `feat/backtest-historical-cache` (no commits yet this session — **branch + PR, never main without explicit permission**)
+- **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md` → archive `sessions/2026-08-06-6cfe281.md`
+- **Subsystem docs (uncommitted)**: `.agents/docs/` — written on disk, awaiting commit go-ahead
 
 ## Progress
-- [x] Branch `ph18` created from `main`
-- [x] PRD updated with Features 6 (Recommendations), 7 (Self-Heal), 8 (Audit)
-- [x] TODO.md updated with Sprints 4 and 5
-- [x] AGENTS.md updated with v3.3.0 version history
-- [x] HANDOFF.md set to `in_progress`
-- [x] Primer.md updated with current status and session history
-- [x] agent-memory.md updated with activity log entry
-- [x] Lessons.md updated with Lessons 26-35
-- [x] Skill files created (daily-recommendations, self-heal, audit-logging)
-- [x] Agent definition created (recommendation-agent.md)
-- [ ] checklist.md — Add Daily Recommendations + Self-Heal sections
-- [ ] Learning session-log.md — Add session entry
-- [ ] Learning patterns — Create 3 pattern files
-- [ ] .agents/prd/ROADMAP.md — Update Phase 5
+- [x] `prisma/schema.prisma` — `BacktestHistory` temp table model (L925, age-pruned, NOT main DB) — **migrated via `prisma db push`** (non-destructive; `migrate dev` blocked by drift) + `npx prisma generate` → LSP errors cleared
+- [x] `lib/cache.ts` — `historicalCache` (24h TTL) + metrics/stats/clear
+- [x] `lib/nse-api.ts` — `fetchSecurityWiseHistoricalData()` + `securityWiseBarsToOHLCV()` (historicalOR endpoint)
+- [x] `lib/services/backtestDataService.ts` — memory → temp table → daily_prices(read-only) → NSE chain + `pruneTempTable()`
+- [x] `app/api/backtest/run/route.ts` — wired to `getBacktestData()`; response has `dataSource`
+- [x] `lib/market-cache.ts` — NodeCache front layer (`mc:` keys) in `getOrFetchNseData`/`forceRefreshCache`/`clearCache` (widen-scope policy)
+- [x] `app/api/mcp/route.ts` — `getHistoricalData` FULLY WIRED (type L21, list, desc, schema, handler L312, POST L705, GET L849) — handoff was stale, no work needed
+- [x] Agentic framework: `.agents/RULES.md`, `.agents/SOUL.md`, `.agents/rules/session-memory-rules.md` created; rules README + AGENTS.md doc table updated
+- [x] AGENTS.md context optimization: 1401 → 249 lines; history/legacy moved to `.agents/CHANGELOG.md` index → `.agents/changelog/` subfiles; behavioral guidelines (think/simplify/surgical/goal-driven) added to RULES.md §0. Branch switched to `feat/backtest-historical-cache`
+- [x] Unit tests: `lib/__tests__/nse-api.test.ts` + `lib/__tests__/backtestDataService.test.ts` — **286 tests pass (23 suites)**, prod files tsc clean
+- [x] Handoff infra: **NEW `.agents/handoffs/flow/agent-to-human.md`** (consent/decision handoffs, `status: awaiting_human`); indexed in handoffs README + session-memory-rules §4 + AGENTS.md doc table
+- [x] Strict git rules: RULES.md §6 + `.agents/linear-history.md` + session-memory-rules §6 — NEVER commit main without permission; branch + PR always
+- [x] Skills: `.opencode/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md` — NSE historical endpoint + field mapping + backtest chain rules added
+- [x] AGENTS.md: NSE Endpoints table (historicalOR row) + MCP list (23 fns) — verified already present
+- [x] README.md: MCP function count updated (22 → 23) + docs/architecture.html link added
+- [x] `app/api/openapi/route.ts`: swagger — MCP enum + `getHistoricalData` + historical from/to params + backtest /run route w/ `dataSource` (security: securityBearer)
+- [x] HTML architecture doc: `docs/architecture.html` (Mermaid: overview, backtest chain, 3 sequence diagrams, ER, sync/lifecycle flows, caching table, MCP, troubleshooting, agentic model, improvements)
+- [x] Final verify: `npm run test` alone → **286 pass (23 suites)**; `npx tsc --noEmit` → all changed prod files clean; `git status` → no junk/secrets
+- [ ] Commit on feature branch (`feat/backtest-historical-cache` — never `main` without explicit permission)
 
 ## Decisions
-- Hybrid approach: Chartink API first, TradingView fallback
-- Public page access (no auth for viewing)
-- Extend existing OpenRouter Agent SDK (reuses llm-provider.ts, orchestrator.ts)
-- Separate cron jobs: 10 AM IST (generation), 3:30 PM IST (performance tracking)
-- UnifiedEvent model for comprehensive audit logging
-- Circuit breaker pattern for AI provider resilience
+- Backtest: 4-step chain, NSE-fetched bars NEVER written to main `daily_prices` (temp table only).
+- Widened scope: memory first → MarketCache DB → NSE → DB sync (reduce DB ops, keep DB in sync).
+- `historicalCache` TTL 24h; temp table prune at 30 days.
+- MCP: reuse `getBacktestData()` so MCP + backtest share one data path.
+- Migration: **`prisma db push` chosen by user** (non-destructive) over `migrate dev` (drift → would reset schema).
+- Git STRICT: never commit main without explicit permission; branch + PR always.
 
 ## Blockers
-- None — documentation complete, ready for code implementation
+- (none) — all work complete; only commit + PR remain (awaiting user go-ahead).
 
 ## Next Steps
-1. Update checklist.md with Daily Recommendations + Self-Heal sections
-2. Update learning session-log.md and create pattern files
-3. Update .agents/prd/ROADMAP.md with Phase 5
-4. Create Prisma migration with 8 new models
-5. Implement service layer (chartinkService, dailyRecommendationService, recommendation-agent)
-6. Implement API routes (recommendations, subscribe, admin)
-7. Implement UI components (DailyPicksTab, HistoryTab, SubscribeTab, RecommendationCard)
-8. Integrate with worker engine and telegram bot
-9. Write tests
-10. Run E2E testing with Playwright
+1. Ask user permission → commit on `feat/backtest-historical-cache`
+2. Push branch + open PR (main ← feat/backtest-historical-cache)
+3. After merge: carry-forward todos (deploy, prod verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI)

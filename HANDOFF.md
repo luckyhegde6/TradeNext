@@ -55,6 +55,7 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | `.agents/linear-history.md` | Git flow & branching (warn-only main) | 📖 Reference |
 | `.agents/code-hygiene.md` | Code quality rules (ponytail minimal-code) | 📖 Reference |
 | `.agents/documentation-standards.md` | Documentation standards | 📖 Reference |
+| `.agents/docs/` | Subsystem deep-dives (recommendations engine, tasks/cron/workers, monitoring & logging, alerts) — read before editing those subsystems | 📖 Reference |
 | `.githooks/` | Versioned git hooks (enabled via `core.hooksPath`) | 📖 Reference |
 
 ---
@@ -76,3 +77,4 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | v1.0 | 2026-07-16 | Initial handoff orchestration system |
 | v1.1 | 2026-08-06 | Session ph19 (prod reliability fixes): updated state, added session-todos + pre-commit + security references |
 | v1.2 | 2026-08-06 | Session ph19: added gardenify docs links (linear-history, code-hygiene, documentation-standards, .githooks/) |
+| v1.3 | 2026-08-06 | Added `.agents/docs/` subsystem deep-dive reference (recommendations engine, tasks/cron/workers, monitoring & logging, alerts) |

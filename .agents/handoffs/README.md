@@ -27,6 +27,7 @@ The Handoff File System provides a standardized mechanism for AI agents to trans
 └── flow/               # Process definitions for different handoff flows
     ├── session-cycle.md
     ├── agent-to-agent.md
+    ├── agent-to-human.md
     └── error-recovery.md
 ```
 
@@ -60,6 +61,7 @@ When a session completes or a handoff is needed:
 | Agent switch | Write handoff, signal handoff_required |
 | Error/abort | Write recovery handoff with checkpoint data |
 | Feature complete | Archive handoff, update agent-memory, update versions |
+| Consent needed | Write agent-to-human handoff (`flow/agent-to-human.md`), status `awaiting_human` |
 | /handoff command | Explicit handoff request |
 
 ## Integration Points

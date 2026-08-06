@@ -51,6 +51,38 @@ try {
 }
 ```
 
+## NSE Historical Data (Backtest + MCP)
+
+### Endpoint
+```
+GET /api/historicalOR/generateSecurityWiseHistoricalData
+  ?from=DD-MM-YYYY&to=DD-MM-YYYY&symbol=SYMBOL&type=priceVolumeDeliverable&series=ALL
+```
+
+### Fetcher (in `lib/nse-api.ts`, never call NSE from client)
+```typescript
+import { fetchSecurityWiseHistoricalData, securityWiseBarsToOHLCV } from "@/lib/nse-api";
+
+const rows = await fetchSecurityWiseHistoricalData(symbol, "01-01-2021", "31-12-2025");
+const bars = securityWiseBarsToOHLCV(rows, symbol);  // sorts by timestamp
+```
+
+### Response Fields (`SecurityWiseHistoricalRow`, all optional — validate)
+`CH_SYMBOL`, `CH_SERIES` (EQ|BL), `mTIMESTAMP`/`CH_TIMESTAMP` (date), `CH_OPENING_PRICE`, `CH_HIGH_PRICE`, `CH_LOW_PRICE`, `CH_CLOSING_PRICE`, `CH_PREVIOUS_CLOSE_PRICE`, `VWAP`, `CH_TOT_TRADED_QTY`, `CH_TOT_TRADED_VAL`, `CH_TOTAL_TRADES`, `COP_DELIV_QTY`, `COP_DELIV_PERC`, optional `CA` (corporate actions array).
+
+### Backtest Data Chain (ALWAYS use — never hit NSE directly for backtests)
+```typescript
+import { getBacktestData } from "@/lib/services/backtestDataService";
+
+const { bars, dataSource } = await getBacktestData(symbol, fromDate, toDate);
+// dataSource: "memory" (24h) | "db" (backtest_history temp table) | "daily_prices" (main, read-only) | "nse"
+```
+
+### Rules
+- **NEVER write NSE-fetched bars to main `daily_prices`** — temp table `backtest_history` only (age-pruned at 30d).
+- Memory `historicalCache` TTL 24h; temp-table unique key `[symbol, fromDate, toDate, series]`.
+- MCP function `getHistoricalData` reuses `getBacktestData()` — one shared data path.
+
 ## Checklist Compliance
 
 When working with NSE data:

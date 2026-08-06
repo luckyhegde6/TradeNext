@@ -23,7 +23,7 @@ import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { filterGroupSchema } from "@/lib/screener/condition-tree";
 import { runBacktest } from "@/lib/screener/backtest-engine";
-import type { OHLCV } from "@/lib/screener/technical-analysis";
+import { getBacktestData } from "@/lib/services/backtestDataService";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -70,38 +70,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "initialCapital must be a positive number" }, { status: 400 });
     }
 
-    // Verify symbol exists
+    const symbolUpper = symbol.toUpperCase();
+
+    // --- Verify symbol exists ---
     const symbolRecord = await prisma.symbol.findUnique({
-      where: { symbol: symbol.toUpperCase() },
+      where: { symbol: symbolUpper },
     });
 
     if (!symbolRecord) {
       return NextResponse.json({ error: `Symbol "${symbol}" not found` }, { status: 404 });
     }
 
-    const ticker = `NSE:${symbol.toUpperCase()}`;
+    // --- Fetch historical OHLCV data (memory → temp table → NSE API) ---
+    // The backtest path uses its own temp cache (BacktestHistory) so ad-hoc
+    // NSE fetches never bloat the main daily_prices table. DB is only touched
+    // on memory miss (1 read) and NSE fetch (1 upsert), then age-pruned.
+    const data = await getBacktestData(symbolUpper);
 
-    // --- Fetch historical DailyPrice data ---
-    const dailyPrices = await prisma.dailyPrice.findMany({
-      where: { ticker },
-      orderBy: { tradeDate: "asc" },
-    });
-
-    if (dailyPrices.length < 50) {
+    if (data.barCount < 50) {
       return NextResponse.json({
-        error: `Insufficient historical data for ${symbol}. Found ${dailyPrices.length} bars, need at least 50.`,
+        error: `Insufficient historical data for ${symbol}. Found ${data.barCount} bars, need at least 50.`,
       }, { status: 400 });
     }
 
-    // Convert to OHLCV format
-    const ohlcv: OHLCV[] = dailyPrices.map((dp: { tradeDate: Date; open: unknown; high: unknown; low: unknown; close: unknown; volume: unknown }) => ({
-      timestamp: dp.tradeDate.getTime(),
-      open: Number(dp.open ?? 0),
-      high: Number(dp.high ?? 0),
-      low: Number(dp.low ?? 0),
-      close: Number(dp.close ?? 0),
-      volume: Number(dp.volume ?? 0),
-    }));
+    const ohlcv = data.ohlcv;
+    const rangeStart = data.rangeStart;
+    const rangeEnd = data.rangeEnd;
 
     // --- Run the backtest ---
     const result = runBacktest(symbol, ohlcv, {
@@ -121,8 +115,8 @@ export async function POST(request: Request) {
         name: name || `Backtest: ${symbol} - ${new Date().toLocaleDateString()}`,
         entryFilter: body.entryFilter as any,
         exitFilter: body.exitFilter || null,
-        startDate: dailyPrices[0].tradeDate,
-        endDate: dailyPrices[dailyPrices.length - 1].tradeDate,
+        startDate: rangeStart,
+        endDate: rangeEnd,
         initialCapital,
         totalTrades: result.metrics.totalTrades,
         winRate: result.metrics.winRate,
@@ -171,6 +165,7 @@ export async function POST(request: Request) {
       metrics: result.metrics,
       trades: result.trades,
       barCount: result.barCount,
+      dataSource: data.source,
     });
   } catch (error) {
     logger.error({ msg: "Backtest failed", error: error instanceof Error ? error.message : String(error) });
