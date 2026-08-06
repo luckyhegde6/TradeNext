@@ -35,6 +35,16 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-08-06 | Git Workflow & Agent Operating Model (v3.4.2) — Tracked Hooks + Gardenify Docs Port
+- **Action**: Applied gardenify git/agentic patterns — versioned `.githooks/` directory + git-flow/code-hygiene/documentation docs + AGENTS.md operating model.
+- **Branch**: main (v3.4.2)
+- **Tracked Git Hooks**: Created `.githooks/pre-commit` (warn-only main/master solo policy; BLOCK hardcoded secrets + staged `.env`; WARN console.log, junk artifacts, tsc production-file errors), `.githooks/post-commit` (checkpoint logging to gitignored `.agents/handoffs/checkpoint.log`), `.githooks/pre-push` (WARN main/master). Set `git config core.hooksPath .githooks` so hooks survive fresh clones.
+- **Gardenify Docs Port**: `.agents/linear-history.md` (git flow, branch naming, commit convention, pre-push checklist), `.agents/code-hygiene.md` (ponytail minimal-code rules + TradeNext standards), `.agents/documentation-standards.md` (doc set + mandatory update rules).
+- **AGENTS.md Operating Model**: Added "Git Hooks (versioned in .githooks/)", "Agent Operating Model (gardenify pattern)" (memory layout, handoff = files, self-healing, anti-hallucination, token efficiency), "Plugins & MCP" (helicone-session, wakatime; ponytail recommended-not-installed).
+- **Files Created**: `.githooks/pre-commit`, `.githooks/post-commit`, `.githooks/pre-push`, `.agents/linear-history.md`, `.agents/code-hygiene.md`, `.agents/documentation-standards.md`
+- **Files Modified**: AGENTS.md (operating model + v3.4.2 version entry), `.agents/pre-commit-workflow.md` (hook reference + doc links), `.agents/session-todos.md`, `HANDOFF.md` (v1.2 quick links), `Primer.md` (Session 7b), `.agents/sessions/README.md`
+- **Verification**: Hooks manually executed (sh) — pre-commit reports "TypeScript: production files clean", post-commit logs checkpoint, pre-push warns on main. Full `npm run test` + `npx tsc --noEmit` pending before commit.
+
 ### 2026-08-06 | Prod Reliability Fixes (v3.4.1) — Txn Timeout + Top-50 Cap + Telegram + History + Monitoring
 - **Action**: Fixed prod daily-recommendation pipeline failures and added UI/monitoring improvements; ran prod UI/UX audit; ported gardenify agentic patterns; updated docs.
 - **Branch**: ph19 (v3.4.1)

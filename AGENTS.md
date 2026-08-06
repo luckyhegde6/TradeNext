@@ -4,6 +4,13 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization, portfolio management, capital gains tax reporting, F&O analytics, dividend tracking, and portfolio rebalancing for NSE (India).
 
 ## Version History
+- **v3.4.2** — Git Workflow & Agent Operating Model: Tracked Hooks + Gardenify Docs Port (August 6, 2026):
+  - **Tracked Git Hooks**: Created versioned `.githooks/` directory (gardenify pattern) with enhanced `pre-commit` (WARN on main/master solo-repo policy; BLOCK hardcoded secrets + staged `.env`; WARN console.log, junk artifacts, and TypeScript errors in production files), `post-commit` (checkpoint logging to gitignored `.agents/handoffs/checkpoint.log`), and `pre-push` (WARN on main/master). Set `git config core.hooksPath .githooks` so hooks survive fresh clones.
+  - **Gardenify Docs Port**: Added `.agents/linear-history.md` (git flow & branching — warn-only main, branch naming, commit message convention, pre-push checklist), `.agents/code-hygiene.md` (ponytail "lazy senior dev" minimal-code rules + TradeNext file/function/import/naming/comment/error-handling/performance standards), `.agents/documentation-standards.md` (TradeNext doc set table, mandatory update rules, quality checklist).
+  - **AGENTS.md Operating Model**: Added "Git Hooks (versioned in .githooks/)", "Agent Operating Model (gardenify pattern)" (memory layout, handoff = files, self-healing, anti-hallucination, token efficiency), and "Plugins & MCP" sections (helicone-session, wakatime plugins; Context7/Playwright/gh_grep/sequential-thinking/memory/chrome-devtools/filesystem MCP; ponytail recommended-not-installed with rules folded into code-hygiene.md).
+  - **Pre-Commit Hook Upgrade**: Existing hook (console.log + secrets) extended with tsc production-file check, junk-artifact detection, .env staging block, and main-branch warn.
+  - **Files Created**: `.githooks/pre-commit`, `.githooks/post-commit`, `.githooks/pre-push`, `.agents/linear-history.md`, `.agents/code-hygiene.md`, `.agents/documentation-standards.md`
+  - **Files Modified**: `AGENTS.md` (operating model + version history), `.agents/pre-commit-workflow.md`, `.agents/session-todos.md`, `HANDOFF.md`, `.agents/sessions/README.md`
 - **v3.4.1** — Prod Reliability Fixes: Recommendations Transaction Timeout + Top-50 Cap + Telegram Live Prices + History Prices + DB Monitoring Logs (August 6, 2026):
   - **Transaction Timeout Fix**: Replaced interactive `$transaction` in `runDailyRecommendations()` and `checkRecommendationPerformance()` with a `runInChunks()` bounded-concurrency helper (sequential chunks, configurable batch size). Prevents the prod error: `Transaction API error: A rollback cannot be executed on an expired transaction (5000ms timeout, 5501ms passed)`.
   - **Top-50 Recommendation Cap**: Added `rankAndCapRecommendations()` in `dailyRecommendationService.ts` — composite score = `screenerCount*10 + marketCapScore*2 + momentumScore` (marketCap bands ≥₹100Cr/₹1,000Cr/₹10,000Cr; momentum from changePercent). Downstream pipeline (trackers, stock entries, AI input, run record, events, audit, return value) all use `rankedResults`. `MAX_RECOMMENDED_STOCKS = 50`, `MAX_AI_STOCKS = 50`.
@@ -996,7 +1003,50 @@ This project uses additional documentation for agent sessions:
 | `.agents/sessions/` | Archived completed sessions (YYYY-MM-DD-<hash>.md) |
 | `.agents/pre-commit-workflow.md` | Pre-commit checklist - run before every commit |
 | `.agents/security-checklist.md` | Security checklist - run before every commit |
+| `.agents/linear-history.md` | Git flow & branching strategy (warn-only main) |
+| `.agents/code-hygiene.md` | Code quality rules (ponytail minimal-code style) |
+| `.agents/documentation-standards.md` | Documentation standards |
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
+
+### Git Hooks (versioned in `.githooks/`)
+
+TradeNext ships versioned hooks (gardenify pattern) — enable on a fresh clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- `.githooks/pre-commit` — WARN on main/master (solo-repo policy); BLOCK hardcoded secrets + staged `.env`; WARN console.log, junk artifacts, tsc errors in production files.
+- `.githooks/post-commit` — logs checkpoints to `.agents/handoffs/checkpoint.log` (gitignored, never tracked).
+- `.githooks/pre-push` — WARN when pushing to main/master.
+
+Never bypass with `git commit --no-verify` unless intentional.
+
+### Agent Operating Model (gardenify pattern)
+
+- **Memory layout**: `HANDOFF.md` (orchestration) → `.agents/handoffs/active/latest.md` (live resume) → `Primer.md` (project status) → `Lessons.md` (corrections) → `agent-memory.md` (activity log). Read `HANDOFF.md` → `latest.md` → `Primer.md` → `Lessons.md` at session start.
+- **Handoff = files, not prose**: before finishing, update `.agents/session-todos.md` (mark done/carry-forward), archive completed sessions to `.agents/sessions/YYYY-MM-DD-<hash>.md`, update `HANDOFF.md` + `Primer.md`. Next agent resumes from files, never conversation memory.
+- **Self-healing**: verify before claiming — run `npx tsc --noEmit`, `npm run test`, `npm run lint` after any change. Trust the repo over memory (re-read files).
+- **Anti-hallucination**: every claim traces to a commit, tracked doc, passing test, or verified live check. Never invent file paths/API shapes — grep/read first.
+- **Token efficiency**: small targeted reads; index files (AGENTS.md, Lessons.md) over full dumps; read file slices by offset/limit; keep session-todos short (archive absorbs history).
+
+### Plugins & MCP (how agents extend TradeNext)
+
+TradeNext's OpenCode setup (`.opencode/opencode.json`) uses:
+
+| Tool | Type | Purpose |
+|------|------|---------|
+| `opencode-helicone-session` | Plugin | Session telemetry (helicone) |
+| `opencode-wakatime` | Plugin | Coding time tracking (wakatime) |
+| Context7 MCP | Remote | Up-to-date library docs (always use for framework/API questions) |
+| Playwright MCP | Local | Browser UI/UX testing |
+| gh_grep (grep.app) | Remote | Real-world code examples |
+| sequential-thinking | Local | Complex multi-step problem solving |
+| memory | Local | Knowledge-graph memory (entities/relations) |
+| chrome-devtools | Local | DevTools automation (snapshot, console, network) |
+| filesystem | Local | File access (off by default in prod) |
+
+**Ponytail (recommended, not installed)**: `{ "plugin": ["opencode-ponytail"] }` adds a "lazy senior dev" ruleset — minimum code that solves the problem, YAGNI, no speculative features. Its rules are already folded into `.agents/code-hygiene.md`. To enable the plugin + `/ponytail-review` commands, add it to the `plugin` array in `.opencode/opencode.json`.
 
 ### ⚠️ MANDATORY: Code Hygiene & Artifact Cleanup
 

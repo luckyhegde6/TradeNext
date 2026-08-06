@@ -1,0 +1,25 @@
+#!/bin/sh
+# Post-commit hook — TradeNext (gardenify pattern)
+# Logs commit checkpoints to a NON-TRACKED file (.agents/handoffs/checkpoint.log).
+# NOTE: Must NOT write to tracked files (agent-memory.md, latest.md) — infinite loop (Lessons.md).
+
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+COMMIT_MSG=$(git log -1 --pretty=%B 2>/dev/null | head -1)
+COMMIT_HASH=$(git log -1 --pretty=%h 2>/dev/null || echo "none")
+FILES_CHANGED=$(git diff --name-only HEAD~1..HEAD 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+
+# Define checkpoint log file (non-tracked — covered by *.log in .gitignore)
+CHECKPOINT_LOG=".agents/handoffs/checkpoint.log"
+
+# Ensure directory exists
+mkdir -p ".agents/handoffs"
+
+# Write checkpoint entry
+echo "[$DATE] CHECKPOINT: cp-commit-$COMMIT_HASH" >> "$CHECKPOINT_LOG"
+echo "  Branch: $BRANCH" >> "$CHECKPOINT_LOG"
+echo "  Message: $COMMIT_MSG" >> "$CHECKPOINT_LOG"
+echo "  Files: $FILES_CHANGED" >> "$CHECKPOINT_LOG"
+echo "" >> "$CHECKPOINT_LOG"
+
+echo "[post-commit] Checkpoint logged to $CHECKPOINT_LOG for $COMMIT_HASH"

@@ -1,6 +1,7 @@
 # Pre-Commit Workflow
 
 > Run this checklist BEFORE every commit.
+> The `.githooks/pre-commit` hook (enabled via `git config core.hooksPath .githooks`) automates the SECURITY + CODE QUALITY + GIT sections. Keep this file as the human-readable source of truth.
 
 ## Session Todo File (MANDATORY)
 
@@ -94,12 +95,22 @@ Refs: #issue-number (if applicable)
 ## Quick Commands
 
 ```bash
+# Enable versioned hooks (one-time per clone)
+git config core.hooksPath .githooks
+
 # Run all checks
 npx tsc --noEmit -p tsconfig.json   # TypeScript type check
 npm run lint                        # ESLint
 npm run test                        # Jest
 git status                          # Review staged files
 ```
+
+## References
+
+- `.agents/linear-history.md` — branch naming, commit message convention, pre-push checklist
+- `.agents/code-hygiene.md` — ponytail minimal-code rules, file/function limits, imports, comments
+- `.agents/documentation-standards.md` — doc set table + mandatory update rules
+- `.agents/security-checklist.md` — deep security gate (secrets scan, auth, RLS patterns)
 
 ## Cleanup & Code Hygiene (Pre-Commit)
 

@@ -11,6 +11,16 @@
 
 ## Current Project Status
 
+### Git Workflow & Agent Operating Model (v3.4.2) — ✅ CODE COMPLETE, COMMIT PENDING
+**Issue**: Git hooks were untracked `.git/hooks/` (lost on fresh clone); missing gardenify-style git-flow, code-hygiene, and documentation-standards docs; AGENTS.md lacked an operating model for handoff/plugins.
+**Fix Applied**:
+- Tracked `.githooks/` directory (gardenify pattern) — enhanced `pre-commit` (warn main, block secrets + `.env`, warn console.log/junk/tsc), `post-commit` (checkpoint log), `pre-push` (warn main); enabled via `git config core.hooksPath .githooks`
+- `.agents/linear-history.md` (warn-only main, branch naming, commit convention, pre-push checklist)
+- `.agents/code-hygiene.md` (ponytail minimal-code + file/function/import/comment/error-handling standards)
+- `.agents/documentation-standards.md` (doc set table + mandatory update rules)
+- AGENTS.md operating model: Git Hooks, Agent Operating Model, Plugins & MCP (helicone-session, wakatime; ponytail recommended-not-installed)
+**Status**: Ready to commit as v3.4.2. After commit: deploy v3.4.1 + v3.4.2 to Netlify, verify prod.
+
 ### Prod Reliability Fixes (v3.4.1) — ✅ CODE + DOCS COMPLETE, AWAITING TEST/DEPLOY
 **Issue**: Prod daily recommendations failed with transaction timeout (5000ms expired); AI monitoring not persisted; monitoring logs invisible on serverless; Telegram daily recommendations stale; history tab lacked current prices; 643 recs too many.
 **Fix Applied**:
@@ -21,7 +31,7 @@
 - AI monitoring: fire-and-forget `persistAiCallToDb()` + merged DB/memory reads + source badge
 - Monitoring: new `type=db-logs` in `/api/admin/monitoring` + DB Logs tab (serverless-safe)
 - Prod UI/UX audit documented in TODO.md; gardenify patterns ported to `.agents/`
-**Status**: Code + docs complete. Pending: full test run, deploy to Netlify, prod verification (see `.agents/session-todos.md`).
+**Status**: Code + docs complete (committed `8bcc72a`). Pending: deploy to Netlify, prod verification (see `.agents/session-todos.md`).
 
 ### Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0) — ✅ COMPLETE
 **Issue**: No daily stock recommendation engine; no self-healing AI agents; no unified audit logging.
@@ -318,6 +328,13 @@
 ---
 
 ## Session History
+
+### Session 7b (August 6, 2026) — Git Workflow & Agent Operating Model (v3.4.2)
+- **Tracked Git Hooks**: Created `.githooks/` (gardenify pattern) — enhanced `pre-commit` (warn main, block secrets + `.env`, warn console.log/junk/tsc), `post-commit` (checkpoint log to gitignored `.agents/handoffs/checkpoint.log`), `pre-push` (warn main). Set `git config core.hooksPath .githooks`.
+- **Gardenify Docs Port**: `.agents/linear-history.md`, `.agents/code-hygiene.md` (ponytail minimal-code), `.agents/documentation-standards.md`.
+- **AGENTS.md Operating Model**: Added Git Hooks, Agent Operating Model, Plugins & MCP sections.
+- **Files Modified**: AGENTS.md, Primer.md, HANDOFF.md (v1.2), `.agents/pre-commit-workflow.md`, `.agents/session-todos.md`, `.agents/sessions/README.md`.
+- **Status**: Ready to commit as v3.4.2; deploy + prod verification pending after commit.
 
 ### Session 7 (August 6, 2026)
 - **Prod Reliability Fixes (v3.4.1)**: Fixed recommendation transaction timeout, AI monitoring persistence, top-50 cap, Telegram live prices, history predicted vs current, DB monitoring logs tab.

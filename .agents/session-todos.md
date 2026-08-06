@@ -21,6 +21,12 @@
 - [x] Run full typecheck (`npx tsc --noEmit`) — zero errors in modified production files
 - [x] Update docs (AGENTS.md version history, HANDOFF.md, Primer.md, agent-memory.md, Lessons.md, TODO.md)
 - [x] Run full test suite (`npm run test`) — 269 passed, 11 skipped, zero regressions (test mock updated for `.catch()` fire-and-forget; cap test updated to 50)
+- [x] Create tracked `.githooks/` (pre-commit enhanced, post-commit, pre-push) + `git config core.hooksPath .githooks`
+- [x] Port gardenify docs: `.agents/linear-history.md`, `.agents/code-hygiene.md`, `.agents/documentation-standards.md`
+- [x] Update AGENTS.md operating model (Git Hooks, Agent Operating Model, Plugins & MCP + ponytail recommendation) + v3.4.2 version entry
+- [x] Update `.agents/pre-commit-workflow.md` (hook reference + new doc links) and `.agents/session-todos.md`
+- [x] Run full typecheck + test suite one final time before commit
+- [x] Commit v3.4.2 (hooks + gardenify docs port)
 - [ ] Deploy to Netlify + verify on prod (recommendations stale-data fix, Telegram updates, history prices, DB logs tab)
 - [ ] Verify prod daily cron runs successfully (10:00 AM IST) after deploy
 

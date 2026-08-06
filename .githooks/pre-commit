@@ -1,0 +1,68 @@
+#!/bin/sh
+# Pre-commit hook — TradeNext (gardenify pattern, warn-only on main)
+# Validates code quality, secrets, and staged artifacts before commit.
+# NOTE: Must NOT modify tracked files — only read-only checks (Lessons.md).
+# Enable via: git config core.hooksPath .githooks
+
+echo ""
+echo "=== Pre-Commit Checklist ==="
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
+
+# 1. Main-branch guard (WARN only — TradeNext allows direct-to-main for solo work)
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+    echo "  ⚠️  WARNING: Direct commit to '$BRANCH'. TradeNext uses a warn-only policy"
+    echo "     (solo repo). For larger features prefer a branch + PR workflow:"
+    echo "     git checkout -b fix/your-change"
+fi
+
+# 2. Check for console.log (should use logger)
+CONSOLE_LOG_COUNT=$(git diff --cached -G"console\.log" -- '*.ts' '*.tsx' -- ':!jest.setup.ts' ':!*test*' 2>/dev/null | grep -c "console\.log" 2>/dev/null)
+test -z "$CONSOLE_LOG_COUNT" && CONSOLE_LOG_COUNT=0
+if [ "$CONSOLE_LOG_COUNT" -gt 0 ] 2>/dev/null; then
+    echo "  WARNING: Found $CONSOLE_LOG_COUNT console.log statements. Use logger from @/lib/logger instead."
+fi
+
+# 3. Check for hardcoded secrets (BLOCKING)
+SECRET_PATTERN='(password|secret|api_key|apiKey|auth_token|sk_live|sk-[A-Za-z0-9]{10,}|AKIA[A-Z0-9]{16})[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_!@#$%^&*()\-=+]{20,}["'"'"']'
+SECRET_COUNT=$(git diff --cached -G"$SECRET_PATTERN" 2>/dev/null | grep -c -E "$SECRET_PATTERN" 2>/dev/null)
+test -z "$SECRET_COUNT" && SECRET_COUNT=0
+if [ "$SECRET_COUNT" -gt 0 ] 2>/dev/null; then
+    echo "  CRITICAL: Potential hardcoded secrets detected in staged changes!"
+    echo "  Please review and remove before committing."
+    exit 1
+fi
+
+# 4. Check for junk artifacts (WARN)
+JUNK=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)(dev-server\.log|next-dev\.log|screenshot-[0-9]+\.png|.*\.playwright[^/]*\.yaml)$|^[^/]*\.yaml$' 2>/dev/null)
+if [ -n "$JUNK" ]; then
+    echo "  WARNING: Possible junk artifacts staged (delete or gitignore):"
+    echo "$JUNK" | sed 's/^/    - /'
+fi
+
+# 5. TypeScript check (WARN — known pre-existing test-file type errors)
+if command -v npx >/dev/null 2>&1; then
+    TSC_OUT=$(npx tsc --noEmit -p tsconfig.json 2>/dev/null)
+    TSC_ERR_COUNT=$(echo "$TSC_OUT" | grep -c "error TS" 2>/dev/null)
+    # Count only NON-test errors (test files have pre-existing matcher errors)
+    PROD_ERR_COUNT=$(echo "$TSC_OUT" | grep "error TS" 2>/dev/null | grep -v -E "__tests__|__test__" | grep -c "error TS" 2>/dev/null)
+    test -z "$PROD_ERR_COUNT" && PROD_ERR_COUNT=0
+    if [ "$PROD_ERR_COUNT" -gt 0 ] 2>/dev/null; then
+        echo "  WARNING: $PROD_ERR_COUNT TypeScript error(s) in production code (npx tsc --noEmit)."
+        echo "$TSC_OUT" | grep "error TS" | grep -v -E "__tests__|__test__" | head -5 | sed 's/^/    /'
+    else
+        echo "  TypeScript: production files clean"
+    fi
+fi
+
+# 6. Verify .env files are not staged (BLOCKING)
+ENV_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' 2>/dev/null)
+if [ -n "$ENV_STAGED" ]; then
+    echo "  CRITICAL: .env files staged — never commit real credentials!"
+    echo "$ENV_STAGED" | sed 's/^/    /'
+    exit 1
+fi
+
+echo "  Pre-commit checks passed"
+echo ""
+exit 0
