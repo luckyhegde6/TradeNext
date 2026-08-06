@@ -1,6 +1,6 @@
 # Git Flow & Branching Strategy — TradeNext
 
-> Adapted from gardenify's PR-only workflow. TradeNext is a **solo repo with warn-only** main-branch policy — direct commits to `main` are allowed but flagged. Larger features SHOULD use branches + PRs.
+> Adapted from gardenify's PR-only workflow. TradeNext enforces a **strict branch + PR policy**: never commit directly to `main` without explicit user permission. Features, fixes, and docs of any size go on a branch first.
 
 ## 1. Branch Naming Convention
 
@@ -16,8 +16,9 @@ ph<N>        # Phase work         → e.g. ph19 (larger feature series)
 
 ### Rules
 ```
-□ Solo fixes / doc updates: commit directly to main (warned by hook)
-□ Larger features: branch + PR (main ← fix/your-change), squash-merge
+□ NEVER commit to main directly — feature/fix/docs branches ALWAYS, even solo
+□ Direct main commits ONLY with explicit user permission (e.g. trivial docs on request)
+□ Branch + PR: main ← your-branch, squash-merge on green CI + review
 □ NEVER use force-push to main
 □ Keep history linear — rebase feature branches onto latest main
 ```
@@ -66,14 +67,17 @@ Never bypass with `git commit --no-verify` unless intentional. Secrets stay only
 
 ## 4. Standard Workflow
 
-### Small fix / doc update (solo path)
+### Small fix / doc update (solo path — branch + PR)
 ```bash
-git checkout main
-git pull origin main
+git checkout main && git pull origin main
+git checkout -b fix/small-fix        # docs/ for doc-only changes
 # make changes
 git add -A
-git commit -m "fix(scope): description"   # hook warns on main (ok)
-git push origin main
+git commit -m "fix(scope): description"
+git push origin fix/small-fix
+# Create PR: main ← fix/small-fix; squash-merge after CI green
+git checkout main && git pull origin main
+git branch -d fix/small-fix
 ```
 
 ### Feature (branch + PR path)

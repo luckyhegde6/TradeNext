@@ -37,8 +37,19 @@ const recommendationsCache = new NodeCache({
   deleteOnExpire: true,
 });
 
+// Cache for backtest historical OHLCV data (24h TTL — daily bars only change
+// at market close; NSE refetch on stale keeps ad-hoc backtests fresh without
+// re-hitting the API for every run).
+const historicalCache = new NodeCache({
+  stdTTL: 86400,      // 24 hours in seconds (24 * 60 * 60)
+  checkperiod: 3600,  // Check every hour
+  maxKeys: 200,       // One key per symbol — plenty for backtesting workloads
+  useClones: false,
+  deleteOnExpire: true,
+});
+
 // Export cache instances
-export { hotCache, staticCache, recommendationsCache };
+export { hotCache, staticCache, recommendationsCache, historicalCache };
 export default cache;
 
 // Cache monitoring utilities
@@ -63,6 +74,11 @@ export const getCacheMetrics = () => ({
     stats: recommendationsCache.getStats(),
     hitRate: recommendationsCache.getStats().hits / (recommendationsCache.getStats().hits + recommendationsCache.getStats().misses) || 0,
   },
+  historicalCache: {
+    keys: historicalCache.keys().length,
+    stats: historicalCache.getStats(),
+    hitRate: historicalCache.getStats().hits / (historicalCache.getStats().hits + historicalCache.getStats().misses) || 0,
+  },
 });
 
 // Cache cleanup utilities
@@ -78,6 +94,7 @@ export const clearAllCaches = () => {
   hotCache.flushAll();
   staticCache.flushAll();
   recommendationsCache.flushAll();
+  historicalCache.flushAll();
 };
 
 // Cache statistics for monitoring
@@ -97,5 +114,9 @@ export const getCacheStats = () => ({
   recommendations: {
     keys: recommendationsCache.keys().length,
     stats: recommendationsCache.getStats(),
+  },
+  historical: {
+    keys: historicalCache.keys().length,
+    stats: historicalCache.getStats(),
   },
 });

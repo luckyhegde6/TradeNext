@@ -3,6 +3,7 @@
 
 import { nseFetch } from "@/lib/nse-client";
 import logger from "@/lib/logger";
+import { parseNseDate } from "@/lib/utils/date-utils";
 
 // Base URL for NSE
 const NSE_BASE = "https://www.nseindia.com";
@@ -83,6 +84,168 @@ export interface VolumeAnalysisData {
   tradedQuantity: number;
   turnover: number;
  adar?: number;
+}
+
+// =============================================================================
+// Security-Wise Historical Data (generateSecurityWiseHistoricalData)
+// =============================================================================
+
+/** Single row from NSE's generateSecurityWiseHistoricalData endpoint. */
+export interface SecurityWiseHistoricalRow {
+  CH_SYMBOL?: string;
+  CH_SERIES?: string; // "EQ" | "BL" | "DL" | ... (request series=ALL returns every series)
+  mTIMESTAMP?: string; // Display trade date, e.g. "05-Aug-2026"
+  CH_TIMESTAMP?: string; // ISO timestamp, e.g. "2026-08-04T18:30:00.000Z"
+  CH_PREVIOUS_CLS_PRICE?: number | string;
+  CH_OPENING_PRICE?: number | string;
+  CH_TRADE_HIGH_PRICE?: number | string;
+  CH_TRADE_LOW_PRICE?: number | string;
+  CH_LAST_TRADED_PRICE?: number | string;
+  CH_CLOSING_PRICE?: number | string;
+  VWAP?: number | string;
+  CH_TOT_TRADED_QTY?: number | string;
+  CH_TOT_TRADED_VAL?: number | string;
+  CH_TOTAL_TRADES?: number | string;
+  COP_DELIV_QTY?: number | string | null;
+  COP_DELIV_PERC?: number | string | null;
+  CA?: unknown[]; // Optional corporate action events attached to the row
+}
+
+/** Normalized OHLCV bar with delivery info (what backtests / charts consume). */
+export interface SecurityWiseHistoricalBar {
+  symbol: string;
+  series: string;
+  timestamp: number; // ms epoch of the trade date (start of day, local)
+  date: string; // ISO date (YYYY-MM-DD)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  previousClose: number;
+  vwap: number;
+  volume: number;
+  value: number;
+  trades: number;
+  deliveryQty: number | null;
+  deliveryPercent: number | null;
+  corporateActions?: unknown[];
+}
+
+/**
+ * Fetch security-wise historical OHLCV data for a symbol from NSE.
+ *
+ * Endpoint:
+ *   GET /api/historicalOR/generateSecurityWiseHistoricalData
+ *     ?from=DD-MM-YYYY&to=DD-MM-YYYY&symbol=SYMBOL&type=priceVolumeDeliverable&series=ALL
+ *
+ * Response: `{ data: SecurityWiseHistoricalRow[] }` sorted newest-first.
+ * `series=ALL` includes every series (EQ, BL, DL, ...) — pass `filterSeries` to
+ * narrow (e.g. "EQ" for equity backtests).
+ *
+ * @param symbol       NSE ticker (e.g. "RELIANCE")
+ * @param fromDate     Inclusive start, DD-MM-YYYY
+ * @param toDate       Inclusive end, DD-MM-YYYY
+ * @param filterSeries Optional series filter — only rows with this CH_SERIES are kept (default: keep all)
+ */
+export async function fetchSecurityWiseHistoricalData(
+  symbol: string,
+  fromDate: string,
+  toDate: string,
+  filterSeries?: string
+): Promise<SecurityWiseHistoricalBar[]> {
+  try {
+    const qs =
+      `?from=${encodeURIComponent(fromDate)}` +
+      `&to=${encodeURIComponent(toDate)}` +
+      `&symbol=${encodeURIComponent(symbol.toUpperCase())}` +
+      `&type=priceVolumeDeliverable&series=ALL`;
+
+    const raw = (await nseFetch(
+      "/api/historicalOR/generateSecurityWiseHistoricalData",
+      qs
+    )) as unknown;
+    const payload = raw as { data?: SecurityWiseHistoricalRow[] };
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+
+    const bars = rows
+      .filter((row) => !filterSeries || row.CH_SERIES === filterSeries)
+      .map((row) => rowToBar(row, symbol))
+      .filter((bar): bar is SecurityWiseHistoricalBar => bar !== null);
+
+    logger.info({
+      msg: "[NSE API] Security-wise historical data fetched",
+      symbol,
+      fromDate,
+      toDate,
+      filterSeries: filterSeries ?? "ALL",
+      count: bars.length,
+    });
+    return bars;
+  } catch (error) {
+    logger.error({
+      msg: "[NSE API] Failed to fetch security-wise historical data",
+      symbol,
+      fromDate,
+      toDate,
+      error,
+    });
+    return [];
+  }
+}
+
+/** Map a raw NSE row to a normalized bar; returns null for unparseable rows. */
+function rowToBar(
+  row: SecurityWiseHistoricalRow,
+  fallbackSymbol: string
+): SecurityWiseHistoricalBar | null {
+  const ts = parseNseDate(row.mTIMESTAMP || row.CH_TIMESTAMP || "");
+  if (!ts) return null;
+
+  const num = (v: number | string | null | undefined): number =>
+    typeof v === "number" ? v : parseFloat(String(v ?? "0"));
+  const safeNum = (v: number | string | null | undefined): number | null => {
+    const n = num(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  return {
+    symbol: row.CH_SYMBOL || fallbackSymbol,
+    series: row.CH_SERIES || "",
+    timestamp: ts.getTime(),
+    date: ts.toISOString().split("T")[0],
+    open: num(row.CH_OPENING_PRICE),
+    high: num(row.CH_TRADE_HIGH_PRICE),
+    low: num(row.CH_TRADE_LOW_PRICE),
+    close: num(row.CH_CLOSING_PRICE),
+    previousClose: num(row.CH_PREVIOUS_CLS_PRICE),
+    vwap: num(row.VWAP),
+    volume: num(row.CH_TOT_TRADED_QTY),
+    value: num(row.CH_TOT_TRADED_VAL),
+    trades: num(row.CH_TOTAL_TRADES),
+    deliveryQty: safeNum(row.COP_DELIV_QTY),
+    deliveryPercent: safeNum(row.COP_DELIV_PERC),
+    corporateActions: row.CA,
+  };
+}
+
+/**
+ * Convert normalized NSE bars to the OHLCV shape used by the backtest engine
+ * and technical-analysis helpers. Bars are sorted ascending by timestamp.
+ */
+export function securityWiseBarsToOHLCV(
+  bars: SecurityWiseHistoricalBar[]
+): { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[] {
+  return bars
+    .slice()
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .map((b) => ({
+      timestamp: b.timestamp,
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    }));
 }
 
 // =============================================================================

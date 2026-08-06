@@ -1,5 +1,13 @@
 # TradeNext Coding Standards
 
+## Agentic Operating Rules
+
+- **`.agents/RULES.md`** — Master agentic rules (session/memory discipline, git, sensitive ops, security, checklist gate). Read on first session / fresh clone.
+- **`.agents/SOUL.md`** — Agent identity & principles (think-first, minimal code, trustworthy, surgical, memory discipline, done definition).
+- **`.agents/rules/session-memory-rules.md`** — Session start read-order, todo maintenance cadence, session archives, handoff updates, mandatory documentation updates, git guidelines summary, context/token efficiency, subagent sessions.
+- **`.agents/rules/checklist.md`** — Engineering guardrail checklist (v1.2) — hard contract for all changes.
+- See also `.agents/code-hygiene.md` (ponytail minimal code, file size/function limits), `.agents/linear-history.md` (git flow), `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/documentation-standards.md`.
+
 ## TypeScript Rules
 
 - **Strict mode enabled** - do not disable strict checks

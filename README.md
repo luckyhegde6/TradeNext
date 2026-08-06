@@ -65,7 +65,7 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
 
 ## Features
 
-- **MCP API**: Unified Machine Communication Protocol API for external NSE data queries (22 functions)
+- **MCP API**: Unified Machine Communication Protocol API for external NSE data queries (23 functions)
 - **User Management**: Secure signup with email verification, role-based access control (Admin/User)
 - **Portfolio Engine**: Real-time P&L tracking, transaction history, cost-basis analysis
 - **Market Intelligence**: Comprehensive NSE data (quotes, charts, corporate actions)
@@ -160,6 +160,11 @@ node scripts/dev-checks/test-auth.js     # Test authentication (demo user)
 ## OpenCode Integration
 
 This project is configured for AI-assisted development with OpenCode.
+
+### Architecture Documentation
+
+- **ARCHITECTURE.md** — Technical architecture (system overview, schema, services)
+- **docs/architecture.html** — Interactive architecture doc with Mermaid diagrams (backtest data chain, sequence/ER/sync-flow diagrams, troubleshooting, agentic operating model, improvements)
 
 ### Setup
 
