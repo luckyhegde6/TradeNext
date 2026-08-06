@@ -50,6 +50,10 @@
 | Daily Recommendations (v3.3.0) | [x] Complete |
 | Self-Heal AI Agents (v3.3.0) | [x] Complete |
 | Comprehensive Audit Logging (v3.3.0) | [x] Complete |
+| Top-50 Recommendation Cap | [x] Complete (v3.4.1, needs deploy) |
+| Telegram Recommendations Live Prices | [x] Complete (v3.4.1, needs deploy) |
+| History Tab Predicted vs Current | [x] Complete (v3.4.1, needs deploy) |
+| Monitoring DB Logs Tab | [x] Complete (v3.4.1) |
 
 ---
 
@@ -412,6 +416,31 @@ Unified event stream for all system events with anomaly detection.
 |------|-------|----------|
 | Demo | demo@tradenext6.app | demo123 |
 | Admin | admin@tradenext6.app | admin123 |
+
+---
+
+## Production UI/UX Audit (2026-08-06)
+
+Playwright walkthrough of the live site (tradenext6.netlify.app) using the demo account. Homepage, login flow, mobile nav, Alerts, Watchlist, Profile, and Screener all render correctly with zero console errors. Issues found below.
+
+### Bugs / Data Quality Issues
+- [ ] **Recommendations data is stale (17 days)**: "Last updated: 19/7/2026" — the daily recommendation cron has not produced a successful run since July 19. The `runDailyRecommendations` transaction timeout (fixed locally) is the likely cause. Verify the run succeeds after the `runInChunks` fix deploys.
+- [ ] **Recommendations History cards render bare "🟡" + "%"** for ~600 of 643 stocks: `AARTISURF`, `AARVI`, `ABCOTS`, `ACCELYA` etc. show a yellow emoji with a "%" placeholder but no HOLD/SELL label and no confidence number. Root cause: `recommendation` / `confidence` fields are null in the DB (AI analysis fell back to HOLD without persisting a label). Fix: either hide the confidence block when null, or persist a default label (`HOLD`) in the fallback path.
+- [ ] **643 recommendations is too many to be useful** — cap to top 50 (implemented locally via `rankAndCapRecommendations`; needs deploy). Also the `Load More (623 remaining)` pagination suggests the run stored every screener hit.
+
+### UX Improvements (non-blocking)
+- [ ] History tab shows snapshot price only — display Current Price + Return % vs entry (implemented locally; needs deploy).
+- [ ] Demo account on prod has no holdings (empty Portfolio) — re-seed demo holdings so the portfolio/tax/rebalancer demos work on prod.
+- [ ] No live-price integration in Portfolio/Watchlist tables yet (SSE hooks exist, not wired).
+
+### Verified Working on Prod
+- [x] Homepage: indices chart (1D/1W/1M/3M/6M/1Y), MA overlays, corporate announcements, upcoming actions
+- [x] Login as demo user; Sign Out in user menu
+- [x] Mobile nav (375px): hamburger menu shows all 12 links
+- [x] Alerts page: 5 tabs (My Alerts, Alert Rules, Channels, Event History, Telegram Bot)
+- [x] Watchlist empty state with CTA
+- [x] Profile page: Account Info + Telegram Notifications
+- [x] Screener: 2,000 stocks, live TradingView data (synced today), sort/filter/pagination
 
 ---
 

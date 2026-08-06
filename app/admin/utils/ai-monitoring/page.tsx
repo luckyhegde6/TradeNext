@@ -190,6 +190,7 @@ export default function AiMonitoringPage() {
 
   const [stats, setStats] = useState<AiStats | null>(null);
   const [calls, setCalls] = useState<AiCallEntry[]>([]);
+  const [dataSource, setDataSource] = useState<"memory" | "database" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(60);
@@ -215,6 +216,7 @@ export default function AiMonitoringPage() {
 
       setStats(statsData.stats);
       setCalls(callsData.calls || []);
+      setDataSource(statsData.stats?.source ?? callsData.source ?? null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -278,7 +280,25 @@ export default function AiMonitoringPage() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">AI Monitoring</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+            AI Monitoring
+            {dataSource && (
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  dataSource === "memory"
+                    ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                    : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                }`}
+                title={
+                  dataSource === "memory"
+                    ? "Showing in-memory ring buffer (this serverless instance)"
+                    : "Showing DB-persisted logs (survives serverless restarts)"
+                }
+              >
+                {dataSource === "memory" ? "Live buffer" : "DB persisted"}
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Observability dashboard for AI calls via OpenRouter. Tracks latency, errors, and usage per model and action.
           </p>

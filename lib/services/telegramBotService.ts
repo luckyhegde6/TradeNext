@@ -243,12 +243,20 @@ async function handleRecommendations(ctx: BotCommandContext): Promise<BotCommand
     const lines = stocks.slice(0, 10).map((s) => {
       const icon = recIcons[s.aiRecommendation ?? "HOLD"] || "⚪";
       const conf = `${s.confidence}%`;
-      const price = s.price ? `₹${s.price.toFixed(2)}` : "";
-      const target = s.targetPrice ? `Tgt ₹${s.targetPrice.toFixed(2)}` : "";
-      const sl = s.stopLoss ? `SL ₹${s.stopLoss.toFixed(2)}` : "";
-      const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+      // Prefer the tracker's latest current price (updated by the 3:30 PM
+      // performance check) over the run-time snapshot.
+      const price = s.tracker?.currentPrice ?? s.price;
+      const priceTxt = price ? `₹${price.toFixed(2)}` : "";
+      const target = s.tracker?.targetPrice ?? s.targetPrice;
+      const targetTxt = target ? `Tgt ₹${target.toFixed(2)}` : "";
+      const sl = s.tracker?.stopLoss ?? s.stopLoss;
+      const slTxt = sl ? `SL ₹${sl.toFixed(2)}` : "";
+      const status = s.tracker?.status && s.tracker.status !== "active"
+        ? ` (${s.tracker.status.replace(/_/g, " ")})`
+        : "";
+      const details = [priceTxt, targetTxt, slTxt, conf].filter(Boolean).join(" | ");
       const sources = s.screenerAttribution || "";
-      return `${icon} *${s.symbol}* — ${s.aiRecommendation ?? "HOLD"}\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
+      return `${icon} *${s.symbol}*${status} — ${s.aiRecommendation ?? "HOLD"}\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
     });
 
     let text = `📈 *Daily Recommendations*\n\n${lines.join("\n\n")}`;
@@ -297,12 +305,20 @@ async function handleDailyRecommendations(ctx: BotCommandContext): Promise<BotCo
     const lines = stocks.slice(0, 10).map((s) => {
       const icon = recIcons[s.aiRecommendation ?? "HOLD"] || "⚪";
       const conf = `${s.confidence}%`;
-      const price = s.price ? `₹${s.price.toFixed(2)}` : "";
-      const target = s.targetPrice ? `Tgt ₹${s.targetPrice.toFixed(2)}` : "";
-      const sl = s.stopLoss ? `SL ₹${s.stopLoss.toFixed(2)}` : "";
-      const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+      // Prefer the tracker's latest current price (updated by the 3:30 PM
+      // performance check) over the run-time snapshot.
+      const price = s.tracker?.currentPrice ?? s.price;
+      const priceTxt = price ? `₹${price.toFixed(2)}` : "";
+      const target = s.tracker?.targetPrice ?? s.targetPrice;
+      const targetTxt = target ? `Tgt ₹${target.toFixed(2)}` : "";
+      const sl = s.tracker?.stopLoss ?? s.stopLoss;
+      const slTxt = sl ? `SL ₹${sl.toFixed(2)}` : "";
+      const status = s.tracker?.status && s.tracker.status !== "active"
+        ? ` (${s.tracker.status.replace(/_/g, " ")})`
+        : "";
+      const details = [priceTxt, targetTxt, slTxt, conf].filter(Boolean).join(" | ");
       const sources = s.screenerAttribution || "";
-      return `${icon} *${s.symbol}* — ${s.aiRecommendation ?? "HOLD"} (${conf})\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
+      return `${icon} *${s.symbol}*${status} — ${s.aiRecommendation ?? "HOLD"} (${conf})\n  ${details}${sources ? `\n  📋 ${sources}` : ""}`;
     });
 
     let text = `📊 *Daily Recommendations* — ${runDate}\n`

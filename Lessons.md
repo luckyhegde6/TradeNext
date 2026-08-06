@@ -936,9 +936,42 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const client = new PrismaClient({ adapter: new PrismaPg(pool) });
 ```
 
+### 46. Prisma Interactive $transaction Expires in Serverless (5000ms) — Use runInChunks
+**Issue**: Prod daily recommendation run failed with `Transaction API error: A rollback cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5501 ms passed`. The run took ~50s (AI batches of 5, RETRY_MAX=2) so the interactive `$transaction` exceeded the 5s Prisma limit.
+
+**Root Cause**: Interactive `$transaction` (callback form) in Prisma has a 5000ms default timeout in serverless (Prisma Accelerate) environments. Long-running batch pipelines — screeners → dedup → AI analysis → DB writes — exceed this.
+
+**Solution**: Replace interactive `$transaction` with a `runInChunks()` bounded-concurrency helper — sequential chunks with configurable batch size, each chunk awaited individually so no single DB call blocks a transaction:
+```typescript
+async function runInChunks<T>(items: T[], batchSize: number, fn: (chunk: T[]) => Promise<void>) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await fn(items.slice(i, i + batchSize)); // each chunk is its own operation
+  }
+}
+```
+Also fire-and-forget non-critical writes (predictions/events) with `.catch()` so a slow DB write never blocks the run.
+
+**Rule**: Any long-running multi-step DB pipeline must use chunked sequential writes, never one interactive `$transaction` that can exceed the serverless 5s limit.
+
+### 47. Cache Invalidation After Background Price/Status Updates
+**Issue**: Telegram daily recommendations stayed stale (showed old prices/statuses) for up to 23h even though `checkRecommendationPerformance()` updated tracker prices at the 3:30 PM IST cron.
+
+**Root Cause**: The `recommendationsCache` NodeCache has a 23h TTL. The performance check updated the DB but never invalidated the cache (`LATEST_KEY`), so every read (`getLatestRecommendations`, Telegram handlers) returned cached data.
+
+**Solution**: Any background job that mutates data behind a long-TTL cache MUST invalidate that cache when done:
+```typescript
+export async function checkRecommendationPerformance() {
+  // ... update trackers ...
+  invalidateRecommendationsCache(); // ← critical
+}
+```
+
+**Rule**: Cache invalidation is part of the write path, not an afterthought. If a cron/worker mutates cached entities, invalidate the relevant cache keys at the end of the mutation.
+
 ---
 
 ## Update Log
+- 2026-08-06: Added Lessons 46-47 (Prisma interactive $transaction expiry → runInChunks; cache invalidation after background updates); added v3.4.1 prod reliability fixes lessons
 - 2026-07-22: Added Lessons 44-45 (Telegram webhook vs local DB mismatch, Prisma 7 adapter for scripts); added v3.4.0 Telegram bot integration lessons
 - 2026-07-21: Added Lessons 41-43 (Prisma @@map table names, camelCase column naming, AI test endpoint pattern); updated Lesson 24 (dev:bg PowerShell script for reliable agent startup)
 - 2026-07-20: Added Lesson 40 (Production Migration) — quickbuild skips prisma migrate deploy, causes missing tables in production

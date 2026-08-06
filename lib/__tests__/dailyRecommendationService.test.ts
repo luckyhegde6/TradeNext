@@ -114,6 +114,8 @@ jest.mock("@/lib/services/ai/prediction-tracker", () => ({
   __esModule: true,
   recordPrediction: (...args: any[]) => mockRecordPrediction(args[0]),
 }));
+// Service calls .catch() on recordPrediction (fire-and-forget) — must resolve
+mockRecordPrediction.mockResolvedValue(undefined);
 
 const mockRecordScreenerEvent = jest.fn() as any;
 const mockRecordAIEvent = jest.fn() as any;
@@ -409,21 +411,21 @@ describe("dailyRecommendationService", () => {
       expect(result.aiProcessed).toBe(0);
     });
 
-    test("caps AI analysis at MAX_AI_STOCKS (100)", async () => {
+    test("caps AI analysis at MAX_AI_STOCKS (50)", async () => {
       // Create 120 stocks
       const manyStocks = Array.from({ length: 120 }, (_, i) =>
         makeScreenerResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
       mockRunDailyScreeners.mockResolvedValue(manyStocks);
-      // AI gets called with only 100
-      const aiResults = Array.from({ length: 100 }, (_, i) =>
+      // AI gets called with only 50 (rankAndCapRecommendations top-50 cap)
+      const aiResults = Array.from({ length: 50 }, (_, i) =>
         makeAIResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
       mockAnalyzeStocks.mockResolvedValue(aiResults);
 
-      // Mock findMany to return entries for all 120 stocks
+      // Mock findMany to return entries for all 50 capped stocks
       mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue(
-        Array.from({ length: 120 }, (_, i) => ({
+        Array.from({ length: 50 }, (_, i) => ({
           id: `stock-${i + 1}`,
           symbol: `STOCK${i + 1}`,
           runId: "run-123",
@@ -431,10 +433,10 @@ describe("dailyRecommendationService", () => {
       );
 
       const result = await runDailyRecommendations();
-      expect(result.uniqueStocks).toBe(120);
-      expect(result.aiProcessed).toBe(100);
-      // analyzeStocks called with array of length 100
-      expect(mockAnalyzeStocks.mock.calls[0][0]).toHaveLength(100);
+      expect(result.uniqueStocks).toBe(50);
+      expect(result.aiProcessed).toBe(50);
+      // analyzeStocks called with array of length 50
+      expect(mockAnalyzeStocks.mock.calls[0][0]).toHaveLength(50);
     });
   });
 

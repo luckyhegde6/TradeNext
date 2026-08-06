@@ -29,6 +29,7 @@ export interface StockAnalysisInput {
   changePercent: number;
   volume: number;
   screenerNames: string[]; // which screeners flagged this stock
+  marketCap?: number; // ₹ market cap (used for ranking, included in prompt)
 }
 
 export interface StockAnalysisResult extends StockAnalysisInput {
@@ -228,7 +229,7 @@ function buildAnalysisPrompt(stocks: StockAnalysisInput[]): string {
   const stockLines = stocks
     .map(
       (s, i) =>
-        `${i + 1}. ${s.symbol} — Price: ₹${s.price}, Change: ${s.change >= 0 ? "+" : ""}${s.change} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%), Volume: ${formatVolume(s.volume)}, Screeners: ${s.screenerNames.join(", ")}`
+        `${i + 1}. ${s.symbol} — Price: ₹${s.price}, Change: ${s.change >= 0 ? "+" : ""}${s.change} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%), Volume: ${formatVolume(s.volume)}, Screeners: ${s.screenerNames.join(", ")}${s.marketCap ? `, Market Cap: ₹${formatMarketCap(s.marketCap)}` : ""}`
     )
     .join("\n");
 
@@ -374,6 +375,15 @@ function formatVolume(vol: number): string {
   if (vol >= 1e5) return `${(vol / 1e5).toFixed(1)}L`;
   if (vol >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
   return String(vol);
+}
+
+function formatMarketCap(mc: number): string {
+  // TradingView returns market cap in ₹ (not in Cr/Lakh units)
+  if (mc >= 1e12) return `${(mc / 1e12).toFixed(2)}L Cr`;
+  if (mc >= 1e11) return `${(mc / 1e11).toFixed(2)}L Cr`;
+  if (mc >= 1e9) return `${(mc / 1e7).toFixed(1)}Cr`;
+  if (mc >= 1e7) return `${(mc / 1e7).toFixed(1)}Cr`;
+  return String(mc);
 }
 
 function estimateTokens(text: string): number {

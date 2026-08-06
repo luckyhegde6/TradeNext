@@ -4,6 +4,18 @@
 TradeNext is a Next.js 16 application with TypeScript, Tailwind CSS, Prisma, and Jest. It provides stock market data visualization, portfolio management, capital gains tax reporting, F&O analytics, dividend tracking, and portfolio rebalancing for NSE (India).
 
 ## Version History
+- **v3.4.1** — Prod Reliability Fixes: Recommendations Transaction Timeout + Top-50 Cap + Telegram Live Prices + History Prices + DB Monitoring Logs (August 6, 2026):
+  - **Transaction Timeout Fix**: Replaced interactive `$transaction` in `runDailyRecommendations()` and `checkRecommendationPerformance()` with a `runInChunks()` bounded-concurrency helper (sequential chunks, configurable batch size). Prevents the prod error: `Transaction API error: A rollback cannot be executed on an expired transaction (5000ms timeout, 5501ms passed)`.
+  - **Top-50 Recommendation Cap**: Added `rankAndCapRecommendations()` in `dailyRecommendationService.ts` — composite score = `screenerCount*10 + marketCapScore*2 + momentumScore` (marketCap bands ≥₹100Cr/₹1,000Cr/₹10,000Cr; momentum from changePercent). Downstream pipeline (trackers, stock entries, AI input, run record, events, audit, return value) all use `rankedResults`. `MAX_RECOMMENDED_STOCKS = 50`, `MAX_AI_STOCKS = 50`.
+  - **Telegram Live Prices Fix**: (1) `checkRecommendationPerformance()` now calls `invalidateRecommendationsCache()` after updating tracker prices/statuses — previously the 23h NodeCache returned stale data; (2) broadcast always sends (non-HOLD picks first, HOLD fallback, BUY/SELL/HOLD breakdown, 4000-char truncation); (3) both Telegram handlers prefer `tracker.currentPrice ?? s.price`, use tracker target/SL, and show lifecycle status.
+  - **History Tab Predicted vs Current**: `/api/recommendations/top-stocks/route.ts` now JOINs `recommendation_trackers` and returns `entryPrice`/`currentPrice`/`trackerStatus`; `HistoryTab.tsx` shows Predicted vs Current with color-coded return % and status badges (active/target_achieved/stop_loss_hit/expired).
+  - **AI Monitoring Persistence**: `trackAiCall()` now fire-and-forgets `persistAiCallToDb()` (ServerLog `source="ai"`); merged DB+memory reads (`getAiCallsMerged`/`getAiStatsMerged`); admin page shows source badge.
+  - **DB Monitoring Logs Tab**: New `type=db-logs` in `/api/admin/monitoring` route (uses existing `getDbLogs` from `db-logger.ts`) + "DB Logs" tab in `/admin/utils/monitoring` with level filter — surfaces logs on serverless where file logging fails.
+  - **Market Cap Plumbing**: `chartinkService.ts` exposes `marketCap?` (from TradingView `market_cap_basic`), merged during dedup; `recommendation-agent.ts` accepts `marketCap?` and includes it in the AI prompt.
+  - **Prod UI/UX Audit**: Playwright walkthrough of tradenext6.netlify.app documented in TODO.md. Findings: recommendations data stale (17 days), bare "🟡 %" history cards for null recommendation/confidence, 643 stocks too many, empty demo portfolio.
+  - **Gardenify Pattern Port**: Added `.agents/session-todos.md` (session todo workflow with `sessions/` archive), `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`; updated HANDOFF.md orchestration state.
+  - **Files Modified**: `lib/services/dailyRecommendationService.ts`, `lib/services/telegramBotService.ts`, `app/api/recommendations/top-stocks/route.ts`, `app/components/recommendations/HistoryTab.tsx`, `lib/services/ai/ai-monitoring.ts`, `app/api/admin/ai/monitoring/route.ts`, `app/admin/utils/ai-monitoring/page.tsx`, `lib/services/chartinkService.ts`, `lib/services/ai/recommendation-agent.ts`, `app/api/admin/monitoring/route.ts`, `app/admin/utils/monitoring/page.tsx`, `TODO.md`, `HANDOFF.md`
+  - **Files Created**: `.agents/session-todos.md`, `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/sessions/README.md`
 - **v3.4.0** — Telegram Bot Integration + Admin Panel + Notifications (July 22, 2026):
   - **Admin Users Telegram Column**: Added "Telegram" column to `/admin/users` showing Linked (green), Pending (yellow), or Not Linked (gray) badges, Chat ID display, and Unlink button. Updated Zod schema in `/api/admin/users/[id]` to accept `telegramChatId` and `telegramVerified` fields.
   - **Telegram Recommendations Broadcast**: Wired `broadcastToSubscribers()` into `dailyRecommendationService.ts` — after daily run completes, sends formatted BUY/SELL recommendations to all verified Telegram subscribers. Non-critical (catches errors).
@@ -980,6 +992,10 @@ This project uses additional documentation for agent sessions:
 | `agent-memory.md` | Activity log - tracks all agent work |
 | `Lessons.md` | Rules & corrections - read before every commit |
 | `HANDOFF.md` | Root orchestration state - read at start of every session |
+| `.agents/session-todos.md` | Current session todo list - maintained during session |
+| `.agents/sessions/` | Archived completed sessions (YYYY-MM-DD-<hash>.md) |
+| `.agents/pre-commit-workflow.md` | Pre-commit checklist - run before every commit |
+| `.agents/security-checklist.md` | Security checklist - run before every commit |
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
 
 ### ⚠️ MANDATORY: Code Hygiene & Artifact Cleanup

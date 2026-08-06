@@ -67,6 +67,12 @@ function getBuffer(): AiCallEntry[] {
 
 /**
  * Record an AI call for observability.
+ *
+ * In addition to the in-memory ring buffer (fast reads within one serverless
+ * instance), the call is fire-and-forget persisted to the database via
+ * {@link persistAiCallToDb}. This guarantees AI call logs survive serverless
+ * instance recycling — otherwise /admin/utils/ai-monitoring would appear to
+ * lose logs on every refresh.
  */
 export function trackAiCall(entry: AiCallEntry): void {
   const buffer = getBuffer();
@@ -76,6 +82,11 @@ export function trackAiCall(entry: AiCallEntry): void {
   if (buffer.length > MAX_CALLS) {
     buffer.splice(0, buffer.length - MAX_CALLS);
   }
+
+  // Persist to DB in the background (never block the caller)
+  persistAiCallToDb(entry).catch(() => {
+    /* handled inside persistAiCallToDb */
+  });
 
   // Log to the main logger
   const logLevel = entry.status === "error" ? "warn" : "info";
@@ -151,6 +162,10 @@ export function getAiStats(timeframeMinutes = 60): AiStats {
 
 /**
  * Persist an AI call to the database log for long-term storage.
+ *
+ * ServerLog.source = "ai" is the durable record. Because the in-memory ring
+ * buffer dies with the serverless instance, this DB row is what makes AI
+ * monitoring survive page refreshes / cold starts.
  */
 export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
   try {
@@ -169,6 +184,10 @@ export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
           error: entry.error,
           analysisType: entry.analysisType,
           userId: entry.userId,
+          prompt: entry.prompt,
+          result: entry.result,
+          userLabel: entry.userLabel,
+          timestamp: entry.timestamp,
         },
       },
     });
@@ -179,8 +198,160 @@ export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
 }
 
 /**
+ * Read AI call records that were persisted to the database.
+ *
+ * This is the source of truth that survives serverless instance restarts.
+ * Only non-null metadata is mapped back into an {@link AiCallEntry}.
+ */
+export async function getPersistedAiCalls(
+  limit = 100,
+  timeframeMinutes?: number,
+): Promise<AiCallEntry[]> {
+  try {
+    const where: { source: string; createdAt?: { gte: Date } } = {
+      source: "ai",
+    };
+    if (timeframeMinutes) {
+      where.createdAt = {
+        gte: new Date(Date.now() - timeframeMinutes * 60 * 1000),
+      };
+    }
+
+    const logs = await prisma.serverLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: Math.min(limit, 500),
+    });
+
+    return logs
+      .map((log) => {
+        const m = (log.metadata ?? {}) as Record<string, unknown>;
+        if (!m.action) return null;
+        const entry: AiCallEntry = {
+          timestamp:
+            (m.timestamp as string) ?? log.createdAt.toISOString(),
+          action: String(m.action),
+          model: (m.model as string) ?? "unknown",
+          status: (m.status as AiCallEntry["status"]) ?? "error",
+          tokensUsed: Number(m.tokensUsed ?? 0),
+          responseTimeMs: Number(m.responseTimeMs ?? 0),
+        };
+        if (m.error) entry.error = String(m.error);
+        if (m.analysisType) entry.analysisType = String(m.analysisType);
+        if (m.userId) entry.userId = Number(m.userId);
+        if (m.prompt) entry.prompt = String(m.prompt);
+        if (m.result) entry.result = String(m.result);
+        if (m.userLabel) entry.userLabel = String(m.userLabel);
+        return entry;
+      })
+      .filter((e): e is AiCallEntry => e !== null);
+  } catch (err) {
+    logger.debug({ msg: "Failed to read persisted AI calls", error: err });
+    return [];
+  }
+}
+
+/**
+ * Get AI calls merging the in-memory buffer with DB-persisted records.
+ *
+ * The in-memory buffer is checked first (cheap, no DB round-trip); if it is
+ * empty (cold serverless instance) we fall back to the durable DB logs so the
+ * admin monitoring page never shows "no data" after a refresh.
+ */
+export async function getAiCallsMerged(
+  limit = 50,
+  timeframeMinutes?: number,
+): Promise<{ calls: AiCallEntry[]; source: "memory" | "database" }> {
+  const memoryCalls = getAiCalls(limit);
+  if (memoryCalls.length > 0) {
+    return { calls: memoryCalls, source: "memory" };
+  }
+
+  const persisted = await getPersistedAiCalls(limit, timeframeMinutes);
+  return { calls: persisted, source: "database" };
+}
+
+/**
+ * Get AI stats merging the in-memory buffer with DB-persisted records.
+ *
+ * Prefers in-memory stats (fast); if the buffer is empty (cold instance),
+ * computes stats from the durable DB logs.
+ */
+export async function getAiStatsMerged(
+  timeframeMinutes = 60,
+): Promise<AiStats & { source: "memory" | "database" }> {
+  const buffer = getBuffer();
+  if (buffer.length > 0) {
+    return { ...getAiStats(timeframeMinutes), source: "memory" };
+  }
+
+  const persisted = await getPersistedAiCalls(1000, timeframeMinutes);
+  if (persisted.length === 0) {
+    return { ...getAiStats(timeframeMinutes), source: "database" };
+  }
+
+  const recent = persisted;
+  const totalCalls = recent.length;
+  const successCount = recent.filter((c) => c.status === "success").length;
+  const errorCount = recent.filter((c) => c.status === "error").length;
+  const totalTokens = recent.reduce((sum, c) => sum + (c.tokensUsed || 0), 0);
+  const totalResponseTime = recent.reduce((sum, c) => sum + (c.responseTimeMs || 0), 0);
+
+  const callsByModel: Record<string, number> = {};
+  const errorsByModel: Record<string, number> = {};
+  const callsByAction: Record<string, number> = {};
+
+  for (const call of recent) {
+    callsByModel[call.model] = (callsByModel[call.model] || 0) + 1;
+    if (call.status === "error") {
+      errorsByModel[call.model] = (errorsByModel[call.model] || 0) + 1;
+    }
+    callsByAction[call.action] = (callsByAction[call.action] || 0) + 1;
+  }
+
+  const recentErrors = recent
+    .filter((c) => c.status === "error")
+    .slice(-10)
+    .reverse();
+
+  return {
+    totalCalls,
+    successCount,
+    errorCount,
+    successRate: totalCalls > 0 ? Math.round((successCount / totalCalls) * 100) : 0,
+    avgTokens: totalCalls > 0 ? Math.round(totalTokens / totalCalls) : 0,
+    avgResponseTimeMs: totalCalls > 0 ? Math.round(totalResponseTime / totalCalls) : 0,
+    totalTokens,
+    callsByModel,
+    errorsByModel,
+    callsByAction,
+    recentErrors,
+    timeframeMinutes,
+    source: "database",
+  };
+}
+
+/**
  * Clear the in-memory AI call buffer.
  */
 export function clearAiCalls(): void {
   global._aiCalls = [];
+}
+
+/**
+ * Delete persisted AI call records (source="ai") from ServerLog.
+ *
+ * Used by the admin "Clear Buffer" action so the durable DB log is also
+ * reset — otherwise the page would re-populate from DB on the next refresh.
+ */
+export async function clearPersistedAiCalls(): Promise<number> {
+  try {
+    const result = await prisma.serverLog.deleteMany({
+      where: { source: "ai" },
+    });
+    return result.count;
+  } catch (err) {
+    logger.debug({ msg: "Failed to clear persisted AI calls", error: err });
+    return 0;
+  }
 }

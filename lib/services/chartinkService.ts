@@ -18,6 +18,8 @@ export interface ChartinkStock {
   change: number;
   pChange: number;
   volume: number;
+  /** Market cap in ₹ (populated from TradingView fallback). */
+  market_cap_basic?: number;
   [key: string]: unknown;
 }
 
@@ -49,6 +51,8 @@ export interface ScreenerResult {
   screenerNames: string[];
   /** Number of screeners that flagged this stock (higher = stronger signal). */
   screenerCount: number;
+  /** Market cap in ₹ (from TradingView `market_cap_basic` when available). */
+  marketCap?: number;
 }
 
 /** Internal wrapper pairing raw stocks with the screener that produced them. */
@@ -199,6 +203,7 @@ async function tryTradingView(screener: ScreenerDef): Promise<ChartinkStock[]> {
     "change",
     "change_percent",
     "volume",
+    "market_cap_basic",
     "relative_volume_10d_calc",
     "SMA20",
     "SMA50",
@@ -229,6 +234,9 @@ async function tryTradingView(screener: ScreenerDef): Promise<ChartinkStock[]> {
       change: Number(row.change ?? 0),
       pChange: Number(row.change_percent ?? 0),
       volume: Number(row.volume ?? 0),
+      // Preserve market cap (₹) for downstream ranking — the daily
+      // recommendation engine ranks top-50 picks partly by market cap.
+      market_cap_basic: Number(row.market_cap_basic ?? 0),
       // Preserve extras for downstream consumers
       _tvRow: row,
     } as ChartinkStock;
@@ -277,6 +285,7 @@ function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
       change: number;
       changePercent: number;
       volume: number;
+      marketCap?: number;
       screenerNames: Set<string>;
     }
   >();
@@ -286,6 +295,15 @@ function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
       const symbol = stock.nse_script_code?.toUpperCase();
       if (!symbol) continue;
 
+      // Market cap: prefer explicit market_cap_basic, fall back to _tvRow
+      const tvRow = (stock as Record<string, unknown>)?._tvRow as
+        | Record<string, unknown>
+        | undefined;
+      const marketCap =
+        Number(stock.market_cap_basic ?? 0) ||
+        Number(tvRow?.market_cap_basic ?? 0) ||
+        undefined;
+
       const existing = map.get(symbol);
       if (existing) {
         existing.screenerNames.add(run.screenerName);
@@ -294,6 +312,7 @@ function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
         if (stock.change !== 0) existing.change = stock.change;
         if (stock.pChange !== 0) existing.changePercent = stock.pChange;
         if (stock.volume > 0) existing.volume = stock.volume;
+        if (marketCap) existing.marketCap = marketCap;
       } else {
         map.set(symbol, {
           name: stock.name || symbol,
@@ -301,6 +320,7 @@ function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
           change: stock.change,
           changePercent: stock.pChange,
           volume: stock.volume,
+          marketCap,
           screenerNames: new Set([run.screenerName]),
         });
       }
@@ -318,6 +338,7 @@ function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
       volume: data.volume,
       screenerNames: Array.from(data.screenerNames),
       screenerCount: data.screenerNames.size,
+      marketCap: data.marketCap,
     }),
   );
 

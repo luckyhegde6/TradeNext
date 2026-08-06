@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-07-19T10:00:00Z"
-feature: "ph18-daily-recommendations"
+last_updated: "2026-08-06T00:30:00Z"
+feature: "ph19-prod-reliability-fixes"
 ```
 
 ## Handoff Required?
 
-**Yes.** Active implementation session for Daily Recommendations Engine (ph18). Documentation and planning complete, ready for code implementation.
+**No active handoff.** Session ph19 (Prod Reliability Fixes, v3.4.1) completed its code + documentation work: transaction timeout fix, AI monitoring persistence, top-50 cap, Telegram updates, history prices, DB logs tab, prod UI/UX audit, and gardenify pattern port. Remaining: test run + deploy + prod verification (see `.agents/session-todos.md`).
 
 ---
 
@@ -34,7 +34,7 @@ feature: "ph18-daily-recommendations"
 
 ## Active Handoff
 
-No active handoff. See `.agents/handoffs/active/latest.md` for current session state.
+No active handoff. Session ph19 code + docs complete; pending test run, deploy, and prod verification. See `.agents/session-todos.md` for the current session todo list and `.agents/handoffs/active/latest.md` for session state.
 
 ---
 
@@ -42,6 +42,7 @@ No active handoff. See `.agents/handoffs/active/latest.md` for current session s
 
 | File | Purpose | Must Read? |
 |------|---------|------------|
+| `.agents/session-todos.md` | Current session todo list | ✅ Yes |
 | `.agents/handoffs/active/latest.md` | Current session handoff | ✅ Yes |
 | `.agents/handoffs/SCHEMA.md` | Handoff file format | ✅ Yes |
 | `Primer.md` | Project status | ✅ Yes |
@@ -49,6 +50,8 @@ No active handoff. See `.agents/handoffs/active/latest.md` for current session s
 | `AGENTS.md` | Full development guide | 📖 Reference |
 | `agent-memory.md` | Activity log | 📖 Reference |
 | `.agents/learning/README.md` | Self-learning system | 📖 Reference |
+| `.agents/pre-commit-workflow.md` | Pre-commit checklist | 📖 Reference |
+| `.agents/security-checklist.md` | Security checklist | 📖 Reference |
 
 ---
 
@@ -67,3 +70,4 @@ No active handoff. See `.agents/handoffs/active/latest.md` for current session s
 | Version | Date | Description |
 |---------|------|-------------|
 | v1.0 | 2026-07-16 | Initial handoff orchestration system |
+| v1.1 | 2026-08-06 | Session ph19 (prod reliability fixes): updated state, added session-todos + pre-commit + security references |

@@ -35,6 +35,22 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-08-06 | Prod Reliability Fixes (v3.4.1) — Txn Timeout + Top-50 Cap + Telegram + History + Monitoring
+- **Action**: Fixed prod daily-recommendation pipeline failures and added UI/monitoring improvements; ran prod UI/UX audit; ported gardenify agentic patterns; updated docs.
+- **Branch**: ph19 (v3.4.1)
+- **Key Fixes**:
+  - **Transaction Timeout**: `runInChunks()` replaces interactive `$transaction` in `runDailyRecommendations()` + `checkRecommendationPerformance()` (prevents `5000ms timeout, 5501ms passed` rollback error).
+  - **Top-50 Cap**: `rankAndCapRecommendations()` — composite score `screenerCount*10 + marketCapScore*2 + momentumScore`; all downstream uses `rankedResults`; `MAX_RECOMMENDED_STOCKS = 50`.
+  - **Telegram Live Prices**: `checkRecommendationPerformance()` invalidates cache; broadcast always sends (non-HOLD first, HOLD fallback, breakdown, 4000-char truncation); handlers use `tracker.currentPrice ?? s.price`.
+  - **History Predicted vs Current**: top-stocks API JOINs `recommendation_trackers` → `entryPrice`/`currentPrice`/`trackerStatus`; HistoryTab shows return % + status badges.
+  - **AI Monitoring Persistence**: `persistAiCallToDb()` fire-and-forget (ServerLog `source="ai"`); merged DB+memory reads; source badge.
+  - **Monitoring DB Logs**: new `type=db-logs` in `/api/admin/monitoring` + DB Logs tab with level filter.
+  - **Market Cap Plumbing**: `chartinkService.marketCap?` (TradingView `market_cap_basic`) + AI prompt inclusion.
+- **Prod UI/UX Audit**: Playwright walkthrough of tradenext6.netlify.app — documented in TODO.md (stale recs, bare "🟡 %" cards, 643 stocks, empty demo portfolio).
+- **Gardenify Port**: `.agents/session-todos.md`, `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/sessions/README.md`; HANDOFF.md updated.
+- **Files Modified**: dailyRecommendationService.ts, telegramBotService.ts, top-stocks/route.ts, HistoryTab.tsx, ai-monitoring.ts, ai/monitoring/route.ts, ai-monitoring/page.tsx, chartinkService.ts, recommendation-agent.ts, admin/monitoring/route.ts, monitoring/page.tsx, TODO.md, HANDOFF.md, Primer.md, agent-memory.md, AGENTS.md, .agents/session-todos.md
+- **Verification**: `npx tsc --noEmit` — zero errors in modified production files. Tests not yet re-run.
+
 ### 2026-07-19 | Daily Recommendations — Test Fixes, Security Hardening & PR #62 MERGED
 - **Action**: Fixed 3 failing test suites, applied CodeQL security fix, created PR, documented learnings.
 - **Branch**: `ph18` — PR #62 created and merged (commit `2f95531`).

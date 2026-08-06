@@ -88,8 +88,20 @@ const EXPIRY_DAYS = 30;
 /** Number of screeners in the daily pipeline. */
 const TOTAL_SCREENER_COUNT = 7;
 
-/** Maximum unique stocks to send through AI analysis per run. */
-const MAX_AI_STOCKS = 100;
+/**
+ * Maximum unique stocks kept for a daily run.
+ *
+ * The screeners can flag 600+ symbols; we rank by a composite score
+ * (screener agreement → market cap → momentum) and keep only the top
+ * MAX_RECOMMENDED_STOCKS to keep AI cost/time bounded and the feed clean.
+ */
+const MAX_RECOMMENDED_STOCKS = 50;
+
+/**
+ * Maximum unique stocks to send through AI analysis per run.
+ * Mirrors MAX_RECOMMENDED_STOCKS — after ranking we never exceed this.
+ */
+const MAX_AI_STOCKS = 50;
 
 // ─── Main Orchestration ─────────────────────────────────────────────────
 
@@ -143,7 +155,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     // 3. Run all screeners
     const screenerResults = await runDailyScreeners({ forceRefresh: true });
 
-    // 4. Compute screener stats
+    // 4. Compute screener stats (from the FULL result set, before capping)
     const successfulScreenerNames = new Set(
       screenerResults.flatMap((s) => s.screenerNames),
     );
@@ -152,14 +164,18 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       0,
     );
 
-    // 5 & 6. Batch upsert trackers and create stock entries
+    // 5. Rank by composite score (screener agreement → market cap → momentum)
+    //    and cap to the top MAX_RECOMMENDED_STOCKS so AI cost/time stays bounded.
+    const rankedResults = rankAndCapRecommendations(screenerResults);
+
+    // 6 & 7. Batch upsert trackers and create stock entries
     // Instead of N individual upserts+creates, we batch:
     // 1 findMany for existing trackers, then batch create/update
     const stockEntries: StockAnalysisInput[] = [];
     const BATCH_SIZE = 100;
 
     // Pre-fetch existing trackers in one query
-    const symbols = screenerResults.map(r => r.symbol);
+    const symbols = rankedResults.map(r => r.symbol);
     const existingTrackers = await prisma.recommendationTracker.findMany({
       where: { symbol: { in: symbols } },
       select: { id: true, symbol: true, status: true },
@@ -167,7 +183,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     const trackerMap = new Map(existingTrackers.map(t => [t.symbol, t]));
 
     // Batch create new trackers
-    const newTrackerData = screenerResults
+    const newTrackerData = rankedResults
       .filter(r => !trackerMap.has(r.symbol))
       .map(r => ({
         symbol: r.symbol,
@@ -195,8 +211,13 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       refreshed.forEach(t => trackerMap.set(t.symbol, t));
     }
 
-    // Update existing tracker in batch
-    const existingToUpdate = screenerResults
+    // Update existing trackers in batch.
+    // NOTE: We intentionally do NOT wrap these in an interactive $transaction.
+    // On production (Prisma Accelerate) the 5s default interactive transaction
+    // timeout was exceeded because each updateMany round-trips to the remote DB.
+    // Each updateMany is atomic on its own, so we run them in small concurrent
+    // chunks instead (bounded concurrency, no transaction timeout risk).
+    const existingToUpdate = rankedResults
       .filter(r => trackerMap.has(r.symbol))
       .map(r =>
         prisma.recommendationTracker.updateMany({
@@ -209,11 +230,11 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
         })
       );
     if (existingToUpdate.length > 0) {
-      await prisma.$transaction(existingToUpdate.slice(0, 50)); // Transaction limit safety
+      await runInChunks(existingToUpdate, 10, (updates) => Promise.all(updates));
     }
 
     // Batch create stock entries
-    const stockCreateData = screenerResults.map(r => {
+    const stockCreateData = rankedResults.map(r => {
       const tracker = trackerMap.get(r.symbol);
       if (!tracker) return null;
       return {
@@ -235,7 +256,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     }
 
     // Build stockEntries for AI analysis
-    for (const result of screenerResults) {
+    for (const result of rankedResults) {
       stockEntries.push({
         symbol: result.symbol,
         price: result.price,
@@ -253,7 +274,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
         totalScreeners: TOTAL_SCREENER_COUNT,
         successfulScreeners: successfulScreenerNames.size,
         totalStocks: totalRawHits,
-        uniqueStocks: screenerResults.length,
+        uniqueStocks: rankedResults.length,
       },
     });
 
@@ -363,6 +384,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     // Batch update stock entries and trackers concurrently
     const stockUpdates: Promise<any>[] = [];
     const trackerUpdates: Promise<any>[] = [];
+    const predictionUpdates: Promise<unknown>[] = [];
 
     for (const aiResult of aiResults) {
       const stockEntryId = stockEntryMap.get(aiResult.symbol);
@@ -409,16 +431,25 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       );
 
       // 10. Record prediction for outcome tracking
-      await recordPrediction({
-        agentType: "recommendation",
-        symbol: aiResult.symbol,
-        prediction: aiResult.aiRecommendation.recommendation,
-        confidence: aiResult.aiRecommendation.confidence,
-        entryPrice: aiResult.price,
-        targetPrice: aiResult.aiRecommendation.targetPrice,
-        stopLoss: aiResult.aiRecommendation.stopLoss,
-        runId: run.id,
-      });
+      predictionUpdates.push(
+        recordPrediction({
+          agentType: "recommendation",
+          symbol: aiResult.symbol,
+          prediction: aiResult.aiRecommendation.recommendation,
+          confidence: aiResult.aiRecommendation.confidence,
+          entryPrice: aiResult.price,
+          targetPrice: aiResult.aiRecommendation.targetPrice,
+          stopLoss: aiResult.aiRecommendation.stopLoss,
+          runId: run.id,
+        }).catch((e) => {
+          // Non-critical — prediction tracking must never break the run
+          logger.warn({
+            msg: "Prediction tracking failed",
+            symbol: aiResult.symbol,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }),
+      );
 
       if (aiResult.success) {
         aiProcessed++;
@@ -427,8 +458,12 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       }
     }
 
-    // Execute batched updates concurrently
-    await Promise.all([...stockUpdates, ...trackerUpdates]);
+    // Execute batched updates concurrently (chunked to bound concurrency)
+    await runInChunks(
+      [...stockUpdates, ...trackerUpdates, ...predictionUpdates],
+      10,
+      (chunk) => Promise.all(chunk),
+    );
 
     // 11. Complete run
     const executionTimeMs = Date.now() - startTime;
@@ -454,7 +489,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       `Daily run completed: ${aiProcessed}/${stockEntries.length} stocks analyzed in ${executionTimeMs}ms`,
       {
         runId: run.id,
-        uniqueStocks: screenerResults.length,
+        uniqueStocks: rankedResults.length,
         aiProcessed,
         aiFailed,
         executionTimeMs,
@@ -468,7 +503,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       resourceId: run.id,
       metadata: {
         runId: run.id,
-        uniqueStocks: screenerResults.length,
+        uniqueStocks: rankedResults.length,
         aiProcessed,
         aiFailed,
         executionTimeMs,
@@ -484,7 +519,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       source: "recommendation_service",
       metadata: {
         runId: run.id,
-        uniqueStocks: screenerResults.length,
+        uniqueStocks: rankedResults.length,
         aiProcessed,
         aiFailed,
       },
@@ -498,32 +533,40 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       const { broadcastToSubscribers } = await import("./telegramBotService");
 
       const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
-      const topStocks = aiResults
-        .filter((r) => r.aiRecommendation.recommendation !== "HOLD")
-        .slice(0, 8);
 
-      if (topStocks.length > 0) {
-        const lines = topStocks.map((r) => {
-          const icon = recIcons[r.aiRecommendation.recommendation] || "⚪";
-          const conf = `${r.aiRecommendation.confidence}%`;
-          const price = r.price ? `₹${r.price.toFixed(2)}` : "";
-          const target = r.aiRecommendation.targetPrice ? `Tgt ₹${r.aiRecommendation.targetPrice.toFixed(2)}` : "";
-          const sl = r.aiRecommendation.stopLoss ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}` : "";
-          const details = [price, target, sl, conf].filter(Boolean).join(" | ");
-          return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
-        });
+      // Always send a broadcast (even if all picks are HOLD) so subscribers
+      // get a daily update. Prefer non-HOLD picks, but fall back to HOLDs so
+      // the message is never empty (previously an all-HOLD day sent nothing).
+      const nonHold = aiResults.filter(
+        (r) => r.aiRecommendation.recommendation !== "HOLD",
+      );
+      const topStocks =
+        nonHold.length > 0 ? nonHold.slice(0, 8) : aiResults.slice(0, 8);
 
-        let tgMessage = `📈 *Daily Recommendations — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}*\n\n`;
-        tgMessage += lines.join("\n\n");
-        tgMessage += `\n\n_View all ${aiResults.length} recommendations on TradeNext → /recommendations_`;
+      const lines = topStocks.map((r) => {
+        const icon = recIcons[r.aiRecommendation.recommendation] || "⚪";
+        const conf = `${r.aiRecommendation.confidence}%`;
+        const price = r.price ? `₹${r.price.toFixed(2)}` : "";
+        const target = r.aiRecommendation.targetPrice ? `Tgt ₹${r.aiRecommendation.targetPrice.toFixed(2)}` : "";
+        const sl = r.aiRecommendation.stopLoss ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}` : "";
+        const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+        return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
+      });
 
-        if (tgMessage.length > 4000) {
-          tgMessage = tgMessage.slice(0, 3990) + "\n\n*(truncated)*";
-        }
+      let tgMessage = `📈 *Daily Recommendations — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}*\n\n`;
+      tgMessage += lines.join("\n\n");
 
-        const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
-        logger.info({ msg: "Telegram broadcast for recommendations", sent });
+      const buyCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "BUY").length;
+      const sellCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "SELL").length;
+      tgMessage += `\n\n_Breakdown: 🟢 ${buyCount} BUY · 🔴 ${sellCount} SELL · ⚪ ${aiResults.length - buyCount - sellCount} HOLD_`;
+      tgMessage += `\n\n_View all ${aiResults.length} recommendations on TradeNext → /recommendations_`;
+
+      if (tgMessage.length > 4000) {
+        tgMessage = tgMessage.slice(0, 3990) + "\n\n*(truncated)*";
       }
+
+      const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
+      logger.info({ msg: "Telegram broadcast for recommendations", sent });
     } catch (tgErr) {
       // Non-critical: log but don't fail the run
       logger.warn({ msg: "Telegram broadcast failed (non-critical)", error: tgErr });
@@ -532,7 +575,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     logger.info({
       msg: "Daily recommendation run finished",
       runId: run.id,
-      uniqueStocks: screenerResults.length,
+      uniqueStocks: rankedResults.length,
       aiProcessed,
       aiFailed,
       executionTimeMs,
@@ -543,7 +586,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       totalScreeners: TOTAL_SCREENER_COUNT,
       successfulScreeners: successfulScreenerNames.size,
       totalStocks: totalRawHits,
-      uniqueStocks: screenerResults.length,
+      uniqueStocks: rankedResults.length,
       aiProcessed,
       aiFailed,
       executionTimeMs,
@@ -655,6 +698,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // Batch status updates and history creation
   const statusUpdates: Promise<any>[] = [];
   const historyCreates: Promise<any>[] = [];
+  const eventLogs: Promise<unknown>[] = [];
 
   for (const tracker of activeTrackers) {
     checked++;
@@ -718,17 +762,34 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
       // Record event
       const emoji = newStatus === "target_achieved" ? "TARGET" : newStatus === "stop_loss_hit" ? "STOP_LOSS" : "EXPIRED";
-      await recordAIEvent("status_change", `[${emoji}] ${tracker.symbol}: ${previousStatus} -> ${newStatus} at price ${currentPrice}`, {
-        symbol: tracker.symbol, currentPrice, previousStatus, newStatus,
-        entryPrice: tracker.entryPrice, targetPrice: tracker.targetPrice, stopLoss: tracker.stopLoss,
-      });
+      eventLogs.push(
+        recordAIEvent("status_change", `[${emoji}] ${tracker.symbol}: ${previousStatus} -> ${newStatus} at price ${currentPrice}`, {
+          symbol: tracker.symbol, currentPrice, previousStatus, newStatus,
+          entryPrice: tracker.entryPrice, targetPrice: tracker.targetPrice, stopLoss: tracker.stopLoss,
+        }).catch((e) => {
+          logger.warn({
+            msg: "Status change event logging failed",
+            symbol: tracker.symbol,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }),
+      );
 
       logger.info({ msg: "Recommendation status changed", symbol: tracker.symbol, previousStatus, newStatus, currentPrice });
     }
   }
 
-  // Execute batched updates
-  await Promise.all([...statusUpdates, ...historyCreates]);
+  // Execute batched updates concurrently (chunked to bound concurrency)
+  await runInChunks(
+    [...statusUpdates, ...historyCreates, ...eventLogs],
+    10,
+    (chunk) => Promise.all(chunk),
+  );
+
+  // Invalidate the recommendations cache so the web UI and Telegram
+  // /recommendations commands reflect updated prices/statuses immediately
+  // (otherwise they serve the stale snapshot for up to 23 hours).
+  invalidateRecommendationsCache();
 
   const executionMs = Date.now() - startTime;
 
@@ -1013,4 +1074,92 @@ function getTodayMidnight(): Date {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0),
   );
+}
+
+/**
+ * Rank screener results by a composite score and cap to the top
+ * {@link MAX_RECOMMENDED_STOCKS}.
+ *
+ * Score is weighted:
+ * - **Screener agreement** (primary): more screeners flagging a stock is a
+ *   stronger signal → `screenerCount * 10`.
+ * - **Market cap** (secondary): prefer liquid, established names so the feed
+ *   stays actionable → banded `0..3` (₹100Cr+, ₹1,000Cr+, ₹10,000Cr+).
+ * - **Momentum** (tertiary): positive `changePercent` for bullish screeners →
+ *   normalized `0..1` from a clamped [-5, +5] band.
+ *
+ * Ties break by screenerCount. Stocks without market cap data are not
+ * penalized (marketCapScore 0 but still ranked by agreement + momentum).
+ *
+ * @param results Full de-duplicated screener results (can be 600+).
+ * @returns Top {@link MAX_RECOMMENDED_STOCKS} entries by composite score.
+ */
+function rankAndCapRecommendations(
+  results: ScreenerResult[],
+): ScreenerResult[] {
+  if (results.length <= MAX_RECOMMENDED_STOCKS) {
+    return results;
+  }
+
+  const scored = results.map((r) => {
+    const marketCap = r.marketCap ?? 0;
+    // Market cap bands in ₹ crore (1 Cr = 10,000,000)
+    const marketCapScore =
+      marketCap >= 100_000_000_000
+        ? 3 // ≥ ₹10,000 Cr (large cap)
+        : marketCap >= 10_000_000_000
+          ? 2 // ≥ ₹1,000 Cr (mid/large cap)
+          : marketCap >= 1_000_000_000
+            ? 1 // ≥ ₹100 Cr (small/mid cap)
+            : 0;
+    // Clamp changePercent to [-5, 5] then normalize to [0, 1]
+    const momentumScore = Math.max(
+      0,
+      Math.min(1, (r.changePercent + 5) / 10),
+    );
+    return {
+      result: r,
+      score: r.screenerCount * 10 + marketCapScore * 2 + momentumScore,
+    };
+  });
+
+  scored.sort(
+    (a, b) => b.score - a.score || b.result.screenerCount - a.result.screenerCount,
+  );
+
+  const ranked = scored.map((s) => s.result);
+  const kept = ranked.slice(0, MAX_RECOMMENDED_STOCKS);
+
+  logger.info({
+    msg: "Capped daily recommendations to top MAX_RECOMMENDED_STOCKS",
+    total: ranked.length,
+    kept: kept.length,
+    dropped: ranked.length - kept.length,
+  });
+
+  return kept;
+}
+
+/**
+ * Run async operations in bounded-concurrency chunks.
+ *
+ * Splits `items` into chunks of at most `chunkSize` and awaits each chunk
+ * sequentially. This replaces interactive $transaction() blocks for batches
+ * of independent writes — each write stays atomic, concurrency is bounded
+ * (so we don't overwhelm the DB / Prisma Accelerate), and there is no
+ * interactive-transaction timeout to exceed.
+ *
+ * @param items The operations to run (as Promises or thunks).
+ * @param chunkSize Max number of operations to run concurrently.
+ * @param executor Optional per-chunk executor (defaults to Promise.all).
+ */
+async function runInChunks<T>(
+  items: T[],
+  chunkSize: number,
+  executor: (chunk: T[]) => Promise<unknown> = (chunk) => Promise.all(chunk),
+): Promise<void> {
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    await executor(chunk);
+  }
 }

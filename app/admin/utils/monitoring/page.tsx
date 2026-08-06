@@ -56,7 +56,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 export default function MonitoringPage() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "nse-calls" | "http-logs" | "server-logs" | "anomalies" | "rate-limits">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "nse-calls" | "http-logs" | "server-logs" | "db-logs" | "anomalies" | "rate-limits">("overview");
   const [stats, setStats] = useState<APIStats | null>(null);
   const [httpStats, setHttpStats] = useState<any>(null);
   const [alerts, setAlerts] = useState<AnomalyAlert[]>([]);
@@ -65,6 +65,9 @@ export default function MonitoringPage() {
   const [nseCalls, setNseCalls] = useState<any[]>([]);
   const [httpLogs, setHttpLogs] = useState<any[]>([]);
   const [serverLogs, setServerLogs] = useState<{ date: string; path: string; size: number }[]>([]);
+  const [dbLogs, setDbLogs] = useState<any[]>([]);
+  const [dbLogTotal, setDbLogTotal] = useState(0);
+  const [dbLogLevel, setDbLogLevel] = useState<string>("all");
   const [selectedLogFile, setSelectedLogFile] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [hours, setHours] = useState(24);
@@ -75,7 +78,7 @@ export default function MonitoringPage() {
       const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
       return () => clearInterval(interval);
     }
-  }, [status, hours]);
+  }, [status, hours, dbLogLevel]);
 
   const fetchData = async () => {
     try {
@@ -135,6 +138,14 @@ export default function MonitoringPage() {
       if (logsRes.ok) {
         const data = await logsRes.json();
         setServerLogs(data.files || []);
+      }
+
+      // Fetch DB-backed server logs (works on serverless)
+      const dbLogsRes = await fetch(`/api/admin/monitoring?type=db-logs&limit=200${dbLogLevel !== "all" ? `&level=${dbLogLevel}` : ""}`);
+      if (dbLogsRes.ok) {
+        const data = await dbLogsRes.json();
+        setDbLogs(data.logs || []);
+        setDbLogTotal(data.total || 0);
       }
     } catch (error) {
       console.error("Failed to fetch monitoring data:", error);
@@ -210,7 +221,7 @@ export default function MonitoringPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-slate-800 overflow-x-auto">
-          {(["overview", "nse-logs", "nse-calls", "http-logs", "server-logs", "anomalies", "rate-limits"] as const).map((tab) => (
+          {(["overview", "nse-logs", "nse-calls", "http-logs", "server-logs", "db-logs", "anomalies", "rate-limits"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -224,6 +235,7 @@ export default function MonitoringPage() {
                tab === "nse-calls" ? "NSE API Calls" : 
                tab === "http-logs" ? "HTTP Logs" :
                tab === "server-logs" ? "Server Logs" :
+               tab === "db-logs" ? "DB Logs" :
                tab === "rate-limits" ? "Rate Limits" : 
                tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -824,6 +836,94 @@ export default function MonitoringPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* DB Logs Tab — DB-backed logs (works on serverless) */}
+            {activeTab === "db-logs" && (
+              <div className="space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Database Server Logs</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Persisted to the database — works on serverless platforms. {dbLogTotal} total entries.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={dbLogLevel}
+                        onChange={(e) => setDbLogLevel(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                      >
+                        <option value="all">All Levels</option>
+                        <option value="info">Info</option>
+                        <option value="warn">Warn</option>
+                        <option value="error">Error</option>
+                        <option value="debug">Debug</option>
+                      </select>
+                      <button
+                        onClick={fetchData}
+                        className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
+                      >
+                        <FolderIcon className="w-4 h-4" />
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                      <thead className="bg-gray-50 dark:bg-slate-800">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Time</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Level</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Source</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Task</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {dbLogs.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                              No database logs recorded yet. Logs appear here once the worker or services write to the DB.
+                            </td>
+                          </tr>
+                        ) : (
+                          dbLogs.map((log) => (
+                            <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                              <td className="px-6 py-3 whitespace-nowrap text-xs text-gray-500">
+                                {new Date(log.createdAt).toLocaleString()}
+                              </td>
+                              <td className="px-6 py-3 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                                  log.level === 'error' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                  log.level === 'warn' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                  log.level === 'debug' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                }`}>
+                                  {log.level}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3 whitespace-nowrap text-xs text-gray-500 font-mono">
+                                {log.source || '-'}
+                              </td>
+                              <td className="px-6 py-3 text-xs text-gray-900 dark:text-white font-mono max-w-md truncate">
+                                {log.message}
+                              </td>
+                              <td className="px-6 py-3 whitespace-nowrap text-xs text-gray-500">
+                                {log.taskId ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-mono">{log.taskId}</span>
+                                ) : '-'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}

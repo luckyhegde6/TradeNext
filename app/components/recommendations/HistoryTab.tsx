@@ -22,6 +22,12 @@ interface TopStock {
   aiSuccess: boolean | null;
   runDate: string;
   runStatus: string;
+  /** Tracker entry price at recommendation time (predicted). */
+  entryPrice: number | null;
+  /** Tracker latest current price (updated by 3:30 PM performance check). */
+  currentPrice: number | null;
+  /** Tracker lifecycle status: active | target_achieved | stop_loss_hit | expired. */
+  trackerStatus: string | null;
 }
 
 interface HistoryTabProps {
@@ -175,6 +181,23 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
             ? ((stock.targetPrice - stock.price) / stock.price * 100).toFixed(1)
             : null;
 
+          // Predicted (entry) vs current price comparison
+          const predictedPrice = stock.entryPrice ?? stock.price;
+          const livePrice = stock.currentPrice ?? stock.price;
+          const priceReturnPct = predictedPrice > 0
+            ? ((livePrice - predictedPrice) / predictedPrice) * 100
+            : 0;
+          const priceReturnColor =
+            priceReturnPct >= 0 ? "text-emerald-400" : "text-red-400";
+
+          const statusBadge: Record<string, { label: string; cls: string }> = {
+            active: { label: "Active", cls: "bg-blue-500/15 text-blue-300" },
+            target_achieved: { label: "🎯 Target", cls: "bg-emerald-500/15 text-emerald-300" },
+            stop_loss_hit: { label: "🛑 SL Hit", cls: "bg-red-500/15 text-red-300" },
+            expired: { label: "Expired", cls: "bg-gray-600/40 text-gray-400" },
+          };
+          const status = statusBadge[stock.trackerStatus || "active"] || statusBadge.active;
+
           return (
             <div
               key={stock.id}
@@ -204,6 +227,9 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
                     }`}>
                       {stock.timeHorizon}
                     </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${status.cls}`}>
+                      {status.label}
+                    </span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -226,6 +252,19 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
                     )}
                     <span className="text-gray-500">
                       {new Date(stock.runDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    </span>
+                  </div>
+
+                  {/* Predicted vs current price */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs border-t border-gray-700/50 pt-2">
+                    <span className="text-gray-500">
+                      Predicted: <span className="text-gray-300">₹{predictedPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </span>
+                    <span className="text-gray-500">
+                      Current: <span className="text-gray-300">₹{livePrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </span>
+                    <span className={priceReturnColor}>
+                      {priceReturnPct >= 0 ? "+" : ""}{priceReturnPct.toFixed(2)}%
                     </span>
                   </div>
 

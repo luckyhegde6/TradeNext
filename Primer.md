@@ -5,11 +5,23 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-07-19
+2026-08-06
 
 ---
 
 ## Current Project Status
+
+### Prod Reliability Fixes (v3.4.1) — ✅ CODE + DOCS COMPLETE, AWAITING TEST/DEPLOY
+**Issue**: Prod daily recommendations failed with transaction timeout (5000ms expired); AI monitoring not persisted; monitoring logs invisible on serverless; Telegram daily recommendations stale; history tab lacked current prices; 643 recs too many.
+**Fix Applied**:
+- `runInChunks()` bounded-concurrency helper replaces interactive `$transaction` in `runDailyRecommendations()` + `checkRecommendationPerformance()`
+- `rankAndCapRecommendations()` caps daily recs to top 50 (composite: screenerCount + marketCap + momentum); `MAX_RECOMMENDED_STOCKS = 50`
+- Telegram: cache invalidation after performance check, broadcast always sends with HOLD fallback + breakdown, handlers prefer tracker live prices
+- History tab: top-stocks API JOINs trackers → entryPrice/currentPrice/trackerStatus with return %
+- AI monitoring: fire-and-forget `persistAiCallToDb()` + merged DB/memory reads + source badge
+- Monitoring: new `type=db-logs` in `/api/admin/monitoring` + DB Logs tab (serverless-safe)
+- Prod UI/UX audit documented in TODO.md; gardenify patterns ported to `.agents/`
+**Status**: Code + docs complete. Pending: full test run, deploy to Netlify, prod verification (see `.agents/session-todos.md`).
 
 ### Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0) — ✅ COMPLETE
 **Issue**: No daily stock recommendation engine; no self-healing AI agents; no unified audit logging.
@@ -306,6 +318,12 @@
 ---
 
 ## Session History
+
+### Session 7 (August 6, 2026)
+- **Prod Reliability Fixes (v3.4.1)**: Fixed recommendation transaction timeout, AI monitoring persistence, top-50 cap, Telegram live prices, history predicted vs current, DB monitoring logs tab.
+- **Prod UI/UX Audit**: Playwright walkthrough of tradenext6.netlify.app — findings documented in TODO.md (stale recs 17 days, bare "🟡 %" cards, 643 stocks too many, empty demo portfolio).
+- **Gardenify Pattern Port**: Added `.agents/session-todos.md`, `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/sessions/` archive.
+- **Status**: Code + docs complete; pending test run + deploy + prod verification.
 
 ### Session 6 (March 20, 2026)
 - **Worker Logger Security Fix (v1.10.6)**: Fixed CodeQL path traversal vulnerability.

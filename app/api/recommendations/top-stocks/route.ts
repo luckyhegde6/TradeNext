@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
             confidence: number; targetprice: number | null; stoploss: number | null;
             timehorizon: string; reasoning: string | null; riskfactors: string | null;
             aisuccess: boolean | null; rundate: Date; runstatus: string;
+            currentprice: number | null; entryprice: number | null; trackerstatus: string | null;
           }>
         >`
           SELECT DISTINCT ON (s.symbol)
@@ -47,14 +48,16 @@ export async function GET(request: NextRequest) {
             s."aiRecommendation" as airecommendation, s.confidence,
             s."targetPrice" as targetprice, s."stopLoss" as stoploss,
             s."timeHorizon" as timehorizon, s.reasoning, s."riskFactors" as riskfactors,
-            s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus
-      FROM daily_recommendation_stocks s
-      JOIN daily_recommendation_runs r ON r.id = s."runId"
-      WHERE r.status IN ('completed', 'failed')
-        AND r."uniqueStocks" > 0
-        AND s."aiRecommendation" = ${filter}
-      ORDER BY s.symbol, r."runDate" DESC
-      LIMIT ${limit} OFFSET ${offset}
+            s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus,
+            t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
+          FROM daily_recommendation_stocks s
+          JOIN daily_recommendation_runs r ON r.id = s."runId"
+          JOIN recommendation_trackers t ON t.id = s."trackerId"
+          WHERE r.status IN ('completed', 'failed')
+            AND r."uniqueStocks" > 0
+            AND s."aiRecommendation" = ${filter}
+          ORDER BY s.symbol, r."runDate" DESC
+          LIMIT ${limit} OFFSET ${offset}
         `
       : await prisma.$queryRaw<
           Array<{
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest) {
             confidence: number; targetprice: number | null; stoploss: number | null;
             timehorizon: string; reasoning: string | null; riskfactors: string | null;
             aisuccess: boolean | null; rundate: Date; runstatus: string;
+            currentprice: number | null; entryprice: number | null; trackerstatus: string | null;
           }>
         >`
           SELECT DISTINCT ON (s.symbol)
@@ -73,9 +77,11 @@ export async function GET(request: NextRequest) {
             s."aiRecommendation" as airecommendation, s.confidence,
             s."targetPrice" as targetprice, s."stopLoss" as stoploss,
             s."timeHorizon" as timehorizon, s.reasoning, s."riskFactors" as riskfactors,
-            s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus
+            s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus,
+            t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
           FROM daily_recommendation_stocks s
           JOIN daily_recommendation_runs r ON r.id = s."runId"
+          JOIN recommendation_trackers t ON t.id = s."trackerId"
           WHERE r.status IN ('completed', 'failed')
             AND r."uniqueStocks" > 0
           ORDER BY s.symbol, r."runDate" DESC
@@ -122,6 +128,10 @@ export async function GET(request: NextRequest) {
       aiSuccess: s.aisuccess,
       runDate: s.rundate instanceof Date ? s.rundate.toISOString() : String(s.rundate),
       runStatus: s.runstatus,
+      // Tracker-derived prices for predicted vs current comparison
+      entryPrice: s.entryprice,
+      currentPrice: s.currentprice,
+      trackerStatus: s.trackerstatus,
     }));
 
     const result = {
