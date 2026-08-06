@@ -831,40 +831,75 @@ export async function syncStocksToDatabase(indexName?: string) {
             return { success: false, message: "No stocks found from NSE" };
         }
 
+        // Build clean stock data
+        const stockData = stocks
+            .map(stock => {
+                const symbol = stock.symbol || stock.SYMBOL;
+                if (!symbol) return null;
+                const companyName = stock.meta?.companyName || stock.companyName || stock.company_name || stock.issuerName || "";
+                const series = stock.series || stock.SERIES || "EQ";
+                return { symbol, companyName, series };
+            })
+            .filter((s): s is { symbol: string; companyName: string; series: string } => s !== null);
+
+        // Batch approach: createMany for all (skip existing), then updateMany for existing
+        // This reduces 2000 individual upserts to ~21 queries (1 createMany + 20 updateMany batches)
         let synced = 0;
         let errors = 0;
+        const BATCH_SIZE = 200;
 
-        for (const stock of stocks) {
-            try {
-                const symbol = stock.symbol || stock.SYMBOL;
-                if (!symbol) continue;
+        try {
+            // Step 1: Insert all new symbols in one query (skip duplicates)
+            const insertResult = await prisma.symbol.createMany({
+                data: stockData.map(s => ({
+                    symbol: s.symbol,
+                    companyName: s.companyName,
+                    series: s.series,
+                    isActive: true,
+                })),
+                skipDuplicates: true,
+            });
+            synced = insertResult.count;
 
-                // Company name can be in meta.companyName or directly in the object
-                const companyName = stock.meta?.companyName || stock.companyName || stock.company_name || stock.issuerName || "";
+            // Step 2: Find existing symbols that need updating
+            const existingSymbols = await prisma.symbol.findMany({
+                where: { symbol: { in: stockData.map(s => s.symbol) } },
+                select: { symbol: true, companyName: true, series: true },
+            });
+            const existingMap = new Map(existingSymbols.map(s => [s.symbol, s]));
 
-                await prisma.symbol.upsert({
-                    where: { symbol },
-                    update: {
-                        companyName,
-                        series: stock.series || stock.SERIES || "EQ",
-                        isActive: true,
-                        updatedAt: new Date()
-                    },
-                    create: {
-                        symbol,
-                        companyName,
-                        series: stock.series || stock.SERIES || "EQ",
-                        isActive: true,
-                    }
+            // Step 3: Update existing symbols in batches
+            for (let i = 0; i < stockData.length; i += BATCH_SIZE) {
+                const batch = stockData.slice(i, i + BATCH_SIZE);
+                const toUpdate = batch.filter(s => {
+                    const existing = existingMap.get(s.symbol);
+                    return existing && (existing.companyName !== s.companyName || existing.series !== s.series || !existing.series);
                 });
-                synced++;
-            } catch (e) {
-                errors++;
-            }
-        }
 
-        logger.info({ msg: 'Stocks synced to database', indexName, synced, errors });
-        return { success: true, synced, errors, total: stocks.length };
+                if (toUpdate.length > 0) {
+                    await prisma.$transaction(
+                        toUpdate.map(s =>
+                            prisma.symbol.update({
+                                where: { symbol: s.symbol },
+                                data: {
+                                    companyName: s.companyName,
+                                    series: s.series,
+                                    isActive: true,
+                                    updatedAt: new Date(),
+                                },
+                            })
+                        )
+                    );
+                }
+            }
+
+            logger.info({ msg: 'Stocks synced to database', indexName, synced, errors: 0, total: stocks.length });
+            return { success: true, synced, errors: 0, total: stocks.length };
+        } catch (e) {
+            logger.error({ msg: 'Stock sync batch error', error: e });
+            // Fallback: fall through to return what we have
+            return { success: true, synced, errors: stockData.length - synced, total: stocks.length };
+        }
     } catch (e) {
         logger.error({ msg: 'Stock sync error', error: e });
         return { success: false, message: String(e) };

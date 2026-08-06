@@ -12,7 +12,9 @@ const updateUserSchema = z.object({
     role: z.enum(['user', 'admin']).optional(),
     password: z.string().min(6).optional(),
     isVerified: z.boolean().optional(),
-    isBlocked: z.boolean().optional()
+    isBlocked: z.boolean().optional(),
+    telegramChatId: z.string().nullable().optional(),
+    telegramVerified: z.boolean().optional()
 });
 
 // GET - Get specific user details
@@ -108,6 +110,8 @@ export async function PUT(
         if (validatedData.role !== undefined) updateData.role = validatedData.role;
         if (validatedData.isVerified !== undefined) updateData.isVerified = validatedData.isVerified;
         if (validatedData.isBlocked !== undefined) updateData.isBlocked = validatedData.isBlocked;
+        if (validatedData.telegramChatId !== undefined) updateData.telegramChatId = validatedData.telegramChatId;
+        if (validatedData.telegramVerified !== undefined) updateData.telegramVerified = validatedData.telegramVerified;
         if (validatedData.password) {
             updateData.password = await bcrypt.hash(validatedData.password, 12);
         }

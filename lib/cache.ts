@@ -28,8 +28,28 @@ const staticCache = new NodeCache({
   deleteOnExpire: true,
 });
 
+// Cache for daily recommendations (23hr TTL — runs once daily at 10 AM IST)
+const recommendationsCache = new NodeCache({
+  stdTTL: 82800,      // 23 hours in seconds (23 * 60 * 60)
+  checkperiod: 3600,  // Check every hour
+  maxKeys: 10,        // Very small — only latest + history
+  useClones: false,
+  deleteOnExpire: true,
+});
+
+// Cache for backtest historical OHLCV data (24h TTL — daily bars only change
+// at market close; NSE refetch on stale keeps ad-hoc backtests fresh without
+// re-hitting the API for every run).
+const historicalCache = new NodeCache({
+  stdTTL: 86400,      // 24 hours in seconds (24 * 60 * 60)
+  checkperiod: 3600,  // Check every hour
+  maxKeys: 200,       // One key per symbol — plenty for backtesting workloads
+  useClones: false,
+  deleteOnExpire: true,
+});
+
 // Export cache instances
-export { hotCache, staticCache };
+export { hotCache, staticCache, recommendationsCache, historicalCache };
 export default cache;
 
 // Cache monitoring utilities
@@ -49,6 +69,16 @@ export const getCacheMetrics = () => ({
     stats: staticCache.getStats(),
     hitRate: staticCache.getStats().hits / (staticCache.getStats().hits + staticCache.getStats().misses) || 0,
   },
+  recommendationsCache: {
+    keys: recommendationsCache.keys().length,
+    stats: recommendationsCache.getStats(),
+    hitRate: recommendationsCache.getStats().hits / (recommendationsCache.getStats().hits + recommendationsCache.getStats().misses) || 0,
+  },
+  historicalCache: {
+    keys: historicalCache.keys().length,
+    stats: historicalCache.getStats(),
+    hitRate: historicalCache.getStats().hits / (historicalCache.getStats().hits + historicalCache.getStats().misses) || 0,
+  },
 });
 
 // Cache cleanup utilities
@@ -63,6 +93,8 @@ export const clearAllCaches = () => {
   cache.flushAll();
   hotCache.flushAll();
   staticCache.flushAll();
+  recommendationsCache.flushAll();
+  historicalCache.flushAll();
 };
 
 // Cache statistics for monitoring
@@ -78,5 +110,13 @@ export const getCacheStats = () => ({
   static: {
     keys: staticCache.keys().length,
     stats: staticCache.getStats(),
+  },
+  recommendations: {
+    keys: recommendationsCache.keys().length,
+    stats: recommendationsCache.getStats(),
+  },
+  historical: {
+    keys: historicalCache.keys().length,
+    stats: historicalCache.getStats(),
   },
 });

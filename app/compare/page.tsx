@@ -1,7 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSession } from "next-auth/react";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js";
+import { Line } from "react-chartjs-2";
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 interface StockQuote {
   symbol: string;
@@ -30,6 +44,8 @@ export default function ComparePage() {
   const { data: session, status } = useSession();
   const [symbols, setSymbols] = useState<string[]>(["", "", "", "", ""]);
   const [stockData, setStockData] = useState<StockData>({});
+  const [chartHistory, setChartHistory] = useState<Record<string, number[]>>({});
+  const [chartLabels, setChartLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +65,8 @@ export default function ComparePage() {
     setLoading(true);
     setError(null);
     setStockData({});
+    setChartHistory({});
+    setChartLabels([]);
 
     try {
       const response = await fetch(`/api/compare?symbols=${validSymbols.join(",")}`);
@@ -67,6 +85,52 @@ export default function ComparePage() {
         }
       });
       setStockData(dataMap);
+
+      // Also fetch historical chart data for each symbol
+      try {
+        const baseUrl = window.location.origin;
+        const chartPromises = validSymbols.map(async (symbol) => {
+          const chartRes = await fetch(`${baseUrl}/api/nse/stock/${symbol}/chart?period=1M`);
+          if (!chartRes.ok) return { symbol, dates: [], prices: [] };
+          const chartData = await chartRes.json();
+          const series = Array.isArray(chartData) ? chartData : (chartData?.data || chartData?.grapthData || []);
+          if (Array.isArray(series) && series.length > 0) {
+            // series is an array of [timestamp_ms, close, ...]
+            const dates = series.map((p: any) => {
+              const ts = Array.isArray(p) ? p[0] : (p.timestamp || p.time || p.date || 0);
+              const d = new Date(ts);
+              return d.toISOString().split("T")[0];
+            });
+            const prices = series.map((p: any) => {
+              if (Array.isArray(p)) return p[1] ?? 0;
+              return p.close ?? p.price ?? p.value ?? 0;
+            });
+            return { symbol, dates, prices };
+          }
+          return { symbol, dates: [], prices: [] };
+        });
+        const chartResults = await Promise.all(chartPromises);
+
+        // Find common dates, normalize to 100
+        const allDates = [...new Set(chartResults.flatMap((r) => r.dates))].sort();
+        const historyMap: Record<string, number[]> = {};
+        chartResults.forEach((r) => {
+          const priceByDate: Record<string, number> = {};
+          r.dates.forEach((d, i) => (priceByDate[d] = r.prices[i]));
+          // Normalize
+          const firstPrice = priceByDate[r.dates[0]];
+          if (firstPrice && firstPrice > 0) {
+            historyMap[r.symbol] = allDates.map((d) => {
+              const p = priceByDate[d];
+              return p ? Math.round((p / firstPrice) * 10000) / 100 : 0;
+            });
+          }
+        });
+        setChartLabels(allDates);
+        setChartHistory(historyMap);
+      } catch {
+        // Chart data is optional — silently fail
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to compare stocks");
     } finally {
@@ -84,6 +148,17 @@ export default function ComparePage() {
     }
     return num.toFixed(decimals);
   };
+
+  const COLORS = [
+    "rgb(59, 130, 246)",   // blue
+    "rgb(239, 68, 68)",    // red
+    "rgb(16, 185, 129)",   // green
+    "rgb(245, 158, 11)",   // amber
+    "rgb(139, 92, 246)",   // violet
+    "rgb(236, 72, 153)",   // pink
+    "rgb(14, 165, 233)",   // sky
+    "rgb(168, 85, 247)",   // purple
+  ];
 
   const formatPrice = (price: number | undefined | null) => {
     if (price === undefined || price === null) return "—";
@@ -268,6 +343,90 @@ export default function ComparePage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Historical Performance Chart */}
+      {Object.keys(chartHistory).length >= 2 && chartLabels.length > 1 && (
+        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Normalized Performance (1 Month)
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            All stocks normalized to 100 at start date for fair comparison
+          </p>
+          <div className="h-72 md:h-80">
+            <Line
+              data={{
+                labels: chartLabels,
+                datasets: Object.entries(chartHistory).filter(([_, vals]) => vals.some(v => v > 0)).map(([symbol, values], idx) => ({
+                  label: symbol,
+                  data: values,
+                  borderColor: COLORS[idx % COLORS.length],
+                  backgroundColor: COLORS[idx % COLORS.length] + "20",
+                  fill: false,
+                  tension: 0.15,
+                  pointRadius: 0,
+                  pointHoverRadius: 4,
+                  borderWidth: 2,
+                })),
+              }}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: "index",
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    position: "top",
+                    labels: {
+                      usePointStyle: true,
+                      boxWidth: 8,
+                      padding: 16,
+                      font: { size: 11 },
+                    },
+                  },
+                  tooltip: {
+                    mode: "index",
+                    intersect: false,
+                    callbacks: {
+                      label: (ctx) => `${ctx.dataset.label}: ${(ctx.parsed.y ?? 0).toFixed(1)}`,
+                    },
+                  },
+                },
+                scales: {
+                  x: {
+                    grid: { display: false },
+                    ticks: {
+                      maxTicksLimit: 8,
+                      font: { size: 10 },
+                      maxRotation: 45,
+                    },
+                  },
+                  y: {
+                    beginAtZero: false,
+                    grid: {
+                      color: "rgba(0,0,0,0.05)",
+                    },
+                    ticks: {
+                      font: { size: 10 },
+                      callback: (v: string | number) => (typeof v === "number" ? v.toFixed(0) : v),
+                    },
+                    title: {
+                      display: true,
+                      text: "Normalized Price (Base 100)",
+                      font: { size: 11 },
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
+          <div className="mt-3 text-xs text-gray-400 text-center">
+            Y-axis shows price relative to first day (set to 100). Line above 100 = gain, below = loss.
           </div>
         </div>
       )}

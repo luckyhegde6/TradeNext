@@ -1,0 +1,90 @@
+# Version History v1.x
+
+> From TradeNext version history. Index: [../CHANGELOG.md](../CHANGELOG.md). Latest versions in [versions-v3.md](./versions-v3.md).
+
+- **v1.16.1** - Code Hygiene & Artifact Cleanup (July 18, 2026). Documented cleanup practices for Playwright snapshots, temp files, and pre-commit review:
+  - **Lessons.md**: Added "Playwright Snapshot Cleanup & Code Hygiene" lesson with cleanup checklist
+  - **AGENTS.md**: Added mandatory "Code Hygiene & Artifact Cleanup" section with checklist and common junk file table
+  - **checklist.md**: Added "Cleanup & Code Hygiene" section + Playwright `--filename` warning + cleanup-after-testing instructions
+  - **Before Every Commit Checklist**: Added code hygiene step (git status, junk files, secrets, dead code review)
+
+- **v1.16.0** - Advanced Screener & Chartink-Like Scanning (July 16, 2026). Complete Phase 1 of Advanced Screener system:
+  - **Filter Grammar Engine**: Created `lib/screener/condition-tree.ts` — recursive `FilterGroup`/`FilterCondition` types, 40+ filter fields, Zod schemas, `getRequiredColumns()`, `createDefaultFilterGroup()`.
+  - **Filter Evaluation Engine**: Created `lib/screener/filter-engine.ts` — `evaluateCondition()` (numeric/string operators), `evaluateFilterGroup()` recursive, `applyFilterGroup()`, `validateFilterGroup()`. Fixed `eq`/`neq` overload dispatch using `isNumericField()`.
+  - **Technical Analysis Library**: Created `lib/screener/technical-analysis.ts` — `computeSMA()`, `computeEMA()`, `computeRSI()`, `computeMACD()`, `computeBollinger()`, `detectCandlestickPatterns()` (Doji, Hammer, Shooting Star, Marubozu, Spinning Top, Bullish/Bearish Engulfing).
+  - **Backtest Engine**: Created `lib/screener/backtest-engine.ts` — OHLCV-based trade simulator with entry via FilterGroup, exit via profit target/stop-loss/trailing stop/max bars, position sizing, performance metrics (win rate, avg win/loss, max drawdown, Sharpe ratio).
+  - **TradingView Service Enhanced**: `lib/services/tradingview-service.ts` — `advancedScan()` with dynamic column list, `DEFAULT_COLUMNS` (14), `TECHNICAL_COLUMNS` (32).
+  - **Prisma Models**: Added `ScanConfig`, `ScanResult`, `ScanResultItem`, `BacktestRun`, `BacktestTrade` models. Deprecated `ScreenerConfig`, `ScreenerResult`, `SavedScreen`.
+  - **Backend APIs**: 10 API routes (`/api/screener/advanced`, `/api/screener/configs`, `/api/screener/configs/:id`, `/api/screener/configs/:id/run`, `/api/screener/export`, `/api/backtest/run`, `/api/backtest/runs`, `/api/backtest/runs/:id`, `/api/screener/templates`, `/api/screener/templates/:id`).
+  - **UI Components**: FilterBuilder (recursive condition tree), ScannedResultsTable (sortable/paginated), TemplatesPanel (98 presets, v2.2.0), ScanConfigsManager (inline edit/delete/share), BacktestDialog (metrics + equity curve SVG + trade table).
+  - **Chartink Analysis**: Reverse-engineered Chartink's DSL (`POST /screener/process`), API format, and trading pattern categories. Built native equivalent using TradingView directly.
+  - **Tests**: 45 tests across 3 suites (filter-engine: 22, technical-analysis: 16, backtest-engine: 7).
+  - **Files Created**: 20+ files in `lib/screener/`, `app/api/screener/`, `app/api/backtest/`, `app/components/screener/`.
+- **v1.15.0** - Agent Handoff & Self-Learning System (July 16, 2026). Complete overhaul of agent collaboration infrastructure:
+  - **Handoff File System**: Created `.agents/handoffs/` with standardized schema, lifecycle flows, and agent-to-agent handoff protocol. Root `HANDOFF.md` orchestrates state across sessions.
+  - **Agent Definitions**: Created 6 specialized agent profiles: GH Helper (diff review, code verify, bug fix), E2E Agent (Playwright flow testing), Integrator (merge/conflict resolution), Observability Checker (logging/metrics/security audit), DevOps (Docker/Vercel/Netlify/CICD), QA (test writing and E2E execution).
+  - **Self-Learning Loop**: Created `.agents/learning/` with session logs, pattern extraction, metrics tracking. Every session feeds into continuous improvement.
+  - **Agent Commands**: Added `/handoff`, `/self-learn`, `/review-diff` commands for explicit orchestration.
+  - **Git Hooks**: Added pre-commit (code quality, secrets detection) and post-commit (activity logging, checkpoint tracking) hooks.
+  - **Documentation Update**: Expanded AGENTS.md, Primer.md, agent-memory.md, Lessons.md with handoff patterns.
+  - **Files Created**: 20+ files in `.agents/` structure (handoffs, agents, learning, commands, hooks).
+- **v1.14.0** - MCP API for External NSE Data (March 27, 2026). Added unified API endpoint for external NSE data queries:
+  - **MCP Endpoint**: `/api/mcp` - Machine Communication Protocol for all NSE data
+  - **22 Functions**: getIndexData, getStockQuote, getStockChart, getGainers, getLosers, getMostActive, getAdvanceDecline, getCorporateActions, getCorporateInfo, getMarquee, getDeals, getAnnouncements, getInsiderTrading, getEvents, getHeatmap, getSymbols, getTrends, etc.
+  - **Authentication**: Optional API key via `x-api-key` header (configurable via `MCP_API_KEY`)
+  - **JSON Format**: Returns standardized response with success, function, data, timestamp
+  - **Caching**: All responses cached for performance (60s-3600s depending on data type)
+  - **Discovery**: Built-in `listFunctions`, `describe`, `schema`, `help` for API exploration
+- **v1.13.0** - Corporate Action Alerts (March 27, 2026). Added new alert types for corporate actions:
+  - **New Alert Types**: dividend_alert, bonus_alert, split_alert, rights_alert, buyback_alert, meeting_alert
+  - **Alert Service**: Added `checkCorporateActionAlerts()` function that scans upcoming corporate actions
+  - **Check API**: Enhanced `/api/alerts/check` to handle both price alerts and corporate action alerts
+  - **UI Updates**: Added corporate action alert options in `/alerts` page including minimum dividend filter
+  - **Notifications**: Enhanced alert messages to include action details (ex-date, purpose, ratio)
+  - **Real-time Fallback**: Alerts page triggers check on load for serverless environments
+- **v1.12.1** - Worker Engine Auto-Start Fix (March 27, 2026). Fixed worker engine and cron jobs not running in production:
+  - **Auto-Start Fix**: Worker engine now auto-starts on first admin GET request to `/api/admin/workers/engine` - no manual click needed
+  - **indexName Fallback**: Added default indexName to cron job payload based on task type (stock_sync → NIFTY TOTAL MARKET, corp_actions → NIFTY 50)
+  - **Error Logging**: Added better error handling and logging for invalid indexName in stock_sync task
+- **v1.12.0** - Netlify Build Fix & Performance Optimization (March 27, 2026). Fixed production deployment and added modern performance optimizations:
+  - **Secrets Scanning Fix**: Added `.opencode` and `opencode.json` to `SECRETS_SCAN_OMIT_PATHS` in `netlify.toml` to prevent build failures from demo password detection
+  - **Cache-Control Headers**: Added caching to key API routes (`/api/nse/indexes`, `/api/nse/marquee`, `/api/news/market`, `/api/nse/corporate-info`, `/api/nse/index/[index]`)
+  - **Lazy Loading**: Implemented React.lazy() for charts in `app/page.tsx` and `app/markets/[index]/page.tsx`
+  - **Web Vitals Monitoring**: Created `lib/metrics.ts` with performance utilities, `app/components/analytics/WebVitals.tsx` for Core Web Vitals tracking via Performance Observer API, and `app/api/metrics/web-vitals/route.ts` for metrics collection
+  - **Mobile Navigation Fix**: Added Calendar link to mobile menu in `app/Header.tsx`
+  - **NSE Deals API Fix**: Added `?mode=bulk_deals` parameter to return data
+  - **BulkDealsTable Fix**: Added proper TypeScript type annotations to render callback
+  - **Prisma Migration Fix**: Marked 28 migrations as applied using `npx prisma migrate resolve --applied`
+- **v1.11.1** - Worker Task Management Fix (March 21, 2026). Fixed worker task actions in admin panel:
+  - **Run Now Button**: Added to UI for pending/failed tasks - executes task immediately via PATCH API
+  - **Retry Button**: Added for failed tasks - resets and re-executes the task
+  - **Cancel Button**: Fixed to use PATCH API instead of PUT, properly updates status
+  - **Delete Button**: Fixed to use PATCH API with action: "delete"
+  - **API Endpoints**: All task actions now use consistent PATCH endpoint with action types
+- **v1.11.0** - Google Analytics & SEO Enhancement (March 21, 2026). Added comprehensive SEO and analytics integration:
+  - **Google Analytics 4**: Installed `@next/third-parties`, created `app/components/analytics/GoogleAnalytics.tsx` with GA4 integration. Only loads if `NEXT_PUBLIC_GA_ID` is set and validates GA ID format.
+  - **Custom Event Tracking**: Created `app/components/analytics/trackEvent.ts` with sanitized `trackEvent()`, `trackPageView()`, `trackTiming()`, and helper functions (`StockTracking`, `AdminTracking`).
+  - **SEO Metadata**: Created `app/components/seo/` with Organization, WebSite, WebPage, and Stock JSON-LD schemas. Added `SEOTags` component with comprehensive metadata.
+  - **Dynamic Sitemap**: Enhanced `app/sitemap.ts` with all public pages, priority levels, and change frequencies.
+  - **Robots.txt**: Enhanced `app/robots.ts` with Googlebot and Bingbot specific rules.
+  - **Page Metadata**: Added `metadata.ts` files to `/markets`, `/markets/screener`, `/markets/analytics`, `/portfolio`, `/news`, `/alerts` routes.
+  - **Root Layout Update**: Updated `app/layout.tsx` to include `<SEOTags />` and `<Analytics />` components.
+  - **Environment Variables**: Updated `.env.example` with `NEXT_PUBLIC_BASE_URL` and `NEXT_PUBLIC_GA_ID`.
+  - **Security**: All event tracking sanitizes inputs to prevent XSS. GA only loads with valid ID format.
+- **v1.10.6** - Worker Logger Security Fix (March 20, 2026). Fixed CodeQL security vulnerability in `lib/services/worker/worker-logger.ts` - uncontrolled data used in path expression. Added `sanitizeTaskIdForPath()` function to validate task IDs contain only safe filename characters (`/^[A-Za-z0-9_\-:.]+$/`), preventing path traversal attacks. Applied sanitization to `writeToBoth()`, `readLog()`, and `deleteLog()` functions.
+- **v1.10.5** - Corporate Actions NSE Field Fix (March 20, 2026). Fixed corporate actions sync saving all records as "OTHER" type. Root cause: NSE API uses lowercase field names (`subject`, `comp`, `recDate`, `faceVal`) but code looked for uppercase (`PURPOSE`, `COMPANY NAME`, `RECORD DATE`, `FACE VALUE`). Also fixed dividend amount field mismatch (`dividendPerShare` vs `dividendAmount`). Updated both `app/api/admin/nse/live-sync/route.ts` and `app/api/corporate-actions/combined/route.ts`. Added Subject, Face Value, and Price columns to Upcoming Actions table for uniform formatting with Historical table.
+- **v1.10.4** - Serverless Logging Fix (March 20, 2026). Added `ServerLog` model to database for persistent logging on serverless platforms (Netlify, Vercel). Created `lib/services/db-logger.ts` for DB-backed logging with helpers (`dbInfo`, `dbWarn`, `dbError`, `dbDebug`). Updated `lib/services/worker/worker-logger.ts` with DB fallback when file logging fails. Added `/api/admin/logs` API route for viewing and managing server logs with filtering (level, source, taskId). Schema synced via `prisma db push --accept-data-loss` since using Prisma Accelerate.
+- **v1.10.3** - Price Alert Current Price Display (March 20, 2026). Added current stock price display when creating price alerts and viewing existing alerts. Now shows "Current Price: ₹XXX" when selecting a stock symbol in the alert form. Also updated admin stats to properly show worker/cron status instead of "disabled".
+- **v1.10.2** - Worker Cache Key Type Fix (March 20, 2026). Fixed `stock_sync` worker task failing with "TypeError: indexName.replace is not a function". Root cause: `generateCacheKey` in `market-cache.ts` checked `if (indexName)` but didn't verify the type was string. Fixed by using `typeof indexName === 'string'` check.
+- **v1.10.1** - Corporate Actions Deduplication Fix (March 20, 2026). Fixed duplicate corporate actions being created during NSE sync. Root cause: deduplication logic only checked `symbol + exDate` but schema unique constraint is `symbol + actionType + exDate`. Also fixed timezone inconsistency in date parsing. All sync functions now use `upsert` with correct unique constraint and UTC noon dates.
+- **v1.10.0** - Stock Screener Enhancement (March 20, 2026). Fixed screener API to fetch live data directly from TradingView when database is empty. Added comprehensive filters: Quick Filters (High Volume, Top Gainers, Top Losers, Value Stocks, Growth Stocks, High Dividend), Basic Filters (Market Cap, Sector, Price, P/E, Volume, Relative Volume), and Advanced Filters (P/B Ratio, Dividend Yield, ROE, Debt/Equity). Enhanced table with color-coded metrics. Fixed `stocks.sort()` error when no data available.
+- **v1.9.3** - Build Fixes (March 19, 2026). Fixed Next.js 15+ async params in dynamic route handlers (`Promise<{ id: string }>`). Fixed Zod v4 error property (`issues` instead of `errors`). Regenerated Prisma client.
+- **v1.9.2** - Secure Join Request Flow (March 19, 2026). Replaced direct user signup with an admin-approved join request system. Implemented RBAC for `/users/*` and `/admin/*` routes. Added a tabbed management interface for admins and cleaned up legacy insecure routes.
+- **v1.9.1** - Notifications & UX Enhancements (March 18, 2026). Implemented a comprehensive Notifications Page at `/notifications`. Integrated triggered alerts into the notification feed. Added persistent logging via Netlify Blobs for serverless environments. Fixed NSE DB logging and centered the login modal.
+- **v1.9.0** - Worker Engine & NSE Sync (March 18, 2026). Implemented a persistent background worker and cron scheduler. Added automated NSE data synchronization for corporate actions, events, news, and market data. Introduced a dynamic logging system in `.next/server_logs` with elevated permissions.
+- **v1.8.3** - Corp Actions Seeding & Auth Stability (March 18, 2026). Fixed broken database seeding logic for corporate actions, eliminating Prisma Accelerate connection timeouts by batching inserts. Resolved a stubborn NextAuth "ghost session" bug that prevented proper logout.
+- **v1.8.2** - Netlify 502 Fix (March 16, 2026). Fixed 502 Bad Gateway error on Netlify. Root cause: Middleware with NextAuth was causing edge function crashes despite `runtime = 'nodejs'`. Solution: Created minimal middleware without NextAuth imports. Authentication now handled at API route level. Prisma Accelerate configuration fixed with `accelerateUrl` option.
+- **v1.8.1** - Build Fixes (March 16, 2026). Fixed Prisma 7 adapter configuration. Moved type packages to dependencies for Netlify. Fixed logger to output in production. Fixed netlify.toml syntax. Added startup logging for debugging 502 errors.
+
+---
+

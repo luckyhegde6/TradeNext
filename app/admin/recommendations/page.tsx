@@ -101,10 +101,10 @@ export default function AdminRecommendationsPage() {
 
   const fetchRecommendations = async () => {
     try {
-      const response = await fetch("/api/admin/recommendations");
+      const response = await fetch("/api/admin/stock-recommendations");
       if (!response.ok) throw new Error("Failed to fetch recommendations");
       const data = await response.json();
-      setRecommendations(data);
+      setRecommendations(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -136,7 +136,7 @@ export default function AdminRecommendationsPage() {
         targetPrice: form.targetPrice ? parseFloat(form.targetPrice) : null,
       };
 
-      const url = editingId ? "/api/admin/recommendations" : "/api/admin/recommendations";
+      const url = "/api/admin/stock-recommendations";
       const method = editingId ? "PUT" : "POST";
 
       const response = await fetch(url, {
@@ -183,7 +183,7 @@ export default function AdminRecommendationsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this recommendation?")) return;
     try {
-      const response = await fetch(`/api/admin/recommendations?id=${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/stock-recommendations?id=${id}`, { method: "DELETE" });
       if (!response.ok) throw new Error("Failed to delete");
       fetchRecommendations();
     } catch (err) {
@@ -198,7 +198,7 @@ export default function AdminRecommendationsPage() {
     try {
       await Promise.all(
         Array.from(selectedIds).map((id) =>
-          fetch(`/api/admin/recommendations?id=${id}`, { method: "DELETE" })
+          fetch(`/api/admin/stock-recommendations?id=${id}`, { method: "DELETE" })
         )
       );
       setSelectedIds(new Set());
@@ -214,7 +214,7 @@ export default function AdminRecommendationsPage() {
     try {
       const results = await Promise.all(
         Array.from(selectedIds).map((id) =>
-          fetch("/api/admin/recommendations", {
+          fetch("/api/admin/stock-recommendations", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id, isActive: activate }),
@@ -236,7 +236,7 @@ export default function AdminRecommendationsPage() {
 
   const handleToggleActive = async (rec: StockRecommendation) => {
     try {
-      const response = await fetch("/api/admin/recommendations", {
+      const response = await fetch("/api/admin/stock-recommendations", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rec.id, isActive: !rec.isActive }),

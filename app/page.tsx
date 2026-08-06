@@ -120,7 +120,16 @@ export default async function Home() {
               >
                 <span className="text-2xl">🔍</span>
                 <span className="text-sm font-bold text-purple-600 dark:text-purple-400 group-hover:underline">Analytics</span>
-                <span className="text-xs text-gray-400 dark:text-slate-500">Screener</span>
+                <span className="text-xs text-gray-400 dark:text-slate-500">Data Analysis</span>
+              </Link>
+
+              <Link
+                href="/markets/screener"
+                className="group flex flex-col items-center justify-center gap-1.5 p-4 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-md transition-all text-center"
+              >
+                <span className="text-2xl">🔎</span>
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-400 group-hover:underline">Screener</span>
+                <span className="text-xs text-gray-400 dark:text-slate-500">Stock Screener</span>
               </Link>
 
               <Link

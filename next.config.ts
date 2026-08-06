@@ -5,7 +5,10 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     'node-fetch',
     'tough-cookie',
-    'fetch-cookie'
+    'fetch-cookie',
+    'pg',
+    'pg-native',
+    'pgpass'
   ],
   // Ensure proper headers for production
   async headers() {

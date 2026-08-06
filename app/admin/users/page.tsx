@@ -10,6 +10,8 @@ interface User {
     role: string;
     isVerified: boolean;
     isBlocked: boolean;
+    telegramChatId: string | null;
+    telegramVerified: boolean;
     createdAt: string;
     updatedAt: string;
     _count: {
@@ -325,6 +327,7 @@ export default function AdminUsersPage() {
                                     <tr className="bg-gray-50/50 dark:bg-slate-800/30 text-xs font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest border-b dark:border-slate-800">
                                         <th className="px-6 py-4">User Details</th>
                                         <th className="px-6 py-4">Account Status</th>
+                                        <th className="px-6 py-4">Telegram</th>
                                         <th className="px-6 py-4">Activity</th>
                                         <th className="px-6 py-4 text-right">Actions</th>
                                     </tr>
@@ -332,7 +335,7 @@ export default function AdminUsersPage() {
                                 <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
                                     {users.length === 0 ? (
                                         <tr>
-                                            <td colSpan={4} className="px-6 py-10 text-center text-gray-500 dark:text-slate-400 font-medium"> No users found. </td>
+                                            <td colSpan={5} className="px-6 py-10 text-center text-gray-500 dark:text-slate-400 font-medium"> No users found. </td>
                                         </tr>
                                     ) : (
                                         users.map((user) => (
@@ -366,6 +369,27 @@ export default function AdminUsersPage() {
                                                             </span>
                                                         )}
                                                     </div>
+                                                </td>
+                                                <td className="px-6 py-5">
+                                                    {user.telegramVerified ? (
+                                                        <div className="flex flex-col space-y-1.5">
+                                                            <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase leading-none rounded-lg bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 w-fit">
+                                                                Linked
+                                                            </span>
+                                                            <p className="text-[10px] text-gray-400 font-mono">ID: {user.telegramChatId}</p>
+                                                        </div>
+                                                    ) : user.telegramChatId ? (
+                                                        <div className="flex flex-col space-y-1.5">
+                                                            <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase leading-none rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 w-fit">
+                                                                Pending
+                                                            </span>
+                                                            <p className="text-[10px] text-gray-400 font-mono">ID: {user.telegramChatId}</p>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase leading-none rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-500">
+                                                            Not linked
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-5">
                                                     <div className="flex flex-col space-y-1.5">
@@ -425,6 +449,25 @@ export default function AdminUsersPage() {
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                                                             </svg>
                                                         </button>
+                                                        {user.telegramChatId && (
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (!confirm(`Unlink Telegram from ${user.email}? They will lose Telegram alert delivery.`)) return;
+                                                                    const res = await fetch(`/api/admin/users/${user.id}`, {
+                                                                        method: 'PUT',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ telegramChatId: null, telegramVerified: false })
+                                                                    });
+                                                                    if (res.ok) fetchUsers();
+                                                                }}
+                                                                className="p-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-all"
+                                                                title="Unlink Telegram"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                                                                </svg>
+                                                            </button>
+                                                        )}
                                                         <Link href={`/admin/users/${user.id}`}>
                                                             <button className="p-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all" title="View Profile">
                                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

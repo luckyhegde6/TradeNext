@@ -1,0 +1,15 @@
+#!/bin/sh
+# Pre-push hook — TradeNext (gardenify pattern, warn-only)
+# Warns when pushing directly to main/master. Solo-repo policy: warn, don't block.
+
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+    echo ""
+    echo "  ⚠️  WARNING: Pushing directly to '$BRANCH'."
+    echo "     TradeNext uses warn-only for solo work. For larger features,"
+    echo "     prefer a branch + PR workflow: git checkout -b fix/your-change"
+    echo ""
+fi
+
+exit 0

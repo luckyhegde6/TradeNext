@@ -23,7 +23,7 @@ const openapi = {
         description: `## TradeNext Market Intelligence Platform API
 
 ### Quick Links
-- [MCP API](/api/mcp) - Unified NSE data queries (22 functions)
+- [MCP API](/api/mcp) - Unified NSE data queries (23 functions)
 - [API Documentation](/api/openapi) - This OpenAPI spec
 
 ### For AI Agents
@@ -1484,6 +1484,59 @@ This API is designed for programmatic access. Key endpoints:
             }
         },
 
+        // ==================== Backtest ====================
+        '/api/backtest/run': {
+            post: {
+                summary: 'Run a backtest for a single symbol',
+                description: 'Runs a backtest against historical OHLCV data. Data is fetched through the cache chain: memory (24h) → backtest_history temp table → daily_prices (read-only) → NSE live. NSE-fetched bars are NEVER written to main daily_prices. Response includes dataSource: "memory" | "db" | "daily_prices" | "nse".',
+                tags: ['Backtest'],
+                security: securityBearer,
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    symbol: { type: 'string', description: 'Stock symbol (e.g., RELIANCE)' },
+                                    entryFilter: { type: 'object', description: 'FilterGroup condition tree for entry' },
+                                    exitFilter: { type: 'object', description: 'Optional FilterGroup condition tree for exit' },
+                                    profitTarget: { type: 'number', description: 'Profit target %' },
+                                    stopLoss: { type: 'number', description: 'Stop loss %' },
+                                    trailingStop: { type: 'number', description: 'Trailing stop %' },
+                                    maxHoldingBars: { type: 'number', description: 'Max holding period in bars' },
+                                    initialCapital: { type: 'number', description: 'Starting capital (required, positive)' },
+                                    positionSizePercent: { type: 'number', description: 'Position size as % of capital' },
+                                    name: { type: 'string', description: 'Optional run name' }
+                                },
+                                required: ['symbol', 'entryFilter', 'initialCapital']
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    '200': {
+                        description: 'Backtest completed',
+                        content: {
+                            'application/json': {
+                                example: {
+                                    success: true,
+                                    run: { id: 1, name: 'Backtest: RELIANCE', status: 'completed', totalTrades: 12 },
+                                    metrics: { totalTrades: 12, winRate: 58.3, totalReturn: 24.5, maxDrawdownPercent: 8.2, sharpeRatio: 1.4 },
+                                    trades: [],
+                                    barCount: 1250,
+                                    dataSource: 'nse'
+                                }
+                            }
+                        }
+                    },
+                    '400': { description: 'Bad Request - missing/insufficient data' },
+                    '401': { description: 'Unauthorized' },
+                    '404': { description: 'Symbol not found' },
+                    '500': { description: 'Internal Server Error' }
+                }
+            }
+        },
+
         // ==================== MCP API (Machine Communication Protocol) ====================
         '/api/mcp': {
             post: {
@@ -1502,6 +1555,7 @@ This API is designed for programmatic access. Key endpoints:
                                         enum: [
                                             'listFunctions', 'describe', 'schema', 'help',
                                             'getIndexData', 'getMarketIndices', 'getStockQuote', 'getStockChart',
+                                            'getHistoricalData',
                                             'getGainers', 'getLosers', 'getMostActive', 'getAdvanceDecline',
                                             'getCorporateActions', 'getCorporateInfo', 'getMarquee', 'getDeals',
                                             'getAnnouncements', 'getInsiderTrading', 'getEvents', 'getHeatmap',
@@ -1519,7 +1573,9 @@ This API is designed for programmatic access. Key endpoints:
                                             interval: { type: 'string', description: 'Data interval (1min, 5min, 15min, 30min, 1hour, 1day)' },
                                             mode: { type: 'string', description: 'Deals mode (block_deals, bulk_deals)' },
                                             functionName: { type: 'string', description: 'Function name for describe/schema' },
-                                            minDividend: { type: 'number', description: 'Minimum dividend for filtering' }
+                                            minDividend: { type: 'number', description: 'Minimum dividend for filtering' },
+                                            from: { type: 'string', description: 'Start date (YYYY-MM-DD) — for getHistoricalData' },
+                                            to: { type: 'string', description: 'End date (YYYY-MM-DD) — for getHistoricalData' }
                                         }
                                     }
                                 },

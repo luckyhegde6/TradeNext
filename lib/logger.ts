@@ -29,6 +29,15 @@ const getNetlifyLogger = () => {
 // Log levels
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
+// Trace context import (lazy to avoid circular)
+let _traceModule: typeof import('./trace') | null = null;
+function getTrace() {
+  if (!_traceModule && isServer) {
+    try { _traceModule = require('./trace'); } catch { /* ignore */ }
+  }
+  return _traceModule;
+}
+
 // Log entry interface
 interface LogEntry {
   timestamp: string;
@@ -263,7 +272,14 @@ function formatLogEntry(level: LogLevel, message: string | object, ...args: any[
     ? ' | ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(', ')
     : '';
 
-  return `${timestamp} | ${levelColor} ${levelStr} | ${msgStr}${extraArgs}`;
+  // Add trace context if available
+  const trace = getTrace();
+  const traceCtx = trace?.getTraceContext();
+  const tracePrefix = traceCtx
+    ? `[trace=${traceCtx.traceId} span=${traceCtx.spanId} corr=${traceCtx.correlationId}] `
+    : '';
+
+  return `${timestamp} | ${levelColor} ${levelStr} | ${tracePrefix}${msgStr}${extraArgs}`;
 }
 
 // Write to file - but ALWAYS log to console first

@@ -500,10 +500,18 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 - [ ] Read Lessons.md
 - [ ] Apply all relevant rules
 - [ ] Check middleware doesn't use NextAuth (for Netlify)
+- [ ] Git hooks don't write to tracked files (check post-commit, pre-commit)
 - [ ] Verify Prisma configuration (accelerateUrl vs adapter)
 - [ ] Verify dependencies in package.json
 - [ ] Test build locally (`npm run quickbuild`)
 - [ ] Check for console.log in critical paths (debugging)
+- [ ] **CODE HYGIENE: Clean up artifacts before commit**:
+      - [ ] Run `git status` — review ALL untracked and modified files
+      - [ ] Delete junk artifacts: Playwright snapshots (`*.yaml`), screenshots, temp logs
+      - [ ] Verify `.gitignore` covers common artifact patterns (`.yaml`, `.log`, `test-results/`)
+      - [ ] Ensure no dead code, commented-out code, or debug `console.log` statements
+      - [ ] Check no secrets/tokens/passwords appear in the diff
+      - [ ] Review diff size — if unexpectedly large, investigate each file
 - [ ] **MANDATORY: Update ALL documentation files**:
       - [ ] **AGENTS.md** - Version history + detailed change section
       - [ ] **Primer.md** - Current status + session history
@@ -535,7 +543,129 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-03-21 00:00
+2026-07-16 08:25
+
+## Advanced Screener Lessons (v1.16.0)
+
+### Handoff File Protocol
+**Rule**: Always use the handoff file system for session context preservation.
+
+**Problem**: Without standardized handoff files, agent sessions lose context on restart, preventing multi-agent collaboration and self-improvement.
+
+**Solution**:
+```yaml
+# Required YAML frontmatter for all handoff files
+---
+handoff_version: "1.0"
+session_id: "sess-YYYYMMDD-HHMMSS"
+agent: "agent-type"
+timestamp: "2026-07-16T10:30:00Z"
+status: "in_progress"
+priority: "high"
+---
+```
+
+### Session Start Protocol
+**Rule**: Every agent MUST read these files in order at session start:
+1. `HANDOFF.md` - Current orchestration state
+2. `.agents/handoffs/active/latest.md` - Current handoff context
+3. `Primer.md` - Project status
+4. `Lessons.md` - Rules and corrections
+
+**Why**: Ensures that agents work with complete context even after session restarts or agent switches.
+
+### Agent Pipeline Protocol
+**Rule**: Use the defined agent pipeline for complex workflows:
+- GH Helper → Integrator → QA → DevOps
+- Observability runs cross-cutting at any stage
+
+**Why**: Each agent has specialized tools and focus. The pipeline ensures quality gates at each step.
+
+### Advanced Screener Lessons (v1.16.0)
+
+**Chartink Architecture**: Chartink is a TradingView wrapper — `POST /screener/process` with DSL like `( {cash} ( market cap > 10000 ) )`, returns DataTables format. Our direct TV integration is architecturally superior: no middleman, no session cookies, no ToS concerns.
+
+**FilterBuilder Type Safety**: `ConditionValue` is a union type; use `as any` on the full condition object in helper functions rather than fighting TypeScript union narrowing.
+
+**Dev Server Management**: Use `start /B cmd /c "npx next dev -p 3000" > next-dev.log 2>&1` from cmd.exe to background the process. Never run long-lived processes in the main agent shell.
+
+**Multi-Value Input**: For "in"/"not_in" operators, use comma-separated text with onBlur commit to array. Split, trim, filter empty. Simplest UX for list operators.
+
+**Backtest Scope**: Backtest runs per-symbol against DailyPrice data, not a full scan set. UI flow: scan → select stock → backtest.
+
+### Playwright Snapshot Cleanup & Code Hygiene (v1.16.0)
+
+**Issue**: Playwright CLI `snapshot` command dumps `.yaml` files in the current working directory by default. These are artifacts, NOT source code, and must not be committed.
+
+**Root Cause**: Calling `npx playwright-cli snapshot` without `--filename=` flag creates timestamped `.yaml` files in the root directory. These files are not covered by `.gitignore` and show up as untracked.
+
+**Solution**:
+1. **Always use `--filename=` flag** with a path inside a temp/ignored directory:
+   ```bash
+   npx playwright-cli snapshot --filename=.playwright-cli/snapshots/test-1.yaml
+   ```
+2. **If snapshots end up in root**, delete them immediately:
+   ```bash
+   del /f /q *.yaml
+   ```
+3. **Before committing, always run `git status`** to check for:
+   - Junk artifact files (`.yaml`, `.png`, `.log`, etc.)
+   - Unexpected untracked files
+   - Stale build artifacts
+
+**Code Hygiene Checklist Before Commit**:
+```markdown
+- [ ] Run `git status` — review all untracked and modified files
+- [ ] Delete junk artifacts: Playwright snapshots (*.yaml), screenshots, temp logs
+- [ ] Verify `.gitignore` covers common artifact patterns
+- [ ] Ensure no dead code, commented-out code, or console.log statements remain
+- [ ] Check no secrets/tokens/passwords in the diff
+- [ ] Review diff line count — if unexpectedly large, investigate
+```
+
+**Why This Matters**:
+- Junk files in git history bloat the repository forever
+- Playwright snapshots contain volatile element IDs that change on every run
+- Clean diffs make code review faster and more reliable
+- Future agents trust the repository state — don't pollute it
+
+### Self-Learning Loop
+**Rule**: After every significant session, run `/self-learn` to extract patterns.
+
+**What to Extract**:
+- **Good Patterns**: Things that worked well → promote to practices
+- **Anti-Patterns**: Things that failed → add to Lessons.md
+- **Metrics**: Build success rate, test pass rate, time to first commit
+
+### Pre-Commit Secrets Detection
+**Issue**: Hardcoded credentials may leak to git history
+**Solution**: Pre-commit hook checks staged changes for:
+- `password`, `secret`, `api_key`, `auth_token` followed by long string values
+- Rejects commit if potential secrets found
+- Also warns about `console.log` statements
+
+### Git Hooks Must NOT Modify Tracked Files ⚠️
+**Issue**: Post-commit hook writing to `agent-memory.md` and `latest.md` (tracked files) created an infinite loop:
+1. Commit → hook appends to tracked files → unstaged changes appear
+2. Those get committed → hook runs again → infinite loop
+3. Result: 2 auto-generated noise commits (`bb83e21`, `65ccaac`)
+
+**Solution**: Git hooks must ONLY write to NON-TRACKED files:
+```bash
+# ✅ CORRECT - write to gitignored file
+echo "checkpoint" >> .agents/handoffs/checkpoint.log  # *.log is in .gitignore
+
+# ❌ WRONG - modifies tracked files, creates infinite loop
+echo "checkpoint" >> agent-memory.md     # tracked!
+echo "checkpoint" >> latest.md           # tracked!
+```
+
+**Rule**: Before any git hook writes to a file, verify it's gitignored:
+```bash
+git check-ignore <file>  # Returns filename if ignored, empty if tracked
+```
+
+**Also**: Pre-commit hook had a minor shell bug where `grep -c` output `"0\n0"` (two lines) instead of just `0` on some systems. Fixed by using simpler integer comparison.
 
 ## SEO & Analytics Implementation (v1.11.0)
 
@@ -577,7 +707,288 @@ export function trackEvent(action: string, category: string, options?: { label?:
 
 ---
 
+### 24. Dev Server Startup — Avoid Blocking the LLM (v3.2.0, updated v3.3.1)
+**Issue**: Running `npm run dev` in a shell via `start /B` or `Start-Process -NoNewWindow` blocks the LLM tool call, preventing further operations.
+
+**Root Cause**: The shell tool waits for the process to exit. Even background processes that redirect output can hold the shell open if not properly detached. `start /B cmd /C "npm run dev > file.log 2>&1"` still blocks because Next.js keeps file handles open.
+
+**Solution (v3.3.1 — Recommended)**: Use PowerShell `System.Diagnostics.ProcessStartInfo` with `CreateNoWindow = $true`:
+```powershell
+# scripts/start-dev-bg.ps1
+$psi = New-Object System.Diagnostics.ProcessStartInfo;
+$psi.FileName = 'cmd.exe';
+$psi.Arguments = '/c cd /d <PROJECT_DIR> && npm run dev > <PROJECT_DIR>\dev-server.log 2>&1';
+$psi.UseShellExecute = $false;
+$psi.CreateNoWindow = $true;
+$psi.RedirectStandardOutput = $false;
+$psi.RedirectStandardError = $false;
+$p = [System.Diagnostics.Process]::Start($psi);
+Write-Output $p.Id
+```
+This returns immediately with the PID, and the dev server runs independently.
+
+**npm script**: `"dev:bg": "powershell -ExecutionPolicy Bypass -File scripts/start-dev-bg.ps1"`
+
+**Cleanup**: Kill the process when done:
+```bash
+taskkill /PID <PID> /F
+```
+
+### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0)
+**Issue**: Build fails with `Module not found: Can't resolve 'dns'` or `pg` when client components import from service files that import Prisma.
+
+**Root Cause**: Next.js client bundle attempts to resolve all imports from a client component, including Node.js built-in modules and database drivers used by services. Even though client components only use types, the bundler follows the entire import chain.
+
+**Solution**: Extract type definitions and constants into a separate `rebalancerTypes.ts` file that has ZERO server-side imports:
+```typescript
+// lib/services/rebalancerTypes.ts — Client-safe types
+export interface AllocationCategory { ... }
+export interface RebalancerAction { ... }
+export const DEFAULT_SECTOR_TARGETS = [ ... ];
+
+// lib/services/rebalancerService.ts — Server-only logic (imports Prisma)
+import { PrismaClient } from '@prisma/client';
+import { AllocationCategory } from './rebalancerTypes';
+```
+
+**Key Rules**:
+1. Client components ONLY import from the `*Types.ts` file
+2. Server API routes import from the main service file
+3. NEVER import Prisma, database adapters, or Node.js modules in files that client components import
+4. Check all client component imports of a service file when introducing a new one
+
+## Lessons from Daily Recommendations Implementation (v3.3.0)
+
+### 26. Hybrid API Fallback Pattern
+**Issue**: External APIs (Chartink) may be unreliable or have rate limits.
+**Solution**: Always implement fallback to equivalent data source.
+**Example**: Try Chartink `POST /screener/process` first, fall back to TradingView screener templates with equivalent filters.
+**Trade-off**: More code to maintain, but significantly higher reliability.
+
+### 27. AI Batch Processing for Token Limits
+**Issue**: Processing many stocks in a single AI call exceeds token limits.
+**Solution**: Process in batches of 5 stocks, accumulate results, handle partial failures gracefully.
+**Pattern**: 
+```typescript
+for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
+  const batch = stocks.slice(i, i + BATCH_SIZE);
+  try { const results = await analyzeBatch(batch); allResults.push(...results); }
+  catch (e) { logger.warn({ msg: 'Batch failed', batchIndex: i/BATCH_SIZE }); }
+}
+```
+
+### 28. Cron Job Timezone Handling
+**Issue**: Cron expressions in UTC cause confusion for IST-based schedules.
+**Solution**: Always document timezone in comments and use UTC offset with clear mapping:
+- 10 AM IST = 04:30 UTC
+- 3:30 PM IST = 10:00 UTC
+
+### 29. Public vs Authenticated API Routes
+**Issue**: Some routes need auth, others don't, but NextAuth middleware can't distinguish easily.
+**Solution**: Define auth at the route handler level, not middleware:
+```typescript
+// Public route - no auth check
+export async function GET() { return NextResponse.json(data); }
+// Protected route - explicit auth check
+export async function GET() { const session = await auth(); if (!session) return 401; }
+```
+
+### 30. Tracker Entity Pattern
+**Issue**: Recommendation status needs to be tracked over time (active → target_achieved / stop_loss_hit / expired).
+**Solution**: Use separate `RecommendationTracker` (long-lived) + `DailyRecommendationStock` (per-run) + `RecommendationStatusHistory` (audit trail). Don't cram status into a single model.
+
+### 31. Circuit Breaker for External Services
+**Issue**: AI provider failures cascade and block entire system.
+**Solution**: Implement circuit breaker with 3 states (CLOSED → OPEN → HALF_OPEN), auto-recovery after cooldown period.
+**Pattern**: Track failure count, reset on success, open circuit at threshold (3 failures), close after successful half-open probe.
+
+### 32. Unified Event Model for Audit
+**Issue**: Multiple event types (Telegram, AI, screener, system health) scattered across different models.
+**Solution**: Create single `UnifiedEvent` model with `eventType` discriminator. Easier to query, paginate, and detect anomalies across all event types.
+
+### 33. Prediction Accuracy Tracking
+**Issue**: No way to measure if AI recommendations are actually good.
+**Solution**: Track entry price vs current price after 1 week, 1 month, 3 months. Classify as win (>5%), breakeven (±5%), loss (>5% negative). Calculate overall accuracy and trigger prompt adjustment when accuracy drops below 40%.
+
+### 34. Prompt Versioning with Auto-Adjustment
+**Issue**: AI prompts degrade over time as market conditions change.
+**Solution**: Version every prompt, track accuracy per version, auto-adjust when: (a) accuracy drops below 40%, (b) consecutive losses exceed 5, (c) 30 days have passed since last adjustment. Fall back to previous version if new version performs worse.
+
+### 35. Screener Deduplication by Symbol
+**Issue**: Multiple screeners returning same stock causes duplicates in recommendations.
+**Solution**: Deduplicate by symbol, track which screeners found each stock (screenerAttribution), sort by screenerCount (more screeners = stronger signal).
+
+### 36. SWC + jest.mock() — TDZ Pattern for Complex Mocks ⚠️
+**Issue**: `import { jest } from "@jest/globals"` prevents SWC from hoisting `jest.mock()` calls. Also, complex mock objects (with Prisma) cause TDZ ReferenceError because SWC hoists the `jest.mock()` call ABOVE the `const` declaration.
+**Root Cause**: SWC transformer hoists `jest.mock()` to top of file, but `const` variables are in temporal dead zone until their declaration line.
+**Solution**: Define mock objects INSIDE the `jest.mock()` factory function (which runs at import time), then retrieve them via `require()` after imports:
+```typescript
+jest.mock("@/lib/prisma", () => {
+  const mockPrisma = {
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
+    // ... other methods
+  };
+  return { __esModule: true, default: mockPrisma };
+});
+
+// After all imports:
+const prisma = require("@/lib/prisma").default;
+beforeEach(() => {
+  prisma.user.findUnique.mockResolvedValue(null);
+});
+```
+**Key Rules**:
+1. NEVER use `import { jest } from "@jest/globals"` — use global `jest`
+2. Complex mocks (Prisma, services) MUST be defined inside factory
+3. Retrieve via `require()` after imports for `beforeEach` reset
+4. Always add `{ __esModule: true }` for default exports
+
+### 37. CodeQL Modulo Bias in Random Code Generation
+**Issue**: `crypto.randomBytes(4).readUInt32BE(0) % 1000000` has modulo bias because 2^32 is not evenly divisible by 1000000.
+**Impact**: Some 6-digit codes are slightly more probable than others (high-severity CodeQL alert).
+**Solution**: Use `crypto.randomInt(1000000)` — cryptographically secure, no modulo bias, cleaner code.
+**Alternative**: `Math.floor(Math.random() * 1000000).toString().padStart(6, '0')` for non-crypto contexts.
+
+### 38. AI Response Parsing — Symbol Matching Priority
+**Issue**: `parseAIResponse` in recommendation-agent.ts used `parsed[idx] || symbolMatch`, so when AI returns results in different order than input, symbol matching was deprioritized.
+**Root Cause**: AI models (especially smaller ones) may return BUY/HOLD/SELL in arbitrary order, not matching input stock order.
+**Solution**: Swap to `symbolMatch || parsed[idx]` — symbol matching is ALWAYS prioritized over positional matching.
+**Lesson**: When parsing AI responses, never assume order matches input. Always match by content (symbol name) first.
+
+### 39. Retry Mock Count Must Match RETRY_MAX
+**Issue**: Test for batch retry failure only provided 1 `mockRejectedValueOnce()` but RETRY_MAX=2, so batch actually succeeded after first retry.
+**Root Cause**: With RETRY_MAX=2, a batch fails twice before giving up. Need exactly 2 rejection mocks.
+**Solution**: Match mock count to retry configuration:
+```typescript
+for (let i = 0; i < BATCHES; i++) {
+  mockReject(2); // RETRY_MAX = 2
+}
+```
+**Rule**: Always check retry configuration before writing retry failure tests.
+
+---
+
+### 40. Production Build Must Include Prisma Migrate Deploy
+**Issue**: Netlify build used `quickbuild` (`next build`) which only generates the Prisma client but never applies schema migrations to the database. Production had 29 missing tables from v3.3.0, causing 500 errors on `/api/recommendations` and empty pages.
+**Root Cause**: `netlify.toml` build command was `npx prisma generate && npm run quickbuild`. The `quickbuild` script was introduced for faster local builds but was accidentally used in production.
+**Solution**: Use `npm run build` which runs `npx prisma migrate deploy && next build`.
+**Rule**: **NEVER** use `quickbuild` in production build configs. Always ensure `prisma migrate deploy` runs before `next build` in any production/deployment pipeline.
+**Pattern**:
+```toml
+# netlify.toml
+[build]
+  command = "npm run build"  # ✅ runs migrate deploy + next build
+  # command = "npm run quickbuild"  # ❌ skips migrations!
+```
+
+---
+
+### 41. Prisma @@map Table Names vs Model Names in Raw SQL
+**Issue**: Raw SQL queries used model names (`daily_recommendation_runs`, `daily_recommendation_stocks`) but Prisma `@@map` renames them to different table names (`daily_recommendation_runs` → `daily_recommendation_runs` BUT `RecommendationTracker` → `recommendation_trackers`, `DailyRecommendationStock` → `daily_recommendation_stocks`).
+**Root Cause**: Prisma model names and DB table names diverge when `@@map` is used. Prisma Client uses the model name, but raw SQL must use the actual DB table name from `@@map`.
+**Solution**: Always check `prisma/schema.prisma` for `@@map()` directives before writing raw SQL. The pattern is:
+```prisma
+model DailyRecommendationStock {  // ← Prisma model name
+  @@map("daily_recommendation_stocks")  // ← Actual DB table name
+}
+```
+**Rule**: Raw SQL = `@@map` name. Prisma Client = model name. Never assume they match.
+
+### 42. Prisma Column Naming — camelCase vs snake_case
+**Issue**: Raw SQL queries used `trade_date` but the actual column in the DB is `"tradeDate"` (camelCase). Caused 500 errors on dividend calendar and corporate actions endpoints.
+**Root Cause**: Prisma preserves the TypeScript field name as the column name by default. When the Prisma field is `tradeDate Date @map("tradeDate")`, the DB column is `"tradeDate"` (with quotes for camelCase). Raw SQL must use the exact column name including case.
+**Solution**: Check the Prisma migration files or `prisma db pull` output for exact column names. When Prisma uses camelCase, raw SQL must quote it: `"tradeDate"`, not `trade_date`.
+**Rule**: Before writing raw SQL against a Prisma-managed table, always verify exact column names from migration files or schema introspection.
+
+### 43. AI Admin Test — Use directPrompt() Not Full Agent
+**Issue**: AI admin "Test Connection" button called `/api/ai/screener` which runs the full agent pipeline with tools (DB writes, stock fetching). Connection test should be lightweight.
+**Solution**: Create a dedicated `/api/admin/ai/test` endpoint that uses `directPrompt()` from `llm-provider.ts` — sends a simple "Say hello" message with DB-saved config. Returns `{ success, response, model, elapsed }`.
+**Pattern**: For config test endpoints, always use the simplest possible prompt and skip all tool execution. Save DB writes for actual production runs.
+
+### 44. Telegram Bot Webhook vs Local Database Mismatch
+**Issue**: User links Chat ID on local dev server, but Telegram bot webhook hits production server — bot responds "Account not linked" because production DB has no record.
+
+**Root Cause**: User linked Chat ID on `localhost:3000` (local PostgreSQL), but Telegram webhook was set to `tradenext6.netlify.app/api/telegram/webhook` (production Prisma Accelerate DB). Different databases = missing record.
+
+**Solution**: Either (a) set webhook to local via tunnel (`ngrok http 3000`), or (b) re-link Chat ID on the production site so both databases have the record.
+
+**Diagnostic Query**: To verify linking, query the User table for `telegramChatId`:
+```typescript
+await prisma.user.findMany({
+  where: { telegramChatId: { not: null } },
+  select: { id: true, name: true, email: true, telegramChatId: true, telegramVerified: true }
+});
+```
+
+**Rule**: When testing Telegram bot locally, always verify which database the webhook is hitting. Use `ngrok` or similar tunnel for local webhook testing.
+
+### 45. Prisma 7 Requires Adapter for External Scripts
+**Issue**: Creating a `PrismaClient` without adapter in a standalone script fails with `PrismaClientInitializationError`.
+
+**Root Cause**: Prisma 7 with driver adapters (e.g., `@prisma/adapter-pg`) requires the adapter to be passed during construction. Plain `new PrismaClient()` doesn't work when the project uses `PrismaPg` adapter.
+
+**Solution**: For standalone scripts, always create a Pool + PrismaPg adapter:
+```typescript
+const { PrismaClient } = require('.prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const client = new PrismaClient({ adapter: new PrismaPg(pool) });
+```
+
+### 46. Prisma Interactive $transaction Expires in Serverless (5000ms) — Use runInChunks
+**Issue**: Prod daily recommendation run failed with `Transaction API error: A rollback cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5501 ms passed`. The run took ~50s (AI batches of 5, RETRY_MAX=2) so the interactive `$transaction` exceeded the 5s Prisma limit.
+
+**Root Cause**: Interactive `$transaction` (callback form) in Prisma has a 5000ms default timeout in serverless (Prisma Accelerate) environments. Long-running batch pipelines — screeners → dedup → AI analysis → DB writes — exceed this.
+
+**Solution**: Replace interactive `$transaction` with a `runInChunks()` bounded-concurrency helper — sequential chunks with configurable batch size, each chunk awaited individually so no single DB call blocks a transaction:
+```typescript
+async function runInChunks<T>(items: T[], batchSize: number, fn: (chunk: T[]) => Promise<void>) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await fn(items.slice(i, i + batchSize)); // each chunk is its own operation
+  }
+}
+```
+Also fire-and-forget non-critical writes (predictions/events) with `.catch()` so a slow DB write never blocks the run.
+
+**Rule**: Any long-running multi-step DB pipeline must use chunked sequential writes, never one interactive `$transaction` that can exceed the serverless 5s limit.
+
+### 47. Cache Invalidation After Background Price/Status Updates
+**Issue**: Telegram daily recommendations stayed stale (showed old prices/statuses) for up to 23h even though `checkRecommendationPerformance()` updated tracker prices at the 3:30 PM IST cron.
+
+**Root Cause**: The `recommendationsCache` NodeCache has a 23h TTL. The performance check updated the DB but never invalidated the cache (`LATEST_KEY`), so every read (`getLatestRecommendations`, Telegram handlers) returned cached data.
+
+**Solution**: Any background job that mutates data behind a long-TTL cache MUST invalidate that cache when done:
+```typescript
+export async function checkRecommendationPerformance() {
+  // ... update trackers ...
+  invalidateRecommendationsCache(); // ← critical
+}
+```
+
+**Rule**: Cache invalidation is part of the write path, not an afterthought. If a cron/worker mutates cached entities, invalidate the relevant cache keys at the end of the mutation.
+
+---
+
 ## Update Log
+- 2026-08-06: Added Lessons 46-47 (Prisma interactive $transaction expiry → runInChunks; cache invalidation after background updates); added v3.4.1 prod reliability fixes lessons
+- 2026-07-22: Added Lessons 44-45 (Telegram webhook vs local DB mismatch, Prisma 7 adapter for scripts); added v3.4.0 Telegram bot integration lessons
+- 2026-07-21: Added Lessons 41-43 (Prisma @@map table names, camelCase column naming, AI test endpoint pattern); updated Lesson 24 (dev:bg PowerShell script for reliable agent startup)
+- 2026-07-20: Added Lesson 40 (Production Migration) — quickbuild skips prisma migrate deploy, causes missing tables in production
+- 2026-07-19: Added Lessons 36-39 (Test Fixes & Security) — SWC TDZ mock pattern, CodeQL modulo bias, AI response parsing priority, retry mock count matching
+- 2026-07-19: Added Lessons 26-35 (Daily Recommendations) — hybrid API fallback, AI batch processing, cron timezone, public/auth routes, tracker entity, circuit breaker, unified events, prediction tracking, prompt versioning, screener deduplication
+- 2026-07-18: Added Lesson 24 (Dev Server Detach) — PowerShell Start-Process for non-blocking startup
+- 2026-07-18: Added Lesson 25 (Client-Server Separation) — extract types to avoid bundling Node.js modules
+- 2026-07-18: Added Playwright Snapshot Cleanup & Code Hygiene lesson (v1.16.1) — mandatory pre-commit cleanup checklist
+- 2026-07-16: Added Git Hooks Must NOT Modify Tracked Files lesson (critical bugfix - infinite loop)
+- 2026-07-16: Fixed pre-commit hook shell variable handling (integer expression bug)
+- 2026-07-16: Added Agent Handoff & Self-Learning System lessons (v1.15.0)
+- 2026-07-16: Added Handoff File Protocol lesson
+- 2026-07-16: Added Advanced Screener lessons (v1.16.0): Chartink architecture, FilterBuilder type safety, dev server management, multi-value input patterns, backtest scope
+- 2026-07-16: Added Session Start Protocol lesson
+- 2026-07-16: Added Agent Pipeline Protocol lesson
+- 2026-07-16: Added Self-Learning Loop lesson
+- 2026-07-16: Added Pre-Commit Secrets Detection lesson
 - 2026-03-21: Added SEO & Analytics lesson (v1.11.0)
 - 2026-03-20: Added lesson 23 (Path Traversal Prevention) - sanitize user inputs in file paths
 - 2026-03-20: Added lesson 22 (NSE API Field Casing) - NSE uses lowercase fields

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import Autocomplete from "@/app/components/ui/Autocomplete";
+import AiActionButton from "@/app/components/AiActionButton";
 
 interface WatchlistItem {
   id: string;
@@ -43,6 +44,13 @@ export default function WatchlistPage() {
   const [newSymbol, setNewSymbol] = useState("");
   const [creating, setCreating] = useState(false);
   const [adding, setAdding] = useState(false);
+
+  // AI Analysis state
+  const [aiModalWatchlistId, setAiModalWatchlistId] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiRateLimit, setAiRateLimit] = useState<{ remaining: number; limit: number } | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -186,6 +194,75 @@ export default function WatchlistPage() {
     }
   };
 
+  // ─── AI Analysis ───────────────────────────────────────────────────────
+  const analyzeWithAI = useCallback(async (watchlistId: string, symbols: string[]): Promise<{ remaining: number | null; limit: number | null }> => {
+    if (symbols.length === 0) {
+      setAiError("No symbols in this watchlist to analyze.");
+      return { remaining: null, limit: null };
+    }
+
+    setAiLoading(true);
+    setAiResult(null);
+    setAiError(null);
+    setAiRateLimit(null);
+
+    let remaining: number | null = null;
+    let limit: number | null = null;
+
+    try {
+      const query = `Analyze these stocks in my watchlist: ${symbols.join(", ")}. For each stock provide: current market sentiment, key support/resistance levels if identifiable, and any notable recent price action. Also identify which ones look most promising for short-term (1-2 weeks) and long-term (3-6 months) holding.`;
+
+      const res = await fetch("/api/ai/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, analysisType: "market" }),
+      });
+
+      // Read rate limit headers
+      remaining = parseInt(res.headers.get("X-RateLimit-Remaining") || "", 10) || null;
+      limit = parseInt(res.headers.get("X-RateLimit-Limit") || "", 10) || null;
+      if (remaining !== null && limit !== null) {
+        setAiRateLimit({ remaining, limit });
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.success && data.data?.analysis) {
+        setAiResult(data.data.analysis);
+      } else if (data.data?.filteredAnalysis) {
+        setAiResult(data.data.filteredAnalysis);
+      } else {
+        setAiResult(data.analysis || "No analysis returned.");
+      }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiLoading(false);
+    }
+    return { remaining, limit };
+  }, []);
+
+  const openAiModal = (watchlistId: string) => {
+    setAiModalWatchlistId(watchlistId);
+    const watchlist = watchlists.find(w => w.id === watchlistId);
+    if (watchlist) {
+      const symbols = watchlist.items.map(i => i.symbol);
+      analyzeWithAI(watchlistId, symbols);
+    }
+  };
+
+  const closeAiModal = () => {
+    setAiModalWatchlistId(null);
+    setAiResult(null);
+    setAiError(null);
+    setAiRateLimit(null);
+    setAiLoading(false);
+  };
+
   const formatPrice = (price: number | undefined) => {
     if (price === undefined || price === null) return "—";
     return price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -255,7 +332,19 @@ export default function WatchlistPage() {
                   ({watchlist.items.length} {watchlist.items.length === 1 ? "stock" : "stocks"})
                 </span>
               </h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                {watchlist.items.length > 0 && (
+                  <AiActionButton
+                    onClick={async () => {
+                      const wl = watchlists.find(w => w.id === watchlist.id);
+                      if (!wl) return { remaining: null, limit: null };
+                      return await analyzeWithAI(watchlist.id, wl.items.map(i => i.symbol));
+                    }}
+                    size="small"
+                  >
+                    Analyze
+                  </AiActionButton>
+                )}
                 <button
                   onClick={() => setShowAddModal(watchlist.id)}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
@@ -425,6 +514,109 @@ export default function WatchlistPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── AI Analysis Modal ───────────────────────────────────────────── */}
+      {aiModalWatchlistId && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black bg-opacity-50" onClick={closeAiModal}></div>
+            <div className="relative bg-white dark:bg-slate-900 rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[80vh] flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  AI Watchlist Analysis
+                </h3>
+                <button
+                  onClick={closeAiModal}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-xl leading-none"
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* Rate limit info */}
+              {aiRateLimit && (
+                <div className={`text-xs mb-3 px-3 py-1.5 rounded ${
+                  aiRateLimit.remaining > 0
+                    ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
+                    : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+                }`}>
+                  {aiRateLimit.remaining > 0
+                    ? `Rate limit: ${aiRateLimit.remaining} of ${aiRateLimit.limit} requests remaining this minute`
+                    : `Rate limit exhausted (${aiRateLimit.limit}/${aiRateLimit.limit}). Please wait before requesting more analysis.`}
+                </div>
+              )}
+
+              {/* Loading */}
+              {aiLoading && (
+                <div className="flex-1 flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin h-8 w-8 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-3" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Analyzing your watchlist stocks...</p>
+                    <p className="text-xs text-gray-400 mt-1">This may take 10-30 seconds</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {aiError && !aiLoading && (
+                <div className="flex-1 flex items-center justify-center py-8">
+                  <div className="text-center">
+                    <p className="text-red-600 dark:text-red-400 mb-3">{aiError}</p>
+                    {aiError.includes("Rate limit") || aiError.includes("429") ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                        Please wait a moment before trying again.
+                      </p>
+                    ) : null}
+                    <AiActionButton
+                      onClick={async () => {
+                        const wl = watchlists.find(w => w.id === aiModalWatchlistId);
+                        if (!wl) return { remaining: null, limit: null };
+                        return await analyzeWithAI(aiModalWatchlistId, wl.items.map(i => i.symbol));
+                      }}
+                      size="small"
+                    >
+                      Retry
+                    </AiActionButton>
+                  </div>
+                </div>
+              )}
+
+              {/* Result */}
+              {aiResult && !aiLoading && (
+                <div className="flex-1 overflow-y-auto">
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                      {aiResult}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Close button */}
+              {!aiLoading && (
+                <div className="mt-4 flex justify-end border-t border-gray-200 dark:border-slate-700 pt-3">
+                  <AiActionButton
+                    onClick={async () => {
+                      const wl = watchlists.find(w => w.id === aiModalWatchlistId);
+                      if (!wl) return { remaining: null, limit: null };
+                      return await analyzeWithAI(aiModalWatchlistId, wl.items.map(i => i.symbol));
+                    }}
+                    size="small"
+                  >
+                    Re-run
+                  </AiActionButton>
+                  <button
+                    onClick={closeAiModal}
+                    className="ml-2 px-3 py-1.5 text-sm bg-gray-500 dark:bg-gray-600 text-white rounded hover:bg-gray-600 dark:hover:bg-gray-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

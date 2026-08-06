@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import logger from "@/lib/logger";
 
 export const dynamic = 'force-dynamic';
 
@@ -44,9 +45,11 @@ export async function GET() {
 
     return NextResponse.json({ alerts: alertsWithUser, stats });
   } catch (error) {
-    console.error('Admin alerts error:', error);
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: "Failed to fetch alerts", details: message }, { status: 500 });
+    logger.error({
+      msg: "Admin alerts: Failed to fetch alerts",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json({ error: "Failed to fetch alerts" }, { status: 500 });
   }
 }
 

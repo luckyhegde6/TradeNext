@@ -11,6 +11,8 @@ const customJestConfig = {
   moduleNameMapper: {
     // Handle module aliases (this will be automatically configured for you based on your tsconfig.json paths)
     '^@/(.*)$': '<rootDir>/$1',
+    // Mock @openrouter/agent ESM-only package to avoid SyntaxError
+    '^@openrouter/agent$': '<rootDir>/__mocks__/@openrouter/agent.js',
   },
   testEnvironment: 'jest-environment-jsdom',
   collectCoverageFrom: [
@@ -28,7 +30,7 @@ const customJestConfig = {
     '<rootDir>/components/**/*.{test,spec}.{js,jsx,ts,tsx}',
   ],
   transformIgnorePatterns: [
-    '/node_modules/(?!(@testing-library|@babel)/)',
+    '/node_modules/(?!(@testing-library|@babel|@openrouter)/)',
   ],
   moduleDirectories: ['node_modules', '<rootDir>'],
 }

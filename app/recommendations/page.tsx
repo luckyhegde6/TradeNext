@@ -1,323 +1,307 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import DailyPicksTab from "@/app/components/recommendations/DailyPicksTab";
+import HistoryTab from "@/app/components/recommendations/HistoryTab";
+import SubscribeTab from "@/app/components/recommendations/SubscribeTab";
+import DividendMonthView from "@/app/components/dividends/DividendMonthView";
+import DividendSummaryCards from "@/app/components/dividends/DividendSummaryCards";
+import DividendListView from "@/app/components/dividends/DividendListView";
+import DividendIncomeChart from "@/app/components/dividends/DividendIncomeChart";
+import type {
+  DividendCalendarData,
+  DividendEvent,
+  MonthlyIncome,
+} from "@/lib/services/dividendCalendarService";
 
-interface StockRecommendation {
-  id: string;
+type Tab = "picks" | "history" | "dividends" | "subscribe";
+type DividendViewTab = "calendar" | "list" | "income";
+
+interface Stock {
   symbol: string;
-  entryRange: string | null;
-  shortTerm: string | null;
-  longTerm: string | null;
-  intraday: string | null;
-  recommendation: string;
-  analystRating: string | null;
-  profitRangeMin: number | null;
-  profitRangeMax: number | null;
-  targetPrice: number | null;
-  analysis: string | null;
-  imageUrl: string | null;
-  isActive: boolean;
-  createdAt: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  screenerAttribution: string[];
+  screenerCount: number;
+  aiRecommendation: string;
+  confidence: number;
+  targetPrice: number;
+  stopLoss: number;
+  timeHorizon: string;
+  reasoning: string;
+  riskFactors: string[];
+  // Tracker status fields
+  trackerStatus?: string;
+  entryPrice?: number;
+  currentPrice?: number;
+  createdAt?: string;
 }
 
-interface SubscribedRecommendation {
+interface RunInfo {
   id: string;
-  recommendationId: string;
-  userId: number;
-  createdAt: string;
-  recommendation?: StockRecommendation;
+  runDate: string;
+  status: string;
+  uniqueStocks: number;
+  aiProcessed: number;
+  executionTimeMs: number;
 }
 
 export default function RecommendationsPage() {
-  const { data: session, status } = useSession();
-  const [recommendations, setRecommendations] = useState<StockRecommendation[]>([]);
-  const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
+  const { data: session } = useSession();
+  const isLoggedIn = !!session?.user;
+
+  const [activeTab, setActiveTab] = useState<Tab>("picks");
+  const [stocks, setStocks] = useState<Stock[]>([]);
+  const [runInfo, setRunInfo] = useState<RunInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filterType, setFilterType] = useState<string>("all");
-  const [subscribing, setSubscribing] = useState<string | null>(null);
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Dividend state
+  const now = new Date();
+  const [divMonth, setDivMonth] = useState(now.getMonth() + 1);
+  const [divYear, setDivYear] = useState(now.getFullYear());
+  const [divActiveTab, setDivActiveTab] = useState<DividendViewTab>("calendar");
+  const [calendarData, setCalendarData] = useState<DividendCalendarData | null>(null);
+  const [allDividends, setAllDividends] = useState<DividendEvent[]>([]);
+  const [incomeData, setIncomeData] = useState<MonthlyIncome[]>([]);
+  const [divLoading, setDivLoading] = useState(true);
+  const [divError, setDivError] = useState("");
 
   useEffect(() => {
-    if (status === "authenticated") {
-      fetchRecommendations();
-      fetchSubscriptions();
-    }
-  }, [status]);
+    fetchRecommendations();
+  }, []);
 
   const fetchRecommendations = async () => {
     try {
-      const response = await fetch("/api/user/recommendations");
-      if (response.ok) {
-        const data = await response.json();
-        setRecommendations(data);
+      setLoading(true);
+      const res = await fetch("/api/recommendations");
+      const data = await res.json();
+      if (data.success) {
+        setStocks(data.stocks || []);
+        setRunInfo(data.run);
+      } else {
+        setError("Failed to load recommendations");
       }
-    } catch (err) {
-      console.error("Failed to fetch recommendations:", err);
+    } catch (e) {
+      setError("Failed to load recommendations");
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchSubscriptions = async () => {
+  // Fetch dividend data when tab is selected
+  const fetchDividendData = useCallback(async () => {
+    setDivLoading(true);
+    setDivError("");
     try {
-      const response = await fetch("/api/user/subscriptions");
-      if (response.ok) {
-        const data = await response.json();
-        const subscribed = new Set<string>(data.subscriptions?.map((s: SubscribedRecommendation) => s.recommendationId) || []);
-        setSubscribedIds(subscribed);
+      const [calRes, listRes, incRes] = await Promise.all([
+        fetch(`/api/dividends/calendar?month=${divMonth}&year=${divYear}&view=calendar`),
+        fetch(`/api/dividends/calendar?month=${divMonth}&year=${divYear}&view=upcoming`),
+        fetch(`/api/dividends/calendar?month=${divMonth}&year=${divYear}&view=income`),
+      ]);
+
+      if (calRes.ok) setCalendarData(await calRes.json());
+      else throw new Error(`Calendar API: ${calRes.status}`);
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        setAllDividends(listData.dividends || []);
+      }
+      if (incRes.ok) {
+        const incData = await incRes.json();
+        setIncomeData(incData.income || []);
       }
     } catch (err) {
-      console.error("Failed to fetch subscriptions:", err);
-    }
-  };
-
-  const handleSubscribe = async (recommendationId: string) => {
-    setSubscribing(recommendationId);
-    try {
-      const method = subscribedIds.has(recommendationId) ? "DELETE" : "POST";
-      const response = await fetch("/api/user/subscriptions", {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recommendationId }),
-      });
-
-      if (response.ok) {
-        const newSubscribed = new Set(subscribedIds);
-        if (subscribedIds.has(recommendationId)) {
-          newSubscribed.delete(recommendationId);
-        } else {
-          newSubscribed.add(recommendationId);
-        }
-        setSubscribedIds(newSubscribed);
-      }
-    } catch (err) {
-      console.error("Failed to subscribe:", err);
+      setDivError(err instanceof Error ? err.message : "Failed to load dividend data");
     } finally {
-      setSubscribing(null);
+      setDivLoading(false);
     }
+  }, [divMonth, divYear]);
+
+  useEffect(() => {
+    if (activeTab === "dividends") {
+      fetchDividendData();
+    }
+  }, [activeTab, fetchDividendData]);
+
+  const handlePrevMonth = () => {
+    if (divMonth === 1) { setDivMonth(12); setDivYear(divYear - 1); }
+    else { setDivMonth(divMonth - 1); }
   };
 
-  const filteredRecommendations = useMemo(() => {
-    let result = [...recommendations];
-    if (filterType !== "all") {
-      result = result.filter((r) => r.recommendation === filterType);
-    }
-    return result;
-  }, [recommendations, filterType]);
-
-  const getRecommendationColor = (rec: string) => {
-    switch (rec) {
-      case "BUY":
-      case "ACCUMULATE":
-        return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300";
-      case "SELL":
-        return "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300";
-      case "HOLD":
-        return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300";
-      default:
-        return "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300";
-    }
+  const handleNextMonth = () => {
+    if (divMonth === 12) { setDivMonth(1); setDivYear(divYear + 1); }
+    else { setDivMonth(divMonth + 1); }
   };
 
-  const openImageModal = (imageUrl: string) => {
-    setSelectedImage(imageUrl);
-    setShowImageModal(true);
+  const handleToday = () => {
+    const today = new Date();
+    setDivMonth(today.getMonth() + 1);
+    setDivYear(today.getFullYear());
   };
 
-  if (status === "loading" || loading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
-        <div className="animate-pulse space-y-4">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="bg-gray-200 dark:bg-slate-800 h-32 rounded-lg"></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const dividendTabs: { key: DividendViewTab; label: string }[] = [
+    { key: "calendar", label: "Calendar" },
+    { key: "list", label: "List" },
+    { key: "income", label: "Income" },
+  ];
 
-  if (status === "unauthenticated") {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-8 text-center">
-          <p className="text-gray-600 dark:text-gray-400">Please sign in to view stock recommendations.</p>
-        </div>
-      </div>
-    );
-  }
+  const tabs: { id: Tab; label: string; icon: string; authRequired?: boolean }[] = [
+    { id: "picks", label: "Today's Picks", icon: "🎯" },
+    { id: "history", label: "History", icon: "📜" },
+    { id: "dividends", label: "Dividends", icon: "💰" },
+    { id: "subscribe", label: "Subscribe", icon: "🔔", authRequired: true },
+  ];
+
+  // Summary stats
+  const buyCount = stocks.filter(s => s.aiRecommendation === "BUY").length;
+  const holdCount = stocks.filter(s => s.aiRecommendation === "HOLD").length;
+  const sellCount = stocks.filter(s => s.aiRecommendation === "SELL").length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Stock Recommendations</h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          {subscribedIds.size} subscription{subscribedIds.size !== 1 ? "s" : ""}
-        </p>
-      </div>
+    <div className="min-h-screen bg-gray-950">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">Daily Recommendations</h1>
+          <p className="text-gray-400 text-sm">
+            AI-powered stock recommendations from 7 Chartink screeners with performance tracking
+          </p>
+        </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{recommendations.length}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Buy</p>
-          <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-            {recommendations.filter((r) => r.recommendation === "BUY" || r.recommendation === "ACCUMULATE").length}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Sell</p>
-          <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-            {recommendations.filter((r) => r.recommendation === "SELL").length}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Hold</p>
-          <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-            {recommendations.filter((r) => r.recommendation === "HOLD").length}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-lg shadow p-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Neutral</p>
-          <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
-            {recommendations.filter((r) => r.recommendation === "NEUTRAL").length}
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-slate-900 shadow overflow-hidden sm:rounded-md">
-        <div className="px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-slate-700">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-            <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
-              Active Recommendations ({filteredRecommendations.length})
-            </h3>
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 dark:text-white"
-            >
-              <option value="all">All Types</option>
-              <option value="BUY">BUY</option>
-              <option value="ACCUMULATE">ACCUMULATE</option>
-              <option value="HOLD">HOLD</option>
-              <option value="SELL">SELL</option>
-              <option value="NEUTRAL">NEUTRAL</option>
-            </select>
+        {/* Summary Cards */}
+        {!loading && stocks.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-white">{stocks.length}</div>
+              <div className="text-xs text-gray-400">Total Stocks</div>
+            </div>
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-emerald-400">{buyCount}</div>
+              <div className="text-xs text-gray-400">Buy</div>
+            </div>
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-amber-400">{holdCount}</div>
+              <div className="text-xs text-gray-400">Hold</div>
+            </div>
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-red-400">{sellCount}</div>
+              <div className="text-xs text-gray-400">Sell</div>
+            </div>
           </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="flex gap-1 mb-6 border-b border-gray-800 overflow-x-auto">
+          {tabs.map(tab => {
+            // Skip subscribe tab for non-logged-in users
+            if (tab.authRequired && !isLoggedIn) return null;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? "border-blue-500 text-blue-400"
+                    : "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600"
+                }`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
-        <ul className="divide-y divide-gray-200 dark:divide-slate-800">
-          {filteredRecommendations.map((rec) => (
-            <li key={rec.id} className="px-4 py-4 sm:px-6">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3">
-                    <a
-                      href={`/company/${rec.symbol}`}
-                      className="text-lg font-bold text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      {rec.symbol}
-                    </a>
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRecommendationColor(rec.recommendation)}`}>
-                      {rec.recommendation}
-                    </span>
-                    {subscribedIds.has(rec.id) && (
-                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
-                        Subscribed
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="mt-2 sm:flex sm:justify-between">
-                    <div className="sm:flex space-x-6 text-sm text-gray-500 dark:text-gray-400">
-                      {rec.targetPrice && <span>Target: ₹{rec.targetPrice}</span>}
-                      {rec.entryRange && <span>Entry: {rec.entryRange}</span>}
-                      {rec.profitRangeMin && rec.profitRangeMax && (
-                        <span>Profit: ₹{rec.profitRangeMin} - ₹{rec.profitRangeMax}</span>
-                      )}
-                      {rec.analystRating && <span>Rating: {rec.analystRating}</span>}
-                    </div>
-                    <div className="mt-2 sm:mt-0 text-sm text-gray-500 dark:text-gray-400">
-                      <span>{new Date(rec.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  </div>
+        {/* Tab Content */}
+        <div className="min-h-[400px]">
+          {activeTab === "picks" && (
+            <DailyPicksTab
+              stocks={stocks}
+              runDate={runInfo?.runDate || null}
+              loading={loading}
+            />
+          )}
 
-                  {rec.analysis && (
-                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 line-clamp-3">{rec.analysis}</p>
-                  )}
+          {activeTab === "history" && (
+            <HistoryTab loading={loading} />
+          )}
 
-                  {(rec.shortTerm || rec.longTerm || rec.intraday) && (
-                    <div className="mt-2 flex gap-4 text-xs text-gray-500 dark:text-gray-400">
-                      {rec.shortTerm && <span>Short Term: {rec.shortTerm}</span>}
-                      {rec.longTerm && <span>Long Term: {rec.longTerm}</span>}
-                      {rec.intraday && <span>Intraday: {rec.intraday}</span>}
-                    </div>
-                  )}
+          {activeTab === "dividends" && (
+            <div className="space-y-6">
+              {/* Dividend Summary */}
+              <DividendSummaryCards
+                summary={calendarData?.summary || { upcomingCount: 0, estMonthlyIncome: 0, estAnnualIncome: 0, avgYield: null, totalDividends: 0 }}
+                loading={divLoading}
+              />
 
-                  {rec.imageUrl && (
-                    <div className="mt-2">
-                      <img 
-                        src={rec.imageUrl} 
-                        alt="Chart" 
-                        className="max-w-xs rounded border dark:border-slate-600 cursor-pointer hover:opacity-80"
-                        onClick={() => openImageModal(rec.imageUrl!)}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 sm:flex-col sm:items-end">
-                  <button
-                    onClick={() => handleSubscribe(rec.id)}
-                    disabled={subscribing === rec.id}
-                    className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                      subscribedIds.has(rec.id)
-                        ? "bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-slate-600"
-                        : "bg-blue-600 text-white hover:bg-blue-700"
-                    } disabled:opacity-50`}
-                  >
-                    {subscribing === rec.id ? "..." : subscribedIds.has(rec.id) ? "Unsubscribe" : "Subscribe"}
+              {/* Dividend Error */}
+              {divError && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-sm text-red-300">
+                  {divError}
+                  <button onClick={fetchDividendData} className="ml-3 underline hover:no-underline">
+                    Retry
                   </button>
-                  <a
-                    href={`/company/${rec.symbol}`}
-                    className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
-                  >
-                    View Details →
-                  </a>
                 </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+              )}
 
-        {filteredRecommendations.length === 0 && (
-          <div className="px-4 py-8 text-center">
-            <p className="text-gray-500 dark:text-gray-400">No recommendations found.</p>
+              {/* Dividend Sub-tabs */}
+              <div className="flex gap-1 bg-gray-800/50 rounded-lg p-1 w-fit">
+                {dividendTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDivActiveTab(tab.key)}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      divActiveTab === tab.key
+                        ? "bg-gray-700 text-white shadow-sm"
+                        : "text-gray-400 hover:text-gray-300"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Dividend Views */}
+              {divActiveTab === "calendar" && (
+                <DividendMonthView
+                  dividends={calendarData?.dividends || []}
+                  month={divMonth}
+                  year={divYear}
+                  onPrevMonth={handlePrevMonth}
+                  onNextMonth={handleNextMonth}
+                  onToday={handleToday}
+                />
+              )}
+              {divActiveTab === "list" && (
+                <DividendListView dividends={allDividends} loading={divLoading} />
+              )}
+              {divActiveTab === "income" && (
+                <DividendIncomeChart data={incomeData} loading={divLoading} />
+              )}
+            </div>
+          )}
+
+          {activeTab === "subscribe" && (
+            <SubscribeTab isLoggedIn={isLoggedIn} />
+          )}
+        </div>
+
+        {/* Error state */}
+        {error && (
+          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
+            <p className="text-sm text-red-300">{error}</p>
+            <button
+              onClick={fetchRecommendations}
+              className="mt-2 px-4 py-1.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded text-xs text-red-300 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         )}
       </div>
-
-      {showImageModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-75" onClick={() => setShowImageModal(false)}></div>
-            <div className="relative">
-              <img src={selectedImage} alt="Chart preview" className="max-w-full max-h-[90vh] rounded-lg" />
-              <button
-                onClick={() => setShowImageModal(false)}
-                className="absolute top-2 right-2 bg-white dark:bg-slate-800 rounded-full p-2 hover:bg-gray-100 dark:hover:bg-slate-700"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

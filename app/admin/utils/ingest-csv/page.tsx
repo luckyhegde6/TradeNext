@@ -100,7 +100,7 @@ export default function IngestCsvPage() {
     useEffect(() => {
         if (status === "loading") return;
         if (!session || session.user.role !== "admin") {
-            router.push("/");
+            router.push("/admin/access-denied");
         }
     }, [session, status, router]);
 

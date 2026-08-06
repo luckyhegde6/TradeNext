@@ -144,6 +144,9 @@ export default function Header() {
                 <NavLink href="/watchlist" active={isActive("/watchlist")}>
                   Watchlist
                 </NavLink>
+                <NavLink href="/profile" active={isActive("/profile")}>
+                  Profile
+                </NavLink>
               </>
             )}
 
@@ -157,16 +160,16 @@ export default function Header() {
             <NavLink href="/markets/calendar" active={isActive("/markets/calendar")}>
               Calendar
             </NavLink>
+            <NavLink href="/recommendations" active={isActive("/recommendations")}>
+              Recommendations
+            </NavLink>
             <NavLink href="/news" active={isActive("/news")}>
               News
             </NavLink>
 
-            {/* Screener – logged in only */}
-            {isLoggedIn && (
-              <NavLink href="/markets/screener" active={isActive("/markets/screener")}>
-                Screener
-              </NavLink>
-            )}
+            <NavLink href="/markets/screener" active={isActive("/markets/screener")}>
+              Screener
+            </NavLink>
 
             <NavLink href="/posts" active={isActive("/posts")}>
               Community
@@ -330,8 +333,9 @@ export default function Header() {
               <MobileNavLink href="/markets" active={isActive("/markets")} onClick={() => setIsMobileMenuOpen(false)}>Markets</MobileNavLink>
               <MobileNavLink href="/markets/analytics" active={isActive("/markets/analytics")} onClick={() => setIsMobileMenuOpen(false)}>Analytics</MobileNavLink>
               <MobileNavLink href="/markets/calendar" active={isActive("/markets/calendar")} onClick={() => setIsMobileMenuOpen(false)}>Calendar</MobileNavLink>
+              <MobileNavLink href="/recommendations" active={isActive("/recommendations")} onClick={() => setIsMobileMenuOpen(false)}>Recommendations</MobileNavLink>
               <MobileNavLink href="/news" active={isActive("/news")} onClick={() => setIsMobileMenuOpen(false)}>News</MobileNavLink>
-              {isLoggedIn && <MobileNavLink href="/markets/screener" active={isActive("/markets/screener")} onClick={() => setIsMobileMenuOpen(false)}>Screener</MobileNavLink>}
+              <MobileNavLink href="/markets/screener" active={isActive("/markets/screener")} onClick={() => setIsMobileMenuOpen(false)}>Screener</MobileNavLink>
               <MobileNavLink href="/watchlist" active={isActive("/watchlist")} onClick={() => setIsMobileMenuOpen(false)}>Watchlist</MobileNavLink>
             </div>
           </div>
@@ -341,6 +345,9 @@ export default function Header() {
             <div className="grid grid-cols-1 gap-1">
               <MobileNavLink href="/posts" active={isActive("/posts")} onClick={() => setIsMobileMenuOpen(false)}>Community</MobileNavLink>
               <MobileNavLink href="/contact" active={isActive("/contact")} onClick={() => setIsMobileMenuOpen(false)}>Contact</MobileNavLink>
+              {isLoggedIn && (
+                <MobileNavLink href="/profile" active={isActive("/profile")} onClick={() => setIsMobileMenuOpen(false)}>Profile Settings</MobileNavLink>
+              )}
             </div>
           </div>
 

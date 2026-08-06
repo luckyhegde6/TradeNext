@@ -8,7 +8,14 @@ export const runtime = "nodejs";
 const createAuditSchema = z.object({
   userId: z.number().optional(),
   userEmail: z.string().optional(),
-  action: z.enum(['API_CALL', 'USER_ACTION', 'PORTFOLIO_ACTION', 'NSE_CALL', 'LOGIN', 'LOGOUT', 'RATE_LIMIT']),
+  action: z.enum([
+    'API_CALL', 'USER_ACTION', 'PORTFOLIO_ACTION', 'NSE_CALL', 'LOGIN', 'LOGOUT', 'RATE_LIMIT',
+    'AI_AGENT_TRIGGER', 'AI_AGENT_SUCCESS', 'AI_AGENT_FAILURE', 'AI_AGENT_FALLBACK',
+    'SCREENER_RUN_START', 'SCREENER_RUN_COMPLETE', 'SCREENER_RUN_FAILED', 'SCREENER_DEDUP',
+    'TELEGRAM_SUBSCRIBE', 'TELEGRAM_UNSUBSCRIBE', 'TELEGRAM_COMMAND', 'TELEGRAM_BROADCAST',
+    'RECOMMENDATION_GENERATED', 'RECOMMENDATION_TARGET_ACHIEVED', 'RECOMMENDATION_STOP_LOSS_HIT', 'RECOMMENDATION_EXPIRED',
+    'SYSTEM_HEALTH_CHECK', 'SYSTEM_ANOMALY_DETECTED', 'SYSTEM_PROVIDER_OUTAGE',
+  ]),
   resource: z.string().optional(),
   resourceId: z.string().optional(),
   method: z.string().optional(),

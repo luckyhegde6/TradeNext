@@ -2,6 +2,7 @@
 import prisma from "@/lib/prisma";
 import { isMarketOpen, getMillisecondsUntilNextMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 import logger from "@/lib/logger";
+import cache from "@/lib/cache";
 
 export type DataType = 
   | "corporate_actions" 
@@ -92,36 +93,61 @@ export function needsCacheRefresh(
 /**
  * Get cached data or fetch from NSE if needed
  * This is the main entry point for smart caching
+ *
+ * Fetch policy (widened scope — used by ALL non-backtest NSE fetches):
+ *   1. In-memory cache (NodeCache) first   — 0 DB ops on hit
+ *   2. MarketCache DB table                 — 1 DB read, persistent across
+ *      serverless cold starts
+ *   3. NSE live                             — 1 NSE call, then DB upsert
+ *      (keeps the persistent cache in sync) + memory populate
  */
 export async function getOrFetchNseData<T>(
   fetchFromNse: () => Promise<T>,
   options: CacheOptions
 ): Promise<GetOrFetchResult<T>> {
   const { dataType, indexName, nseLastModified, ttlSecondsOpen = 300, ttlSecondsClosed = 3600 } = options;
-  
+
   const cacheKey = generateCacheKey(dataType, indexName);
   const marketOpen = isMarketOpen();
-  
+  const memKey = `mc:${cacheKey}`;
+  // Memory TTL mirrors the DB freshness window (seconds for NodeCache)
+  const memTtl = marketOpen ? ttlSecondsOpen : ttlSecondsClosed;
+
   try {
-    // Try to get existing cache
+    // 1) In-memory front layer — avoids a DB read on every request
+    const memCached = cache.get<{ data: T; lastSyncedAt: Date }>(memKey);
+    if (memCached) {
+      logger.debug({ msg: "MarketCache: Serving from memory", cacheKey });
+      return {
+        data: memCached.data,
+        source: "cache",
+        needsRefresh: false,
+        lastSyncedAt: memCached.lastSyncedAt
+      };
+    }
+
+    // 2) Persistent DB cache
     const cached = await prisma.marketCache.findUnique({
       where: { cacheKey }
     });
-    
+
     const lastSyncedAt = cached?.lastSyncedAt || null;
     const nextSyncAt = cached?.nextSyncAt || null;
-    
+
     // Check if we need to refresh
     const shouldRefresh = needsCacheRefresh(lastSyncedAt, nextSyncAt, marketOpen);
-    
+
     if (!shouldRefresh && cached) {
-      logger.debug({ 
-        msg: "MarketCache: Serving from DB", 
-        cacheKey, 
+      logger.debug({
+        msg: "MarketCache: Serving from DB",
+        cacheKey,
         lastSyncedAt,
-        marketOpen 
+        marketOpen
       });
-      
+
+      // Repopulate memory so the next request is a 0-DB-op hit
+      cache.set(memKey, { data: cached.data as T, lastSyncedAt: cached.lastSyncedAt }, memTtl);
+
       return {
         data: cached.data as T,
         source: "db",
@@ -129,21 +155,21 @@ export async function getOrFetchNseData<T>(
         lastSyncedAt
       };
     }
-    
-    // Need to refresh - fetch from NSE
-    logger.info({ 
-      msg: "MarketCache: Fetching from NSE", 
-      cacheKey, 
+
+    // 3) Need to refresh - fetch from NSE
+    logger.info({
+      msg: "MarketCache: Fetching from NSE",
+      cacheKey,
       marketOpen,
       reason: !cached ? "no_cache" : "needs_refresh"
     });
-    
+
     try {
       const nseData = await fetchFromNse();
-      
+
       // Calculate next sync time
       const nextSync = calculateNextSync(marketOpen, ttlSecondsOpen, ttlSecondsClosed);
-      
+
       // Upsert the cache
       const updatedCache = await prisma.marketCache.upsert({
         where: { cacheKey },
@@ -170,7 +196,10 @@ export async function getOrFetchNseData<T>(
           syncError: null
         }
       });
-      
+
+      // Sync fresh data into memory too
+      cache.set(memKey, { data: nseData as T, lastSyncedAt: updatedCache.lastSyncedAt }, memTtl);
+
       return {
         data: nseData as T,
         source: "nse",
@@ -178,14 +207,15 @@ export async function getOrFetchNseData<T>(
         lastSyncedAt: updatedCache.lastSyncedAt
       };
     } catch (nseError) {
-      logger.error({ 
-        msg: "MarketCache: NSE fetch failed, serving from DB if available", 
-        cacheKey, 
-        error: nseError 
+      logger.error({
+        msg: "MarketCache: NSE fetch failed, serving from DB if available",
+        cacheKey,
+        error: nseError
       });
-      
+
       // If NSE fails but we have cached data, return it
       if (cached) {
+        cache.set(memKey, { data: cached.data as T, lastSyncedAt: cached.lastSyncedAt }, memTtl);
         return {
           data: cached.data as T,
           source: "db",
@@ -193,15 +223,15 @@ export async function getOrFetchNseData<T>(
           lastSyncedAt: cached.lastSyncedAt
         };
       }
-      
+
       // No cache and NSE failed - rethrow
       throw nseError;
     }
   } catch (error) {
-    logger.error({ 
-      msg: "MarketCache: Error in getOrFetch", 
-      cacheKey, 
-      error 
+    logger.error({
+      msg: "MarketCache: Error in getOrFetch",
+      cacheKey,
+      error
     });
     throw error;
   }
@@ -218,12 +248,14 @@ export async function forceRefreshCache<T>(
 ): Promise<GetOrFetchResult<T>> {
   const cacheKey = generateCacheKey(dataType, indexName);
   const marketOpen = isMarketOpen();
-  
+  const memKey = `mc:${cacheKey}`;
+  const memTtl = marketOpen ? 300 : 3600;
+
   logger.info({ msg: "MarketCache: Force refreshing", cacheKey });
-  
+
   const nseData = await fetchFromNse();
   const nextSync = calculateNextSync(marketOpen, 300, 3600);
-  
+
   const updatedCache = await prisma.marketCache.upsert({
     where: { cacheKey },
     create: {
@@ -249,7 +281,10 @@ export async function forceRefreshCache<T>(
       syncError: null
     }
   });
-  
+
+  // Sync fresh data into memory too
+  cache.set(memKey, { data: nseData as T, lastSyncedAt: updatedCache.lastSyncedAt }, memTtl);
+
   return {
     data: nseData as T,
     source: "nse",
@@ -283,19 +318,32 @@ export async function getCacheStatus(dataType?: DataType): Promise<any> {
 
 /**
  * Clear specific cache or all caches
+ * Also clears the matching in-memory front-layer entries.
  */
 export async function clearCache(cacheKey?: string, dataType?: DataType): Promise<number> {
   if (cacheKey) {
     await prisma.marketCache.delete({ where: { cacheKey } });
+    cache.del(`mc:${cacheKey}`);
     return 1;
   }
-  
+
   if (dataType) {
     const result = await prisma.marketCache.deleteMany({ where: { dataType } });
+    // Clear any memory entries for this data type
+    for (const key of cache.keys()) {
+      if (key.startsWith(`mc:${dataType}_`)) {
+        cache.del(key);
+      }
+    }
     return result.count;
   }
-  
+
   // Clear all
   const result = await prisma.marketCache.deleteMany({});
+  for (const key of cache.keys()) {
+    if (key.startsWith("mc:")) {
+      cache.del(key);
+    }
+  }
   return result.count;
 }

@@ -39,6 +39,8 @@ export async function GET() {
                 role: true,
                 isVerified: true,
                 isBlocked: true,
+                telegramChatId: true,
+                telegramVerified: true,
                 createdAt: true,
                 updatedAt: true,
                 _count: {

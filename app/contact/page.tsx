@@ -229,13 +229,22 @@ export default function ContactPage() {
           </h2>
         </div>
 
-        <div className="space-y-6">
+          <div className="space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
               How do I get started with TradeNext?
             </h3>
             <p className="text-gray-600 dark:text-gray-400">
               Simply sign up for an account and you&apos;ll have immediate access to our market data dashboard and basic analytics.
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              How do I receive real-time alerts via Telegram?
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              Go to Alerts → Telegram Bot tab, enter your Chat ID (get it by messaging <strong>@tradenext6Bot</strong> on Telegram with <code>/start</code>), then verify with the code sent to your Telegram. Once verified, you&apos;ll receive alerts, recommendations, and updates directly on your phone.
             </p>
           </div>
 

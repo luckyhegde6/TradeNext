@@ -4,38 +4,18 @@
 
 ---
 
-## Git Hook Setup
+## Git Hook Setup (v1.15.0)
 
-To enable automatic logging, create a post-commit hook:
+The post-commit hook has been created automatically as part of the Handoff File System:
 
-### Step 1: Create the hooks directory
-```bash
-mkdir -p .git/hooks
-```
+- **Location**: `.git/hooks/post-commit`
+- **Function**: Logs commit checkpoints to `.agents/handoffs/checkpoint.log` (non-tracked file)
+- **Automation**: Runs on every `git commit` automatically
+- **⚠️ Important**: Post-commit hook writes to a NON-TRACKED file only to avoid infinite loop. Update `agent-memory.md` manually for meaningful activity entries.
 
-### Step 2: Create post-commit hook
-Create `.git/hooks/post-commit`:
-
-```bash
-#!/bin/bash
-# Post-commit hook to log agent activity
-
-DATE=$(date '+%Y-%m-%d %H:%M:%S')
-BRANCH=$(git branch --show-current)
-COMMIT_MSG=$(git log -1 --pretty=%B)
-COMMIT_HASH=$(git log -1 --pretty=%h)
-
-echo "" >> agent--memory.md
-echo "### $DATE | Branch: $BRANCH | Commit: $COMMIT_HASH" >> agent--memory.md
-echo "- **Action**: Commit created" >> agent--memory.md
-echo "- **Message**: $COMMIT_MSG" >> agent--memory.md
-echo "" >> agent--memory.md
-```
-
-### Step 3: Make it executable
-```bash
-chmod +x .git/hooks/post-commit
-```
+The pre-commit hook is also installed at `.git/hooks/pre-commit`:
+- Checks for `console.log` statements (should use logger)
+- Detects hardcoded secrets (passwords, API keys, tokens)
 
 ---
 
@@ -45,15 +25,137 @@ You can also manually add entries:
 
 ```bash
 # Add activity entry
-echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent--memory.md
-echo "- **Action**: Description of what was done" >> agent--memory.md
-echo "- **Files**: file1.ts, file2.ts" >> agent--memory.md
-echo "" >> agent--memory.md
+echo "### $(date '+%Y-%m-%d %H:%M:%S')" >> agent-memory.md
+echo "- **Action**: Description of what was done" >> agent-memory.md
+echo "- **Files**: file1.ts, file2.ts" >> agent-memory.md
+echo "" >> agent-memory.md
 ```
 
 ---
 
 ## Activity Log
+
+### 2026-08-06 | Git Workflow & Agent Operating Model (v3.4.2) — Tracked Hooks + Gardenify Docs Port
+- **Action**: Applied gardenify git/agentic patterns — versioned `.githooks/` directory + git-flow/code-hygiene/documentation docs + AGENTS.md operating model.
+- **Branch**: main (v3.4.2)
+- **Tracked Git Hooks**: Created `.githooks/pre-commit` (warn-only main/master solo policy; BLOCK hardcoded secrets + staged `.env`; WARN console.log, junk artifacts, tsc production-file errors), `.githooks/post-commit` (checkpoint logging to gitignored `.agents/handoffs/checkpoint.log`), `.githooks/pre-push` (WARN main/master). Set `git config core.hooksPath .githooks` so hooks survive fresh clones.
+- **Gardenify Docs Port**: `.agents/linear-history.md` (git flow, branch naming, commit convention, pre-push checklist), `.agents/code-hygiene.md` (ponytail minimal-code rules + TradeNext standards), `.agents/documentation-standards.md` (doc set + mandatory update rules).
+- **AGENTS.md Operating Model**: Added "Git Hooks (versioned in .githooks/)", "Agent Operating Model (gardenify pattern)" (memory layout, handoff = files, self-healing, anti-hallucination, token efficiency), "Plugins & MCP" (helicone-session, wakatime; ponytail recommended-not-installed).
+- **Files Created**: `.githooks/pre-commit`, `.githooks/post-commit`, `.githooks/pre-push`, `.agents/linear-history.md`, `.agents/code-hygiene.md`, `.agents/documentation-standards.md`
+- **Files Modified**: AGENTS.md (operating model + v3.4.2 version entry), `.agents/pre-commit-workflow.md` (hook reference + doc links), `.agents/session-todos.md`, `HANDOFF.md` (v1.2 quick links), `Primer.md` (Session 7b), `.agents/sessions/README.md`
+- **Verification**: Hooks manually executed (sh) — pre-commit reports "TypeScript: production files clean", post-commit logs checkpoint, pre-push warns on main. Full `npm run test` + `npx tsc --noEmit` pending before commit.
+
+### 2026-08-06 | Prod Reliability Fixes (v3.4.1) — Txn Timeout + Top-50 Cap + Telegram + History + Monitoring
+- **Action**: Fixed prod daily-recommendation pipeline failures and added UI/monitoring improvements; ran prod UI/UX audit; ported gardenify agentic patterns; updated docs.
+- **Branch**: ph19 (v3.4.1)
+- **Key Fixes**:
+  - **Transaction Timeout**: `runInChunks()` replaces interactive `$transaction` in `runDailyRecommendations()` + `checkRecommendationPerformance()` (prevents `5000ms timeout, 5501ms passed` rollback error).
+  - **Top-50 Cap**: `rankAndCapRecommendations()` — composite score `screenerCount*10 + marketCapScore*2 + momentumScore`; all downstream uses `rankedResults`; `MAX_RECOMMENDED_STOCKS = 50`.
+  - **Telegram Live Prices**: `checkRecommendationPerformance()` invalidates cache; broadcast always sends (non-HOLD first, HOLD fallback, breakdown, 4000-char truncation); handlers use `tracker.currentPrice ?? s.price`.
+  - **History Predicted vs Current**: top-stocks API JOINs `recommendation_trackers` → `entryPrice`/`currentPrice`/`trackerStatus`; HistoryTab shows return % + status badges.
+  - **AI Monitoring Persistence**: `persistAiCallToDb()` fire-and-forget (ServerLog `source="ai"`); merged DB+memory reads; source badge.
+  - **Monitoring DB Logs**: new `type=db-logs` in `/api/admin/monitoring` + DB Logs tab with level filter.
+  - **Market Cap Plumbing**: `chartinkService.marketCap?` (TradingView `market_cap_basic`) + AI prompt inclusion.
+- **Prod UI/UX Audit**: Playwright walkthrough of tradenext6.netlify.app — documented in TODO.md (stale recs, bare "🟡 %" cards, 643 stocks, empty demo portfolio).
+- **Gardenify Port**: `.agents/session-todos.md`, `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/sessions/README.md`; HANDOFF.md updated.
+- **Files Modified**: dailyRecommendationService.ts, telegramBotService.ts, top-stocks/route.ts, HistoryTab.tsx, ai-monitoring.ts, ai/monitoring/route.ts, ai-monitoring/page.tsx, chartinkService.ts, recommendation-agent.ts, admin/monitoring/route.ts, monitoring/page.tsx, TODO.md, HANDOFF.md, Primer.md, agent-memory.md, AGENTS.md, .agents/session-todos.md
+- **Verification**: `npx tsc --noEmit` — zero errors in modified production files. Tests not yet re-run.
+
+### 2026-07-19 | Daily Recommendations — Test Fixes, Security Hardening & PR #62 MERGED
+- **Action**: Fixed 3 failing test suites, applied CodeQL security fix, created PR, documented learnings.
+- **Branch**: `ph18` — PR #62 created and merged (commit `2f95531`).
+- **Test Fixes (68 tests, 0 failures)**:
+  - `chartinkService.test.ts` (25/25): Fixed `hasValidConfig` mock — was checking wrong path; updated to mock config service correctly.
+  - `recommendation-agent.test.ts` (24/24): Fixed `parseAIResponse` source bug — swapped `parsed[idx] || symbolMatch` to `symbolMatch || parsed[idx]` so symbol matching is prioritized. Fixed batch retry test — added 2 `mockRejectedValueOnce` calls to match RETRY_MAX=2.
+  - `dailyRecommendationService.test.ts` (19/19): Complete rewrite using TDZ-safe mock pattern — mock Prisma inside `jest.mock()` factory, retrieve via `require()`. Resolved complex object hoisting issues.
+- **CodeQL High-Severity Fix**:
+  - `app/api/user/telegram/verify/route.ts`: `crypto.randomBytes(4).readUInt32BE(0) % 1000000` → `crypto.randomInt(1000000)` — eliminates modulo bias in 6-digit verification code generation.
+- **Source Bug Fix**:
+  - `lib/services/ai/recommendation-agent.ts` line 271: Swapped symbol matching priority so AI responses in different order are matched correctly by symbol name, not position.
+- **Full Test Suite**: 269/269 pass, 0 failures, 21/21 suites (1 skipped).
+- **E2E Screenshots**: Captured `recommendations-todays-picks.png`, `recommendations-history.png`, `dashboard.png` in `screenshots/` directory.
+- **Documentation Updated**: Lessons.md (36-39), TODO.md (Sprints 4-5 marked complete), AGENTS.md (v3.3.0 in version history), agent-memory.md (this entry), Primer.md (v3.3.0 status).
+- **Files Changed**:
+  - `lib/__tests__/chartinkService.test.ts` — mock fix
+  - `lib/__tests__/recommendation-agent.test.ts` — parseAIResponse fix, retry mocks
+  - `lib/__tests__/dailyRecommendationService.test.ts` — full rewrite with TDZ-safe pattern
+  - `lib/services/ai/recommendation-agent.ts` — source fix line 271
+  - `app/api/user/telegram/verify/route.ts` — CodeQL modulo bias fix
+  - `Lessons.md` — 4 new lessons (36-39)
+  - `TODO.md` — Sprints 4-5 marked complete
+  - `agent-memory.md` — this entry
+- **Status**: ✅ COMPLETE — v3.3.0 (Daily Recommendations + Self-Heal + Audit) fully implemented and merged
+
+### 2026-07-19 | Daily Recommendations + Self-Heal + Audit (v3.3.0) — PLANNING COMPLETE
+- **Action**: Created comprehensive implementation plan for Daily Recommendations Engine, Self-Heal AI Agents, and Unified Audit Logging.
+- **Branch**: `ph18` created from `main`.
+- **PRD Updated**: `.agents/PRD.md` — Features 6, 7, 8 added with full specifications.
+- **TODO Updated**: Sprints 4 and 5 added with all UI/UX and implementation checklists.
+- **AGENTS.md Updated**: v3.3.0 version history with complete file lists and feature descriptions.
+- **HANDOFF.md Updated**: Status set to `in_progress`.
+- **Key Design Decisions**:
+  - Hybrid approach: Try Chartink API first, fall back to TradingView screener templates
+  - Public page access (no auth for viewing), auth required for Telegram subscription
+  - Extend existing OpenRouter Agent SDK (reuses llm-provider.ts, orchestrator.ts)
+  - Separate cron jobs: 10 AM IST for generation, 3:30 PM IST for performance tracking
+  - UnifiedEvent model for comprehensive audit logging
+  - Circuit breaker pattern for AI provider resilience
+- **8 New Prisma Models**: RecommendationTracker, DailyRecommendationRun, DailyRecommendationStock, RecommendationStatusHistory, RecommendationAlertSubscription, AgentPerformanceLog, ScreenerRunLog, SystemHealthLog, UnifiedEvent
+- **Files to Create**: 25+ new files across services, APIs, UI, agent defs, skills
+- **Files to Modify**: 16 existing files (schema, worker, telegram, header, audit, etc.)
+- **Status**: ✅ Planning complete — ready for code implementation starting with Prisma schema
+
+### 2026-07-18 | Telegram Bot Alert Delivery (v3.2.0) - COMPLETE
+- **Action**: Built complete Telegram bot alert delivery system with @tradenext6Bot.
+- **Problem**: Users couldn't receive real-time alerts on their phone; no Telegram integration existed.
+- **Files Created (5)**:
+  - `lib/services/telegramBotService.ts` — Centralized bot command handler with 6 commands, rate limiter (5/min, 20/hr, 3s cooldown), user verification via 6-digit code, audit logging, sendAlertToUser(), broadcastToSubscribers()
+  - `app/api/user/telegram/test/route.ts` — POST test endpoint that sends "Test Message" to user's registered Telegram
+  - `app/api/user/telegram/verify/route.ts` — POST with send (generates code) and confirm (validates code) actions; 10-min TTL
+  - `app/components/alerts/TelegramSubscription.tsx` — 3-step subscription UI: Register → Verify → Done, with test/unsubscribe buttons
+  - `lib/services/rebalancerTypes.ts` — Extracted types from rebalancerService.ts to avoid bundling Prisma/node modules in client components
+- **Files Modified (8)**:
+  - `app/api/telegram/webhook/route.ts` — Now delegates to handleBotCommand()
+  - `app/alerts/page.tsx` — Added Telegram Bot as 5th tab
+  - `app/contact/page.tsx` — Added FAQ: "How do I receive real-time alerts via Telegram?"
+  - `app/components/rebalancer/AllocationTable.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TargetAllocationEditor.tsx` — Changed import to rebalancerTypes
+  - `app/components/rebalancer/TradeSuggestionList.tsx` — Changed import to rebalancerTypes
+  - `next.config.ts` — Added pg, pg-native, pgpass to serverExternalPackages
+  - `README.md`, `AGENTS.md`, `TODO.md` — Documentation updates
+- **Bug Fix — Corp Actions Price/Yield**:
+  - Added price enrichment from `daily_prices` (DISTINCT ON ticker for latest close)
+  - Fixed yield formula: `(dividendPerShare / currentPrice) * 100` (was using face value)
+- **Build Fixes**:
+  - Extracted types to `rebalancerTypes.ts` to fix client-side Prisma bundling (was trying to resolve `pg`, `dns`)
+  - Used PowerShell `ProcessStartInfo` for non-blocking dev server startup
+- **Secrets Management**: Removed hardcoded Telegram secrets from README.md; stored only in .env + Netlify env vars
+- **Testing**: Jest 190/190 pass; E2E Playwright on Dashboard, Alerts→Telegram tab, Contact FAQ, Dividends calendar, Portfolio Rebalance, Telegram webhook API, mobile responsive (375px) — 0 console errors
+- **Build**: `npm run quickbuild` compiles successfully
+- **Status**: ✅ RESOLVED — Code committed, needs git push to trigger Netlify CD deploy
+
+### 2026-07-16 | Agent Handoff & Self-Learning System (v1.15.0) - COMPLETE
+- **Action**: Created complete agent orchestration infrastructure with handoff files, agent definitions, self-learning loop, commands, and git hooks.
+- **Issue**: No standardized mechanism for agent-to-agent handoffs, session context preservation, or self-improvement across diverse AI agents.
+- **Root Cause**: Previous system had no handoff protocol between sessions, no way for different agent types (Claude, Cursor, OpenCode) to share context, and no self-learning loop.
+- **Files Created (23 files)**:
+    - `HANDOFF.md` - Root orchestration state
+    - `.agents/handoffs/README.md`, `SCHEMA.md`, `active/latest.md`
+    - `.agents/handoffs/flow/session-cycle.md`, `agent-to-agent.md`, `error-recovery.md`
+    - `.agents/agents/gh-helper.md`, `e2e-agent.md`, `integrator.md`, `observability.md`, `devops.md`, `qa.md`
+    - `.agents/agents/code-reviewer.md` (updated), `tdd-guide.md` (updated)
+    - `.agents/commands/handoff.md`, `self-learn.md`, `review-diff.md`
+    - `.agents/learning/README.md`, `session-log.md`
+    - `.agents/hooks/README.md` (updated)
+    - `.git/hooks/pre-commit`, `post-commit`
+- **Details**:
+    - Handoff system uses YAML frontmatter with structured context, progress, decisions, blockers, learnings
+    - Agent pipeline protocol: GH Helper → Integrator → QA → DevOps
+    - Self-learning loop extracts patterns and promotes them to Lessons.md
+    - Pre-commit hook detects console.log and hardcoded secrets
+    - Post-commit hook logs to `.agents/handoffs/checkpoint.log` (non-tracked) to avoid infinite loop
+    - Full documentation updated: AGENTS.md, Primer.md, agent-memory.md, Lessons.md
+- **Status**: RESOLVED in v1.15.0.
 
 ### 2026-03-21 | Worker Task Management Fix - COMPLETE
 - **Action**: Fixed worker task actions in admin panel - Run Now, Cancel, Retry, Delete buttons.
@@ -331,3 +433,5 @@ echo "" >> agent--memory.md
 - Keep entries concise but informative
 - Include file names when relevant
 - Note any errors or issues encountered
+
+

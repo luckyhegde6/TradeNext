@@ -1,140 +1,87 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { runDailyRecommendations, checkRecommendationPerformance } from "@/lib/services/dailyRecommendationService";
 import prisma from "@/lib/prisma";
-import { z } from "zod";
+import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
 
-const recommendationSchema = z.object({
-  symbol: z.string().min(1),
-  entryRange: z.string().optional().nullable(),
-  shortTerm: z.string().optional().nullable(),
-  longTerm: z.string().optional().nullable(),
-  intraday: z.string().optional().nullable(),
-  recommendation: z.enum(['ACCUMULATE', 'BUY', 'HOLD', 'SELL', 'NEUTRAL']),
-  analystRating: z.string().optional().nullable(),
-  profitRangeMin: z.number().optional().nullable(),
-  profitRangeMax: z.number().optional().nullable(),
-  targetPrice: z.number().optional().nullable(),
-  analysis: z.string().optional().nullable(),
-  imageUrl: z.string().optional().nullable(),
-});
-
-const updateRecommendationSchema = recommendationSchema.partial();
-
+// GET /api/admin/recommendations — Get admin overview
 export async function GET() {
   try {
     const session = await auth();
-    if (!session || !session.user || session.user.role !== 'admin') {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session?.user || (session.user as any).role !== "admin") {
+      return NextResponse.json({ success: false, error: "Admin access required" }, { status: 403 });
     }
 
-    const recommendations = await prisma.stockRecommendation.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+    const [totalRuns, activeTrackers, recentRuns, performanceStats] = await Promise.all([
+      prisma.dailyRecommendationRun.count(),
+      prisma.recommendationTracker.count({ where: { status: "active" } }),
+      prisma.dailyRecommendationRun.findMany({
+        orderBy: { runDate: "desc" },
+        take: 10,
+        include: { stocks: { select: { id: true } } },
+      }),
+      prisma.recommendationTracker.groupBy({
+        by: ["status"],
+        _count: true,
+      }),
+    ]);
 
-    return NextResponse.json(recommendations);
-  } catch (error) {
-    console.error('Admin recommendations GET error:', error);
-    return NextResponse.json({ error: "Failed to fetch recommendations" }, { status: 500 });
-  }
-}
-
-export async function POST(req: Request) {
-  try {
-    const session = await auth();
-    if (!session || !session.user || session.user.role !== 'admin') {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const statusBreakdown: Record<string, number> = {};
+    for (const s of performanceStats) {
+      statusBreakdown[s.status] = s._count;
     }
 
-    const body = await req.json();
-    console.log('POST /api/admin/recommendations - body:', JSON.stringify(body));
-    const validatedData = recommendationSchema.parse(body);
-    console.log('POST /api/admin/recommendations - validated:', JSON.stringify(validatedData));
-
-    const recommendation = await prisma.stockRecommendation.create({
-      data: {
-        symbol: validatedData.symbol.toUpperCase(),
-        entryRange: validatedData.entryRange,
-        shortTerm: validatedData.shortTerm,
-        longTerm: validatedData.longTerm,
-        intraday: validatedData.intraday,
-        recommendation: validatedData.recommendation,
-        analystRating: validatedData.analystRating,
-        profitRangeMin: validatedData.profitRangeMin,
-        profitRangeMax: validatedData.profitRangeMax,
-        targetPrice: validatedData.targetPrice,
-        analysis: validatedData.analysis,
-        imageUrl: validatedData.imageUrl,
-        createdBy: session.user.id ? parseInt(session.user.id as string, 10) : null,
+    return NextResponse.json({
+      success: true,
+      stats: {
+        totalRuns,
+        activeTrackers,
+        statusBreakdown,
       },
+      recentRuns: recentRuns.map((r: (typeof recentRuns)[number]) => ({
+        id: r.id,
+        runDate: r.runDate,
+        status: r.status,
+        uniqueStocks: r.uniqueStocks,
+        aiProcessed: r.aiProcessed,
+        executionTimeMs: r.executionTimeMs,
+        stockCount: r.stocks.length,
+      })),
     });
-
-    return NextResponse.json(recommendation, { status: 201 });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid input", details: error.issues }, { status: 400 });
-    }
-    console.error('Admin recommendations POST error:', error);
-    return NextResponse.json({ error: "Failed to create recommendation" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Failed to fetch admin overview" }, { status: 500 });
   }
 }
 
-export async function PUT(req: Request) {
+// POST /api/admin/recommendations — Trigger manual run
+export async function POST(request: Request) {
   try {
     const session = await auth();
-    if (!session || !session.user || session.user.role !== 'admin') {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session?.user || (session.user as any).role !== "admin") {
+      return NextResponse.json({ success: false, error: "Admin access required" }, { status: 403 });
     }
 
-    const body = await req.json();
-    const { id, ...updateData } = body;
-    
-    if (!id) {
-      return NextResponse.json({ error: "ID is required" }, { status: 400 });
+    const body = await request.json();
+    const { action } = body;
+
+    if (action === "run_now") {
+      // Fire-and-forget: start pipeline in background, return immediately
+      runDailyRecommendations().catch((err) => {
+        logger.error({ msg: "Background recommendation run failed", error: err instanceof Error ? err.message : String(err) });
+      });
+      return NextResponse.json({ success: true, message: "Recommendation run started in background" });
     }
 
-    const validatedData = updateRecommendationSchema.parse(updateData);
+    if (action === "check_performance") {
+      const result = await checkRecommendationPerformance();
+      return NextResponse.json({ success: true, result });
+    }
 
-    const recommendation = await prisma.stockRecommendation.update({
-      where: { id },
-      data: {
-        ...validatedData,
-        symbol: validatedData.symbol?.toUpperCase(),
-      },
-    });
-
-    return NextResponse.json(recommendation);
+    return NextResponse.json({ success: false, error: "Invalid action" }, { status: 400 });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid input", details: error.issues }, { status: 400 });
-    }
-    console.error('Admin recommendations PUT error:', error);
-    return NextResponse.json({ error: "Failed to update recommendation" }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: Request) {
-  try {
-    const session = await auth();
-    if (!session || !session.user || session.user.role !== 'admin') {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ error: "ID is required" }, { status: 400 });
-    }
-
-    await prisma.stockRecommendation.delete({
-      where: { id },
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Admin recommendations DELETE error:', error);
-    return NextResponse.json({ error: "Failed to delete recommendation" }, { status: 500 });
+    logger.error({ msg: "Admin recommendation action failed", error });
+    return NextResponse.json({ success: false, error: "Action failed" }, { status: 500 });
   }
 }

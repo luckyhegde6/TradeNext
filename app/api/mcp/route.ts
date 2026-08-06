@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { nseFetch } from "@/lib/nse-client";
 import cache from "@/lib/cache";
+import { getBacktestData } from "@/lib/services/backtestDataService";
 
 // ============================================================================
 // Type Definitions
@@ -17,6 +18,7 @@ type McpFunction =
   | "getMarketIndices"    // Specific index data (NIFTY, BANK, etc.)
   | "getStockQuote"       // Real-time stock quote
   | "getStockChart"       // Historical chart data
+  | "getHistoricalData"   // Security-wise historical OHLCV (backtest source)
   | "getGainers"          // Top gainers for index
   | "getLosers"           // Top losers for index
   | "getMostActive"       // Most active stocks
@@ -96,6 +98,7 @@ function getFunctionList() {
     { name: "getMarketIndices", description: "Get specific index data (param: indexName)" },
     { name: "getStockQuote", description: "Get real-time stock quote (param: symbol)" },
     { name: "getStockChart", description: "Get historical chart data (param: symbol)" },
+    { name: "getHistoricalData", description: "Get security-wise historical OHLCV bars (params: symbol, from, to)" },
     { name: "getGainers", description: "Get top gainers for index (param: indexName)" },
     { name: "getLosers", description: "Get top losers for index (param: indexName)" },
     { name: "getMostActive", description: "Get most active stocks (param: indexName)" },
@@ -125,6 +128,7 @@ function getFunctionDescription(functionName: string): string | null {
     getMarketIndices: "Returns detailed data for a specific index. Parameters: indexName (e.g., 'NIFTY 50', 'NIFTY BANK', 'NIFTY IT').",
     getStockQuote: "Returns real-time quote for a stock. Parameters: symbol (e.g., 'RELIANCE', 'TCS', 'INFY').",
     getStockChart: "Returns historical chart data for a stock. Parameters: symbol (e.g., 'RELIANCE'), optional: period, interval.",
+    getHistoricalData: "Returns security-wise historical OHLCV bars for backtesting. Parameters: symbol (required), optional: from (DD-MM-YYYY), to (DD-MM-YYYY). Uses memory → temp table → NSE chain; never writes to main daily_prices.",
     getGainers: "Returns top gainers for an index. Parameters: indexName (e.g., 'NIFTY 50').",
     getLosers: "Returns top losers for an index. Parameters: indexName (e.g., 'NIFTY 50').",
     getMostActive: "Returns most active stocks by volume. Parameters: indexName (e.g., 'NIFTY 50').",
@@ -176,6 +180,15 @@ function getFunctionSchema(functionName: string): object | null {
         symbol: { type: "string", description: "Stock symbol" },
         period: { type: "string", enum: ["1D", "1W", "1M", "3M", "6M", "1Y", "5Y"], description: "Time period" },
         interval: { type: "string", enum: ["1min", "5min", "15min", "30min", "1hour", "1day"], description: "Data interval" },
+      },
+      required: ["symbol"],
+    },
+    getHistoricalData: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Stock symbol (e.g., 'RELIANCE', 'TCS')" },
+        from: { type: "string", description: "Start date DD-MM-YYYY (default: 5 years back)" },
+        to: { type: "string", description: "End date DD-MM-YYYY (default: today)" },
       },
       required: ["symbol"],
     },
@@ -289,6 +302,32 @@ async function handleGetStockChart(params: Record<string, unknown>): Promise<unk
   const data = await nseFetch("/api/NextApi/apiClient", `?symbol=${symbol}&functionName=getQuoteHistory&period=${period}`);
   cache.set(cacheKey, data, 300); // 5 min cache
   return data;
+}
+
+/**
+ * Handler: getHistoricalData - Security-wise historical OHLCV bars
+ * Shares the backtest data path (memory → temp table → NSE). Never writes
+ * to the main daily_prices table.
+ */
+async function handleGetHistoricalData(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = params.symbol as string;
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const from = params.from as string | undefined;
+  const to = params.to as string | undefined;
+
+  const data = await getBacktestData(symbol, from, to);
+  return {
+    symbol: symbol.toUpperCase(),
+    source: data.source,
+    barCount: data.barCount,
+    rangeStart: data.rangeStart.toISOString(),
+    rangeEnd: data.rangeEnd.toISOString(),
+    fetchedAt: data.fetchedAt.toISOString(),
+    ohlcv: data.ohlcv,
+  };
 }
 
 /**
@@ -663,6 +702,9 @@ export async function POST(request: NextRequest) {
       case "getStockChart":
         result = await handleGetStockChart(parameters);
         break;
+      case "getHistoricalData":
+        result = await handleGetHistoricalData(parameters);
+        break;
       case "getGainers":
         result = await handleGetGainers(parameters);
         break;
@@ -803,6 +845,9 @@ export async function GET(request: NextRequest) {
         break;
       case "getStockQuote":
         result = await handleGetStockQuote(parameters);
+        break;
+      case "getHistoricalData":
+        result = await handleGetHistoricalData(parameters);
         break;
       case "getMarquee":
         result = await handleGetMarquee();

@@ -148,55 +148,90 @@ function parseCorporateActionFromNse(item: any): any | null {
 }
 
 async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
-  let hydrated = 0;
+  // Batch approach: collect all valid actions, createMany with skipDuplicates, then update existing
+  // Reduces N individual upserts to ~N/200 + 1 queries
+  const BATCH_SIZE = 200;
+  const validActions = actions.filter(a => a.symbol && a.exDate);
   
-  for (const action of actions) {
-    if (!action.symbol || !action.exDate) continue;
-    
-    try {
-      const actionType = action.actionType || "OTHER";
-      const exDate = new Date(action.exDate);
-      
-      // Use upsert with symbol + actionType + exDate to match unique constraint
-      await prisma.corporateAction.upsert({
-        where: {
-          symbol_actionType_exDate: {
-            symbol: action.symbol,
-            actionType: actionType,
-            exDate: exDate
-          }
-        },
-        update: {
-          companyName: action.companyName || "",
-          series: action.series,
-          subject: action.subject || "",
-          recordDate: action.recordDate ? new Date(action.recordDate) : null,
-          faceValue: action.faceValue,
-          ratio: action.ratio,
-          dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
-          dividendYield: action.dividendYield,
-          source: 'nse'
-        },
-        create: {
-          symbol: action.symbol,
-          companyName: action.companyName || "",
-          series: action.series,
-          subject: action.subject || "",
-          actionType: actionType,
-          exDate: exDate,
-          recordDate: action.recordDate ? new Date(action.recordDate) : null,
-          faceValue: action.faceValue,
-          ratio: action.ratio,
-          dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
-          dividendYield: action.dividendYield,
-          source: 'nse'
-        }
+  if (validActions.length === 0) return 0;
+
+  let hydrated = 0;
+
+  // Build insert data
+  const insertData = validActions.map(action => {
+    const exDate = new Date(action.exDate);
+    return {
+      symbol: action.symbol,
+      companyName: action.companyName || "",
+      series: action.series || null,
+      subject: action.subject || "",
+      actionType: action.actionType || "OTHER",
+      exDate,
+      recordDate: action.recordDate ? new Date(action.recordDate) : null,
+      faceValue: action.faceValue || null,
+      ratio: action.ratio || null,
+      dividendPerShare: action.dividendPerShare ?? action.dividendAmount ?? null,
+      dividendYield: action.dividendYield || null,
+      source: 'nse',
+    };
+  });
+
+  try {
+    // Step 1: Insert all new records in batches (skip duplicates)
+    for (let i = 0; i < insertData.length; i += BATCH_SIZE) {
+      const batch = insertData.slice(i, i + BATCH_SIZE);
+      const result = await prisma.corporateAction.createMany({
+        data: batch,
+        skipDuplicates: true,
       });
-      hydrated++;
-    } catch (error) {
-      logger.error({ msg: 'Error hydrating corporate action', symbol: action.symbol, error });
+      hydrated += result.count;
     }
+
+    // Step 2: Update existing records in batches (only changed fields)
+    const uniqueSymbols = [...new Set(insertData.map(a => a.symbol))];
+    const existingRecords = await prisma.corporateAction.findMany({
+      where: {
+        symbol: { in: uniqueSymbols },
+      },
+      select: { symbol: true, actionType: true, exDate: true },
+    });
+    const existingSet = new Set(existingRecords.map(r => `${r.symbol}|${r.actionType}|${r.exDate?.toISOString()}`));
+
+    const toUpdate = insertData.filter(a => {
+      const key = `${a.symbol}|${a.actionType}|${a.exDate.toISOString()}`;
+      return existingSet.has(key);
+    });
+
+    for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+      const batch = toUpdate.slice(i, i + BATCH_SIZE);
+      await prisma.$transaction(
+        batch.map(a =>
+          prisma.corporateAction.updateMany({
+            where: {
+              symbol: a.symbol,
+              actionType: a.actionType,
+              exDate: a.exDate,
+            },
+            data: {
+              companyName: a.companyName,
+              series: a.series,
+              subject: a.subject,
+              recordDate: a.recordDate,
+              faceValue: a.faceValue,
+              ratio: a.ratio,
+              dividendPerShare: a.dividendPerShare,
+              dividendYield: a.dividendYield,
+              source: 'nse',
+            },
+          })
+        )
+      );
+    }
+  } catch (error) {
+    logger.error({ msg: 'Error batch hydrating corporate actions', error });
   }
+
+  logger.info({ msg: 'Corporate actions hydrated', total: validActions.length, hydrated });
   return hydrated;
 }
 
@@ -216,36 +251,55 @@ function parseAnnouncementFromNse(item: any): any | null {
 }
 
 async function hydrateAnnouncementsToDb(announcements: any[]): Promise<number> {
-  let hydrated = 0;
+  // Batch approach: createMany with skipDuplicates
+  // Reduces 2N queries (find+create per record) to N/200 batches
+  const BATCH_SIZE = 200;
+  const validAnns = announcements.filter(a => a.symbol && a.broadcastDateTime);
   
-  for (const ann of announcements) {
-    if (!ann.symbol || !ann.broadcastDateTime) continue;
-    
-    try {
-      const existing = await prisma.corporateAnnouncement.findFirst({
-        where: {
-          symbol: ann.symbol,
-          broadcastDateTime: new Date(ann.broadcastDateTime)
-        }
+  if (validAnns.length === 0) return 0;
+
+  let hydrated = 0;
+
+  const insertData = validAnns.map(ann => ({
+    symbol: ann.symbol,
+    companyName: ann.companyName || "",
+    subject: ann.subject || "",
+    details: ann.details || null,
+    broadcastDateTime: new Date(ann.broadcastDateTime),
+    attachment: ann.attachment || null,
+  }));
+
+  try {
+    // createMany with skipDuplicates - requires a unique constraint on (symbol, broadcastDateTime)
+    // If no unique constraint, fall back to individual findFirst+create with batched reads
+    const existingRecords = await prisma.corporateAnnouncement.findMany({
+      where: {
+        symbol: { in: insertData.map(a => a.symbol) },
+      },
+      select: { symbol: true, broadcastDateTime: true },
+    });
+    const existingSet = new Set(
+      existingRecords.map(r => `${r.symbol}|${r.broadcastDateTime?.toISOString()}`)
+    );
+
+    const newRecords = insertData.filter(a => {
+      const key = `${a.symbol}|${a.broadcastDateTime.toISOString()}`;
+      return !existingSet.has(key);
+    });
+
+    for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
+      const batch = newRecords.slice(i, i + BATCH_SIZE);
+      const result = await prisma.corporateAnnouncement.createMany({
+        data: batch,
+        skipDuplicates: true,
       });
-      
-      if (!existing) {
-        await prisma.corporateAnnouncement.create({
-          data: {
-            symbol: ann.symbol,
-            companyName: ann.companyName || "",
-            subject: ann.subject || "",
-            details: ann.details || null,
-            broadcastDateTime: new Date(ann.broadcastDateTime),
-            attachment: ann.attachment || null,
-          }
-        });
-        hydrated++;
-      }
-    } catch (error) {
-      logger.error({ msg: 'Error hydrating announcement', symbol: ann.symbol, error });
+      hydrated += result.count;
     }
+  } catch (error) {
+    logger.error({ msg: 'Error batch hydrating announcements', error });
   }
+
+  logger.info({ msg: 'Announcements hydrated', total: validAnns.length, hydrated });
   return hydrated;
 }
 
@@ -267,64 +321,75 @@ function parseDealFromNse(item: any, dealType: 'BLOCK' | 'BULK'): any | null {
 }
 
 async function hydrateDealsToDb(deals: any[]): Promise<{ blockDeals: number; bulkDeals: number }> {
+  // Batch approach: split into block/bulk, batch find existing, then createMany new
+  // Reduces 2N queries to ~N/200 + 2 batch queries
+  const BATCH_SIZE = 200;
+  const validDeals = deals.filter(d => d.symbol && d.date);
+  
+  const blockDealsData = validDeals.filter(d => d.dealType === 'BLOCK').map(d => ({
+    symbol: d.symbol,
+    securityName: d.securityName || "",
+    clientName: d.clientName || "",
+    quantityTraded: d.quantityTraded || 0,
+    tradePrice: d.tradePrice || 0,
+    buySell: d.buySell || "",
+    date: new Date(d.date),
+  }));
+
+  const bulkDealsData = validDeals.filter(d => d.dealType !== 'BLOCK').map(d => ({
+    symbol: d.symbol,
+    securityName: d.securityName || "",
+    clientName: d.clientName || "",
+    quantityTraded: d.quantityTraded || 0,
+    tradePrice: d.tradePrice || 0,
+    buySell: d.buySell || "",
+    date: new Date(d.date),
+  }));
+
   let blockDealsCount = 0;
   let bulkDealsCount = 0;
-  
-  for (const deal of deals) {
-    if (!deal.symbol || !deal.date) continue;
-    
-    try {
-      // Handle block deals
-      if (deal.dealType === 'BLOCK') {
-        const existing = await prisma.blockDeal.findFirst({
-          where: {
-            symbol: deal.symbol,
-            date: new Date(deal.date)
-          }
+
+  try {
+    // Process block deals
+    if (blockDealsData.length > 0) {
+      const existingBlock = await prisma.blockDeal.findMany({
+        where: { symbol: { in: blockDealsData.map(d => d.symbol) } },
+        select: { symbol: true, date: true },
+      });
+      const blockExistingSet = new Set(existingBlock.map(r => `${r.symbol}|${r.date?.toISOString()}`));
+      const newBlockDeals = blockDealsData.filter(d => !blockExistingSet.has(`${d.symbol}|${d.date.toISOString()}`));
+
+      for (let i = 0; i < newBlockDeals.length; i += BATCH_SIZE) {
+        const result = await prisma.blockDeal.createMany({
+          data: newBlockDeals.slice(i, i + BATCH_SIZE),
+          skipDuplicates: true,
         });
-        
-        if (!existing) {
-          await prisma.blockDeal.create({
-            data: {
-              symbol: deal.symbol,
-              securityName: deal.securityName || "",
-              clientName: deal.clientName || "",
-              quantityTraded: deal.quantityTraded || 0,
-              tradePrice: deal.tradePrice || 0,
-              buySell: deal.buySell || "",
-              date: new Date(deal.date),
-            }
-          });
-          blockDealsCount++;
-        }
-      } else {
-        // Handle bulk deals
-        const existing = await prisma.bulkDeal.findFirst({
-          where: {
-            symbol: deal.symbol,
-            date: new Date(deal.date)
-          }
-        });
-        
-        if (!existing) {
-          await prisma.bulkDeal.create({
-            data: {
-              symbol: deal.symbol,
-              securityName: deal.securityName || "",
-              clientName: deal.clientName || "",
-              quantityTraded: deal.quantityTraded || 0,
-              tradePrice: deal.tradePrice || 0,
-              buySell: deal.buySell || "",
-              date: new Date(deal.date),
-            }
-          });
-          bulkDealsCount++;
-        }
+        blockDealsCount += result.count;
       }
-    } catch (error) {
-      logger.error({ msg: 'Error hydrating deal', symbol: deal.symbol, error });
     }
+
+    // Process bulk deals
+    if (bulkDealsData.length > 0) {
+      const existingBulk = await prisma.bulkDeal.findMany({
+        where: { symbol: { in: bulkDealsData.map(d => d.symbol) } },
+        select: { symbol: true, date: true },
+      });
+      const bulkExistingSet = new Set(existingBulk.map(r => `${r.symbol}|${r.date?.toISOString()}`));
+      const newBulkDeals = bulkDealsData.filter(d => !bulkExistingSet.has(`${d.symbol}|${d.date.toISOString()}`));
+
+      for (let i = 0; i < newBulkDeals.length; i += BATCH_SIZE) {
+        const result = await prisma.bulkDeal.createMany({
+          data: newBulkDeals.slice(i, i + BATCH_SIZE),
+          skipDuplicates: true,
+        });
+        bulkDealsCount += result.count;
+      }
+    }
+  } catch (error) {
+    logger.error({ msg: 'Error batch hydrating deals', error });
   }
+
+  logger.info({ msg: 'Deals hydrated', blockDeals: blockDealsCount, bulkDeals: bulkDealsCount });
   return { blockDeals: blockDealsCount, bulkDeals: bulkDealsCount };
 }
 

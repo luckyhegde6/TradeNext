@@ -79,6 +79,42 @@ export default function AdminAuditPage() {
         return "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700";
       case "RATE_LIMIT":
         return "bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800";
+      // AI Agent events
+      case "AI_AGENT_TRIGGER":
+      case "AI_AGENT_SUCCESS":
+        return "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800";
+      case "AI_AGENT_FAILURE":
+      case "AI_AGENT_FALLBACK":
+        return "bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-400 border border-orange-200 dark:border-orange-800";
+      // Screener events
+      case "SCREENER_RUN_START":
+        return "bg-cyan-100 dark:bg-cyan-900/40 text-cyan-800 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800";
+      case "SCREENER_RUN_COMPLETE":
+        return "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800";
+      case "SCREENER_RUN_FAILED":
+      case "SCREENER_DEDUP":
+        return "bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-400 border border-rose-200 dark:border-rose-800";
+      // Telegram events
+      case "TELEGRAM_SUBSCRIBE":
+      case "TELEGRAM_COMMAND":
+        return "bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-400 border border-sky-200 dark:border-sky-800";
+      case "TELEGRAM_UNSUBSCRIBE":
+      case "TELEGRAM_BROADCAST":
+        return "bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-400 border border-violet-200 dark:border-violet-800";
+      // Recommendation events
+      case "RECOMMENDATION_GENERATED":
+        return "bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-400 border border-teal-200 dark:border-teal-800";
+      case "RECOMMENDATION_TARGET_ACHIEVED":
+        return "bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-800";
+      case "RECOMMENDATION_STOP_LOSS_HIT":
+      case "RECOMMENDATION_EXPIRED":
+        return "bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800";
+      // System events
+      case "SYSTEM_HEALTH_CHECK":
+        return "bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-400 border border-lime-200 dark:border-lime-800";
+      case "SYSTEM_ANOMALY_DETECTED":
+      case "SYSTEM_PROVIDER_OUTAGE":
+        return "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-800";
       default:
         return "bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-300 border border-gray-200 dark:border-slate-700";
     }
@@ -139,13 +175,44 @@ export default function AdminAuditPage() {
               className="px-4 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             >
               <option value="">All Actions</option>
-              <option value="API_CALL">API Call</option>
-              <option value="NSE_CALL">NSE Call</option>
-              <option value="USER_ACTION">User Action</option>
-              <option value="PORTFOLIO_ACTION">Portfolio Action</option>
-              <option value="LOGIN">Login</option>
-              <option value="LOGOUT">Logout</option>
-              <option value="RATE_LIMIT">Rate Limit</option>
+              <optgroup label="Core">
+                <option value="API_CALL">API Call</option>
+                <option value="NSE_CALL">NSE Call</option>
+                <option value="USER_ACTION">User Action</option>
+                <option value="PORTFOLIO_ACTION">Portfolio Action</option>
+                <option value="LOGIN">Login</option>
+                <option value="LOGOUT">Logout</option>
+                <option value="RATE_LIMIT">Rate Limit</option>
+              </optgroup>
+              <optgroup label="AI Agents">
+                <option value="AI_AGENT_TRIGGER">AI Agent Trigger</option>
+                <option value="AI_AGENT_SUCCESS">AI Agent Success</option>
+                <option value="AI_AGENT_FAILURE">AI Agent Failure</option>
+                <option value="AI_AGENT_FALLBACK">AI Agent Fallback</option>
+              </optgroup>
+              <optgroup label="Screeners">
+                <option value="SCREENER_RUN_START">Screener Run Start</option>
+                <option value="SCREENER_RUN_COMPLETE">Screener Run Complete</option>
+                <option value="SCREENER_RUN_FAILED">Screener Run Failed</option>
+                <option value="SCREENER_DEDUP">Screener Dedup</option>
+              </optgroup>
+              <optgroup label="Telegram">
+                <option value="TELEGRAM_SUBSCRIBE">Telegram Subscribe</option>
+                <option value="TELEGRAM_UNSUBSCRIBE">Telegram Unsubscribe</option>
+                <option value="TELEGRAM_COMMAND">Telegram Command</option>
+                <option value="TELEGRAM_BROADCAST">Telegram Broadcast</option>
+              </optgroup>
+              <optgroup label="Recommendations">
+                <option value="RECOMMENDATION_GENERATED">Recommendation Generated</option>
+                <option value="RECOMMENDATION_TARGET_ACHIEVED">Target Achieved</option>
+                <option value="RECOMMENDATION_STOP_LOSS_HIT">Stop Loss Hit</option>
+                <option value="RECOMMENDATION_EXPIRED">Recommendation Expired</option>
+              </optgroup>
+              <optgroup label="System">
+                <option value="SYSTEM_HEALTH_CHECK">Health Check</option>
+                <option value="SYSTEM_ANOMALY_DETECTED">Anomaly Detected</option>
+                <option value="SYSTEM_PROVIDER_OUTAGE">Provider Outage</option>
+              </optgroup>
             </select>
           </div>
           <div>

@@ -5,12 +5,18 @@ import { usePathname } from "next/navigation";
 
 const navItems = [
     { name: "Overview", href: "/admin/utils" },
+    { name: "AI Agents", href: "/admin/ai" },
+    { name: "AI Monitoring", href: "/admin/utils/ai-monitoring" },
     { name: "Users", href: "/admin/users" },
     { name: "Sessions", href: "/admin/sessions" },
     { name: "Alerts", href: "/admin/alerts" },
     { name: "Recommendations", href: "/admin/recommendations" },
     { name: "Holdings", href: "/admin/holdings" },
     { name: "Audit Logs", href: "/admin/audit" },
+    { name: "Dividend Mgmt", href: "/admin/dividends" },
+    { name: "Live Prices", href: "/admin/live-prices" },
+    { name: "Tax Mgmt", href: "/admin/tax" },
+    { name: "Rebalancer", href: "/admin/rebalance" },
     { name: "Tasks", href: "/admin/utils/tasks" },
     { name: "Monitoring", href: "/admin/utils/monitoring" },
     { name: "Workers", href: "/admin/utils/workers" },
@@ -26,7 +32,13 @@ const navItems = [
 function getPageTitle(pathname: string): string {
     const map: Record<string, string> = {
         "/admin/utils": "Admin Utils",
+        "/admin/ai": "AI Agents",
+        "/admin/utils/ai-monitoring": "AI Monitoring",
         "/admin/sessions": "Sessions",
+        "/admin/dividends": "Dividend Mgmt",
+        "/admin/live-prices": "Live Prices",
+        "/admin/tax": "Tax Mgmt",
+        "/admin/rebalance": "Rebalancer",
         "/admin/utils/ingest-zip": "Ingest ZIP",
         "/admin/utils/ingest-csv": "Ingest CSV",
         "/admin/utils/workers": "Workers",

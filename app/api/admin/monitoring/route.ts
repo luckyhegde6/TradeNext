@@ -188,6 +188,24 @@ export async function GET(req: Request) {
         return NextResponse.json(httpStats);
       }
 
+      case "db-logs": {
+        // DB-backed server logs (works on serverless — no writable FS needed)
+        const { getDbLogs } = await import("@/lib/services/db-logger");
+        const level = searchParams.get("level") || undefined;
+        const source = searchParams.get("source") || undefined;
+        const limit = parseInt(searchParams.get("limit") || "200");
+        const offset = parseInt(searchParams.get("offset") || "0");
+
+        const result = await getDbLogs({
+          level: level as never,
+          source: source || undefined,
+          limit,
+          offset,
+        });
+        logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
+        return NextResponse.json(result);
+      }
+
       case "server-logs": {
         // Get list of log files
         if (searchParams.get("action") === "list") {

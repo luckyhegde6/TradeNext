@@ -8,11 +8,19 @@ import { existsSync, mkdirSync, chmodSync } from "fs";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
+let heartbeatInterval: NodeJS.Timeout | null = null;
 let schedulerInterval: NodeJS.Timeout | null = null;
 const WORKER_ID = `worker-${os.hostname()}-${process.pid}`;
+const HEARTBEAT_INTERVAL_MS = 60_000; // Write heartbeat every 60s instead of every 5s
+let lastHeartbeatStatus: "idle" | "busy" = "idle";
+let lastHeartbeatTaskId: string | undefined;
 
 /**
  * Start the background worker polling loop
+ * NOTE: Task polling runs every 5s for responsiveness, but DB heartbeat
+ * is separated into a 60s interval to reduce monthly query count by ~98%.
+ * Previously: ~1,036,800 queries/month from heartbeat alone.
+ * Now: ~17,280 queries/month (heartbeat) + 5s poll only queries DB when tasks exist.
  */
 export function startWorker(pollingIntervalMs = 5000) {
     if (workerInterval) {
@@ -20,7 +28,7 @@ export function startWorker(pollingIntervalMs = 5000) {
         return;
     }
 
-    logger.info({ msg: "Starting background worker engine", workerId: WORKER_ID, interval: pollingIntervalMs });
+    logger.info({ msg: "Starting background worker engine", workerId: WORKER_ID, interval: pollingIntervalMs, heartbeatInterval: HEARTBEAT_INTERVAL_MS });
 
     // Ensure logs directory exists at startup
     try {
@@ -33,14 +41,26 @@ export function startWorker(pollingIntervalMs = 5000) {
         logger.warn({ msg: "Failed to initialize logs directory at startup", error: e });
     }
 
+    // Task polling — only queries DB when there might be pending tasks
     workerInterval = setInterval(async () => {
         try {
             await pollAndExecute();
-            await updateHeartbeat("idle");
         } catch (error) {
             logger.error({ msg: "Worker loop error", error });
         }
     }, pollingIntervalMs);
+
+    // Heartbeat — writes to DB every 60s for crash recovery visibility
+    heartbeatInterval = setInterval(async () => {
+        try {
+            await updateHeartbeat(lastHeartbeatStatus, lastHeartbeatTaskId);
+        } catch (error) {
+            // Ignore heartbeat errors
+        }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    // Write initial heartbeat
+    updateHeartbeat("idle").catch(() => {});
 }
 
 /**
@@ -70,6 +90,10 @@ export function stopWorkerEngine() {
     if (workerInterval) {
         clearInterval(workerInterval);
         workerInterval = null;
+    }
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
     }
     if (schedulerInterval) {
         clearInterval(schedulerInterval);
@@ -106,6 +130,10 @@ async function pollAndExecute() {
 
     if (updateResult.count === 0) return; // Already picked up by another worker node
 
+    // Update tracked status (will be written to DB by heartbeat interval)
+    lastHeartbeatStatus = "busy";
+    lastHeartbeatTaskId = task.id;
+    // Write immediate heartbeat for task start (important for real-time status)
     await updateHeartbeat("busy", task.id);
     const taskLogger = createTaskLogger(task.id);
     await taskLogger.info(`Worker ${WORKER_ID} started task: ${task.name} [${task.taskType}]`);
@@ -138,6 +166,10 @@ async function pollAndExecute() {
         });
         await taskLogger.error(`Task ${task.id} execution failed`, error);
     } finally {
+        // Update tracked status — heartbeat interval will write to DB on next tick
+        lastHeartbeatStatus = "idle";
+        lastHeartbeatTaskId = undefined;
+        // Write immediate heartbeat for task end
         await updateHeartbeat("idle");
     }
 }
