@@ -34,7 +34,7 @@
 - [x] `app/api/openapi/route.ts`: swagger — MCP enum + historical from/to params + `getHistoricalData` + backtest /run route w/ `dataSource`
 - [x] HTML architecture doc: `docs/architecture.html` (Mermaid: system overview, backtest chain, 3 sequence diagrams, ER, sync/lifecycle flows, caching table, MCP, troubleshooting, agentic model, improvements)
 - [x] Final: `npm run test` (alone — 286 pass, 23 suites) + `npx tsc --noEmit` (all changed prod files clean); `git status` — no junk/secrets
-- [ ] Commit on **feat/backtest-historical-cache** branch (never `main` without explicit permission)
+- [x] Commit `720c4af` on `feat/backtest-historical-cache` + pushed + **PR #67** opened (https://github.com/luckyhegde6/TradeNext/pull/67)
 
 ### Carried Forward (from ph19)
 - [ ] Deploy to Netlify + verify prod (recommendations stale-data fix, Telegram updates, history prices, DB logs tab)
