@@ -37,7 +37,8 @@ checkpoint: "ph20-backtest-historical"
 - [x] `app/api/openapi/route.ts`: swagger — MCP enum + `getHistoricalData` + historical from/to params + backtest /run route w/ `dataSource` (security: securityBearer)
 - [x] HTML architecture doc: `docs/architecture.html` (Mermaid: overview, backtest chain, 3 sequence diagrams, ER, sync/lifecycle flows, caching table, MCP, troubleshooting, agentic model, improvements)
 - [x] Final verify: `npm run test` alone → **286 pass (23 suites)**; `npx tsc --noEmit` → all changed prod files clean; `git status` → no junk/secrets
-- [ ] Commit on feature branch (`feat/backtest-historical-cache` — never `main` without explicit permission)
+- [x] Commit on feature branch: `720c4af` on `feat/backtest-historical-cache` (39 files, pre-commit checks passed)
+- [x] Pushed branch + **PR #67**: https://github.com/luckyhegde6/TradeNext/pull/67 — **MERGED** into main (`6fad8d5` Merge pull request #67)
 
 ## Decisions
 - Backtest: 4-step chain, NSE-fetched bars NEVER written to main `daily_prices` (temp table only).
@@ -48,9 +49,8 @@ checkpoint: "ph20-backtest-historical"
 - Git STRICT: never commit main without explicit permission; branch + PR always.
 
 ## Blockers
-- (none) — all work complete; only commit + PR remain (awaiting user go-ahead).
+- (none)
 
 ## Next Steps
-1. Ask user permission → commit on `feat/backtest-historical-cache`
-2. Push branch + open PR (main ← feat/backtest-historical-cache)
-3. After merge: carry-forward todos (deploy, prod verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI)
+1. (DONE) PR #67 merged into main
+2. Carry-forward todos: deploy, prod verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI
