@@ -187,7 +187,6 @@ export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTa
         {[
           { id: "all", label: "All" },
           { id: "BUY", label: "Buy" },
-          { id: "HOLD", label: "Hold" },
           { id: "SELL", label: "Sell" },
         ].map((f) => (
           <button

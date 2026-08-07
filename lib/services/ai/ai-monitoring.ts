@@ -68,13 +68,13 @@ function getBuffer(): AiCallEntry[] {
 /**
  * Record an AI call for observability.
  *
- * In addition to the in-memory ring buffer (fast reads within one serverless
- * instance), the call is fire-and-forget persisted to the database via
- * {@link persistAiCallToDb}. This guarantees AI call logs survive serverless
- * instance recycling — otherwise /admin/utils/ai-monitoring would appear to
- * lose logs on every refresh.
+ * The call is pushed to the in-memory ring buffer (fast reads) AND persisted
+ * to the database. The returned promise resolves once the DB row is written —
+ * callers in request handlers MUST `await` it (e.g. in a `finally` block) so
+ * the serverless function does not freeze before the write lands. Fire-and-
+ * forget callers (background workers) may ignore the promise.
  */
-export function trackAiCall(entry: AiCallEntry): void {
+export function trackAiCall(entry: AiCallEntry): Promise<void> {
   const buffer = getBuffer();
   buffer.push(entry);
 
@@ -82,11 +82,6 @@ export function trackAiCall(entry: AiCallEntry): void {
   if (buffer.length > MAX_CALLS) {
     buffer.splice(0, buffer.length - MAX_CALLS);
   }
-
-  // Persist to DB in the background (never block the caller)
-  persistAiCallToDb(entry).catch(() => {
-    /* handled inside persistAiCallToDb */
-  });
 
   // Log to the main logger
   const logLevel = entry.status === "error" ? "warn" : "info";
@@ -99,6 +94,10 @@ export function trackAiCall(entry: AiCallEntry): void {
     responseTimeMs: entry.responseTimeMs,
     error: entry.error,
   });
+
+  // Persist to DB (awaited by request handlers so the write survives
+  // serverless instance freeze; safe to ignore in worker contexts).
+  return persistAiCallToDb(entry);
 }
 
 // ─── Query functions ────────────────────────────────────────────────────
@@ -254,54 +253,86 @@ export async function getPersistedAiCalls(
 /**
  * Get AI calls merging the in-memory buffer with DB-persisted records.
  *
- * The in-memory buffer is checked first (cheap, no DB round-trip); if it is
- * empty (cold serverless instance) we fall back to the durable DB logs so the
- * admin monitoring page never shows "no data" after a refresh.
+ * Both sources are combined (memory entries first, then DB records older
+ * than the buffer so history is never hidden). The in-memory buffer alone is
+ * not authoritative — DB logs survive serverless restarts, so always reading
+ * both prevents the admin page from appearing to "lose" persisted calls.
  */
 export async function getAiCallsMerged(
   limit = 50,
   timeframeMinutes?: number,
-): Promise<{ calls: AiCallEntry[]; source: "memory" | "database" }> {
+): Promise<{ calls: AiCallEntry[]; source: "memory" | "database" | "hybrid" }> {
   const memoryCalls = getAiCalls(limit);
-  if (memoryCalls.length > 0) {
+  const persisted = await getPersistedAiCalls(limit, timeframeMinutes);
+
+  if (memoryCalls.length === 0 && persisted.length === 0) {
+    return { calls: [], source: "database" };
+  }
+  if (memoryCalls.length === 0) {
+    return { calls: persisted, source: "database" };
+  }
+  if (persisted.length === 0) {
     return { calls: memoryCalls, source: "memory" };
   }
 
-  const persisted = await getPersistedAiCalls(limit, timeframeMinutes);
-  return { calls: persisted, source: "database" };
+  // Merge: memory first (newest, this instance), then older DB records not
+  // already present in memory. Dedupe by timestamp+action+model to avoid
+  // double-showing the same call.
+  const seen = new Set(memoryCalls.map((c) => `${c.timestamp}|${c.action}|${c.model}`));
+  const merged = [...memoryCalls];
+  for (const p of persisted) {
+    const key = `${p.timestamp}|${p.action}|${p.model}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(p);
+    }
+  }
+  return { calls: merged.slice(0, limit), source: "hybrid" };
 }
 
 /**
  * Get AI stats merging the in-memory buffer with DB-persisted records.
  *
- * Prefers in-memory stats (fast); if the buffer is empty (cold instance),
- * computes stats from the durable DB logs.
+ * Stats are computed over the union of the in-memory buffer and DB-persisted
+ * logs (within the timeframe) so the dashboard reflects the full history, not
+ * just whatever the current serverless instance happened to buffer.
  */
 export async function getAiStatsMerged(
   timeframeMinutes = 60,
-): Promise<AiStats & { source: "memory" | "database" }> {
-  const buffer = getBuffer();
-  if (buffer.length > 0) {
-    return { ...getAiStats(timeframeMinutes), source: "memory" };
-  }
+): Promise<AiStats & { source: "memory" | "database" | "hybrid" }> {
+  const { calls: mergedAll } = await getAiCallsMerged(1000, timeframeMinutes);
 
-  const persisted = await getPersistedAiCalls(1000, timeframeMinutes);
-  if (persisted.length === 0) {
+  // Apply the same timeframe cutoff used by getAiStats() so memory entries
+  // outside the window are excluded (persisted rows are already filtered).
+  const cutoff = Date.now() - timeframeMinutes * 60 * 1000;
+  const merged = mergedAll.filter(
+    (c) => new Date(c.timestamp).getTime() > cutoff,
+  );
+
+  if (merged.length === 0) {
     return { ...getAiStats(timeframeMinutes), source: "database" };
   }
 
-  const recent = persisted;
-  const totalCalls = recent.length;
-  const successCount = recent.filter((c) => c.status === "success").length;
-  const errorCount = recent.filter((c) => c.status === "error").length;
-  const totalTokens = recent.reduce((sum, c) => sum + (c.tokensUsed || 0), 0);
-  const totalResponseTime = recent.reduce((sum, c) => sum + (c.responseTimeMs || 0), 0);
+  // Memory-only (no DB rows) → memory; DB-only → database; both → hybrid
+  const memoryCount = getBuffer().length;
+  const source: "memory" | "database" | "hybrid" =
+    memoryCount > 0 && merged.length > memoryCount
+      ? "hybrid"
+      : memoryCount > 0
+        ? "memory"
+        : "database";
+
+  const totalCalls = merged.length;
+  const successCount = merged.filter((c) => c.status === "success").length;
+  const errorCount = merged.filter((c) => c.status === "error").length;
+  const totalTokens = merged.reduce((sum, c) => sum + (c.tokensUsed || 0), 0);
+  const totalResponseTime = merged.reduce((sum, c) => sum + (c.responseTimeMs || 0), 0);
 
   const callsByModel: Record<string, number> = {};
   const errorsByModel: Record<string, number> = {};
   const callsByAction: Record<string, number> = {};
 
-  for (const call of recent) {
+  for (const call of merged) {
     callsByModel[call.model] = (callsByModel[call.model] || 0) + 1;
     if (call.status === "error") {
       errorsByModel[call.model] = (errorsByModel[call.model] || 0) + 1;
@@ -309,7 +340,7 @@ export async function getAiStatsMerged(
     callsByAction[call.action] = (callsByAction[call.action] || 0) + 1;
   }
 
-  const recentErrors = recent
+  const recentErrors = merged
     .filter((c) => c.status === "error")
     .slice(-10)
     .reverse();
@@ -327,7 +358,7 @@ export async function getAiStatsMerged(
     callsByAction,
     recentErrors,
     timeframeMinutes,
-    source: "database",
+    source,
   };
 }
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import DailyPicksTab from "@/app/components/recommendations/DailyPicksTab";
 import HistoryTab from "@/app/components/recommendations/HistoryTab";
+import PerformanceTab from "@/app/components/recommendations/PerformanceTab";
 import SubscribeTab from "@/app/components/recommendations/SubscribeTab";
 import DividendMonthView from "@/app/components/dividends/DividendMonthView";
 import DividendSummaryCards from "@/app/components/dividends/DividendSummaryCards";
@@ -15,7 +16,7 @@ import type {
   MonthlyIncome,
 } from "@/lib/services/dividendCalendarService";
 
-type Tab = "picks" | "history" | "dividends" | "subscribe";
+type Tab = "picks" | "history" | "performance" | "dividends" | "subscribe";
 type DividendViewTab = "calendar" | "list" | "income";
 
 interface Stock {
@@ -151,6 +152,7 @@ export default function RecommendationsPage() {
   const tabs: { id: Tab; label: string; icon: string; authRequired?: boolean }[] = [
     { id: "picks", label: "Today's Picks", icon: "🎯" },
     { id: "history", label: "History", icon: "📜" },
+    { id: "performance", label: "Performance", icon: "📈" },
     { id: "dividends", label: "Dividends", icon: "💰" },
     { id: "subscribe", label: "Subscribe", icon: "🔔", authRequired: true },
   ];
@@ -227,6 +229,10 @@ export default function RecommendationsPage() {
 
           {activeTab === "history" && (
             <HistoryTab loading={loading} />
+          )}
+
+          {activeTab === "performance" && (
+            <PerformanceTab loading={loading} />
           )}
 
           {activeTab === "dividends" && (

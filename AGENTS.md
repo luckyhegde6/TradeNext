@@ -8,6 +8,7 @@
 
 | Ver | Date | Summary |
 |-----|------|---------|
+| **v3.5.0** | Aug 7 2026 | Recommendation Performance Tracking & Archival: 3-status lifecycle (`tracking → target_achieved/stop_loss_hit → archived` 360d), 4 PM IST Mon–Fri SYSTEM perf-check cron (`30 10 * * 1-5`), `RecommendationArchive` snapshot table + `DailyRecommendationStock.trackerId` SetNull, weekday cron parser support, `triggeredBy: system`, categories extended to `btst|short|swing|medium|long`, public Performance tab (dynamic columns, sort, filters, pagination), sort-enum fix (10 keys), 24 new tests + session follow-up: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) + Run History Manual/System badge, Today's Picks BUY/SELL filter (All/Buy/Sell pills), AI monitoring persistence fix (awaited `trackAiCall` + `memory\|database\|hybrid` reads), 21 rec-service tests (312 total) |
 | **v3.4.3** | Aug 6 2026 | Subsystem architecture docs in `.agents/docs/` (recs engine, tasks/cron/workers, monitoring, alerts) with Mermaid diagrams + Agent Hints |
 | **v3.4.2** | Aug 6 2026 | Versioned `.githooks/` (pre-commit/post-commit/pre-push, `core.hooksPath`); gardenify docs port: `.agents/linear-history.md`, `code-hygiene.md`, `documentation-standards.md`; RULES/SOUL operating model |
 | **v3.4.1** | Aug 6 2026 | Prod fixes: `runInChunks()` txn-timeout fix, top-50 rec cap (`rankAndCapRecommendations`), Telegram live prices + always-broadcast, History predicted-vs-current, AI monitoring DB persistence, DB logs tab, marketCap plumbing |
@@ -107,6 +108,7 @@ git config core.hooksPath .githooks    # Enable versioned hooks (fresh clone)
 | `.agents/code-hygiene.md` | Code quality rules (ponytail minimal-code style) |
 | `.agents/documentation-standards.md` | Documentation standards |
 | `.agents/docs/` | Subsystem deep-dives (recommendations, tasks/cron/workers, monitoring, alerts) — read before editing those subsystems |
+| `.agents/AGENT-SKILL-MATRIX.md` | Agent ↔ Skill ↔ Command mapping matrix |
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
 | `.agents/handoffs/flow/` | Handoff flows: session-cycle, agent-to-agent, agent-to-human, error-recovery |
 
@@ -133,6 +135,31 @@ git config core.hooksPath .githooks
 ## Plugins & MCP (how agents extend TradeNext)
 
 `.opencode/opencode.json`: plugins `opencode-helicone-session`, `opencode-wakatime`; MCP: Context7 (library docs), Playwright (UI testing), gh_grep (code search), sequential-thinking, memory (knowledge graph), chrome-devtools, filesystem.
+
+## Skills, Agents & Commands (extensible system)
+
+TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents/AGENT-SKILL-MATRIX.md`.
+
+| Layer | Location | Notes |
+|-------|----------|-------|
+| Skills (machine) | `.opencode/skills/<name>/SKILL.md` | YAML frontmatter (`name`, `description`); auto-discovered |
+| Skills (human mirror) | `.agents/skills/<name>.md` | Short version + `Source:` footer |
+| Agent profiles | `.agents/agents/<name>.md` | Expertise + Workflow + Handoff Triggers |
+| Commands | `.agents/commands/<name>.md` | `/command` templates |
+| Wiring | `.opencode/opencode.json` | `agent:` + `command:` sections |
+
+**Focused skills** (beyond umbrella `docs-workflow`):
+
+| Skill | Agent | Command | Purpose |
+|-------|-------|---------|---------|
+| `docs-updater` | doc-writer | `/docs-update` | repo doc updates after every implementation |
+| `wiki-creator` | wiki-publisher | `/wiki-publish` | publish GitHub wiki pages (GitHub-renderer-safe mermaid) |
+| `bug-finder` | bug-hunter | `/find-bugs` | hunt/reproduce/verify bugs, layer contract audits |
+| `ux-enhancer` | ux-designer | `/ux-audit` | UI/UX audit (states/responsive/dark-mode) + enhancement |
+
+**Adding a new skill**: create `.opencode/skills/<name>/SKILL.md` → mirror `.agents/skills/<name>.md` → profile + command → wire `opencode.json` → update matrix + this table.
+
+**GitHub wiki gotchas** (wiki-creator skill): wiki git repo is lazy-created (create first page via web UI before cloning); GitHub's mermaid renderer is stricter — quote ALL labels with specials (`A["text<br/>more"]`, `E3["action: none|buy|sell|paper_trade"]`).
 
 ---
 
@@ -247,3 +274,7 @@ Key functions: `getIndexData`, `getMarketIndices`, `getStockQuote`, `getStockCha
 - Use `nseFetch(path, qs)` from `lib/nse-client.ts` (cookie + cache handled). Server-side proxy only; never call NSE from client.
 - **Historical data endpoint**: `GET /api/historicalOR/generateSecurityWiseHistoricalData?from=DD-MM-YYYY&to=DD-MM-YYYY&symbol=SYMBOL&type=priceVolumeDeliverable&series=ALL` → `{ data: SecurityWiseHistoricalRow[] }` (fields: `CH_SYMBOL`, `CH_SERIES` EQ|BL, `mTIMESTAMP`/`CH_TIMESTAMP`, OHLC, `VWAP`, `CH_TOT_TRADED_QTY`, `CH_TOT_TRADED_VAL`, `CH_TOTAL_TRADES`, `COP_DELIV_QTY`, `COP_DELIV_PERC`). Fetcher + OHLCV mapper in `lib/nse-api.ts`; use `parseNseDate`.
 - Rate limits respected; retry + backoff; cache with TTL. See `.opencode/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md`.
+
+## Documentation Workflow Skill
+
+- **`docs-workflow`** (`.opencode/skills/docs-workflow/SKILL.md` + `.agents/skills/docs-workflow.md`) — how to create feature plan files (`docs/designDoc/ph<NN>-*.md`), publish GitHub wiki pages (`TradeNext.wiki.git`), and apply the mandatory repo doc updates (AGENTS.md version table, CHANGELOG, TODO, Primer, Lessons, agent-memory, swagger/OpenAPI). Load this skill before any documentation work.

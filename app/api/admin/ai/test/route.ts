@@ -52,8 +52,8 @@ export async function POST(req: NextRequest) {
 
     const isError = response.startsWith("AI") && (response.includes("not configured") || response.includes("failed"));
 
-    // Track the test call
-    trackAiCall({
+    // Track the test call (await so the write lands before the response)
+    await trackAiCall({
       timestamp: new Date().toISOString(),
       action: "test",
       model: config.model,

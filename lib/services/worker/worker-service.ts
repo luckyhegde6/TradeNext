@@ -469,8 +469,10 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
 
   try {
     const { runDailyRecommendations } = await import("@/lib/services/dailyRecommendationService");
-    const result = await runDailyRecommendations();
-    logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId });
+    // System cron → "system"; admin manual trigger → "admin" (spawnRegularTask sets payload.source)
+    const triggeredBy = payload?.source === "admin_manual" ? "admin" : "system";
+    const result = await runDailyRecommendations({ triggeredBy });
+    logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId, triggeredBy });
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

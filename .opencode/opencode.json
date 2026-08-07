@@ -248,6 +248,62 @@
         "Edit": false,
         "Bash": false
       }
+    },
+    "doc-writer": {
+      "description": "Documentation specialist - keeps AGENTS.md, CHANGELOG, TODO, Primer, Lessons, swagger current after every implementation",
+      "mode": "subagent",
+      "prompt": "You are the Doc Writer agent. Apply mandatory repo documentation updates after an implementation (docs-updater skill + .agents/agents/doc-writer.md): AGENTS.md version row + bullets, .agents/CHANGELOG.md + detail subfile, TODO.md, Primer.md, agent-memory.md, Lessons.md, swagger/OpenAPI if API changed. Feature plans go in docs/designDoc/ph<NN>-<feature>-design.md with mermaid (quote labels with specials). If docs are not updated, the task is NOT complete. Run git status first to know what changed.",
+      "tools": {
+        "Read": true,
+        "Write": true,
+        "Edit": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
+    },
+    "wiki-publisher": {
+      "description": "Wiki specialist - publishes repo docs to the GitHub wiki with GitHub-renderer-safe mermaid",
+      "mode": "subagent",
+      "prompt": "You are the Wiki Publisher agent. Publish/maintain TradeNext wiki pages (wiki-creator skill + .agents/agents/wiki-publisher.md) at git@github.com:luckyhegde6/TradeNext.wiki.git (master). Adapt repo docs (.agents/docs/, prisma schema) into wiki pages; quote ALL mermaid labels with specials for GitHub's stricter renderer (e.g. A[\"text<br/>more\"]). Lazy-creation gotcha: if clone fails, ask user to create the first page via web UI. Commit + push, then verify rendering in browser (no Parse error boxes).",
+      "tools": {
+        "Read": true,
+        "Write": true,
+        "Edit": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
+    },
+    "bug-hunter": {
+      "description": "Bug hunting specialist - finds, reproduces, and verifies layer contract mismatches (UI ↔ API ↔ service ↔ DB)",
+      "mode": "subagent",
+      "prompt": "You are the Bug Hunter agent. Systematically hunt and verify TradeNext bugs (bug-finder skill + .agents/agents/bug-hunter.md). Contract audit first: UI sort/filter keys vs API zod enums vs service orderBy vs DB fields. Reproduce via raw curl before browser. Check edge cases (empty/null/pagination/sort/filter/cache). Classify severity (Critical/High fix before commit, Medium/Low → BUGS.md). Verify fixes: npx tsc --noEmit, targeted jest, browser re-test. Record root cause in Lessons.md.",
+      "tools": {
+        "Read": true,
+        "Write": true,
+        "Edit": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
+    },
+    "ux-designer": {
+      "description": "UI/UX specialist - audits pages (loading/error/empty/responsive/dark-mode) and enhances without over-engineering",
+      "mode": "subagent",
+      "prompt": "You are the UX Designer agent. Audit and enhance TradeNext UI/UX (ux-enhancer skill + .agents/agents/ux-designer.md). Verify loading/error/empty states, responsive (375/768/1920), dark/light, zero console errors via Playwright/chrome-devtools. Enhance with minimum code - reuse existing components, match Tailwind patterns, surgical changes. Deliver a UX audit report. Cleanup only processes you started (never port 4096).",
+      "tools": {
+        "Read": true,
+        "Write": true,
+        "Edit": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
     }
   },
   "command": {
@@ -275,6 +331,26 @@
       "agent": "build",
       "template": "./.agents/commands/plan.md",
       "prompt": "You are a documentation checker. Before the user commits code, verify documentation is up to date:\n\n## Tasks\n\n1. Check git diff to see what files changed\n2. Analyze if changes require AGENTS.md updates:\n   - New API endpoints added?\n   - New commands or features?\n   - Changes to build/test commands?\n   - New environment variables?\n3. Analyze if changes require README.md updates:\n   - New features added?\n   - Changed tech stack?\n   - New installation steps?\n   - Changed credentials?\n4. Report findings to user with specific update suggestions\n\n## Important\n- Do NOT make changes - only report what needs updating\n- Be specific about which sections need changes\n- Use git diff to see actual changes"
+    },
+    "docs-update": {
+      "description": "Apply mandatory repo documentation updates after an implementation",
+      "template": "./.agents/commands/docs-update.md",
+      "agent": "doc-writer"
+    },
+    "wiki-publish": {
+      "description": "Publish repo docs to the GitHub wiki with GitHub-renderer-safe mermaid",
+      "template": "./.agents/commands/wiki-publish.md",
+      "agent": "wiki-publisher"
+    },
+    "find-bugs": {
+      "description": "Hunt, reproduce, and verify TradeNext bugs (layer contract mismatches)",
+      "template": "./.agents/commands/find-bugs.md",
+      "agent": "bug-hunter"
+    },
+    "ux-audit": {
+      "description": "Audit a page for UI/UX completeness and enhance without over-engineering",
+      "template": "./.agents/commands/ux-audit.md",
+      "agent": "ux-designer"
     }
   },
   "permission": {

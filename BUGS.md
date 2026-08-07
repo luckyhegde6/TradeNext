@@ -1,5 +1,26 @@
 # TradeNext - UX Analysis & Bugs
 
+> **Bug tracking convention**: every open bug gets a GitHub issue on [luckyhegde6/TradeNext/issues](https://github.com/luckyhegde6/TradeNext/issues). This file is the human-readable tracker — fix bugs one by one, close the issue, then mark the row ✅ here.
+
+---
+
+## 🐞 Open Bugs (Priority Order)
+
+| # | Issue | Severity | GitHub | Status |
+|---|-------|----------|--------|--------|
+| 1 | **Prod: server/DB logs empty** on `/admin/utils/monitoring` (works locally) — FS-based log tab can't work on serverless; DB logger not wired to all sinks | High | [#68](https://github.com/luckyhegde6/TradeNext/issues/68) | Open |
+| 2 | **Prod: admin sessions page empty** — `createUserSession`/`updateSessionActivity` are never called, so `user_sessions` table stays empty | High | [#69](https://github.com/luckyhegde6/TradeNext/issues/69) | Open |
+| 3 | **Recommendations data stale (17 days)** — daily rec cron not producing successful runs since Jul 19; txn-timeout likely (fixed locally, awaiting deploy) | High | — | Open |
+| 4 | **History cards render bare "🟡" + "%"** for ~600/643 stocks — `recommendation`/`confidence` null in DB (AI fell back to HOLD without persisting) | Medium | — | Open |
+| 5 | **643 recommendations too many** — cap to top 50 (`rankAndCapRecommendations` implemented locally, needs deploy) | Medium | — | Open |
+| 6 | ~~NSE Large Deals API returns empty data~~ (`/api/nse/deals`) — **RESOLVED** via `mode` param | High | [#70](https://github.com/luckyhegde6/TradeNext/issues/70) | Resolved |
+| 7 | INDIA VIX shows "0 +0%" on markets page | Medium | — | Open |
+| 8 | No user profile management page reachable from header | Medium | — | Open |
+| 9 | Demo user shows 2 portfolios in admin panel (seed upsert duplicates) | Low | — | Open |
+| 10 | Portfolio page brief "Loading..." flash (UX polish) | Low | — | Open |
+
+---
+
 ## Navigation Analysis
 
 ### Pages Tested
@@ -27,73 +48,22 @@
 
 ---
 
-## Bugs Identified
+## ✅ Resolved Bugs
 
-### 1. Demo Portfolio Not Showing (FIXED)
-- **Issue**: Demo user showed "No Portfolio Found" on /portfolio even after seed
-- **Root Cause**: Server was using stale cached data
-- **Fix**: Restarted dev server to clear cache
-- **Status**: ✅ FIXED - Demo portfolio now shows correctly with 5 holdings
-
-### 2. Admin User Portfolio Missing (Medium Priority)
-- **Issue**: Admin user (admin@tradenext6.app) shows "No Portfolio Found" on /portfolio
-- **Expected**: Admin should either have a demo portfolio OR see a different message
-- **Current Behavior**: Shows empty state with "Create Portfolio" CTA
-
-### 2. Demo User Shows 2 Portfolios in Admin Panel (Low Priority)
-- **Issue**: In User Management, Demo User shows "2 portfolios" 
-- **Root Cause**: Seed script creates duplicate portfolios due to upsert logic
-- **Impact**: Data inconsistency
-
-### 3. Portfolio Page Loading State (UX Polish)
-- **Issue**: Brief "Loading portfolio..." flash on first load
-- **Impact**: Minor UX issue, mostly acceptable
-
-### 4. INDIA VIX Shows 0 +0% (Data Issue)
-- **Issue**: INDIA VIX index shows "0" and "+0%" on markets page
-- **Expected**: Should show actual volatility index value
-
-### 5. Company Page UI Issues (FIXED)
-- **Issue**: 52W High/Low showing "-"
-- **Status**: ✅ FIXED - Now calculates from database
-- **Issue**: Volume/Value showing "NaN"
-- **Status**: ✅ FIXED - Now calculates from database
-- **Issue**: Price change showing "(%)" instead of value
-- **Status**: ✅ FIXED - Now shows actual change value
-
-### 6. NIFTY 50 Page UI Issue (FIXED)
-- **Issue**: Change showing long decimals like "-288.34999999999854"
-- **Status**: ✅ FIXED - Now shows "-288.35"
-
-### 7. Missing Sign Up Route (Feature Gap)
-- **Issue**: No /signup or /register route accessible from UI
-- **Current**: Only "Join Now" link exists but may point to broken route
-- **Verified**: Link exists at /users/new - needs testing
-
-### 8. No User Profile Management Page
-- **Issue**: Profile button in header doesn't navigate anywhere visible
-- **Expected**: Should open profile edit modal or page
-
-### 9. Missing Error Boundaries
-- **Issue**: No graceful error handling on API failures
-- **Impact**: Users may see blank pages on errors
-
-### 10. User APIs 500 Errors - FIXED
-- **Issue**: Watchlist, Notifications, Subscriptions APIs returned 500 errors
-- **Root Cause**: User ID was being parsed incorrectly - `parseInt(session.user.id as string)` didn't work with NextAuth string IDs
-- **Fix Applied**: Changed to `Number(session.user.id)` in all user API routes
-- **Status**: ✅ FIXED - Regenerated Prisma client and verified
-
-### 11. NSE Charting Integration (ENHANCED)
-- **Feature**: Added native multi-timeframe charts (1D, 1M, 3M, 6M, 1Y) for indices.
-- **Implementation**:
-  - Backend support in `lib/index-service.ts` with timeframe-specific caching.
-  - Frontend UI in `HomeChart.tsx` with range selection and responsive height.
-- **Status**: ✅ FULLY INTEGRATED
+| # | Issue | Root Cause | Fix | GitHub |
+|---|-------|-----------|-----|--------|
+| R1 | Demo portfolio not showing on /portfolio | Stale server cache | Restarted dev server; demo portfolio shows 5 holdings (seed restored in Ph9 #34) | [#74](https://github.com/luckyhegde6/TradeNext/issues/74) |
+| R2 | Company page 52W high/low, volume, change showing "-" / "NaN" | Missing DB calculations | Now calculated from database | [#75](https://github.com/luckyhegde6/TradeNext/issues/75) |
+| R3 | NIFTY 50 change showing long decimals | Unrounded float math | Rounded to 2 decimals | [#76](https://github.com/luckyhegde6/TradeNext/issues/76) |
+| R4 | User APIs returned 500 errors (watchlist/notifications/subscriptions) | `parseInt(session.user.id)` failed with NextAuth string IDs | Switched to `Number(session.user.id)` | [#77](https://github.com/luckyhegde6/TradeNext/issues/77) |
+| R5 | Non-admin access to `/admin/utils/ingest-csv` | Missing auth check | Added NextAuth session redirect | [#78](https://github.com/luckyhegde6/TradeNext/issues/78) |
+| R6 | Public API exposed admin endpoint | `BulkDealsTable` called `/api/admin/ingest/deals` | Created public `/api/deals` + updated table | [#73](https://github.com/luckyhegde6/TradeNext/issues/73) |
+| R7 | Admin CSV upload page access control | — | ✅ FIXED (admin role gate) | [#79](https://github.com/luckyhegde6/TradeNext/issues/79) |
+| R8 | NSE charting multi-timeframe | — | ✅ FULLY INTEGRATED (native 1D/1M/3M/6M/1Y charts) | [#80](https://github.com/luckyhegde6/TradeNext/issues/80) |
 
 ---
 
-## New Features Added
+## 🔧 New Features Added
 
 ### Technical Indicators
 - RSI (14), MACD (12,26,9), Bollinger Bands (20,2), SMA Crossover (20 & 50)
@@ -130,10 +100,6 @@
 
 ## UX Observations
 
----
-
-## UX Observations
-
 1. Clean, professional UI with consistent styling and dark mode support
 2. Real-time market data integration working well
 3. Portfolio P&L calculations appear accurate
@@ -151,12 +117,14 @@
 
 ---
 
-## New Bugs - March 2026
+## Archived Bugs — March 2026
 
-### 12. NSE Large Deals API Returns Empty Data (Open - High Priority)
+> ✅ All archived bugs below are now tracked as closed GitHub issues (see links).
+
+### NSE Large Deals API Returns Empty Data (Resolved — High Priority) → [#70](https://github.com/luckyhegde6/TradeNext/issues/70)
 - **Date**: 2026-03-09
 - **Issue**: `/api/nse/deals` returns 0 records from NSE API
-- **Root Cause**: NSE API format may have changed or requires different parameters
+- **Root Cause**: NSE API format may have changed or requires different parameters (missing `mode` param)
 - **Steps to Reproduce**:
   1. Go to `/markets/analytics`
   2. Click "Bulk Deals" or "Block Deals"
@@ -164,29 +132,22 @@
   4. Observe empty table with 0 records
 - **Expected**: Data should display from NSE API
 - **Actual**: Empty table
+- **Fix**: Added `mode` parameter (commit `d1ea270`, PR #49 `ph16`)
+- **Note**: Previously tracked as open bug #6 in the top table — now resolved.
 
-### 13. BulkDealsTable TypeScript Errors (Open - Medium Priority)
+### BulkDealsTable TypeScript Errors (Resolved — code moved on) → [#71](https://github.com/luckyhegde6/TradeNext/issues/71)
 - **Date**: 2026-03-09
-- **Issue**: Type errors in `app/components/analytics/BulkDealsTable.tsx`
-- **Errors**:
-  - `Type 'string' is not assignable to type 'keyof BulkDeal'`
-  - `Parameter 'v' implicitly has an 'any' type`
-  - `Parameter 'row' implicitly has an 'any' type`
-  - `Cannot find name 'row'`
+- **Issue**: Type errors in `app/components/analytics/BulkDealsTable.tsx` (implicit any, keyof mismatch)
+- **Fix**: Event handler + row key types corrected (commit `d1ea270`, PR #49 `ph16`)
+- **Status**: Superseded by later screener/analytics refactors; typecheck clean.
 
-### 14. Admin CSV Upload Page Access Control (FIXED)
+### Admin CSV Upload Page Access Control (FIXED) → [#72](https://github.com/luckyhegde6/TradeNext/issues/72)
 - **Date**: 2026-03-09
-- **Issue**: Non-admin users could access `/admin/utils/ingest-csv`
-- **Fix Applied**: Added NextAuth session check - redirects non-admin users
-- **Status**: ✅ FIXED
+- **Fix**: Added NextAuth session check - redirects non-admin users (commit `5f22a03`, PR #60 `Ph17`)
 
-### 15. Public API Exposing Admin Endpoint (FIXED)
+### Public API Exposing Admin Endpoint (FIXED) → [#73](https://github.com/luckyhegde6/TradeNext/issues/73)
 - **Date**: 2026-03-09
-- **Issue**: BulkDealsTable called `/api/admin/ingest/deals` exposing admin API
-- **Fix Applied**: 
-  - Created new public `/api/deals` endpoint
-  - Updated BulkDealsTable to use public endpoint
-- **Status**: ✅ FIXED
+- **Fix**: Created public `/api/deals` endpoint; updated BulkDealsTable (commit `1bbbbf8`, PR #36 `ph11`)
 
 ---
 

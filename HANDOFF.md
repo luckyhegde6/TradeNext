@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-06T00:30:00Z"
-feature: "ph19-prod-reliability-fixes"
+last_updated: "2026-08-07T14:30:00Z"
+feature: "ph20-recommendation-performance"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Session ph19 (Prod Reliability Fixes, v3.4.1) completed its code + documentation work: transaction timeout fix, AI monitoring persistence, top-50 cap, Telegram updates, history prices, DB logs tab, prod UI/UX audit, and gardenify pattern port. Remaining: test run + deploy + prod verification (see `.agents/session-todos.md`).
+**No active handoff.** Session ph20 (Recommendation Performance Tracking & Archival, v3.5.0) — code complete on branch `ph20` (schema, cron/worker, performance service, API, UI). **All verification passed**: backfill run on local dev DB (683 tracking), full test suite 310 passed / 11 skipped, `npx tsc --noEmit` clean, Playwright local functional verify (Performance tab, sort 200, pagination, mobile, zero console errors), docs updated (AGENTS.md, CHANGELOG, TODO, Primer, Lessons, README, swagger, session-todos, handoff). **Remaining: pre-commit hygiene → commit → push → PR (never auto-merge)** — see `.agents/session-todos.md`.
 
 ---
 
@@ -78,3 +78,4 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | v1.1 | 2026-08-06 | Session ph19 (prod reliability fixes): updated state, added session-todos + pre-commit + security references |
 | v1.2 | 2026-08-06 | Session ph19: added gardenify docs links (linear-history, code-hygiene, documentation-standards, .githooks/) |
 | v1.3 | 2026-08-06 | Added `.agents/docs/` subsystem deep-dive reference (recommendations engine, tasks/cron/workers, monitoring & logging, alerts) |
+| v1.4 | 2026-08-07 | Session ph20 (recommendation performance tracking, v3.5.0): updated state to ph20, session-todos refreshed |

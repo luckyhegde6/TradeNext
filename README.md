@@ -4,6 +4,20 @@
 
 **Live Demo:** https://tradenext6.netlify.app/
 
+## Latest Update - v3.5.0 (August 7, 2026)
+
+### Recommendation Performance Tracking & Archival
+- **Performance tab** on `/recommendations`: live table of every recommendation's outcome — entry vs current price, return %, target/stop-loss, status (Tracking / Target Met / SL Hit), category, days tracked
+- **Dynamic columns**: show/hide columns per browser (persisted in localStorage), sortable headers, filters (status/category/recommendation), server-side pagination
+- **3-status lifecycle**: `tracking → target_achieved / stop_loss_hit → archived` (360 days) — replaces the old 30-day expiry
+- **4 PM IST Mon–Fri SYSTEM cron**: automatic price/status check against `daily_prices`, plus a 360-day archival sweep into a frozen `RecommendationArchive` snapshot table (History tab survives via `SetNull`)
+- **Extended categories**: `btst | short | swing | medium | long`
+- **Admin**: manual archive sweep + run/check actions now spawn observable worker tasks (`triggeredBy: "system"`) in `/admin/workers`
+- **Public API**: `GET /api/recommendations/performance` (paginated, filterable, sortable, cached 15 min)
+- **Run trigger source**: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) — Admin Run History shows a Manual/System badge per run; admin-triggered runs are audited as `admin`
+- **Today's Picks BUY/SELL filter**: only actionable runs surface; All/Buy/Sell filter pills (no HOLD pill)
+- **AI monitoring persistence fix**: `trackAiCall()` now awaited in every AI route `finally` — rows survive serverless cold start; merged reads (`memory | database | hybrid`) with source badge
+
 ## Latest Update - v3.2.0 (July 18, 2026)
 
 ### Telegram Bot Alert Delivery

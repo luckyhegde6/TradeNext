@@ -54,6 +54,7 @@
 | Telegram Recommendations Live Prices | [x] Complete (v3.4.1, needs deploy) |
 | History Tab Predicted vs Current | [x] Complete (v3.4.1, needs deploy) |
 | Monitoring DB Logs Tab | [x] Complete (v3.4.1) |
+| Recommendation Performance Tracking & Archival (v3.5.0) | [x] Complete (branch ph20, PR pending) |
 
 ---
 

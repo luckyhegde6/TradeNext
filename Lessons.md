@@ -968,9 +968,50 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: Cache invalidation is part of the write path, not an afterthought. If a cron/worker mutates cached entities, invalidate the relevant cache keys at the end of the mutation.
 
+### 48. GitHub Wiki Is Lazy-Created + Strict Mermaid Renderer
+**Issue**: (1) `git clone git@github.com:<user>/<repo>.wiki.git` failed "Repository not found" even though the wiki URL resolved in a browser; (2) after publishing, three wiki pages showed "Parse error" / "Lexical error" in GitHub's mermaid renderer even though the same diagrams rendered fine elsewhere.
+
+**Root Cause**: (1) GitHub creates the wiki **git repo lazily** — until the first page is saved via the logged-in web UI, the wiki repo doesn't exist on the server, so clone/`ls-remote` 404s. (2) GitHub's wiki mermaid renderer is **stricter** than other renderers:
+- `User ||----o{ UserSession : "sessions"` (4 hyphens) → parse error — erDiagram cardinality is exactly `||--o{`.
+- `AIMON[/api/admin/ai/monitoring]` → a label **starting with `[/`** is parsed as a parallelogram shape and needs `/]` to close — quote it: `AIMON["/api/admin/ai/monitoring"]`.
+- Unquoted labels with `<br/>` or specials (`| + ( ) → · @ % & && <=`) can error — always quote: `A["text<br/>more"]`, `E3["action: none|buy|sell|paper_trade"]`.
+
+**Solution**: Wiki creation: ask the user to create the first page via the web UI, then clone. Diagram authoring: quote ALL labels containing specials; never deviate from exact cardinality tokens; scan for `[/` at label start. Verify by opening the live wiki page and checking for error boxes (not just the GitHub-side rendered SVG).
+
+**Rule**: GitHub wiki ≠ repo renderers. Treat mermaid for the wiki as its own dialect — quote aggressively and verify on the live page. (See `wiki-creator` skill / `.agents/AGENT-SKILL-MATRIX.md`.)
+
+### 49. UI Sort Keys Must Match API Zod Enums (layer contract)
+**Issue**: Performance tab UI offered `sortBy` values (entryPrice, currentPrice, targetPrice, stopLoss, daysTracked, lastCheckedAt) that the API's zod `sort` enum rejected — every such sort returned HTTP 400 (first discovered as "Entry column sort broken").
+
+**Root Cause**: Two enums drifted apart — `PerformanceTab.tsx` state typed 10 keys, API route zod only allowed 4 (`createdAt|returnPercent|symbol|confidence`). The service `orderBy` map silently tolerated extra keys (passed through to Prisma), so the UI seemed fine until the API layer rejected them.
+
+**Solution**: Widen the API zod enum to the full 10-key set shared by the UI. Keep a single source of truth: if UI offers a sortable column, the API must accept its key (and the service must map it to a real DB field or a JS-sort path for computed values like `returnPercent`).
+
+**Rule**: When adding a sortable UI column, audit the full chain — UI key → API zod enum → service `orderBy`/sort path → DB field. Mismatches surface as 400s or wrong order, not compile errors.
+
+### 50. Open PR Exists → Move Work to That Branch, Never Fork a New One
+**Issue**: While an open PR (`#81`, head `ph20`) awaited merge, a separate branch (`feat/recs-run-source-picks-filter`) was created from `main` for follow-up changes (run `triggeredBy`, BUY/SELL filter, AI monitoring persistence). This created a divergent branch whose changes would either orphan the open PR or conflict on merge.
+
+**Root Cause**: Creating a new branch from `main` for work that belongs to an in-flight feature branch splits the feature across two branches and risks an out-of-order merge (the new branch could merge before the PR, or PR #81 merges without the follow-ups).
+
+**Solution**: When a feature has an OPEN PR with an existing head branch, move ALL related work onto that branch. The stash was applied onto `ph20` and the sole conflict (in `app/api/admin/recommendations/route.ts`) was resolved in favor of ph20's `spawnRegularTask` worker-based approach.
+
+**Rule**: Before branching, always check for open PRs on the target feature (`gh pr list --head ph20`). If a PR is open, the head branch IS the workspace — `git stash`, `git checkout ph20`, apply, resolve, commit there.
+
+### 51. Dev DB Without Migration History → Use `prisma db push`, Not `migrate deploy`
+**Issue**: On a dev DB with no `_prisma_migrations` table history, `npx prisma migrate deploy` fails with `P3005` ("The database schema is not empty" / migration history missing), even though `migrate dev` and `db push` work.
+
+**Root Cause**: Two separately-created migrations share the timestamp `20260807103000` (archive + triggered_by). `migrate deploy` needs the full history table to apply new migrations; a DB provisioned via `db push`/`db seed` lacks it.
+
+**Solution**: For the local dev DB, sync the schema with `npx prisma db push` (non-destructive; verified `triggeredBy` column + `recommendation_archives` table + `trackerId` nullable). Keep both migration folders in the repo — the production history-based pipeline (Netlify build `prisma migrate deploy`) will apply them correctly.
+
+**Rule**: Check for a `_prisma_migrations` table before choosing `migrate deploy` vs `db push`. On dev DBs provisioned without history, `db push` is the sanctioned sync path; never run `migrate reset --force`/`db drop` without explicit user consent.
+
 ---
 
 ## Update Log
+- 2026-08-07: Added Lessons 50-51 (open PR → move work to existing head branch, never fork; dev DB without migration history → `db push` not `migrate deploy`); added v3.5.0 run trigger source + BUY/SELL filter + AI monitoring persistence lessons
+- 2026-08-07: Added Lessons 48-49 (GitHub wiki lazy-creation + strict mermaid; UI sort keys vs API zod enums); added v3.5.0 performance/archival + wiki + skills-system lessons
 - 2026-08-06: Added Lessons 46-47 (Prisma interactive $transaction expiry → runInChunks; cache invalidation after background updates); added v3.4.1 prod reliability fixes lessons
 - 2026-07-22: Added Lessons 44-45 (Telegram webhook vs local DB mismatch, Prisma 7 adapter for scripts); added v3.4.0 Telegram bot integration lessons
 - 2026-07-21: Added Lessons 41-43 (Prisma @@map table names, camelCase column naming, AI test endpoint pattern); updated Lesson 24 (dev:bg PowerShell script for reliable agent startup)

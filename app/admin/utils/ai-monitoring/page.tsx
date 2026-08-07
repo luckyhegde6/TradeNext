@@ -190,7 +190,7 @@ export default function AiMonitoringPage() {
 
   const [stats, setStats] = useState<AiStats | null>(null);
   const [calls, setCalls] = useState<AiCallEntry[]>([]);
-  const [dataSource, setDataSource] = useState<"memory" | "database" | null>(null);
+  const [dataSource, setDataSource] = useState<"memory" | "database" | "hybrid" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(60);
@@ -287,15 +287,19 @@ export default function AiMonitoringPage() {
                 className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                   dataSource === "memory"
                     ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                    : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                    : dataSource === "hybrid"
+                      ? "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300"
+                      : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
                 }`}
                 title={
                   dataSource === "memory"
-                    ? "Showing in-memory ring buffer (this serverless instance)"
-                    : "Showing DB-persisted logs (survives serverless restarts)"
+                    ? "Showing live in-memory buffer (this serverless instance)"
+                    : dataSource === "hybrid"
+                      ? "Showing live buffer + DB-persisted history (survives serverless restarts)"
+                      : "Showing DB-persisted logs (survives serverless restarts)"
                 }
               >
-                {dataSource === "memory" ? "Live buffer" : "DB persisted"}
+                {dataSource === "memory" ? "Live buffer" : dataSource === "hybrid" ? "Live + DB" : "DB persisted"}
               </span>
             )}
           </h1>

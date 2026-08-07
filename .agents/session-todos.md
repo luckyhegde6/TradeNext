@@ -8,38 +8,31 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-06) — NSE Historical Data for Backtesting + Cache/DB-Sync Refactor + HTML Architecture Docs
+## Current Session (2026-08-07) — ph20: Recommendation Performance Tracking & Archival (v3.5.0)
 
-**Design decisions (from user):**
-- Backtest path: memory cache (24h) → temp table `BacktestHistory` → main `daily_prices` (read-only) → NSE live. **Never writes NSE-fetched bars into main DB** (age-pruned temp table instead).
-- Widened scope (all other NSE fetches): cache-first (NodeCache front layer) → MarketCache DB → NSE live → DB sync (reduces DB ops; DB stays in sync).
-- Deliverables: unit tests, API + swagger + skill + MCP updates, and an HTML architecture doc (sequence/ER/sync-flow diagrams, troubleshooting, agentic flow, improvements).
+**Design doc**: `docs/designDoc/ph20-recommendation-performance-design.md` (12 phases)
+**Branch**: `ph20` (code + tests + docs complete; commit + PR pending — PR #81 open, mergeable, never auto-merge)
 
 ### In Progress
-- [x] Prisma: add `BacktestHistory` temp table model (schema.prisma L925) — migrated via `prisma db push` (non-destructive; `migrate dev` blocked by drift) + `npx prisma generate` → LSP errors cleared
-- [x] `lib/cache.ts`: add `historicalCache` 24h TTL instance + metrics (DONE)
-- [x] `lib/nse-api.ts`: add `fetchSecurityWiseHistoricalData()` + `securityWiseBarsToOHLCV()` (DONE)
-- [x] `lib/services/backtestDataService.ts`: memory → temp table → daily_prices → NSE chain + age-prune (DONE)
-- [x] `app/api/backtest/run/route.ts`: wire to `getBacktestData()` + `dataSource` in response (DONE)
-- [x] `lib/market-cache.ts`: add NodeCache front layer to `getOrFetchNseData` + `forceRefreshCache` + `clearCache` (DONE)
-- [x] `app/api/mcp/route.ts`: add `getHistoricalData` function (type L21/list/desc/schema/handler L312/POST L705/GET L849) (DONE — was fully wired)
-- [x] Agentic framework: `.agents/RULES.md` + `.agents/SOUL.md` + `.agents/rules/session-memory-rules.md`; wired into rules README + AGENTS.md doc table
-- [x] AGENTS.md context optimization: 1401 → 249 lines; version history + legacy docs moved to `.agents/CHANGELOG.md` index → `.agents/changelog/` subfiles (versions-v3/v2/v1, screener, corp-actions, serverless-logging, security-workers); behavioral guidelines (think-first/simplicity/surgical/goal-driven) folded into RULES.md §0
-- [x] Unit tests: `lib/__tests__/nse-api.test.ts` (mapper w/ CA + BL rows) + `lib/__tests__/backtestDataService.test.ts` (cache-ordering: memory hit = 0 DB ops, daily_prices read-only, temp-only upsert, prune >30d, NSE fallback) — 286 tests pass (23 suites), prod files tsc clean
-- [x] Handoff infra: `.agents/handoffs/flow/agent-to-human.md` (new), indexed in handoffs README + session-memory-rules §4 + AGENTS.md doc table
-- [x] Strict git rules: RULES.md §6 + `.agents/linear-history.md` + session-memory-rules §6 — NEVER commit main without permission; branch + PR always
-- [x] Skills: NSE historical endpoint + field mapping added to `.opencode/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md`
-- [x] AGENTS.md: NSE Endpoints table (historicalOR row) + MCP list (23 fns) — already present from earlier work, verified
-- [x] README.md: MCP function count updated (22 → 23)
-- [x] `app/api/openapi/route.ts`: swagger — MCP enum + historical from/to params + `getHistoricalData` + backtest /run route w/ `dataSource`
-- [x] HTML architecture doc: `docs/architecture.html` (Mermaid: system overview, backtest chain, 3 sequence diagrams, ER, sync/lifecycle flows, caching table, MCP, troubleshooting, agentic model, improvements)
-- [x] Final: `npm run test` (alone — 286 pass, 23 suites) + `npx tsc --noEmit` (all changed prod files clean); `git status` — no junk/secrets
-- [x] Commit `720c4af` on `feat/backtest-historical-cache` + pushed + **PR #67** opened (https://github.com/luckyhegde6/TradeNext/pull/67)
+- [x] Phase 1 — Schema: `RecommendationArchive` model + `DailyRecommendationStock.trackerId` nullable/SetNull; migration `20260807103000_add_recommendation_archive`; `prisma generate` done
+- [x] Phase 1 — `scripts/backfill-recommendation-categories.ts` **run on local dev DB**: 683 tracking (short=554, swing=129), archived=0
+- [x] Phase 2 — `calculateNextRun` weekday support (`lib/cron-parser.ts` shared by worker-engine + admin cron route); dow-only `v<=6` cap bug fixed
+- [x] Phase 2 — `spawnCronTask()` `triggeredBy` override; `ensureRecommendationCrons()`; audit actions added
+- [x] Phase 3 — `lib/services/recommendationPerformanceService.ts` (getPerformanceList, archiveRecommendations, getPerformanceColumns, invalidateRecommendationsCache)
+- [x] Phase 3 — `checkRecommendationPerformance()` reworked (tracking→target/SL, triggerSource system, fold archive, invalidate cache, no EXPIRY_DAYS)
+- [x] Phase 4 — API: `/api/recommendations/performance` (public, Zod, 10-key sort enum), `/api/admin/recommendations/archive` (admin), `/api/admin/recommendations` POST spawns worker tasks
+- [x] Phase 5 — UI: `PerformanceTab.tsx` wired into `/recommendations` as 5th tab
+- [x] Phase 6 — Tests: `cronParser.test.ts` + `recommendationPerformanceService.test.ts` — 24/24 pass; full suite 310 passed / 11 skipped; `npx tsc --noEmit` clean (production files)
+- [x] Phase 6 — Local functional verify: dev server + Playwright (Performance tab renders, sort=entryPrice 200, pagination Page 2/28, mobile 375 no overflow, zero console errors)
+- [x] Phase 6 — Docs: AGENTS.md (v3.5.0 row + Skills section + matrix), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md, TODO.md, Primer.md, agent-memory.md, Lessons.md (48-49), README.md, swagger
+- [x] **Session follow-up (2026-08-07, staged on ph20)**: moved merge-relevant work from the old separate branch onto ph20 per user correction (open PR #81 exists → never fork a new branch; move work to existing branch). Changes: `DailyRecommendationRun.triggeredBy` (`system` default) + `@@index([triggeredBy])` + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge from `run.triggeredBy`; `runDailyRecommendations({ triggeredBy })` persists/logs/audits trigger source; worker maps `admin_manual` → `admin` (worker-service L473-475); BUY/SELL filter in `getLatestRecommendations()` (actionable-only runs, nested where, empty state when none) + `DailyPicksTab` All/Buy/Sell (HOLD pill removed); AI monitoring persistence fix — `trackAiCall` → awaited `Promise<void>` in every AI route `finally`, merged reads with `source: memory|database|hybrid`, "Live + DB" badge; 21 rec-service tests (312 passed / 11 skipped); cold-start verified via fresh dev server (PID 23420): AI rows `source:"database"`, "DB persisted" badge, Today's Picks empty state correct (583 null + 100 HOLD, 0 BUY/SELL), "System" badge verified on run `5eaad1d7`; DB synced via `npx prisma db push` (no migration history → P3005 blocks `migrate deploy`); test artifacts cleaned (verify_test rows, admin test run `e48b98b2`, 10 batch rows) — DB restored to 10 AI rows + 1 system run
+- [x] Commit ph20 on branch `ph20` (`0871d2a`, pre-commit checks passed) + push + PR #81 summary updated (never auto-merge)
 
-### Carried Forward (from ph19)
-- [ ] Deploy to Netlify + verify prod (recommendations stale-data fix, Telegram updates, history prices, DB logs tab)
-- [ ] Verify prod daily cron runs (10:00 AM IST) after deploy
+### Carried Forward (from ph19/ph20-backtest)
+- [ ] Deploy to Netlify + verify prod (recommendations stale-data fix, Telegram updates, history prices, DB logs tab, ph20 perf tracking)
+- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy
 - [ ] Re-seed demo holdings on prod
 - [ ] Wire live-price SSE hooks into Portfolio/Watchlist tables
 - [ ] Persist default `HOLD` label when AI analysis falls back (bare "🟡 %" history cards)
 - [ ] F&O Analytics UI (services + API done, UI pending)
+- [ ] Fix prod issues #68 (monitoring logs) + #69 (sessions) — still open

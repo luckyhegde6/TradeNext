@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { executeAIQuery, type OrchestratorInput } from "@/lib/services/ai/orchestrator";
 import { getDefaultConfig, hasValidConfig } from "@/lib/services/ai/config";
-import { trackAiCall, persistAiCallToDb } from "@/lib/services/ai/ai-monitoring";
+import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -105,7 +105,9 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    trackAiCall({
+    // Await persistence so the DB write completes before the serverless
+    // function freezes — otherwise AI calls would be lost on every request.
+    await trackAiCall({
       timestamp: new Date().toISOString(),
       action: statusAnalysisType,
       model: getDefaultConfig().model || "openrouter/free",
@@ -113,13 +115,5 @@ export async function POST(req: NextRequest) {
       tokensUsed: 0,
       responseTimeMs: Date.now() - startTime,
     });
-    persistAiCallToDb({
-      timestamp: new Date().toISOString(),
-      action: statusAnalysisType,
-      model: getDefaultConfig().model || "openrouter/free",
-      status,
-      tokensUsed: 0,
-      responseTimeMs: Date.now() - startTime,
-    }).catch(() => {});
   }
 }

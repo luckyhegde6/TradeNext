@@ -5,11 +5,25 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-06
+2026-08-07
 
 ---
 
 ## Current Project Status
+
+### Recommendation Performance Tracking & Archival (v3.5.0 / ph20) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT + PR PENDING
+**Issue**: Recommendations had a 30-day expiry that deleted trackers after a month; performance check ran at 3:30 PM IST with no weekday support; no public view of tracker performance; categories limited to `short|medium|long`; worker tasks from crons weren't marked SYSTEM.
+**Fix Applied**:
+- 3-status lifecycle `tracking → target_achieved/stop_loss_hit → archived (360d)`; removed 30-day expiry
+- `RecommendationArchive` snapshot table + `DailyRecommendationStock.trackerId` SetNull (History survives via LEFT JOIN)
+- 4 PM IST Mon–Fri SYSTEM perf-check cron (`30 10 * * 1-5`) via `ensureRecommendationCrons()`; shared weekday cron parser `lib/cron-parser.ts` (worker-engine + admin cron route)
+- `triggeredBy: "system"` worker marking + audit actions (RECOMMENDATION_PERFORMANCE_CHECK / ARCHIVED / PERFORMANCE_MOVED)
+- Public Performance tab (dynamic columns, sort — 10-key enum fix, filters, pagination); admin archive + worker-spawning triggers
+- Categories extended to `btst|short|swing|medium|long`; backfill script run (683 tracking, short=554/swing=129)
+- Run trigger source tracking: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge; worker maps `admin_manual` → `admin`
+- Today's Picks BUY/SELL filter — only actionable runs surface; All/Buy/Sell pills (no HOLD)
+- AI monitoring persistence fix — `trackAiCall()` awaited in every AI route `finally` (serverless cold-start rows survive); merged reads (`memory|database|hybrid`) + source badge
+**Status**: Code + tests complete (24 new perf tests + 21 rec-service tests; suite 312 passed / 11 skipped). Playwright-verified (tab renders, sort 200, pagination, mobile, zero console errors; AI monitoring cold-start `source:"database"` verified; Today's Picks empty state correct; System badge verified on run `5eaad1d7`). Docs done. Pending: commit on `ph20` + push + update PR #81 summary (never auto-merge).
 
 ### Git Workflow & Agent Operating Model (v3.4.2) — ✅ CODE COMPLETE, COMMIT PENDING
 **Issue**: Git hooks were untracked `.git/hooks/` (lost on fresh clone); missing gardenify-style git-flow, code-hygiene, and documentation-standards docs; AGENTS.md lacked an operating model for handoff/plugins.

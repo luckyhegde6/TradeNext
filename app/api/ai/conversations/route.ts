@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDefaultConfig, hasValidConfig } from "@/lib/services/ai/config";
-import {
-  trackAiCall,
-  persistAiCallToDb,
-} from "@/lib/services/ai/ai-monitoring";
+import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 import prisma from "@/lib/prisma";
 
@@ -57,7 +54,7 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    trackAiCall({
+    await trackAiCall({
       timestamp: new Date().toISOString(),
       action: "conversations",
       model: "n/a",
@@ -135,7 +132,7 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    trackAiCall({
+    await trackAiCall({
       timestamp: new Date().toISOString(),
       action: "create_conversation",
       model: "n/a",
@@ -145,15 +142,5 @@ export async function POST(req: NextRequest) {
       userId: userId ? Number(userId) : undefined,
       analysisType,
     });
-    persistAiCallToDb({
-      timestamp: new Date().toISOString(),
-      action: "create_conversation",
-      model: "n/a",
-      status,
-      tokensUsed: 0,
-      responseTimeMs: Date.now() - startTime,
-      userId: userId ? Number(userId) : undefined,
-      analysisType,
-    }).catch(() => {});
   }
 }
