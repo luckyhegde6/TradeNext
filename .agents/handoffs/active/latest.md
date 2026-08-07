@@ -19,6 +19,9 @@ checkpoint: "ph21-target-sl-fix-sse-wiring"
 - **Verified live before fix**: prod `/api/recommendations/performance` → 1666 trackers all `targetPrice:0 / stopLoss:0 / confidence:50 / "AI analysis unavailable — defaulting to HOLD"`
 
 ## Progress
+- [x] **PR #82 MERGED** (`9eb80b2` on main, 2026-08-07) — deployed to Netlify; live site confirms v3.5.1 null-guard (`/api/recommendations/top-stocks` returns `ai=HOLD conf=0` for legacy rows)
+- [x] **PROD BACKFILL DONE**: `set USE_REMOTE_DB=true && npx tsx --env-file=.env scripts/backfill-recommendation-targets.ts` → **327 rows updated** on prod DB via Prisma Accelerate (env precedence: shell `USE_REMOTE_DB=true` overrides `.env` value `false`). Live `/api/recommendations/performance`: 1666 trackers, all non-zero (GRWRHITECH 8520.05/7358.23, SAILIFE 1562.77/1349.67); 0 zero-target in sampled 200
+- [x] **Netlify OPENROUTERKEY set by user** — fixes the prod AI failure root cause (future runs get real AI analysis; price-based fallback is now the safety net)
 - [x] **Root cause**: prod AI fails (netlify.toml `[build.environment]` L5 has NO `OPENROUTERKEY`; key only in local `.env`/`.env.local`) → `hasValidConfig()` false → `failedResult(s,"AI is not configured")` → `getDefaultRecommendation()` returned literal `targetPrice: 0, stopLoss: 0` → overwrote good price-based creation defaults (`price*1.2`/`price*0.95`)
 - [x] **Fix** (`lib/services/ai/recommendation-agent.ts`): `getDefaultRecommendation(stock?)` price-based — `target = round(price*1.1)`, `sl = round(price*0.95)`, guard `price>0`; constants `DEFAULT_TARGET_MULTIPLIER=1.1`/`DEFAULT_STOP_LOSS_MULTIPLIER=0.95`; `failedResult` + both `parseAIResponse` call sites pass `stock`; `normalizeRecommendation` falls back to `round(price*1.1*100)/100` / `round(price*0.95*100)/100` (never literal 0)
 - [x] **Backfill**: `scripts/backfill-recommendation-targets.ts` (idempotent, `entryPrice>0`) **run on LOCAL dev DB**: rowsScanned=149, updated=149, 0 zero-target remain (verified via `.verify-targets.cjs`, deleted). Command needs `--env-file=.env`. PROD DB backfill pending.
@@ -35,11 +38,11 @@ checkpoint: "ph21-target-sl-fix-sse-wiring"
 - Backfill is idempotent + only touches `entryPrice > 0` rows — safe to run on prod later
 
 ## Blockers
-- PROD DB backfill + Netlify `OPENROUTERKEY` env need user action (remote DB URL / Netlify dashboard)
+- None blocking. Remaining open work: prod crons verification (next 10 AM/4 PM IST window), demo holdings re-seed, F&O UI, issues #68 (Server Logs tab — serverless FS) + #69 (sessions — `createUserSession` never wired into auth)
 
 ## Next Steps
-1. Pre-commit hygiene: confirm `.playwright-mcp/` session artifacts deleted (gitignored anyway), no `dev-server.log`, no secrets
-2. Commit on `fix/ph21-carryforward-perftab` (recommend: `fix(recommendations): price-based AI fallback target/SL + backfill` + `feat(live-prices): wire SSE into portfolio/watchlist + fix useLivePrices loop`)
-3. `git push origin fix/ph21-carryforward-perftab` + open PR (never auto-merge)
-4. Ask user: prod backfill (`DATABASE_REMOTE`/remote URL) + add `OPENROUTERKEY` to Netlify env vars
-5. Continue carry-forward: demo holdings re-seed, F&O UI, issues #68/#69, prod cron verification
+1. ✅ (done) Merge PR #82 → deployed → verified live (null-guard live, backfill live non-zero targets)
+2. Verify prod daily crons produce a successful run in the next 10 AM / 4 PM IST window (OPENROUTERKEY now set — check run history shows `aiProcessed > 0`)
+3. Re-seed demo holdings on prod
+4. Fix issue #69 (wire `createUserSession` into NextAuth `signIn`/`signOut` events) + revisit #68 Server Logs tab (serverless FS limitation → point at DB logs or document)
+5. F&O Analytics UI (services + API done, UI pending)

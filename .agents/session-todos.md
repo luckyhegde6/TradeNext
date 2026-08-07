@@ -26,9 +26,9 @@
 - [x] **Committed + pushed + PR #82 opened** (3 commits: fix b7b6742, feat 370bcd4, docs 31c8f90) — never auto-merge
 
 ### Pending
-- [ ] Merge PR #82 → deploy (Netlify) → verify prod
-- [ ] PROD DB backfill: run `scripts/backfill-recommendation-targets.ts` against remote DB (needs user: Netlify `OPENROUTERKEY` env + remote DB access) — without the key, future runs still fall back to price-based defaults (now non-zero, so less urgent)
-- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy
+- [x] ~~Merge PR #82 → deploy (Netlify) → verify prod~~ — **DONE**: PR #82 merged `9eb80b2`; live site confirms v3.5.1 null-guard deployed (`top-stocks` returns `ai=HOLD conf=0` for legacy rows)
+- [x] ~~PROD DB backfill~~ — **DONE**: `USE_REMOTE_DB=true npx tsx --env-file=.env scripts/backfill-recommendation-targets.ts` → **327 rows updated** on prod DB (Prisma Accelerate); live `/api/recommendations/performance` now returns non-zero target/SL (GRWRHITECH 8520.05/7358.23 etc.), 0 zero-target in sampled 200. Netlify `OPENROUTERKEY` already set by user.
+- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window
 - [ ] Re-seed demo holdings on prod
 - [ ] F&O Analytics UI (services + API done, UI pending)
-- [ ] Fix prod issues #68 (monitoring logs) + #69 (sessions) — still open
+- [ ] Fix prod issues #68 (monitoring logs — DB Logs tab likely fixed by OPENROUTERKEY; Server Logs file tab still serverless-FS-limited) + #69 (sessions — `createUserSession` never wired into auth) — still open
