@@ -47,6 +47,10 @@ const RETRY_MAX = 2;
 const RETRY_BASE_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 8000;
 
+/** Fallback target/SL multipliers used when AI cannot determine a target (mirrors dailyRecommendationService). */
+const DEFAULT_TARGET_MULTIPLIER = 1.1;
+const DEFAULT_STOP_LOSS_MULTIPLIER = 0.95;
+
 const SYSTEM_PROMPT = `You are a senior Indian stock market analyst for NSE-listed stocks. You analyze stocks based on price data, momentum, volume, and screener signals to produce actionable recommendations.
 
 RULES:
@@ -264,7 +268,7 @@ function parseAIResponse(response: string, stocks: StockAnalysisInput[]): AIReco
 
   if (!Array.isArray(parsed)) {
     logger.warn({ msg: "Failed to parse AI response into array", preview: response.slice(0, 200) });
-    return stocks.map(() => getDefaultRecommendation());
+    return stocks.map((s) => getDefaultRecommendation(s));
   }
 
   // Map parsed objects to our schema, matching by index
@@ -273,7 +277,7 @@ function parseAIResponse(response: string, stocks: StockAnalysisInput[]): AIReco
 
     if (!raw) {
       logger.warn({ msg: "No recommendation found for stock", symbol: stock.symbol });
-      return getDefaultRecommendation();
+      return getDefaultRecommendation(stock);
     }
 
     return normalizeRecommendation(raw, stock);
@@ -301,8 +305,10 @@ function normalizeRecommendation(raw: Record<string, unknown>, stock: StockAnaly
   const validRec = rec === "BUY" || rec === "SELL" ? rec : "HOLD";
 
   const confidence = clamp(toNumber(raw.confidence), 0, 100);
-  const targetPrice = toNumber(raw.targetPrice) || stock.price;
-  const stopLoss = toNumber(raw.stopLoss) || 0;
+  // Fall back to price-based defaults when the model returns 0 (per prompt: "Set to 0 if not
+  // determinable"). Prevents ₹0.00 targets/stops from reaching trackers and the Performance tab.
+  const targetPrice = toNumber(raw.targetPrice) || Math.round(stock.price * DEFAULT_TARGET_MULTIPLIER * 100) / 100;
+  const stopLoss = toNumber(raw.stopLoss) || Math.round(stock.price * DEFAULT_STOP_LOSS_MULTIPLIER * 100) / 100;
 
   const horizon = toUpper(raw.timeHorizon);
   const validHorizon: "short" | "medium" | "long" =
@@ -395,12 +401,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getDefaultRecommendation(): AIRecommendation {
+/**
+ * Price-based default recommendation used when AI analysis is unavailable
+ * (unconfigured provider, circuit breaker open, parse failure, or per-stock error).
+ * Target/SL are derived from the stock price so the Performance tab and trackers
+ * never display ₹0.00 — matching the service-level fallback multipliers.
+ */
+function getDefaultRecommendation(stock?: Pick<StockAnalysisInput, "price">): AIRecommendation {
+  const price = stock?.price ?? 0;
+  const round = (n: number) => Math.round(n * 100) / 100;
   return {
     recommendation: "HOLD",
     confidence: 50,
-    targetPrice: 0,
-    stopLoss: 0,
+    targetPrice: price > 0 ? round(price * DEFAULT_TARGET_MULTIPLIER) : 0,
+    stopLoss: price > 0 ? round(price * DEFAULT_STOP_LOSS_MULTIPLIER) : 0,
     timeHorizon: "medium",
     reasoning: "AI analysis unavailable — defaulting to HOLD",
     riskFactors: ["Analysis failed"],
@@ -410,7 +424,7 @@ function getDefaultRecommendation(): AIRecommendation {
 function failedResult(stock: StockAnalysisInput, error: string): StockAnalysisResult {
   return {
     ...stock,
-    aiRecommendation: getDefaultRecommendation(),
+    aiRecommendation: getDefaultRecommendation(stock),
     tokensUsed: 0,
     executionMs: 0,
     success: false,

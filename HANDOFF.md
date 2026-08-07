@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-07T14:30:00Z"
-feature: "ph20-recommendation-performance"
+last_updated: "2026-08-07T16:45:00Z"
+feature: "ph21-carryforward-perftab"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Session ph20 (Recommendation Performance Tracking & Archival, v3.5.0) — code complete on branch `ph20` (schema, cron/worker, performance service, API, UI). **All verification passed**: backfill run on local dev DB (683 tracking), full test suite 310 passed / 11 skipped, `npx tsc --noEmit` clean, Playwright local functional verify (Performance tab, sort 200, pagination, mobile, zero console errors), docs updated (AGENTS.md, CHANGELOG, TODO, Primer, Lessons, README, swagger, session-todos, handoff). **Remaining: pre-commit hygiene → commit → push → PR (never auto-merge)** — see `.agents/session-todos.md`.
+**No active handoff.** Session ph21 (Carry-Forward, v3.5.1) — **PR #81 (ph20) MERGED** (`bf584e2`). On branch `fix/ph21-carryforward-perftab`: Performance-tab ₹0.00 target/SL bug fixed (price-based AI fallback `price*1.1`/`price*0.95` + backfill script fixed 149 local trackers), SSE live prices wired into Portfolio (HoldingsTable) + Watchlist + MarqueeBanner, `useLivePrices` infinite-loop fixed, HistoryTab/top-stocks null-guard (no more bare "🟡 %"). **All verification passed**: full suite 317 passed / 11 skipped / 0 failed, tsc + eslint clean on touched files, Playwright desktop + mobile zero console errors. Docs updated. **Remaining: pre-commit hygiene → commit → push → PR (never auto-merge)** + prod backfill / Netlify `OPENROUTERKEY` (needs user) — see `.agents/session-todos.md`.
 
 ---
 
@@ -79,3 +79,4 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | v1.2 | 2026-08-06 | Session ph19: added gardenify docs links (linear-history, code-hygiene, documentation-standards, .githooks/) |
 | v1.3 | 2026-08-06 | Added `.agents/docs/` subsystem deep-dive reference (recommendations engine, tasks/cron/workers, monitoring & logging, alerts) |
 | v1.4 | 2026-08-07 | Session ph20 (recommendation performance tracking, v3.5.0): updated state to ph20, session-todos refreshed |
+| v1.5 | 2026-08-07 | Session ph21 (carry-forward, v3.5.1): target/SL ₹0 fix + SSE live prices + HistoryTab null-guard; state updated to ph21 |

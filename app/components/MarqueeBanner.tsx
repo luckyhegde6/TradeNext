@@ -2,7 +2,10 @@
 import useSWR from "swr";
 
 export default function MarqueeBanner() {
-  const { data, error, isLoading } = useSWR("/api/nse/marquee", (url) => fetch(url).then(r => r.json()));
+  const { data, error, isLoading } = useSWR("/api/nse/marquee", (url) => fetch(url).then(r => r.json()), {
+    // Live prices on the dashboard: revalidate every 30s during market hours
+    refreshInterval: 30_000,
+  });
 
   if (error) return null;
   // Based on actual API response, data is in data.data array

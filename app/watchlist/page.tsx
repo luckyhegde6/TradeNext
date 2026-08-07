@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import Autocomplete from "@/app/components/ui/Autocomplete";
 import AiActionButton from "@/app/components/AiActionButton";
+import { useLivePrices } from "@/lib/hooks/useLivePrices";
 
 interface WatchlistItem {
   id: string;
@@ -44,6 +45,27 @@ export default function WatchlistPage() {
   const [newSymbol, setNewSymbol] = useState("");
   const [creating, setCreating] = useState(false);
   const [adding, setAdding] = useState(false);
+
+  // All symbols across watchlists (for SSE live price overlay)
+  const allSymbols = [...new Set(watchlists.flatMap(w => w.items.map(i => i.symbol)))];
+  const { prices: livePrices, isLive } = useLivePrices(allSymbols);
+
+  // Live quote = SSE price if available, else fetched quote
+  const liveQuoteFor = (symbol: string): StockQuote | undefined => {
+    const live = livePrices.get(symbol.toUpperCase());
+    if (!live) return quotes[symbol];
+    return {
+      symbol,
+      lastPrice: live.price,
+      change: live.change,
+      pChange: live.changePercent,
+      volume: live.volume,
+      open: live.open,
+      high: live.dayHigh,
+      low: live.dayLow,
+      close: live.previousClose,
+    };
+  };
 
   // AI Analysis state
   const [aiModalWatchlistId, setAiModalWatchlistId] = useState<string | null>(null);
@@ -395,8 +417,9 @@ export default function WatchlistPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
                     {watchlist.items.map((item) => {
-                      const quote = quotes[item.symbol];
+                      const quote = liveQuoteFor(item.symbol);
                       const isPositive = quote && quote.pChange >= 0;
+                      const isLiveSymbol = isLive && livePrices.has(item.symbol.toUpperCase());
                       return (
                         <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
                           <td className="px-4 py-3">
@@ -406,6 +429,11 @@ export default function WatchlistPage() {
                             >
                               {item.symbol}
                             </a>
+                            {isLiveSymbol && (
+                              <span className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/15 text-emerald-500">
+                                ● Live
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right text-gray-900 dark:text-white">
                             {loadingQuotes ? "..." : `₹${formatPrice(quote?.lastPrice)}`}

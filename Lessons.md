@@ -1007,9 +1007,28 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: Check for a `_prisma_migrations` table before choosing `migrate deploy` vs `db push`. On dev DBs provisioned without history, `db push` is the sanctioned sync path; never run `migrate reset --force`/`db drop` without explicit user consent.
 
+### 52. React Hook — Caller-Passed Array Refs Cause Infinite Rerender Loops (Stabilize via Refs)
+**Issue**: `useLivePrices(["RELIANCE","TCS"])` caused **"Maximum update depth exceeded"** — 196 console errors on the Watchlist empty state, page locked up.
+
+**Root Cause**: The hook's `fetchAllPrices` `useCallback` depended on the `symbols` array (`[symbols, updatePrices]`). Callers pass freshly-created arrays every render (`watchlists.flatMap(...)` / `holdings.map(...)`), so `fetchAllPrices` got a new identity each render → the effect (`deps: [symbolsKey, fetchAllPrices]`) re-ran every render → the empty-symbol branch called `setState` synchronously → re-render → loop. Also `symbols.sort()` mutated the caller's array in place (aliasing bug).
+
+**Solution**: Read the latest symbols from a `symbolsRef` (`symbolsRef.current = symbols` each render) and make `fetchAllPrices` depend only on the stable `updatePrices` callback. Effect deps become `[symbolsKey, fetchAllPrices, updatePrices]` — `symbolsKey` is a primitive join so it only changes when the symbol set actually changes. Use `symbols.slice().sort()` to avoid mutating the caller's array. Guard the empty case with a conditional setState (`prev.isLoading ? ... : prev`).
+
+**Rule**: When a hook accepts an array prop, derive a primitive key (`join(",")`) and never depend on the array reference itself inside `useCallback`/`useEffect` deps unless it is truly stable. Mock `fetch` BEFORE `renderHook` in tests (the hook fetches at mount). Regression test: re-render with a fresh array reference N times and assert only ONE EventSource connection is created.
+
+### 53. AI Fallback Values Must Be Price-Based, Never Literal Zeros
+**Issue**: Production Performance tab showed `targetPrice: 0 / stopLoss: 0` on all 1666 trackers. The row showed "confidence 50 / AI analysis unavailable — defaulting to HOLD".
+
+**Root Cause**: Prod AI isn't configured — Netlify `[build.environment]` in `netlify.toml` has no `OPENROUTERKEY` (only local `.env` has it) → `hasValidConfig()` false → `analyzeStocks()` short-circuits to `failedResult(s, "AI is not configured")` → `getDefaultRecommendation()` returned literal `targetPrice: 0, stopLoss: 0`. Those zeros then **overwrote** the good price-based tracker-creation defaults (`price*1.2`/`price*0.95`) at tracker-create time (AI update ran after creation).
+
+**Solution**: `getDefaultRecommendation(stock?)` computes `target = round(price * 1.1)`, `stopLoss = round(price * 0.95)`, guarded `price > 0` (else 0). `normalizeRecommendation` falls back to `round(price*1.1*100)/100` / `round(price*0.95*100)/100` instead of `|| 0`. Constants `DEFAULT_TARGET_MULTIPLIER = 1.1` / `DEFAULT_STOP_LOSS_MULTIPLIER = 0.95` shared with the service fallback. Backfilled existing rows via `scripts/backfill-recommendation-targets.ts` (idempotent, `entryPrice > 0`).
+
+**Rule**: Any AI/fallback path that produces price-derived fields (target/SL/exit) must derive them from the stock price — literal `0`/`null` defaults silently poison downstream UI and analytics. Also: `tsx` scripts need `--env-file=.env` (else `SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string` on local Postgres).
+
 ---
 
 ## Update Log
+- 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)
 - 2026-08-07: Added Lessons 50-51 (open PR → move work to existing head branch, never fork; dev DB without migration history → `db push` not `migrate deploy`); added v3.5.0 run trigger source + BUY/SELL filter + AI monitoring persistence lessons
 - 2026-08-07: Added Lessons 48-49 (GitHub wiki lazy-creation + strict mermaid; UI sort keys vs API zod enums); added v3.5.0 performance/archival + wiki + skills-system lessons
 - 2026-08-06: Added Lessons 46-47 (Prisma interactive $transaction expiry → runInChunks; cache invalidation after background updates); added v3.4.1 prod reliability fixes lessons

@@ -176,6 +176,7 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
       <div className="space-y-2">
         {sortedStocks.map((stock) => {
           const rec = recConfig[stock.aiRecommendation] || recConfig.HOLD;
+          const aiRecLabel = stock.aiRecommendation || "HOLD";
           const changeColor = stock.change >= 0 ? "text-emerald-400" : "text-red-400";
           const returnPct = stock.targetPrice && stock.price
             ? ((stock.targetPrice - stock.price) / stock.price * 100).toFixed(1)
@@ -216,7 +217,7 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
                       {stock.symbol}
                     </a>
                     <span className={`${rec.bg} ${rec.text} px-1.5 py-0.5 rounded text-[10px] font-bold`}>
-                      {rec.icon} {stock.aiRecommendation}
+                      {rec.icon} {aiRecLabel}
                     </span>
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                       stock.timeHorizon === "short"
@@ -276,11 +277,11 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
                 {/* Right: Confidence + Screeners */}
                 <div className="text-right flex-shrink-0">
                   <div className={`text-lg font-bold ${
-                    stock.confidence >= 70 ? "text-emerald-400" :
-                    stock.confidence >= 50 ? "text-amber-400" :
+                    (stock.confidence ?? 0) >= 70 ? "text-emerald-400" :
+                    (stock.confidence ?? 0) >= 50 ? "text-amber-400" :
                     "text-red-400"
                   }`}>
-                    {stock.confidence}%
+                    {stock.confidence != null ? `${stock.confidence}%` : "—"}
                   </div>
                   <div className="text-[10px] text-gray-500 mb-1">confidence</div>
                   <div className="flex flex-wrap gap-1 justify-end max-w-[140px]">

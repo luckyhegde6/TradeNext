@@ -1,52 +1,45 @@
 ---
 handoff_version: "1.0"
-session_id: "sess-20260807-ph20-recs-perf"
+session_id: "sess-20260807-ph21-carryforward"
 agent: "system"
-timestamp: "2026-08-07T14:30:00Z"
+timestamp: "2026-08-07T16:45:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: null
+parent_session: "sess-20260807-ph20-recs-perf"
 child_sessions: []
-checkpoint: "ph20-recommendation-performance"
+checkpoint: "ph21-target-sl-fix-sse-wiring"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: Recommendation Performance Tracking & Archival (v3.5.0) — Performance tab, 4 PM IST SYSTEM cron, 360-day archival
-- **Branch**: `ph20` (PR #81 OPEN + MERGEABLE against `main`; all work STAGED on ph20, commit + PR-summary update pending — never merge to main without permission, never auto-merge)
-- **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md` → `docs/designDoc/ph20-recommendation-performance-design.md`
-- **Subsystem docs**: `.agents/docs/daily-recommendations-engine.md` + `tasks-cron-workers.md` exist (uncommitted baseline from v3.4.3)
-- **Also in tree (staged, same branch)**: skills/agents/commands extension system (5 focused skills + mirrors, 4 agent profiles, 4 commands, `.agents/AGENT-SKILL-MATRIX.md`, opencode.json wiring) + session follow-up: run `triggeredBy`, BUY/SELL filter, AI monitoring persistence
+- **Task**: Post-merge carry-forward (v3.5.1) — fix Performance-tab ₹0.00 target/SL bug (root-caused to AI fallback), wire SSE live prices into Portfolio/Watchlist/Dashboard, fix bare "🟡 %" History cards
+- **Branch**: `fix/ph21-carryforward-perftab` (from `main` after PR #81 merged `bf584e2` 2026-08-07)
+- **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md`
+- **Verified live before fix**: prod `/api/recommendations/performance` → 1666 trackers all `targetPrice:0 / stopLoss:0 / confidence:50 / "AI analysis unavailable — defaulting to HOLD"`
 
 ## Progress
-- [x] Phase 1 — Schema: `RecommendationArchive` model + `DailyRecommendationStock.trackerId` nullable/`onDelete: SetNull`; migration `20260807103000_add_recommendation_archive` (applied via `db push`, non-destructive) + `npx prisma generate`
-- [x] Phase 1 — `scripts/backfill-recommendation-categories.ts` — **RUN on local dev DB**: 683 tracking (short=554, swing=129), archived=0, `aiRecommendation` all HOLD
-- [x] Phase 2 — `lib/cron-parser.ts` (shared weekday-range parser; fixed dow-only `v<=6` cap bug); worker-engine + admin cron route import it; `ensureRecommendationCrons()` 2 jobs (`30 4 * * 1-5` = 10:00 IST, `30 10 * * 1-5` = 16:00 IST); audit actions `RECOMMENDATION_PERFORMANCE_CHECK/ARCHIVED/PERFORMANCE_MOVED`
-- [x] Phase 3 — `lib/services/recommendationPerformanceService.ts`: `getPerformanceColumns()`, `getPerformanceList()` (15-min cache, next-day promotion, BigInt-safe, JS sort), `archiveRecommendations()` (360d, idempotent, runInChunks), `invalidateRecommendationsCache()`
-- [x] Phase 3 — `checkRecommendationPerformance()` reworked in `dailyRecommendationService.ts` (no EXPIRY_DAYS; triggerSource system; folds archive + cache invalidation)
-- [x] Phase 4 — API: `/api/recommendations/performance` (public GET, Zod, **10-key sort enum**), `/api/admin/recommendations/archive` (admin POST), `/api/admin/recommendations` POST spawns worker tasks (triggeredBy system)
-- [x] Phase 5 — UI: `PerformanceTab.tsx` wired into `/recommendations` as 5th tab
-- [x] Phase 6 — Tests: `cronParser.test.ts` + `recommendationPerformanceService.test.ts` — **24/24 pass**; full suite **310 passed / 11 skipped**; `npx tsc --noEmit` clean (production files only)
-- [x] Phase 6 — Local functional verify: dev server + Playwright — Performance tab renders, `sort=entryPrice` **200 OK** (400 bug fixed), pagination Page 2/28, mobile 375 no overflow, **zero console errors**
-- [x] Docs: AGENTS.md (v3.5.0 row + Skills section + matrix), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([3.5.0] released), TODO.md, Primer.md, agent-memory.md, Lessons.md (48–49), README.md (v3.5.0 Latest Update), swagger (performance + archive routes)
-- [x] Wiki: published 7 pages + mermaid parse-error fixes pushed to wiki master (`d2c5964`); ER/Monitoring/Home browser-verified clean
-- [x] **Session follow-up (staged)**: `DailyRecommendationRun.triggeredBy` + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge; `runDailyRecommendations({ triggeredBy })`; worker `admin_manual`→`admin`; BUY/SELL filter in `getLatestRecommendations()` + All/Buy/Sell pills; AI monitoring awaited `trackAiCall` in all AI route `finally` + merged reads (`memory|database|hybrid`); tests 312 passed / 11 skipped; tsc clean (touched files); cold-start + empty-state + System-badge verified; DB synced via `db push`; test artifacts cleaned
+- [x] **Root cause**: prod AI fails (netlify.toml `[build.environment]` L5 has NO `OPENROUTERKEY`; key only in local `.env`/`.env.local`) → `hasValidConfig()` false → `failedResult(s,"AI is not configured")` → `getDefaultRecommendation()` returned literal `targetPrice: 0, stopLoss: 0` → overwrote good price-based creation defaults (`price*1.2`/`price*0.95`)
+- [x] **Fix** (`lib/services/ai/recommendation-agent.ts`): `getDefaultRecommendation(stock?)` price-based — `target = round(price*1.1)`, `sl = round(price*0.95)`, guard `price>0`; constants `DEFAULT_TARGET_MULTIPLIER=1.1`/`DEFAULT_STOP_LOSS_MULTIPLIER=0.95`; `failedResult` + both `parseAIResponse` call sites pass `stock`; `normalizeRecommendation` falls back to `round(price*1.1*100)/100` / `round(price*0.95*100)/100` (never literal 0)
+- [x] **Backfill**: `scripts/backfill-recommendation-targets.ts` (idempotent, `entryPrice>0`) **run on LOCAL dev DB**: rowsScanned=149, updated=149, 0 zero-target remain (verified via `.verify-targets.cjs`, deleted). Command needs `--env-file=.env`. PROD DB backfill pending.
+- [x] **CF #5 HistoryTab null-guard**: `top-stocks` API coalesces `aiRecommendation || "HOLD"`, `confidence ?? 0`; `HistoryTab.tsx` defensive `aiRecLabel`, `(stock.confidence ?? 0)`, "—" when null — no more bare "🟡 %"
+- [x] **CF #4 SSE wiring**: `useLivePrices` FIXED (infinite "Maximum update depth exceeded" loop — 196 console errors on empty watchlist; `fetchAllPrices` deps `[symbols]`→`[updatePrices]` + `symbolsRef`; `slice().sort()`; guarded empty setState). Wired: `HoldingsTable` (live price/value/P&L/% overlay + green ● Live badge), `watchlist/page.tsx` (`liveQuoteFor` overlay + badge), `MarqueeBanner` (refreshInterval 30s)
+- [x] **Tests**: new `lib/__tests__/useLivePrices.test.ts` (4) + updated `recommendation-agent.test.ts` (25). Full suite **317 passed / 11 skipped / 0 failed**
+- [x] **Verification**: tsc + eslint clean on touched files (only pre-existing test-file tsc errors remain); Playwright — `/recommendations` clean, `/portfolio` live RELIANCE ₹1,327.60 (+1.76%) & TCS ₹2,446.90 (+10.27%) 0 errors, `/watchlist` 0 errors (loop fixed), 375px mobile clean; `/api/recommendations/performance?limit=3` returns non-zero targets (SCML 95.40/75.52, ARVEE 186.43/147.59, FELDVR 2.94/2.33)
+- [x] **Docs**: AGENTS.md (v3.5.1 row), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([Unreleased]), Primer.md (ph21 status + Session 12), agent-memory.md, Lessons.md (52-53), `.agents/session-todos.md`
 
 ## Decisions
-- 30-day expiry REMOVED → 3-status lifecycle: tracking → target_achieved/stop_loss_hit → archived (360d only trigger)
-- Archival = hard-delete tracker into frozen `RecommendationArchive` (+ statusHistory JSON); `DailyRecommendationStock.trackerId → SetNull` so History survives
-- 4 PM IST Mon–Fri cron (10:30 UTC); worker tasks `triggeredBy: "system"` for full audit trail
-- Admin triggers spawn worker tasks (observable in /admin/workers), not fire-and-forget
-- Performance list = `createdAt < today` (next-day promotion), cached 15 min, invalidated by worker
-- `runInChunks` for bulk writes; raw SQL camelCase quoted columns
-- Git STRICT: branch + PR, never auto-merge, always sync main via PRs; **open PR #81 → all follow-up work moves to `ph20`, never a new branch**
+- AI fallback target/SL = `price*1.1`/`price*0.95` (matches existing service-level `DEFAULT_TARGET_MULTIPLIER`/`DEFAULT_STOP_LOSS_MULTIPLIER`)
+- Null-guard at API layer (coalesce) + UI defensive layer — belt and suspenders for legacy rows
+- SSE wiring self-contained in `HoldingsTable`/watchlist page (no PortfolioClient data-flow change)
+- Backfill is idempotent + only touches `entryPrice > 0` rows — safe to run on prod later
 
 ## Blockers
-- (none) — commit/PR-summary update is the only remaining step
+- PROD DB backfill + Netlify `OPENROUTERKEY` env need user action (remote DB URL / Netlify dashboard)
 
 ## Next Steps
-1. Pre-commit hygiene: delete `dev-server.log`, stray root `*.yaml`/`.tmp-*.ts`; verify `.playwright-mcp/` clean/gitignored; no secrets/console.log
-2. Commit (recommend separate commits: skills/agents/wiring chore + feat(recs) v3.5.0 follow-up) on `ph20`
-3. `git push origin ph20` + update PR #81 summary/description with the session follow-up changes (run trigger source, BUY/SELL filter, AI monitoring persistence); never auto-merge
-4. Carry-forward: deploy, prod cron verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI, issues #68/#69
+1. Pre-commit hygiene: confirm `.playwright-mcp/` session artifacts deleted (gitignored anyway), no `dev-server.log`, no secrets
+2. Commit on `fix/ph21-carryforward-perftab` (recommend: `fix(recommendations): price-based AI fallback target/SL + backfill` + `feat(live-prices): wire SSE into portfolio/watchlist + fix useLivePrices loop`)
+3. `git push origin fix/ph21-carryforward-perftab` + open PR (never auto-merge)
+4. Ask user: prod backfill (`DATABASE_REMOTE`/remote URL) + add `OPENROUTERKEY` to Netlify env vars
+5. Continue carry-forward: demo holdings re-seed, F&O UI, issues #68/#69, prod cron verification

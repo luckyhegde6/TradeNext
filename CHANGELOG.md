@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **SSE live prices wired into Portfolio & Watchlist** (ph21 carry-forward): `HoldingsTable` shows live price/value/P&L/returns overlay + green "● Live" badge; Watchlist uses SSE quote overlay (`liveQuoteFor`) + badge; dashboard `MarqueeBanner` refreshes every 30s. `useLivePrices` hardened (stable callbacks via `symbolsRef`, no in-place `.sort()`, no redundant setState on empty) — fixes the "Maximum update depth exceeded" infinite loop on empty watchlists.
+- 4 new hook tests (`lib/__tests__/useLivePrices.test.ts`): empty list, no-loop on fresh array refs, SSE price event, connected→isLive.
+
 ### Fixed
+- **Performance tab target/SL showing ₹0.00**: prod AI fails (Netlify `OPENROUTERKEY` missing) → `getDefaultRecommendation()` wrote literal `0`s, overwriting price-based tracker defaults. AI fallback is now price-based (`price*1.1` target / `price*0.95` SL, guarded `price>0`); `normalizeRecommendation` no longer persists literal 0. Backfill script `scripts/backfill-recommendation-targets.ts` fixed 149 existing trackers (local DB; prod pending).
+- **History tab bare "🟡 %" cards** (legacy null `aiRecommendation`/`confidence`): `top-stocks` API coalesces to `"HOLD"` / `0`; HistoryTab renders "—" when confidence is null.
 - Prod bugs tracked as issues [#68](https://github.com/luckyhegde6/TradeNext/issues/68) (monitoring logs empty on serverless) and [#69](https://github.com/luckyhegde6/TradeNext/issues/69) (admin sessions never persisted).
 
 ---
