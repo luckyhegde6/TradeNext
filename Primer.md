@@ -5,13 +5,23 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-07
+2026-08-07 (ph21)
 
 ---
 
 ## Current Project Status
 
-### Recommendation Performance Tracking & Archival (v3.5.0 / ph20) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT + PR PENDING
+### ph21 — Carry-Forward: Target/SL ₹0.00 Fix + SSE Live Prices + HistoryTab Null-Guard (v3.5.1) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT PENDING
+**Issue (from prod)**: Performance tab showed `targetPrice: 0 / stopLoss: 0` on every tracker; History cards rendered bare "🟡 %"; SSE live-price hooks existed but weren't wired into Portfolio/Watchlist/Dashboard.
+**Root Cause**: prod AI fails (Netlify `[build.environment]` has no `OPENROUTERKEY`; key only in local `.env`) → `getDefaultRecommendation()` returned literal `0`s that overwrote price-based tracker defaults.
+**Fix Applied**:
+- `getDefaultRecommendation(stock?)` price-based fallback — `price*1.1` target / `price*0.95` SL (guarded `price>0`); `normalizeRecommendation` no longer persists literal 0
+- Backfill script `scripts/backfill-recommendation-targets.ts` — local dev DB fixed 149 trackers (0 zero-target remain; prod pending)
+- `useLivePrices` infinite-loop fix (`symbolsRef` stable callbacks, no in-place `.sort()`) + wired into HoldingsTable (live overlay + ● Live badge), Watchlist (`liveQuoteFor` + badge), MarqueeBanner (30s refresh)
+- `top-stocks` API + HistoryTab null-coalescing (`"HOLD"` / `0` / "—") — no more bare "🟡 %"
+**Status**: 317 tests passed / 11 skipped / 0 failed (4 new hook tests); tsc + eslint clean on touched files; Playwright-verified (portfolio live RELIANCE ₹1,327.60, watchlist loop fixed, mobile 375px, zero console errors). Branch `fix/ph21-carryforward-perftab`, nothing committed yet. Remaining: prod DB backfill + Netlify `OPENROUTERKEY` (needs user), demo holdings re-seed, F&O UI, issues #68/#69.
+
+### Recommendation Performance Tracking & Archival (v3.5.0 / ph20) — ✅ MERGED via PR #81
 **Issue**: Recommendations had a 30-day expiry that deleted trackers after a month; performance check ran at 3:30 PM IST with no weekday support; no public view of tracker performance; categories limited to `short|medium|long`; worker tasks from crons weren't marked SYSTEM.
 **Fix Applied**:
 - 3-status lifecycle `tracking → target_achieved/stop_loss_hit → archived (360d)`; removed 30-day expiry
@@ -23,7 +33,7 @@
 - Run trigger source tracking: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge; worker maps `admin_manual` → `admin`
 - Today's Picks BUY/SELL filter — only actionable runs surface; All/Buy/Sell pills (no HOLD)
 - AI monitoring persistence fix — `trackAiCall()` awaited in every AI route `finally` (serverless cold-start rows survive); merged reads (`memory|database|hybrid`) + source badge
-**Status**: Code + tests complete (24 new perf tests + 21 rec-service tests; suite 312 passed / 11 skipped). Playwright-verified (tab renders, sort 200, pagination, mobile, zero console errors; AI monitoring cold-start `source:"database"` verified; Today's Picks empty state correct; System badge verified on run `5eaad1d7`). Docs done. Pending: commit on `ph20` + push + update PR #81 summary (never auto-merge).
+**Status**: MERGED — PR #81 (merge commit `bf584e2`, 2026-08-07). Deploy + prod verification + carry-forward items moved to ph21 (in progress on `fix/ph21-carryforward-perftab`).
 
 ### Git Workflow & Agent Operating Model (v3.4.2) — ✅ CODE COMPLETE, COMMIT PENDING
 **Issue**: Git hooks were untracked `.git/hooks/` (lost on fresh clone); missing gardenify-style git-flow, code-hygiene, and documentation-standards docs; AGENTS.md lacked an operating model for handoff/plugins.
@@ -260,6 +270,15 @@
 ---
 
 ## Session History
+
+### Session 12 (August 7, 2026) — ph21: Target/SL ₹0.00 Fix + SSE Live Prices Wiring (v3.5.1)
+- **PR #81 merged** (commit `bf584e2`) → new branch `fix/ph21-carryforward-perftab` from main.
+- **Root-caused Performance ₹0.00**: prod AI fails (Netlify missing `OPENROUTERKEY`) → `getDefaultRecommendation()` wrote literal `0`s → overwrote price-based defaults. Fixed with price-based fallback (`price*1.1`/`price*0.95`).
+- **Backfilled 149 trackers** locally (`scripts/backfill-recommendation-targets.ts`, needs `--env-file=.env`); verified 0 zero-target remain.
+- **Wired SSE live prices**: HoldingsTable (live value/P&L + ● Live badge), Watchlist (`liveQuoteFor` overlay), MarqueeBanner (30s refresh). Fixed `useLivePrices` infinite loop (196 console errors on empty watchlist → `symbolsRef`).
+- **HistoryTab null-guard**: top-stocks API coalesces `"HOLD"`/`0`; UI renders "—" for null confidence.
+- **Tests**: 317 passed / 11 skipped / 0 failed (+4 new `useLivePrices` tests). tsc + eslint clean. Playwright verified desktop + mobile.
+- **Status**: docs updated; nothing committed yet on `fix/ph21-carryforward-perftab`.
 
 ### Session 11 (July 19, 2026)
 - **Daily Recommendations Engine + Self-Heal AI + Audit Logging (v3.3.0)**: Planning and documentation complete.

@@ -54,7 +54,10 @@
 | Telegram Recommendations Live Prices | [x] Complete (v3.4.1, needs deploy) |
 | History Tab Predicted vs Current | [x] Complete (v3.4.1, needs deploy) |
 | Monitoring DB Logs Tab | [x] Complete (v3.4.1) |
-| Recommendation Performance Tracking & Archival (v3.5.0) | [x] Complete (branch ph20, PR pending) |
+| Recommendation Performance Tracking & Archival (v3.5.0) | [x] Complete (merged via PR #81) |
+| Performance Tab Target/SL ₹0.00 Fix (v3.5.1) | [x] Complete (price-based AI fallback + backfill script, local 149 rows; prod pending) |
+| SSE Live Prices Wiring (v3.5.1) | [x] Complete (HoldingsTable + Watchlist + MarqueeBanner; useLivePrices loop fixed) |
+| History Tab Null-Guard (v3.5.1) | [x] Complete (top-stocks coalesce + HistoryTab "—") |
 
 ---
 
@@ -140,9 +143,9 @@ Server-Sent Events for live price updates across the platform. Zero-refresh pric
 
 #### UI/UX Checklist — User Facing
 - [x] LivePriceBadge: Green/red flash on price change
-- [ ] Portfolio holdings show live prices (to be wired)
-- [ ] Watchlist shows live prices (to be wired)
-- [ ] Dashboard shows live market status (to be wired)
+- [x] Portfolio holdings show live prices (wired v3.5.1 — HoldingsTable overlay + ● Live badge)
+- [x] Watchlist shows live prices (wired v3.5.1 — SSE quote overlay + badge)
+- [x] Dashboard shows live market status (MarqueeBanner 30s refresh, v3.5.1)
 - [x] Connection indicator: "Live" / "Reconnecting..." / "Offline"
 - [x] Loading state: Previous cached price + pulsing indicator
 - [x] Error state: "Connection lost, retrying..." with retry button
@@ -165,8 +168,8 @@ Server-Sent Events for live price updates across the platform. Zero-refresh pric
 - [x] `lib/hooks/useLivePrices.ts` — Batch symbol hook
 - [x] `app/components/LivePriceBadge.tsx` — Price display component
 - [x] `app/admin/live-prices/page.tsx` — Admin SSE dashboard
-- [ ] Wire into `app/portfolio/PortfolioClient.tsx` (can be done in follow-up)
-- [ ] Wire into `app/components/HoldingsTable.tsx` (can be done in follow-up)
+- [x] Wire into `app/portfolio/PortfolioClient.tsx` (done v3.5.1 via HoldingsTable)
+- [x] Wire into `app/components/HoldingsTable.tsx` (done v3.5.1 — live overlay + ● Live badge)
 - [ ] Wire into `app/page.tsx` (dashboard) (can be done in follow-up)
 - [ ] Wire into `app/Header.tsx` (market status) (can be done in follow-up)
 - [ ] Tests: `lib/__tests__/useLivePrice.test.ts` (can be done in follow-up)
@@ -426,13 +429,13 @@ Playwright walkthrough of the live site (tradenext6.netlify.app) using the demo 
 
 ### Bugs / Data Quality Issues
 - [ ] **Recommendations data is stale (17 days)**: "Last updated: 19/7/2026" — the daily recommendation cron has not produced a successful run since July 19. The `runDailyRecommendations` transaction timeout (fixed locally) is the likely cause. Verify the run succeeds after the `runInChunks` fix deploys.
-- [ ] **Recommendations History cards render bare "🟡" + "%"** for ~600 of 643 stocks: `AARTISURF`, `AARVI`, `ABCOTS`, `ACCELYA` etc. show a yellow emoji with a "%" placeholder but no HOLD/SELL label and no confidence number. Root cause: `recommendation` / `confidence` fields are null in the DB (AI analysis fell back to HOLD without persisting a label). Fix: either hide the confidence block when null, or persist a default label (`HOLD`) in the fallback path.
-- [ ] **643 recommendations is too many to be useful** — cap to top 50 (implemented locally via `rankAndCapRecommendations`; needs deploy). Also the `Load More (623 remaining)` pagination suggests the run stored every screener hit.
+- [ ] **Recommendations History cards render bare "🟡" + "%"** — FIXED v3.5.1 (top-stocks API coalesces `"HOLD"`/`0`; HistoryTab renders "—" for null confidence). ~600 legacy rows now show proper HOLD badge + confidence or "—".
+- [ ] **643 recommendations is too many to be useful** — top-50 cap implemented locally via `rankAndCapRecommendations` (v3.4.1); needs deploy + verified run.
 
 ### UX Improvements (non-blocking)
 - [ ] History tab shows snapshot price only — display Current Price + Return % vs entry (implemented locally; needs deploy).
 - [ ] Demo account on prod has no holdings (empty Portfolio) — re-seed demo holdings so the portfolio/tax/rebalancer demos work on prod.
-- [ ] No live-price integration in Portfolio/Watchlist tables yet (SSE hooks exist, not wired).
+- [x] No live-price integration in Portfolio/Watchlist tables yet (SSE hooks exist, not wired). — DONE v3.5.1 (HoldingsTable + Watchlist overlay, MarqueeBanner 30s refresh, useLivePrices loop fixed).
 
 ### Verified Working on Prod
 - [x] Homepage: indices chart (1D/1W/1M/3M/6M/1Y), MA overlays, corporate announcements, upcoming actions
