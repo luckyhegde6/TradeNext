@@ -21,8 +21,10 @@ import { recordPrediction } from "./ai/prediction-tracker";
 import {
   recordScreenerEvent,
   recordAIEvent,
+  recordSystemEvent,
 } from "./unifiedEventService";
 import { recordMetric } from "./systemHealthService";
+import { archiveRecommendations } from "./recommendationPerformanceService";
 import { createAuditLog } from "@/lib/audit";
 import { recommendationsCache } from "@/lib/cache";
 import prisma from "@/lib/prisma";
@@ -43,12 +45,19 @@ export interface DailyRunResult {
   stocks: { symbol: string; aiRecommendation: string; confidence: number }[];
 }
 
-/** Result of the performance check cron job. */
+/**
+ * Result of the performance check cron job.
+ *
+ * Lifecycle (v3.5.0): tracking → target_achieved / stop_loss_hit → archived.
+ * There is NO 30-day expiry anymore; target/SL hits are flags, not deletion
+ * triggers. Aged trackers (≥ ARCHIVE_AFTER_DAYS) are snapshotted to
+ * RecommendationArchive and hard-deleted inside this same run.
+ */
 export interface PerformanceCheckResult {
   checked: number;
   targetAchieved: number;
   stopLossHit: number;
-  expired: number;
+  archived: number;
   executionTimeMs: number;
 }
 
@@ -81,9 +90,6 @@ const DEFAULT_TARGET_MULTIPLIER = 1.1;
 
 /** Default stop loss multiplier (5% below entry). */
 const DEFAULT_STOP_LOSS_MULTIPLIER = 0.95;
-
-/** Days after which an active recommendation expires. */
-const EXPIRY_DAYS = 30;
 
 /** Number of screeners in the daily pipeline. */
 const TOTAL_SCREENER_COUNT = 7;
@@ -650,30 +656,64 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
 // ─── Performance Tracking ────────────────────────────────────────────────
 
 /**
- * Check all active recommendations against current market prices.
+ * Check all tracking recommendations against current market prices.
  *
- * Called by the cron job at 3:30 PM IST daily.
+ * Called by the SYSTEM cron job at 4:00 PM IST Mon–Fri (worker task with
+ * `triggeredBy: "system"`).
  *
- * For each active {@link RecommendationTracker}:
- * 1. Fetch current price from daily_prices
- * 2. Check if targetPrice or stopLoss has been hit
- * 3. Check if the recommendation has expired (30+ days)
- * 4. If status changed, update tracker and create RecommendationStatusHistory
- * 5. Record events for status changes
+ * For each {@link RecommendationTracker} in `tracking`:
+ * 1. Fetch current price from daily_prices (single batch query)
+ * 2. Update currentPrice + lastCheckedAt for EVERY tracker (keeps the
+ *    Performance tab's return % fresh even when status is unchanged)
+ * 3. If targetPrice hit → `target_achieved`; if stopLoss hit → `stop_loss_hit`
+ * 4. Status changes are recorded in RecommendationStatusHistory with
+ *    `triggerSource: "system"`
+ * 5. At the end, run the 360-day archival sweep and invalidate all caches
+ *
+ * v3.5.0: removed the 30-day expiry path (EXPIRY_DAYS). Trackers stay in
+ * `tracking` indefinitely until they hit target/SL or age past 360 days.
  */
 export async function checkRecommendationPerformance(): Promise<PerformanceCheckResult> {
   const startTime = Date.now();
 
   logger.info({ msg: "Performance check starting" });
 
-  // Batch fetch all active trackers and their latest prices in one query each
+  // Batch fetch all tracking trackers and their latest prices in one query each
   // Instead of N individual price queries, we do 1 query with DISTINCT ON
   const activeTrackers = await prisma.recommendationTracker.findMany({
-    where: { status: "active" },
+    where: { status: "tracking" },
   });
 
   if (activeTrackers.length === 0) {
-    return { checked: 0, targetAchieved: 0, stopLossHit: 0, expired: 0, executionTimeMs: 0 };
+    // Still run the archival sweep — aged trackers of ANY status need cleanup.
+    const archive = await archiveRecommendations();
+    // Run-level audit parity with the main path (design §3/§8)
+    await Promise.allSettled([
+      createAuditLog({
+        action: "RECOMMENDATION_PERFORMANCE_CHECK",
+        resource: "recommendation-tracker",
+        method: "SYSTEM",
+        path: "system:checkRecommendationPerformance",
+        responseStatus: 200,
+        responseTime: 0,
+        metadata: { checked: 0, targetAchieved: 0, stopLossHit: 0, archived: archive.archived },
+      }),
+      recordSystemEvent("performance_check", `Performance check completed: 0 tracked, ${archive.archived} archived`, "info", {
+        checked: 0,
+        targetAchieved: 0,
+        stopLossHit: 0,
+        archived: archive.archived,
+      }).catch((e) => {
+        logger.warn({ msg: "Performance check system event failed", error: e instanceof Error ? String(e) : String(e) });
+      }),
+    ]);
+    return {
+      checked: 0,
+      targetAchieved: 0,
+      stopLossHit: 0,
+      archived: archive.archived,
+      executionTimeMs: 0,
+    };
   }
 
   // Get all unique symbols
@@ -693,7 +733,6 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   let checked = 0;
   let targetAchieved = 0;
   let stopLossHit = 0;
-  let expired = 0;
 
   // Batch status updates and history creation
   const statusUpdates: Promise<any>[] = [];
@@ -711,42 +750,40 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
     let newStatus: string | null = null;
 
-    // Check conditions in priority order
+    // Check target/SL conditions in priority order (target wins on tie)
     if (currentPrice >= tracker.targetPrice) {
       newStatus = "target_achieved";
       targetAchieved++;
     } else if (currentPrice <= tracker.stopLoss) {
       newStatus = "stop_loss_hit";
       stopLossHit++;
-    } else {
-      const daysSinceCreation = Math.floor(
-        (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      if (daysSinceCreation >= EXPIRY_DAYS) {
-        newStatus = "expired";
-        expired++;
-      }
     }
+
+    // Update currentPrice + lastCheckedAt for EVERY tracker — the Performance
+    // tab computes return % from currentPrice, so even unchanged trackers must
+    // get the freshest close. (There is no stored changePercent column.)
+    statusUpdates.push(
+      prisma.recommendationTracker.update({
+        where: { id: tracker.id },
+        data: {
+          ...(newStatus ? { status: newStatus } : {}),
+          currentPrice,
+          lastCheckedAt: new Date(),
+        },
+      })
+    );
 
     if (newStatus) {
       const previousStatus = tracker.status;
 
-      // Batch update tracker
-      statusUpdates.push(
-        prisma.recommendationTracker.update({
-          where: { id: tracker.id },
-          data: { status: newStatus, currentPrice, lastCheckedAt: new Date() },
-        })
-      );
-
-      // Batch create status history
+      // Batch create status history (triggerSource: system)
       historyCreates.push(
         prisma.recommendationStatusHistory.create({
           data: {
             trackerId: tracker.id,
             previousStatus,
             newStatus,
-            triggerSource: "cron_check",
+            triggerSource: "system",
             metadata: {
               currentPrice,
               entryPrice: tracker.entryPrice,
@@ -761,7 +798,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       );
 
       // Record event
-      const emoji = newStatus === "target_achieved" ? "TARGET" : newStatus === "stop_loss_hit" ? "STOP_LOSS" : "EXPIRED";
+      const emoji = newStatus === "target_achieved" ? "TARGET" : "STOP_LOSS";
       eventLogs.push(
         recordAIEvent("status_change", `[${emoji}] ${tracker.symbol}: ${previousStatus} -> ${newStatus} at price ${currentPrice}`, {
           symbol: tracker.symbol, currentPrice, previousStatus, newStatus,
@@ -786,6 +823,10 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     (chunk) => Promise.all(chunk),
   );
 
+  // Run the 360-day archival sweep (any status) — snapshots + hard-deletes
+  // aged trackers. Idempotent; safe to run every day.
+  const archive = await archiveRecommendations();
+
   // Invalidate the recommendations cache so the web UI and Telegram
   // /recommendations commands reflect updated prices/statuses immediately
   // (otherwise they serve the stale snapshot for up to 23 hours).
@@ -804,20 +845,58 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       checked,
       targetAchieved,
       stopLossHit,
-      expired,
+      archived: archive.archived,
     },
   });
+
+  // Run-level audit + unified event (design §3/§8): one RECOMMENDATION_PERFORMANCE_CHECK
+  // entry per run so monitoring tabs show the sweep ran even with zero status changes.
+  const runMeta = {
+    checked,
+    targetAchieved,
+    stopLossHit,
+    archived: archive.archived,
+    executionMs,
+  };
+  await Promise.allSettled([
+    createAuditLog({
+      action: "RECOMMENDATION_PERFORMANCE_CHECK",
+      resource: "recommendation-tracker",
+      method: "SYSTEM",
+      path: "system:checkRecommendationPerformance",
+      responseStatus: 200,
+      responseTime: executionMs,
+      metadata: runMeta,
+    }),
+    recordSystemEvent(
+      "performance_check",
+      `Performance check completed: ${checked} tracked, ${targetAchieved} target, ${stopLossHit} stop-loss, ${archive.archived} archived`,
+      "info",
+      runMeta,
+    ).catch((e) => {
+      logger.warn({
+        msg: "Performance check system event failed",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }),
+  ]);
 
   logger.info({
     msg: "Performance check completed",
     checked,
     targetAchieved,
     stopLossHit,
-    expired,
+    archived: archive.archived,
     executionMs,
   });
 
-  return { checked, targetAchieved, stopLossHit, expired, executionTimeMs: executionMs };
+  return {
+    checked,
+    targetAchieved,
+    stopLossHit,
+    archived: archive.archived,
+    executionTimeMs: executionMs,
+  };
 }
 
 // ─── Query Helpers ───────────────────────────────────────────────────────

@@ -416,6 +416,27 @@ echo "" >> agent-memory.md
 - **Context**: Netlify 502 error investigation
 - **Files**: lib/logger.ts, lib/prisma.ts, netlify.toml
 
+### 2026-08-07 | Archived/Resolved Bugs → GitHub Issues (tracking)
+- **Action**: Created 11 GitHub issues for archived + resolved bugs in BUGS.md, assigned to @luckyhegde6, closed as resolved with PR/branch tagged
+- **Issues**: #70 (NSE deals mode param — PR #49 `ph16`), #71 (BulkDealsTable TS — PR #49 `ph16`), #72 (ingest-csv access — PR #60 `Ph17`), #73 (public /api/deals — PR #36 `ph11`), #74–#80 (R1–R8 resolved bugs with fixing PRs #34/#35/#36/#60)
+- **Files**: BUGS.md (GitHub columns added to Resolved table + Archived section), .agents/rules/session-memory-rules.md (new rule §9: interleaved/unrelated user messages → subagent, don't pollute main session)
+- **Lesson**: `gh issue create --body` with inline markdown gets truncated on cmd.exe (only `## Summary` survived) — always use `--body-file` for multi-line issue bodies
+
+### 2026-08-07 | ph20 — Recommendation Performance Tests Green
+- **Action**: Fixed test mocks (`recommendationsCache.keys`, `archive.findMany` default, age-filter emulation) — `cronParser.test.ts` + `recommendationPerformanceService.test.ts` = 24/24 pass
+- **Files**: lib/__tests__/recommendationPerformanceService.test.ts, lib/__tests__/cronParser.test.ts
+- **Detail**: cron-parser `v <= 6` bug was real — capped all fields, truncated minutes/months (only dow should be capped); tests caught it, fixed via `isDowField = max === 6`
+
+### 2026-08-07 | ph20 — Full Verification + Docs + Wiki + Skills System
+- **Action**: ph20 end-to-end verification + GitHub wiki publish + extensible skills/agents/commands system
+- **Wiki**: Published 7 pages to GitHub wiki (`TradeNext.wiki.git`) from `.agents/docs/` + prisma schema — Home, Architecture-Overview, Database-ER-Diagram (75 models), Daily-Recommendations-Engine, Tasks-Cron-Workers, Monitoring-And-Logging, Alerts-System. Fixes: `||----o{` → `||--o{` cardinality; `[/api/...]` parallelogram labels quoted `["/api/..."]`; unquoted `<br/>` labels quoted. Commits `22e66cc`, `8a3d52e`, `d2c5964`
+- **Wiki gotchas (Lessons-worthy)**: wiki git repo is lazy-created (clone fails until first page via web UI); GitHub mermaid renderer is stricter — quote ALL labels with specials (`| + ( ) <br/> → · @ % & && <=`); `[/api/x]` is parsed as a parallelogram shape (needs `["..."]` or `( )` start)
+- **Skills system**: Created umbrella `docs-workflow` skill + 4 focused skills (`docs-updater`, `wiki-creator`, `bug-finder`, `ux-enhancer`) in `.opencode/skills/<name>/SKILL.md` + `.agents/skills/<name>.md` mirrors; 4 agent profiles (doc-writer, wiki-publisher, bug-hunter, ux-designer); 4 command templates (docs-update, wiki-publish, find-bugs, ux-audit); wired into `.opencode/opencode.json` (agent + command sections); `.agents/AGENT-SKILL-MATRIX.md` created; AGENTS.md "Skills, Agents & Commands" section added
+- **ph20 verification**: tsc clean (only pre-existing test-file errors); `npm run test` = 25 suites / 310 passed / 11 skipped; DB state verified (683 tracking, short=554/swing=129, archived=0); Playwright: Performance tab renders (filters, sortable columns, pagination Page 1→2 of 28, mobile 375 no overflow, zero console errors); sort fix confirmed — `sort=entryPrice` returns 200 (was 400)
+- **Docs updated**: AGENTS.md (v3.5.0 row + Skills section + matrix file), `.agents/CHANGELOG.md` + `versions-v3.md` (v3.5.0 detail), CHANGELOG.md (3.5.0 released section), TODO.md (Quick Reference), Primer.md (v3.5.0 status)
+- **Files**: wiki clone `C:\Users\lucky\AppData\Local\Temp\opencode\TradeNext.wiki`, `.opencode/skills/*`, `.agents/skills/*`, `.agents/agents/{doc-writer,wiki-publisher,bug-hunter,ux-designer}.md`, `.agents/commands/{docs-update,wiki-publish,find-bugs,ux-audit}.md`, `.opencode/opencode.json`, `.agents/AGENT-SKILL-MATRIX.md`
+- **Lesson**: PowerShell/cmd quoting for `$disconnect` in tsx -e breaks — write a temp `.ts` file instead (`.` prefix to keep it untracked-adjacent, then delete)
+
 ---
 
 ## How to Use

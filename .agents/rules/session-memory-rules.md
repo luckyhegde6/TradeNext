@@ -85,3 +85,14 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 - Each subagent gets: self-contained context, exact files to touch, verification command, expected return
 - Merge results into session-todos before committing
 - Subagent outputs are not user-visible — summarize back to the user
+
+## 9. Interleaved / Unrelated User Messages → Subagent (DO NOT pollute main session)
+
+- If the user posts a message **unrelated to the current work**, spawn a subagent to handle it
+  instead of doing it in the main session — this keeps the main agent's context, todos, and
+  session state clean and focused.
+- **Exception**: if the user explicitly says to handle it in the main session (e.g., "handle this
+  here"), do it in the main session.
+- The subagent should be given self-contained context (what to do, files, verification, expected
+  return) and its output summarized back — per rule #8.
+- Applies to: random questions, unrelated feature requests, side tasks arriving mid-session.

@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { z } from "zod";
+import { calculateNextRun } from "@/lib/cron-parser";
 
 export const runtime = "nodejs";
 
@@ -158,53 +159,5 @@ export async function DELETE(req: Request) {
   }
 }
 
-// Helper function to calculate next run time from cron expression
-function calculateNextRun(cronExpression: string): Date {
-  // Simple cron parser for common intervals
-  // Format: minute hour day month dayOfWeek
-  const parts = cronExpression.split(" ");
-
-  const now = new Date();
-  const next = new Date(now);
-
-  // Handle different cron patterns
-  if (parts.length >= 5) {
-    const [minute, hour] = parts;
-
-    // Daily at specific time (e.g., "0 6 * * *" = daily at 6 AM)
-    if (parts[2] === "*" && parts[3] === "*") {
-      next.setHours(parseInt(hour) || 0, parseInt(minute) || 0, 0, 0);
-      if (next <= now) {
-        next.setDate(next.getDate() + 1);
-      }
-    }
-    // Weekly (e.g., "0 6 * * 1" = every Monday at 6 AM)
-    else if (parts[2] === "*" && parts[3] === "*" && parts[4] !== "*") {
-      const dayOfWeek = parseInt(parts[4]);
-      next.setHours(parseInt(hour) || 0, parseInt(minute) || 0, 0, 0);
-      while (next.getDay() !== dayOfWeek || next <= now) {
-        next.setDate(next.getDate() + 1);
-      }
-    }
-    // Monthly (e.g., "0 6 1 * *" = 1st of every month at 6 AM)
-    else if (parts[3] === "*" && parts[4] === "*") {
-      const dayOfMonth = parseInt(parts[2]) || 1;
-      next.setDate(dayOfMonth);
-      next.setHours(parseInt(hour) || 0, parseInt(minute) || 0, 0, 0);
-      if (next <= now) {
-        next.setMonth(next.getMonth() + 1);
-      }
-    }
-    // Hourly (e.g., "0 * * * *" = every hour)
-    else if (parts[0] !== "*" && parts[1] === "*") {
-      next.setHours(next.getHours() + 1, parseInt(minute) || 0, 0, 0);
-    }
-    // Every 5 minutes for testing (e.g., "*/5 * * * *")
-    else if (parts[0].startsWith("*/")) {
-      const interval = parseInt(parts[0].replace("*/", "")) || 5;
-      next.setMinutes(next.getMinutes() + interval, 0, 0);
-    }
-  }
-
-  return next;
-}
+// calculateNextRun is imported from "@/lib/cron-parser" (shared, testable,
+// supports weekday ranges like "0 16 * * 1-5" = Mon-Fri at 16:00).

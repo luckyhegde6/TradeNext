@@ -1381,6 +1381,35 @@ This API is designed for programmatic access. Key endpoints:
             }
         },
 
+        // ==================== ADMIN - RECOMMENDATION ARCHIVE ====================
+        '/api/admin/recommendations/archive': {
+            post: {
+                summary: 'Run manual recommendation archival sweep (age >= 360d -> RecommendationArchive)',
+                tags: ['Admin - Recommendations'],
+                security: securityAdmin,
+                responses: { '200': { description: '{ success, archived, failed } counts' } }
+            }
+        },
+
+        // ==================== PUBLIC - RECOMMENDATION PERFORMANCE ====================
+        '/api/recommendations/performance': {
+            get: {
+                summary: 'Public paginated recommendation performance list (tracking/target_achieved/stop_loss_hit)',
+                tags: ['Recommendations'],
+                parameters: [
+                    { name: 'limit', in: 'query', schema: { type: 'integer', default: 25, maximum: 200 } },
+                    { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } },
+                    { name: 'status', in: 'query', schema: { type: 'string', enum: ['tracking', 'target_achieved', 'stop_loss_hit'] } },
+                    { name: 'category', in: 'query', schema: { type: 'string', enum: ['btst', 'short', 'swing', 'medium', 'long'] } },
+                    { name: 'recommendation', in: 'query', schema: { type: 'string', enum: ['BUY', 'HOLD', 'SELL'] } },
+                    { name: 'sort', in: 'query', schema: { type: 'string', enum: ['createdAt', 'returnPercent', 'symbol', 'confidence', 'entryPrice', 'currentPrice', 'targetPrice', 'stopLoss', 'daysTracked', 'lastCheckedAt'] } },
+                    { name: 'order', in: 'query', schema: { type: 'string', enum: ['asc', 'desc'] } },
+                    { name: 'columns', in: 'query', schema: { type: 'string', description: '1 = return dynamic column metadata' } }
+                ],
+                responses: { '200': { description: '{ success, items, total, columns, cachedAt }' } }
+            }
+        },
+
         // ==================== ADMIN - AUDIT ====================
         '/api/admin/audit': {
             get: {

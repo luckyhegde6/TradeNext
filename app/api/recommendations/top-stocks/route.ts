@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
             t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
           FROM daily_recommendation_stocks s
           JOIN daily_recommendation_runs r ON r.id = s."runId"
-          JOIN recommendation_trackers t ON t.id = s."trackerId"
+          LEFT JOIN recommendation_trackers t ON t.id = s."trackerId"
           WHERE r.status IN ('completed', 'failed')
             AND r."uniqueStocks" > 0
             AND s."aiRecommendation" = ${filter}
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
             t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
           FROM daily_recommendation_stocks s
           JOIN daily_recommendation_runs r ON r.id = s."runId"
-          JOIN recommendation_trackers t ON t.id = s."trackerId"
+          LEFT JOIN recommendation_trackers t ON t.id = s."trackerId"
           WHERE r.status IN ('completed', 'failed')
             AND r."uniqueStocks" > 0
           ORDER BY s.symbol, r."runDate" DESC

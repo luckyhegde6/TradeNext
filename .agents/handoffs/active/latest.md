@@ -1,56 +1,51 @@
 ---
 handoff_version: "1.0"
-session_id: "sess-20260806-nse-historical"
+session_id: "sess-20260807-ph20-recs-perf"
 agent: "system"
-timestamp: "2026-08-06T17:00:00Z"
+timestamp: "2026-08-07T14:30:00Z"
 status: "in_progress"
 priority: "high"
 parent_session: null
 child_sessions: []
-checkpoint: "ph20-backtest-historical"
+checkpoint: "ph20-recommendation-performance"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: NSE Historical Data for Backtesting + Cache/DB-Sync Refactor + HTML Architecture Docs
-- **Branch**: `feat/backtest-historical-cache` (no commits yet this session — **branch + PR, never main without explicit permission**)
-- **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md` → archive `sessions/2026-08-06-6cfe281.md`
-- **Subsystem docs (uncommitted)**: `.agents/docs/` — written on disk, awaiting commit go-ahead
+- **Task**: Recommendation Performance Tracking & Archival (v3.5.0) — Performance tab, 4 PM IST SYSTEM cron, 360-day archival
+- **Branch**: `ph20` (== origin/main `67d8ed3`, all work uncommitted in tree — **branch + PR, never merge to main without permission, never auto-merge**)
+- **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md` → `docs/designDoc/ph20-recommendation-performance-design.md`
+- **Subsystem docs**: `.agents/docs/daily-recommendations-engine.md` + `tasks-cron-workers.md` exist (uncommitted baseline from v3.4.3)
+- **Also in tree (uncommitted, same branch)**: skills/agents/commands extension system (5 focused skills + mirrors, 4 agent profiles, 4 commands, `.agents/AGENT-SKILL-MATRIX.md`, opencode.json wiring)
 
 ## Progress
-- [x] `prisma/schema.prisma` — `BacktestHistory` temp table model (L925, age-pruned, NOT main DB) — **migrated via `prisma db push`** (non-destructive; `migrate dev` blocked by drift) + `npx prisma generate` → LSP errors cleared
-- [x] `lib/cache.ts` — `historicalCache` (24h TTL) + metrics/stats/clear
-- [x] `lib/nse-api.ts` — `fetchSecurityWiseHistoricalData()` + `securityWiseBarsToOHLCV()` (historicalOR endpoint)
-- [x] `lib/services/backtestDataService.ts` — memory → temp table → daily_prices(read-only) → NSE chain + `pruneTempTable()`
-- [x] `app/api/backtest/run/route.ts` — wired to `getBacktestData()`; response has `dataSource`
-- [x] `lib/market-cache.ts` — NodeCache front layer (`mc:` keys) in `getOrFetchNseData`/`forceRefreshCache`/`clearCache` (widen-scope policy)
-- [x] `app/api/mcp/route.ts` — `getHistoricalData` FULLY WIRED (type L21, list, desc, schema, handler L312, POST L705, GET L849) — handoff was stale, no work needed
-- [x] Agentic framework: `.agents/RULES.md`, `.agents/SOUL.md`, `.agents/rules/session-memory-rules.md` created; rules README + AGENTS.md doc table updated
-- [x] AGENTS.md context optimization: 1401 → 249 lines; history/legacy moved to `.agents/CHANGELOG.md` index → `.agents/changelog/` subfiles; behavioral guidelines (think/simplify/surgical/goal-driven) added to RULES.md §0. Branch switched to `feat/backtest-historical-cache`
-- [x] Unit tests: `lib/__tests__/nse-api.test.ts` + `lib/__tests__/backtestDataService.test.ts` — **286 tests pass (23 suites)**, prod files tsc clean
-- [x] Handoff infra: **NEW `.agents/handoffs/flow/agent-to-human.md`** (consent/decision handoffs, `status: awaiting_human`); indexed in handoffs README + session-memory-rules §4 + AGENTS.md doc table
-- [x] Strict git rules: RULES.md §6 + `.agents/linear-history.md` + session-memory-rules §6 — NEVER commit main without permission; branch + PR always
-- [x] Skills: `.opencode/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md` — NSE historical endpoint + field mapping + backtest chain rules added
-- [x] AGENTS.md: NSE Endpoints table (historicalOR row) + MCP list (23 fns) — verified already present
-- [x] README.md: MCP function count updated (22 → 23) + docs/architecture.html link added
-- [x] `app/api/openapi/route.ts`: swagger — MCP enum + `getHistoricalData` + historical from/to params + backtest /run route w/ `dataSource` (security: securityBearer)
-- [x] HTML architecture doc: `docs/architecture.html` (Mermaid: overview, backtest chain, 3 sequence diagrams, ER, sync/lifecycle flows, caching table, MCP, troubleshooting, agentic model, improvements)
-- [x] Final verify: `npm run test` alone → **286 pass (23 suites)**; `npx tsc --noEmit` → all changed prod files clean; `git status` → no junk/secrets
-- [x] Commit on feature branch: `720c4af` on `feat/backtest-historical-cache` (39 files, pre-commit checks passed)
-- [x] Pushed branch + **PR #67**: https://github.com/luckyhegde6/TradeNext/pull/67 — **MERGED** into main (`6fad8d5` Merge pull request #67)
+- [x] Phase 1 — Schema: `RecommendationArchive` model + `DailyRecommendationStock.trackerId` nullable/`onDelete: SetNull`; migration `20260807103000_add_recommendation_archive` (applied via `db push`, non-destructive) + `npx prisma generate`
+- [x] Phase 1 — `scripts/backfill-recommendation-categories.ts` — **RUN on local dev DB**: 683 tracking (short=554, swing=129), archived=0, `aiRecommendation` all HOLD
+- [x] Phase 2 — `lib/cron-parser.ts` (shared weekday-range parser; fixed dow-only `v<=6` cap bug); worker-engine + admin cron route import it; `ensureRecommendationCrons()` 2 jobs (`30 4 * * 1-5` = 10:00 IST, `30 10 * * 1-5` = 16:00 IST); audit actions `RECOMMENDATION_PERFORMANCE_CHECK/ARCHIVED/PERFORMANCE_MOVED`
+- [x] Phase 3 — `lib/services/recommendationPerformanceService.ts`: `getPerformanceColumns()`, `getPerformanceList()` (15-min cache, next-day promotion, BigInt-safe, JS sort), `archiveRecommendations()` (360d, idempotent, runInChunks), `invalidateRecommendationsCache()`
+- [x] Phase 3 — `checkRecommendationPerformance()` reworked in `dailyRecommendationService.ts` (no EXPIRY_DAYS; triggerSource system; folds archive + cache invalidation)
+- [x] Phase 4 — API: `/api/recommendations/performance` (public GET, Zod, **10-key sort enum**), `/api/admin/recommendations/archive` (admin POST), `/api/admin/recommendations` POST spawns worker tasks (triggeredBy system)
+- [x] Phase 5 — UI: `PerformanceTab.tsx` wired into `/recommendations` as 5th tab
+- [x] Phase 6 — Tests: `cronParser.test.ts` + `recommendationPerformanceService.test.ts` — **24/24 pass**; full suite **310 passed / 11 skipped**; `npx tsc --noEmit` clean (production files only)
+- [x] Phase 6 — Local functional verify: dev server + Playwright — Performance tab renders, `sort=entryPrice` **200 OK** (400 bug fixed), pagination Page 2/28, mobile 375 no overflow, **zero console errors**
+- [x] Docs: AGENTS.md (v3.5.0 row + Skills section + matrix), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([3.5.0] released), TODO.md, Primer.md, agent-memory.md, Lessons.md (48–49), README.md (v3.5.0 Latest Update), swagger (performance + archive routes)
+- [x] Wiki: published 7 pages + mermaid parse-error fixes pushed to wiki master (`d2c5964`); ER/Monitoring/Home browser-verified clean
 
 ## Decisions
-- Backtest: 4-step chain, NSE-fetched bars NEVER written to main `daily_prices` (temp table only).
-- Widened scope: memory first → MarketCache DB → NSE → DB sync (reduce DB ops, keep DB in sync).
-- `historicalCache` TTL 24h; temp table prune at 30 days.
-- MCP: reuse `getBacktestData()` so MCP + backtest share one data path.
-- Migration: **`prisma db push` chosen by user** (non-destructive) over `migrate dev` (drift → would reset schema).
-- Git STRICT: never commit main without explicit permission; branch + PR always.
+- 30-day expiry REMOVED → 3-status lifecycle: tracking → target_achieved/stop_loss_hit → archived (360d only trigger)
+- Archival = hard-delete tracker into frozen `RecommendationArchive` (+ statusHistory JSON); `DailyRecommendationStock.trackerId → SetNull` so History survives
+- 4 PM IST Mon–Fri cron (10:30 UTC); worker tasks `triggeredBy: "system"` for full audit trail
+- Admin triggers spawn worker tasks (observable in /admin/workers), not fire-and-forget
+- Performance list = `createdAt < today` (next-day promotion), cached 15 min, invalidated by worker
+- `runInChunks` for bulk writes; raw SQL camelCase quoted columns
+- Git STRICT: branch + PR, never auto-merge, always sync main via PRs
 
 ## Blockers
-- (none)
+- (none) — commit/PR is the only remaining step
 
 ## Next Steps
-1. (DONE) PR #67 merged into main
-2. Carry-forward todos: deploy, prod verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI
+1. Pre-commit hygiene: delete `dev-server.log`, stray root `*.yaml`/`.tmp-*.ts`; verify `.playwright-mcp/` clean/gitignored; no secrets/console.log
+2. Commit (recommend separate commits: skills/agents/wiring chore + feat(recs) v3.5.0) on `ph20`
+3. `git push origin ph20` + `gh pr create --base main --head ph20` (full v3.5.0 summary; never auto-merge)
+4. Carry-forward: deploy, prod cron verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI, issues #68/#69

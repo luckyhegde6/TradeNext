@@ -1364,7 +1364,7 @@ model DailyRecommendationRun {
 model DailyRecommendationStock {
   id              String   @id @default(uuid())
   runId           String
-  trackerId       String
+  trackerId       String? // Nullable since v3.5.0 — tracker is hard-deleted on archival (SetNull)
   symbol          String
   price           Float
   change          Float?
@@ -1388,7 +1388,7 @@ model DailyRecommendationStock {
   aiError         String?
 
   run             DailyRecommendationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  tracker         RecommendationTracker  @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  tracker         RecommendationTracker?  @relation(fields: [trackerId], references: [id], onDelete: SetNull)
 
   createdAt       DateTime @default(now())
 
@@ -1416,6 +1416,39 @@ model RecommendationStatusHistory {
   @@index([newStatus])
   @@index([createdAt])
   @@map("recommendation_status_history")
+}
+
+// Frozen snapshot of an archived recommendation tracker (v3.5.0).
+// When a tracker reaches 360 days, it is snapshotted here and hard-deleted
+// from RecommendationTracker (daily_recommendation_stocks survive via SetNull).
+model RecommendationArchive {
+  id              String   @id @default(uuid())
+  symbol          String
+  trackerId       String   // Original RecommendationTracker id (for reference)
+  lastRunId       String?  // Most recent DailyRecommendationRun id
+  runDate         DateTime // Recommendation posted date (run date)
+  entryPrice      Float
+  currentPrice    Float?   // Final price at archival
+  targetPrice     Float?
+  stopLoss        Float?
+  category        String?  // btst | short | swing | medium | long (timeHorizon)
+  aiRecommendation String? // BUY | HOLD | SELL
+  confidence      Float?
+  reasoning       String?
+  riskFactors     Json?
+  screenerAttribution Json?
+  finalStatus     String   // tracking | target_achieved | stop_loss_hit
+  returnPercent   Float?   // (currentPrice - entryPrice) / entryPrice * 100
+  daysTracked     Int
+  statusHistory   Json?    // Frozen RecommendationStatusHistory trail
+  archivedReason  String   // age_360d
+  archivedAt      DateTime @default(now())
+
+  @@index([symbol])
+  @@index([finalStatus])
+  @@index([runDate])
+  @@index([archivedAt])
+  @@map("recommendation_archives")
 }
 
 // User subscription for recommendation alerts via Telegram

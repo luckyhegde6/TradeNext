@@ -42,17 +42,18 @@ export interface SpawnTaskOptions {
 /**
  * Create a worker task from a CronJob definition.
  * Automatically sets taskCategory = "cron", triggeredBy = "cron", and links the cronJobId.
+ * Pass triggeredBy: "system" for self-healing/system upserts to mark them as SYSTEM-triggered.
  */
 export async function spawnCronTask(
     cronJobId: string,
-    options: SpawnTaskOptions
+    options: SpawnTaskOptions & { triggeredBy?: string }
 ) {
     const task = await prisma.workerTask.create({
         data: {
             name: options.name,
             taskType: options.taskType,
             taskCategory: "cron",
-            triggeredBy: "cron",
+            triggeredBy: options.triggeredBy ?? "cron",
             cronJobId,
             priority: options.priority ?? 7, // cron tasks default to higher priority
             maxRetries: options.maxRetries ?? 3,

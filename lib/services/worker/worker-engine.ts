@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { executeTask } from "./worker-service";
 import { createTaskLogger, writeLog } from "./worker-logger";
+import { calculateNextRun } from "@/lib/cron-parser";
 import { join } from "path";
 import { existsSync, mkdirSync, chmodSync } from "fs";
 import os from "os";
@@ -73,6 +74,12 @@ export function startScheduler(checkIntervalMs = 60000) {
     }
 
     logger.info({ msg: "Starting cron scheduler engine", interval: checkIntervalMs });
+
+    // Ensure SYSTEM-managed recommendation crons exist (self-healing upsert).
+    import("@/lib/services/recommendationCronService")
+        .then(({ ensureRecommendationCrons }) => ensureRecommendationCrons())
+        .then((res) => logger.info({ msg: "Recommendation crons ensured", jobs: res.jobs.length }))
+        .catch((error) => logger.error({ msg: "Failed to ensure recommendation crons", error }));
 
     schedulerInterval = setInterval(async () => {
         try {
@@ -211,6 +218,10 @@ async function checkScheduledJobs() {
                 name: `Scheduled: ${job.name}`,
                 taskType: job.taskType,
                 payload,
+                // System-managed jobs (e.g. recommendation crons upserted by
+                // ensureRecommendationCrons) carry a systemManaged flag so the
+                // spawned task is marked triggeredBy: "system" for audit.
+                triggeredBy: (job.config as Record<string, unknown>)?.systemManaged === true ? "system" : "cron",
             });
 
             // Calculate and update next run time
@@ -258,34 +269,4 @@ async function updateHeartbeat(status: "idle" | "busy", currentTaskId?: string) 
     }
 }
 
-/**
- * Simple cron next-run calculator
- * In production, use a library like 'cron-parser'
- */
-function calculateNextRun(cronExpression: string): Date {
-    const parts = cronExpression.split(" ");
-    const now = new Date();
-    const next = new Date(now);
-
-    if (parts.length >= 5) {
-        const [minute, hour, dom, month, dow] = parts;
-
-        // Simple hourly/daily logic
-        if (minute !== "*" && hour !== "*" && dom === "*" && month === "*" && dow === "*") {
-            // Daily at HH:mm
-            next.setHours(parseInt(hour), parseInt(minute), 0, 0);
-            if (next <= now) next.setDate(next.getDate() + 1);
-        } else if (minute.startsWith("*/")) {
-            // Every X minutes
-            const interval = parseInt(minute.replace("*/", "")) || 5;
-            next.setMinutes(Math.floor(now.getMinutes() / interval) * interval + interval, 0, 0);
-        } else {
-            // Default to 1 hour from now if complex
-            next.setHours(next.getHours() + 1);
-        }
-    } else {
-        next.setHours(next.getHours() + 1);
-    }
-
-    return next;
-}
+// calculateNextRun is imported from "@/lib/cron-parser" (shared, testable).
