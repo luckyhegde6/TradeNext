@@ -112,7 +112,18 @@ describe("recommendation-agent", () => {
       expect(results).toHaveLength(1);
       expect(results[0].success).toBe(false);
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
+      expect(results[0].aiRecommendation.confidence).toBe(50);
       expect(results[0].error).toContain("not configured");
+    });
+
+    test("failed results get price-based target/SL defaults (never ₹0.00)", async () => {
+      const stock = makeStock({ price: 2500 });
+      const results = await analyzeStocks([stock], { model: "", apiKey: "", temperature: 0.3, maxTokens: 2048, enabled: false });
+      expect(results[0].success).toBe(false);
+      // Target = 2500 * 1.1 = 2750, Stop Loss = 2500 * 0.95 = 2375
+      expect(results[0].aiRecommendation.targetPrice).toBe(2750);
+      expect(results[0].aiRecommendation.stopLoss).toBe(2375);
+      expect(results[0].aiRecommendation.reasoning).toBe("AI analysis unavailable — defaulting to HOLD");
     });
 
     test("analyzes a single stock successfully", async () => {
@@ -270,14 +281,16 @@ describe("recommendation-agent", () => {
       expect(results[0].aiRecommendation.confidence).toBe(0);
     });
 
-    test("uses stock price as targetPrice when AI returns 0", async () => {
+    test("uses price-based defaults for targetPrice and stopLoss when AI returns 0", async () => {
       const stock = makeStock({ price: 2500 });
       mockDirectPrompt.mockResolvedValue(JSON.stringify([
         { symbol: "RELIANCE", recommendation: "BUY", confidence: 70, targetPrice: 0, stopLoss: 0, timeHorizon: "medium", reasoning: "Good.", riskFactors: [] },
       ]));
 
       const results = await analyzeStocks([stock], VALID_AI_CONFIG);
-      expect(results[0].aiRecommendation.targetPrice).toBe(2500);
+      // Target = price * 1.1, Stop Loss = price * 0.95 (price-based fallbacks, never ₹0.00)
+      expect(results[0].aiRecommendation.targetPrice).toBe(2750);
+      expect(results[0].aiRecommendation.stopLoss).toBe(2375);
     });
 
     test("defaults timeHorizon to medium for invalid values", async () => {
