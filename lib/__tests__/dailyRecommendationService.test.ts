@@ -240,9 +240,9 @@ describe("dailyRecommendationService", () => {
       expect(result.uniqueStocks).toBe(1);
       expect(result.aiProcessed).toBe(1);
 
-      // Run created with status "running"
+      // Run created with status "running" and default triggeredBy "system"
       expect(mockPrisma.dailyRecommendationRun.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: "running" }) }),
+        expect.objectContaining({ data: expect.objectContaining({ status: "running", triggeredBy: "system" }) }),
       );
 
       // Run updated to "completed"
@@ -251,6 +251,17 @@ describe("dailyRecommendationService", () => {
         (call: any) => call[0]?.data?.status === "completed",
       );
       expect(completeUpdate).toBeDefined();
+    });
+
+    test("persists triggeredBy when options provided", async () => {
+      mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+      mockAnalyzeStocks.mockResolvedValue([makeAIResult()]);
+
+      await runDailyRecommendations({ triggeredBy: "admin" });
+
+      expect(mockPrisma.dailyRecommendationRun.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ triggeredBy: "admin" }) }),
+      );
     });
 
     test("marks run as failed when screeners throw", async () => {
@@ -449,14 +460,30 @@ describe("dailyRecommendationService", () => {
         status: "completed",
         runDate: new Date(),
         stocks: [
-          { symbol: "RELIANCE", screenerCount: 3, tracker: { id: "t1" } },
+          { symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "BUY", tracker: { id: "t1" } },
+          { symbol: "TCS", screenerCount: 2, aiRecommendation: "SELL", tracker: { id: "t2" } },
         ],
       };
       mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(mockRun);
 
       const result = await getLatestRecommendations();
       expect(result.run).toEqual(mockRun);
-      expect(result.stocks).toHaveLength(1);
+      expect(result.stocks).toHaveLength(2);
+    });
+
+    test("filters at source to BUY/SELL only (no HOLD in query)", async () => {
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
+
+      await getLatestRecommendations();
+
+      // Both the run-level where and the nested stocks include must filter to BUY/SELL
+      const callArgs = mockPrisma.dailyRecommendationRun.findFirst.mock.calls;
+      for (const call of callArgs) {
+        const where = call[0]?.where;
+        const include = call[0]?.include;
+        expect(where.stocks.some).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
+        expect(include.stocks.where).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
+      }
     });
 
     test("returns empty when no runs exist", async () => {
@@ -467,14 +494,14 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toEqual([]);
     });
 
-    test("falls back to any run with stocks if no completed run", async () => {
+    test("falls back to any run with actionable stocks if no completed run", async () => {
       // First call (completed/failed) returns null
       mockPrisma.dailyRecommendationRun.findFirst
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({
           id: "run-2",
           status: "running",
-          stocks: [{ symbol: "TCS", screenerCount: 2, tracker: { id: "t2" } }],
+          stocks: [{ symbol: "TCS", screenerCount: 2, aiRecommendation: "BUY", tracker: { id: "t2" } }],
         });
 
       const result = await getLatestRecommendations();

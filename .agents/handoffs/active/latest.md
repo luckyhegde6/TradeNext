@@ -14,10 +14,10 @@ checkpoint: "ph20-recommendation-performance"
 
 ## Context
 - **Task**: Recommendation Performance Tracking & Archival (v3.5.0) — Performance tab, 4 PM IST SYSTEM cron, 360-day archival
-- **Branch**: `ph20` (== origin/main `67d8ed3`, all work uncommitted in tree — **branch + PR, never merge to main without permission, never auto-merge**)
+- **Branch**: `ph20` (PR #81 OPEN + MERGEABLE against `main`; all work STAGED on ph20, commit + PR-summary update pending — never merge to main without permission, never auto-merge)
 - **Full plan + work state**: `HANDOFF.md` → `.agents/session-todos.md` → `docs/designDoc/ph20-recommendation-performance-design.md`
 - **Subsystem docs**: `.agents/docs/daily-recommendations-engine.md` + `tasks-cron-workers.md` exist (uncommitted baseline from v3.4.3)
-- **Also in tree (uncommitted, same branch)**: skills/agents/commands extension system (5 focused skills + mirrors, 4 agent profiles, 4 commands, `.agents/AGENT-SKILL-MATRIX.md`, opencode.json wiring)
+- **Also in tree (staged, same branch)**: skills/agents/commands extension system (5 focused skills + mirrors, 4 agent profiles, 4 commands, `.agents/AGENT-SKILL-MATRIX.md`, opencode.json wiring) + session follow-up: run `triggeredBy`, BUY/SELL filter, AI monitoring persistence
 
 ## Progress
 - [x] Phase 1 — Schema: `RecommendationArchive` model + `DailyRecommendationStock.trackerId` nullable/`onDelete: SetNull`; migration `20260807103000_add_recommendation_archive` (applied via `db push`, non-destructive) + `npx prisma generate`
@@ -31,6 +31,7 @@ checkpoint: "ph20-recommendation-performance"
 - [x] Phase 6 — Local functional verify: dev server + Playwright — Performance tab renders, `sort=entryPrice` **200 OK** (400 bug fixed), pagination Page 2/28, mobile 375 no overflow, **zero console errors**
 - [x] Docs: AGENTS.md (v3.5.0 row + Skills section + matrix), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([3.5.0] released), TODO.md, Primer.md, agent-memory.md, Lessons.md (48–49), README.md (v3.5.0 Latest Update), swagger (performance + archive routes)
 - [x] Wiki: published 7 pages + mermaid parse-error fixes pushed to wiki master (`d2c5964`); ER/Monitoring/Home browser-verified clean
+- [x] **Session follow-up (staged)**: `DailyRecommendationRun.triggeredBy` + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge; `runDailyRecommendations({ triggeredBy })`; worker `admin_manual`→`admin`; BUY/SELL filter in `getLatestRecommendations()` + All/Buy/Sell pills; AI monitoring awaited `trackAiCall` in all AI route `finally` + merged reads (`memory|database|hybrid`); tests 312 passed / 11 skipped; tsc clean (touched files); cold-start + empty-state + System-badge verified; DB synced via `db push`; test artifacts cleaned
 
 ## Decisions
 - 30-day expiry REMOVED → 3-status lifecycle: tracking → target_achieved/stop_loss_hit → archived (360d only trigger)
@@ -39,13 +40,13 @@ checkpoint: "ph20-recommendation-performance"
 - Admin triggers spawn worker tasks (observable in /admin/workers), not fire-and-forget
 - Performance list = `createdAt < today` (next-day promotion), cached 15 min, invalidated by worker
 - `runInChunks` for bulk writes; raw SQL camelCase quoted columns
-- Git STRICT: branch + PR, never auto-merge, always sync main via PRs
+- Git STRICT: branch + PR, never auto-merge, always sync main via PRs; **open PR #81 → all follow-up work moves to `ph20`, never a new branch**
 
 ## Blockers
-- (none) — commit/PR is the only remaining step
+- (none) — commit/PR-summary update is the only remaining step
 
 ## Next Steps
 1. Pre-commit hygiene: delete `dev-server.log`, stray root `*.yaml`/`.tmp-*.ts`; verify `.playwright-mcp/` clean/gitignored; no secrets/console.log
-2. Commit (recommend separate commits: skills/agents/wiring chore + feat(recs) v3.5.0) on `ph20`
-3. `git push origin ph20` + `gh pr create --base main --head ph20` (full v3.5.0 summary; never auto-merge)
+2. Commit (recommend separate commits: skills/agents/wiring chore + feat(recs) v3.5.0 follow-up) on `ph20`
+3. `git push origin ph20` + update PR #81 summary/description with the session follow-up changes (run trigger source, BUY/SELL filter, AI monitoring persistence); never auto-merge
 4. Carry-forward: deploy, prod cron verify, demo holdings re-seed, SSE wiring, HOLD label persist, F&O UI, issues #68/#69

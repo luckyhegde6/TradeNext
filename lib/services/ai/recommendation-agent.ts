@@ -173,8 +173,8 @@ async function analyzeBatch(
         };
       });
 
-      // Track AI call for monitoring
-      trackAiCall({
+      // Track AI call for monitoring (await so it persists on serverless)
+      await trackAiCall({
         timestamp: new Date().toISOString(),
         action: "recommendation_batch",
         model: config?.model || "unknown",
@@ -207,7 +207,7 @@ async function analyzeBatch(
   }
 
   // All retries exhausted — track failure
-  trackAiCall({
+  await trackAiCall({
     timestamp: new Date().toISOString(),
     action: "recommendation_batch",
     model: config?.model || "unknown",

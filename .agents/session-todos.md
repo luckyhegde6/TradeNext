@@ -11,7 +11,7 @@
 ## Current Session (2026-08-07) — ph20: Recommendation Performance Tracking & Archival (v3.5.0)
 
 **Design doc**: `docs/designDoc/ph20-recommendation-performance-design.md` (12 phases)
-**Branch**: `ph20` (code + tests + docs complete; commit + PR pending)
+**Branch**: `ph20` (code + tests + docs complete; commit + PR pending — PR #81 open, mergeable, never auto-merge)
 
 ### In Progress
 - [x] Phase 1 — Schema: `RecommendationArchive` model + `DailyRecommendationStock.trackerId` nullable/SetNull; migration `20260807103000_add_recommendation_archive`; `prisma generate` done
@@ -25,7 +25,8 @@
 - [x] Phase 6 — Tests: `cronParser.test.ts` + `recommendationPerformanceService.test.ts` — 24/24 pass; full suite 310 passed / 11 skipped; `npx tsc --noEmit` clean (production files)
 - [x] Phase 6 — Local functional verify: dev server + Playwright (Performance tab renders, sort=entryPrice 200, pagination Page 2/28, mobile 375 no overflow, zero console errors)
 - [x] Phase 6 — Docs: AGENTS.md (v3.5.0 row + Skills section + matrix), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md, TODO.md, Primer.md, agent-memory.md, Lessons.md (48-49), README.md, swagger
-- [ ] Commit ph20 on branch `ph20` + push + PR (never auto-merge)
+- [x] **Session follow-up (2026-08-07, staged on ph20)**: moved merge-relevant work from the old separate branch onto ph20 per user correction (open PR #81 exists → never fork a new branch; move work to existing branch). Changes: `DailyRecommendationRun.triggeredBy` (`system` default) + `@@index([triggeredBy])` + migration `20260807103000_add_daily_run_triggered_by`; Admin Run History Manual/System badge from `run.triggeredBy`; `runDailyRecommendations({ triggeredBy })` persists/logs/audits trigger source; worker maps `admin_manual` → `admin` (worker-service L473-475); BUY/SELL filter in `getLatestRecommendations()` (actionable-only runs, nested where, empty state when none) + `DailyPicksTab` All/Buy/Sell (HOLD pill removed); AI monitoring persistence fix — `trackAiCall` → awaited `Promise<void>` in every AI route `finally`, merged reads with `source: memory|database|hybrid`, "Live + DB" badge; 21 rec-service tests (312 passed / 11 skipped); cold-start verified via fresh dev server (PID 23420): AI rows `source:"database"`, "DB persisted" badge, Today's Picks empty state correct (583 null + 100 HOLD, 0 BUY/SELL), "System" badge verified on run `5eaad1d7`; DB synced via `npx prisma db push` (no migration history → P3005 blocks `migrate deploy`); test artifacts cleaned (verify_test rows, admin test run `e48b98b2`, 10 batch rows) — DB restored to 10 AI rows + 1 system run
+- [ ] Commit ph20 on branch `ph20` + push + update PR #81 summary (never auto-merge)
 
 ### Carried Forward (from ph19/ph20-backtest)
 - [ ] Deploy to Netlify + verify prod (recommendations stale-data fix, Telegram updates, history prices, DB logs tab, ph20 perf tracking)

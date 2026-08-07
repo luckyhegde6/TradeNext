@@ -127,18 +127,22 @@ const MAX_AI_STOCKS = 50;
  * 10. Record prediction for tracking
  * 11. Record completion event + metrics
  * 12. Return run summary
+ *
+ * @param options.triggeredBy Source of this run: "system" (cron/scheduler) or "admin" (manual Run Now). Defaults to "system".
  */
-export async function runDailyRecommendations(): Promise<DailyRunResult> {
+export async function runDailyRecommendations(options: { triggeredBy?: string } = {}): Promise<DailyRunResult> {
   const startTime = Date.now();
   const todayMidnight = getTodayMidnight();
+  const triggeredBy = options.triggeredBy ?? "system";
 
-  logger.info({ msg: "Daily recommendation run starting" });
+  logger.info({ msg: "Daily recommendation run starting", triggeredBy });
 
   // 1. Create run record
   const run = await prisma.dailyRecommendationRun.create({
     data: {
       status: "running",
       runDate: new Date(),
+      triggeredBy,
     },
   });
 
@@ -147,7 +151,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
     await recordScreenerEvent(
       "run_start",
       `Daily recommendation run started [${run.id}]`,
-      { runId: run.id },
+      { runId: run.id, triggeredBy },
     );
 
     // Audit: screener run started
@@ -155,7 +159,7 @@ export async function runDailyRecommendations(): Promise<DailyRunResult> {
       action: "SCREENER_RUN_START",
       resource: "daily_recommendation",
       resourceId: run.id,
-      metadata: { runId: run.id, triggerSource: "cron_or_admin" },
+      metadata: { runId: run.id, triggerSource: triggeredBy },
     });
 
     // 3. Run all screeners
@@ -923,25 +927,40 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
     return cached;
   }
 
-  // 1. Try latest completed run first
+  // Today's Picks shows actionable recommendations only (BUY/SELL).
+  // HOLD (and null) stocks are filtered out at the source so the public API,
+  // UI, and Telegram /recommendations all surface only BUY/SELL picks.
+  // Runs with zero actionable stocks are skipped entirely (empty state).
+  const actionable = { aiRecommendation: { in: ["BUY", "SELL"] } };
+
+  // 1. Try latest completed run that has actionable stocks
   let latestRun = await prisma.dailyRecommendationRun.findFirst({
-    where: { status: { in: ["completed", "failed"] }, uniqueStocks: { gt: 0 } },
+    where: {
+      status: { in: ["completed", "failed"] },
+      uniqueStocks: { gt: 0 },
+      stocks: { some: actionable },
+    },
     orderBy: { runDate: "desc" },
     include: {
       stocks: {
+        where: actionable,
         orderBy: { screenerCount: "desc" },
         include: { tracker: true },
       },
     },
   });
 
-  // 2. Fallback: any run that has stocks
+  // 2. Fallback: any run that has actionable stocks
   if (!latestRun || !latestRun.stocks || latestRun.stocks.length === 0) {
     latestRun = await prisma.dailyRecommendationRun.findFirst({
-      where: { uniqueStocks: { gt: 0 } },
+      where: {
+        uniqueStocks: { gt: 0 },
+        stocks: { some: actionable },
+      },
       orderBy: { runDate: "desc" },
       include: {
         stocks: {
+          where: actionable,
           orderBy: { screenerCount: "desc" },
           include: { tracker: true },
         },

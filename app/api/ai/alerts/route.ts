@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { analyzeAlerts } from "@/lib/services/ai/alert-agent";
 import { getDefaultConfig, hasValidConfig } from "@/lib/services/ai/config";
-import { trackAiCall, persistAiCallToDb } from "@/lib/services/ai/ai-monitoring";
+import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -72,7 +72,8 @@ export async function POST(req: NextRequest) {
       tokensUsed: 0,
       responseTimeMs,
     };
-    trackAiCall(entry);
-    persistAiCallToDb(entry).catch(() => {});
+    // Await persistence so the DB write completes before the serverless
+    // function freezes — otherwise AI calls would be lost on every request.
+    await trackAiCall(entry);
   }
 }

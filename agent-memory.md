@@ -437,6 +437,16 @@ echo "" >> agent-memory.md
 - **Files**: wiki clone `C:\Users\lucky\AppData\Local\Temp\opencode\TradeNext.wiki`, `.opencode/skills/*`, `.agents/skills/*`, `.agents/agents/{doc-writer,wiki-publisher,bug-hunter,ux-designer}.md`, `.agents/commands/{docs-update,wiki-publish,find-bugs,ux-audit}.md`, `.opencode/opencode.json`, `.agents/AGENT-SKILL-MATRIX.md`
 - **Lesson**: PowerShell/cmd quoting for `$disconnect` in tsx -e breaks — write a temp `.ts` file instead (`.` prefix to keep it untracked-adjacent, then delete)
 
+### 2026-08-07 | ph20 — Run Trigger Source + BUY/SELL Filter + AI Monitoring Persistence (staged, commit pending)
+- **Action**: Moved follow-up work from a wrongly-forked branch (`feat/recs-run-source-picks-filter`) onto existing `ph20` head branch per user correction (PR #81 open → never fork a new branch; move work to existing branch). Stash applied; sole conflict (`app/api/admin/recommendations/route.ts`) resolved in favor of ph20's `spawnRegularTask` worker path.
+- **Run trigger source**: `DailyRecommendationRun.triggeredBy` (`"system"` default) + `@@index([triggeredBy])`; migration `20260807103000_add_daily_run_triggered_by`; `runDailyRecommendations({ triggeredBy })` persists/logs/audits source; worker maps `admin_manual` → `admin` (worker-service L473-475); Admin Run History Manual/System badge from `run.triggeredBy` (admin page L385-387)
+- **BUY/SELL filter**: `getLatestRecommendations()` filters to runs with actionable (BUY/SELL) stocks + nested where; runs with zero actionable skipped; `DailyPicksTab` pills All/Buy/Sell (HOLD pill removed). Verified: DB has 583 null + 100 HOLD across runs, 0 BUY/SELL → correct empty state
+- **AI monitoring persistence**: `trackAiCall()` → awaited `Promise<void>`; single await in `finally` of every AI route (screener/query/alerts/conversations/admin test/recommendation-agent); merged reads `source: "memory"|"database"|"hybrid"`; admin "Live + DB"/"DB persisted" badges. Cold-start verified via fresh dev server (PID 23420): persisted rows `source:"database"` via externally-inserted row
+- **Verification**: `npm run test` = 25 suites / 312 passed / 11 skipped; `npx tsc --noEmit` clean for all touched files; DB synced via `npx prisma db push` (no migration history → P3005 blocks `migrate deploy`); System badge verified on run `5eaad1d7` (`triggeredBy=system` in DB)
+- **Cleanup**: verify_test AI rows, admin test run `e48b98b2` (cascade), 10 background recommendation_batch rows deleted; temp tsx scripts removed; stash dropped; DB restored to 10 AI rows + 1 system run
+- **Docs updated**: `.agents/session-todos.md` (follow-up items), `.agents/changelog/versions-v3.md` (trigger source + filter + monitoring bullets), CHANGELOG.md ([3.5.0] additions), Primer.md (v3.5.0 status), Lessons.md (50-51: open-PR branch discipline; dev DB db-push vs migrate-deploy), agent-memory.md (this entry)
+- **Lesson**: (1) When a feature has an OPEN PR, its head branch IS the workspace — never branch from main for the same feature; (2) dev DBs without `_prisma_migrations` history must sync via `prisma db push` (migrate deploy → P3005)
+
 ---
 
 ## How to Use

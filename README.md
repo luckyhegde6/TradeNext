@@ -14,6 +14,9 @@
 - **Extended categories**: `btst | short | swing | medium | long`
 - **Admin**: manual archive sweep + run/check actions now spawn observable worker tasks (`triggeredBy: "system"`) in `/admin/workers`
 - **Public API**: `GET /api/recommendations/performance` (paginated, filterable, sortable, cached 15 min)
+- **Run trigger source**: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) — Admin Run History shows a Manual/System badge per run; admin-triggered runs are audited as `admin`
+- **Today's Picks BUY/SELL filter**: only actionable runs surface; All/Buy/Sell filter pills (no HOLD pill)
+- **AI monitoring persistence fix**: `trackAiCall()` now awaited in every AI route `finally` — rows survive serverless cold start; merged reads (`memory | database | hybrid`) with source badge
 
 ## Latest Update - v3.2.0 (July 18, 2026)
 

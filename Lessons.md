@@ -989,9 +989,28 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: When adding a sortable UI column, audit the full chain — UI key → API zod enum → service `orderBy`/sort path → DB field. Mismatches surface as 400s or wrong order, not compile errors.
 
+### 50. Open PR Exists → Move Work to That Branch, Never Fork a New One
+**Issue**: While an open PR (`#81`, head `ph20`) awaited merge, a separate branch (`feat/recs-run-source-picks-filter`) was created from `main` for follow-up changes (run `triggeredBy`, BUY/SELL filter, AI monitoring persistence). This created a divergent branch whose changes would either orphan the open PR or conflict on merge.
+
+**Root Cause**: Creating a new branch from `main` for work that belongs to an in-flight feature branch splits the feature across two branches and risks an out-of-order merge (the new branch could merge before the PR, or PR #81 merges without the follow-ups).
+
+**Solution**: When a feature has an OPEN PR with an existing head branch, move ALL related work onto that branch. The stash was applied onto `ph20` and the sole conflict (in `app/api/admin/recommendations/route.ts`) was resolved in favor of ph20's `spawnRegularTask` worker-based approach.
+
+**Rule**: Before branching, always check for open PRs on the target feature (`gh pr list --head ph20`). If a PR is open, the head branch IS the workspace — `git stash`, `git checkout ph20`, apply, resolve, commit there.
+
+### 51. Dev DB Without Migration History → Use `prisma db push`, Not `migrate deploy`
+**Issue**: On a dev DB with no `_prisma_migrations` table history, `npx prisma migrate deploy` fails with `P3005` ("The database schema is not empty" / migration history missing), even though `migrate dev` and `db push` work.
+
+**Root Cause**: Two separately-created migrations share the timestamp `20260807103000` (archive + triggered_by). `migrate deploy` needs the full history table to apply new migrations; a DB provisioned via `db push`/`db seed` lacks it.
+
+**Solution**: For the local dev DB, sync the schema with `npx prisma db push` (non-destructive; verified `triggeredBy` column + `recommendation_archives` table + `trackerId` nullable). Keep both migration folders in the repo — the production history-based pipeline (Netlify build `prisma migrate deploy`) will apply them correctly.
+
+**Rule**: Check for a `_prisma_migrations` table before choosing `migrate deploy` vs `db push`. On dev DBs provisioned without history, `db push` is the sanctioned sync path; never run `migrate reset --force`/`db drop` without explicit user consent.
+
 ---
 
 ## Update Log
+- 2026-08-07: Added Lessons 50-51 (open PR → move work to existing head branch, never fork; dev DB without migration history → `db push` not `migrate deploy`); added v3.5.0 run trigger source + BUY/SELL filter + AI monitoring persistence lessons
 - 2026-08-07: Added Lessons 48-49 (GitHub wiki lazy-creation + strict mermaid; UI sort keys vs API zod enums); added v3.5.0 performance/archival + wiki + skills-system lessons
 - 2026-08-06: Added Lessons 46-47 (Prisma interactive $transaction expiry → runInChunks; cache invalidation after background updates); added v3.4.1 prod reliability fixes lessons
 - 2026-07-22: Added Lessons 44-45 (Telegram webhook vs local DB mismatch, Prisma 7 adapter for scripts); added v3.4.0 Telegram bot integration lessons

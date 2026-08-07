@@ -52,6 +52,7 @@ export async function GET() {
         id: r.id,
         runDate: r.runDate,
         status: r.status,
+        triggeredBy: r.triggeredBy,
         uniqueStocks: r.uniqueStocks,
         aiProcessed: r.aiProcessed,
         executionTimeMs: r.executionTimeMs,

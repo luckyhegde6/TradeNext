@@ -27,6 +27,7 @@ interface Run {
   id: string;
   runDate: string;
   status: string;
+  triggeredBy?: string;
   uniqueStocks: number;
   aiProcessed: number;
   executionTimeMs: number;
@@ -379,6 +380,11 @@ export default function AdminDailyRecommendationsPage() {
                           "bg-amber-500/20 text-amber-300"
                         }`}>
                           {run.status}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          run.triggeredBy === "admin" ? "bg-violet-500/20 text-violet-300" : "bg-gray-500/20 text-gray-400"
+                        }`} title={run.triggeredBy === "admin" ? "Manual trigger (Run Now)" : "System trigger (cron)"}>
+                          {run.triggeredBy === "admin" ? "Manual" : "System"}
                         </span>
                         <span className="text-sm text-gray-300">
                           {new Date(run.runDate).toLocaleString("en-IN", {

@@ -7,7 +7,7 @@ import {
   recordViolation,
   getRateLimitHeaders,
 } from "@/lib/services/ai/rateLimit";
-import { trackAiCall, persistAiCallToDb } from "@/lib/services/ai/ai-monitoring";
+import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -81,21 +81,16 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    trackAiCall({
+    const entry = {
       timestamp: new Date().toISOString(),
-      action: "screener",
+      action: "screener" as const,
       model: getDefaultConfig().model || "openrouter/free",
       status,
       tokensUsed: 0,
       responseTimeMs: Date.now() - startTime,
-    });
-    persistAiCallToDb({
-      timestamp: new Date().toISOString(),
-      action: "screener",
-      model: getDefaultConfig().model || "openrouter/free",
-      status,
-      tokensUsed: 0,
-      responseTimeMs: Date.now() - startTime,
-    }).catch(() => {});
+    };
+    // Await persistence so the DB write completes before the serverless
+    // function freezes — otherwise AI calls would be lost on every request.
+    await trackAiCall(entry);
   }
 }

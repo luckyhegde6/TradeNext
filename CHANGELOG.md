@@ -28,10 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 360-day archival into new `RecommendationArchive` table (`daily_recommendation_stocks` survive via `SetNull`).
   - `timeHorizon` extended to 5 values (`btst | short | swing | medium | long`); backfill script maps legacy rows.
   - Shared weekday-range cron parser (`lib/cron-parser.ts`); `triggeredBy: "system"` worker-task marking + audit actions.
-- 24 new tests (cron parser weekday ranges + performance service lifecycle/archival).
+  - Run trigger source tracking: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) + Admin Run History Manual/System badge.
+  - Today's Picks BUY/SELL filter — only actionable runs surface; All/Buy/Sell pills (no HOLD).
+- 24 new tests (cron parser weekday ranges + performance service lifecycle/archival) + 21 rec-service tests (triggeredBy, BUY/SELL).
 
 ### Fixed
 - Performance API sort enum widened to 10 keys — UI column sorts (entry/current/target/SL/days) no longer return HTTP 400.
+- AI monitoring rows lost on serverless cold start — `trackAiCall()` now awaited in every AI route `finally` so DB persistence completes before the response; reads merged (`memory|database|hybrid`) with source badge.
 
 ## [3.4.3] - 2026-08-06
 
