@@ -457,7 +457,8 @@ echo "" >> agent-memory.md
 - **Tests**: `lib/__tests__/useLivePrices.test.ts` (4 new: empty, no-loop-on-fresh-array, SSE price event, connected→isLive); recommendation-agent tests updated (price-based defaults 2750/2375 for price 2500; failed results never ₹0.00; confidence 50). Full suite: **317 passed / 11 skipped / 0 failed** (was 312 + 4 new + 1 moved).
 - **Verification**: `npx tsc --noEmit` clean for all touched files (only pre-existing test-file errors remain); eslint clean on touched files; Playwright — `/recommendations`, `/portfolio` (live RELIANCE ₹1,327.60 +1.76%, TCS ₹2,446.90 +10.27%, zero console errors), `/watchlist` (loop fixed, zero errors), mobile 375px portfolio clean; `/api/recommendations/performance?limit=3` now returns non-zero targets (SCML ₹95.40/₹75.52 etc.).
 - **Files**: lib/services/ai/recommendation-agent.ts, lib/__tests__/recommendation-agent.test.ts, scripts/backfill-recommendation-targets.ts (new), lib/hooks/useLivePrices.ts, lib/__tests__/useLivePrices.test.ts (new), app/components/HoldingsTable.tsx, app/watchlist/page.tsx, app/components/MarqueeBanner.tsx, app/api/recommendations/top-stocks/route.ts, app/components/recommendations/HistoryTab.tsx
-- **Remaining carry-forward**: prod DB backfill + Netlify `OPENROUTERKEY` env (needs user), demo holdings re-seed, F&O UI (`app/fo/`), issues #68/#69. Nothing committed yet on `fix/ph21-carryforward-perftab`.
+- **Remaining carry-forward**: merge PR #82 → deploy → verify prod crons; prod DB backfill + Netlify `OPENROUTERKEY` env (needs user), demo holdings re-seed, F&O UI (`app/fo/`), issues #68/#69.
+- **Committed + pushed + PR #82**: 3 commits on `fix/ph21-carryforward-perftab` — `b7b6742` fix (AI fallback + backfill), `370bcd4` feat (SSE wiring + HistoryTab null-guard + 4 hook tests), `31c8f90` docs. PR: https://github.com/luckyhegde6/TradeNext/pull/82 (never auto-merge).
 
 ---
 

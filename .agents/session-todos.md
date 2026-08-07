@@ -23,9 +23,10 @@
 - [x] HistoryTab null-guard: `top-stocks` API coalesces `"HOLD"`/`0`; HistoryTab renders "—" for null confidence
 - [x] Verification: tsc + eslint clean on touched files; Playwright — `/recommendations`, `/portfolio` (live RELIANCE ₹1,327.60 +1.76%), `/watchlist` (loop fixed, 0 errors), mobile 375px clean; `/api/recommendations/performance` returns non-zero targets
 - [x] Docs updated: AGENTS.md (v3.5.1 row), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([Unreleased]), Primer.md, agent-memory.md, Lessons.md (52-53)
+- [x] **Committed + pushed + PR #82 opened** (3 commits: fix b7b6742, feat 370bcd4, docs 31c8f90) — never auto-merge
 
 ### Pending
-- [ ] Commit on `fix/ph21-carryforward-perftab` → push → PR (never auto-merge)
+- [ ] Merge PR #82 → deploy (Netlify) → verify prod
 - [ ] PROD DB backfill: run `scripts/backfill-recommendation-targets.ts` against remote DB (needs user: Netlify `OPENROUTERKEY` env + remote DB access) — without the key, future runs still fall back to price-based defaults (now non-zero, so less urgent)
 - [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy
 - [ ] Re-seed demo holdings on prod
