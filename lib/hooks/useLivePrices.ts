@@ -44,8 +44,13 @@ export function useLivePrices(symbols: string[]): LivePricesState {
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectAttempts = useRef(0);
   const mountedRef = useRef(true);
+  // Keep latest symbols in a ref so fetchAllPrices can be a stable callback
+  // (prevents the effect from re-running on every render when the caller
+  // passes a freshly-created array, which caused infinite re-render loops).
+  const symbolsRef = useRef(symbols);
+  symbolsRef.current = symbols;
 
-  const symbolsKey = symbols.sort().join(",");
+  const symbolsKey = symbols.slice().sort().join(",");
 
   const updatePrices = useCallback((symbol: string, data: Partial<PricePoint>) => {
     if (!mountedRef.current) return;
@@ -58,7 +63,7 @@ export function useLivePrices(symbols: string[]): LivePricesState {
   }, []);
 
   const fetchAllPrices = useCallback(async () => {
-    for (const symbol of symbols) {
+    for (const symbol of symbolsRef.current) {
       try {
         const res = await fetch(`/api/nse/stock/${encodeURIComponent(symbol)}/quote`);
         if (res.ok) {
@@ -78,12 +83,14 @@ export function useLivePrices(symbols: string[]): LivePricesState {
         // skip failed symbols
       }
     }
-  }, [symbols, updatePrices]);
+  }, [updatePrices]);
 
   useEffect(() => {
     mountedRef.current = true;
-    if (symbols.length === 0) {
-      setState((prev) => ({ ...prev, isLoading: false }));
+    const currentSymbols = symbolsRef.current;
+    if (currentSymbols.length === 0) {
+      // Avoid a redundant setState that would trigger re-renders
+      setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
       return;
     }
 
@@ -91,7 +98,7 @@ export function useLivePrices(symbols: string[]): LivePricesState {
     fetchAllPrices();
 
     // Try SSE
-    const symStr = symbols.map((s) => s.trim().toUpperCase()).join(",");
+    const symStr = currentSymbols.map((s) => s.trim().toUpperCase()).join(",");
     let reconnectTimeout: ReturnType<typeof setTimeout>;
 
     const connectSSE = () => {

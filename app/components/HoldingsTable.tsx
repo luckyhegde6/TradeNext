@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Holding } from '@/lib/services/portfolioService';
 import { getChartButton } from "@/lib/charting";
 import { isNSEIndexSymbol } from "@/lib/charting";
+import { useLivePrices } from "@/lib/hooks/useLivePrices";
 
 interface HoldingsTableProps {
     holdings: Holding[];
@@ -11,6 +12,19 @@ interface HoldingsTableProps {
 }
 
 export default function HoldingsTable({ holdings, onEditHolding }: HoldingsTableProps) {
+    // Live price overlay via SSE — falls back to holding.currentPrice when offline
+    const { prices, isLive } = useLivePrices(holdings.map((h) => h.ticker));
+
+    const livePriceFor = (holding: Holding) => {
+        const live = prices.get(holding.ticker.toUpperCase());
+        return live?.price ?? holding.currentPrice;
+    };
+
+    const liveChangePercentFor = (holding: Holding) => {
+        const live = prices.get(holding.ticker.toUpperCase());
+        return live?.changePercent ?? holding.dayChangePercent;
+    };
+
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-IN', {
             style: 'currency',
@@ -61,7 +75,15 @@ export default function HoldingsTable({ holdings, onEditHolding }: HoldingsTable
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
-                    {holdings.map((holding) => (
+                    {holdings.map((holding) => {
+                        const livePrice = livePriceFor(holding);
+                        const liveChangePercent = liveChangePercentFor(holding);
+                        const liveValue = livePrice * holding.quantity;
+                        const livePnl = liveValue - holding.investedValue;
+                        const livePnlPercent = holding.investedValue > 0
+                            ? (livePnl / holding.investedValue) * 100
+                            : 0;
+                        return (
                         <tr
                             key={holding.ticker}
                             className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors"
@@ -73,6 +95,11 @@ export default function HoldingsTable({ holdings, onEditHolding }: HoldingsTable
                                 >
                                     {holding.ticker}
                                 </Link>
+                                {isLive && prices.has(holding.ticker.toUpperCase()) && (
+                                    <span className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/15 text-emerald-500">
+                                        ● Live
+                                    </span>
+                                )}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
                                 {holding.quantity}
@@ -82,28 +109,28 @@ export default function HoldingsTable({ holdings, onEditHolding }: HoldingsTable
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
                                 <div className="text-gray-900 dark:text-white">
-                                    {formatCurrency(holding.currentPrice)}
+                                    {formatCurrency(livePrice)}
                                 </div>
-                                {holding.dayChangePercent !== undefined && (
-                                    <div className={`text-xs ${holding.dayChangePercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                        {holding.dayChangePercent >= 0 ? '↑' : '↓'} {formatPercent(holding.dayChangePercent)}
+                                {liveChangePercent !== undefined && (
+                                    <div className={`text-xs ${liveChangePercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        {liveChangePercent >= 0 ? '↑' : '↓'} {formatPercent(liveChangePercent)}
                                     </div>
                                 )}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium text-gray-900 dark:text-white">
-                                {formatCurrency(holding.currentValue)}
+                                {formatCurrency(liveValue)}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                                <div className={`font-medium ${holding.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                    {formatCurrency(holding.pnl)}
+                                <div className={`font-medium ${livePnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    {formatCurrency(livePnl)}
                                 </div>
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${holding.pnlPercent >= 0
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${livePnlPercent >= 0
                                         ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                         : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                                     }`}>
-                                    {holding.pnlPercent >= 0 ? '↑' : '↓'} {formatPercent(holding.pnlPercent)}
+                                    {livePnlPercent >= 0 ? '↑' : '↓'} {formatPercent(livePnlPercent)}
                                 </span>
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white">
@@ -123,7 +150,8 @@ export default function HoldingsTable({ holdings, onEditHolding }: HoldingsTable
                                 )}
                             </td>
                         </tr>
-                    ))}
+                        );
+                    })}
                 </tbody>
             </table>
         </div>
