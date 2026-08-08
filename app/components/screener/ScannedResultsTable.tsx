@@ -134,9 +134,11 @@ export default function ScannedResultsTable({
               </thead>
               <tbody>
                 {stocks.map((stock, idx) => {
-                  const change = Number(stock.change ?? stock.change_percent ?? 0);
-                  const changeIsPositive = change >= 0;
-                  const changePct = Number(stock.change_percent ?? 0);
+                  // TV's `change` field IS the % change for NSE; derive ₹ amount from close + pct
+                  const changePct = Number(stock.change ?? stock.change_percent ?? 0);
+                  const changeIsPositive = changePct >= 0;
+                  const closeNum = Number(stock.close ?? 0);
+                  const change = closeNum > 0 ? (closeNum * changePct) / (100 + changePct) : 0;
                   return (
                     <tr
                       key={stock.symbol || idx}

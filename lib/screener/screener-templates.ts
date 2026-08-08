@@ -263,7 +263,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "technical",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: thr("change_percent", "gt", 0, "volume", "gt", 100000, "close", "gt", 0),
+    filterGroup: thr("change", "gt", 0, "volume", "gt", 100000, "close", "gt", 0),
   },
   {
     id: tplId(),
@@ -295,7 +295,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     description: "Price up 2%+ with 1.5x+ relative volume — explosive move",
     category: "technical",
     popularity: 5,
-    filterGroup: tc("change_percent", "gt", 2, "relative_volume_10d_calc", "gt", 1.5),
+    filterGroup: tc("change", "gt", 2, "relative_volume_10d_calc", "gt", 1.5),
   },
   {
     id: tplId(),
@@ -303,7 +303,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     description: "Biggest daily gainers — momentum leaders",
     category: "technical",
     popularity: 5,
-    filterGroup: sc("change_percent", "gte", 3),
+    filterGroup: sc("change", "gte", 3),
   },
   {
     id: tplId(),
@@ -311,7 +311,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     description: "Biggest daily losers — potential reversal or breakdown",
     category: "technical",
     popularity: 4,
-    filterGroup: sc("change_percent", "lte", -3),
+    filterGroup: sc("change", "lte", -3),
   },
   {
     id: tplId(),
@@ -328,7 +328,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "technical",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: tc("close", "gt", 0, "change_percent", "gt", 0),
+    filterGroup: tc("close", "gt", 0, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -368,7 +368,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 5,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
   {
     id: tplId(),
@@ -377,7 +377,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: sc("change_percent", "lt", 0),
+    filterGroup: sc("change", "lt", 0),
   },
   {
     id: tplId(),
@@ -386,7 +386,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
   {
     id: tplId(),
@@ -395,7 +395,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change_percent", "gt", 0),
+    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -404,7 +404,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change_percent", "lt", 0),
+    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change", "lt", 0),
   },
   {
     id: tplId(),
@@ -422,7 +422,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 4,
-    filterGroup: sc("change_percent", "gt", 2),
+    filterGroup: sc("change", "gt", 2),
   },
   {
     id: tplId(),
@@ -431,7 +431,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
   {
     id: tplId(),
@@ -458,7 +458,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "lt", 0),
+    filterGroup: sc("change", "lt", 0),
   },
   {
     id: tplId(),
@@ -467,7 +467,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
   {
     id: tplId(),
@@ -476,7 +476,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: thr("close", "gt", 0, "change_percent", "gt", 0, "volume", "gt", 100000),
+    filterGroup: thr("close", "gt", 0, "change", "gt", 0, "volume", "gt", 100000),
   },
   {
     id: tplId(),
@@ -485,7 +485,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "candlestick",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: thr("close", "gt", 0, "change_percent", "lt", 0, "volume", "gt", 100000),
+    filterGroup: thr("close", "gt", 0, "change", "lt", 0, "volume", "gt", 100000),
   },
   {
     id: tplId(),
@@ -503,11 +503,11 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
   {
     id: tplId(),
     name: "Short Term Breakouts",
-    description: "5-day high > 120-day high * 1.05 with volume confirmation",
+    description: "Up day with volume above 10-day average and 5-day momentum > 3%",
     category: "range_breakout",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: thr("change_percent", "gt", 0, "volume", "gt", 100000, "close", "gt", 0),
+    filterGroup: thr("change", "gt", 0, "relative_volume_10d_calc", "gt", 1, "Perf.5D", "gt", 3),
   },
   {
     id: tplId(),
@@ -516,7 +516,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "range_breakout",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 0, "relative_volume_10d_calc", "gt", 1.2),
+    filterGroup: tc("change", "gt", 0, "relative_volume_10d_calc", "gt", 1.2),
   },
   {
     id: tplId(),
@@ -552,7 +552,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "range_breakout",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "gt", 1),
+    filterGroup: sc("change", "gt", 1),
   },
   {
     id: tplId(),
@@ -561,7 +561,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "range_breakout",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
 
   // ============================================================
@@ -592,7 +592,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "crossover",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change_percent", "gt", 0),
+    filterGroup: thr("close", "gt", 0, "volume", "gt", 100000, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -601,7 +601,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "crossover",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: thr("change_percent", "gt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
+    filterGroup: thr("change", "gt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
   },
   {
     id: tplId(),
@@ -610,7 +610,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "crossover",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: sc("change_percent", "lt", 0),
+    filterGroup: sc("change", "lt", 0),
   },
   {
     id: tplId(),
@@ -637,7 +637,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "crossover",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: sc("change_percent", "gt", 0),
+    filterGroup: sc("change", "gt", 0),
   },
   {
     id: tplId(),
@@ -655,7 +655,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "crossover",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: tc("close", "gt", 0, "change_percent", "gt", 0),
+    filterGroup: tc("close", "gt", 0, "change", "gt", 0),
   },
 
   // ============================================================
@@ -668,7 +668,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: tc("change_percent", "gt", 2, "relative_volume_10d_calc", "gt", 1.2),
+    filterGroup: tc("change", "gt", 2, "relative_volume_10d_calc", "gt", 1.2),
   },
   {
     id: tplId(),
@@ -677,7 +677,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: thr("change_percent", "gt", 0, "volume", "gt", 100000, "close", "gt", 0),
+    filterGroup: thr("change", "gt", 0, "volume", "gt", 100000, "close", "gt", 0),
   },
   {
     id: tplId(),
@@ -686,7 +686,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: sc("change_percent", "gt", 2),
+    filterGroup: sc("change", "gt", 2),
   },
   {
     id: tplId(),
@@ -695,7 +695,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: tc("RSI", "gt", 50, "change_percent", "gt", 0),
+    filterGroup: tc("RSI", "gt", 50, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -704,7 +704,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 1, "volume", "gt", 200000),
+    filterGroup: tc("change", "gt", 1, "volume", "gt", 200000),
   },
   {
     id: tplId(),
@@ -713,7 +713,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: thr("change_percent", "gt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
+    filterGroup: thr("change", "gt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
   },
   {
     id: tplId(),
@@ -722,7 +722,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: thr("close", "gt", 0, "change_percent", "gt", 0, "volume", "gt", 100000),
+    filterGroup: thr("close", "gt", 0, "change", "gt", 0, "volume", "gt", 100000),
   },
   {
     id: tplId(),
@@ -731,7 +731,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: tc("RSI", "lt", 50, "change_percent", "gt", 0),
+    filterGroup: tc("RSI", "lt", 50, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -740,7 +740,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 1, "volume", "gt", 500000),
+    filterGroup: tc("change", "gt", 1, "volume", "gt", 500000),
   },
   {
     id: tplId(),
@@ -749,7 +749,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bullish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 0, "volume", "gt", 300000),
+    filterGroup: tc("change", "gt", 0, "volume", "gt", 300000),
   },
 
   // ============================================================
@@ -762,7 +762,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: sc("change_percent", "lte", -2),
+    filterGroup: sc("change", "lte", -2),
   },
   {
     id: tplId(),
@@ -771,7 +771,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 5,
-    filterGroup: sc("change_percent", "lte", -2),
+    filterGroup: sc("change", "lte", -2),
   },
   {
     id: tplId(),
@@ -780,7 +780,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: tc("RSI", "lt", 50, "change_percent", "lt", 0),
+    filterGroup: tc("RSI", "lt", 50, "change", "lt", 0),
   },
   {
     id: tplId(),
@@ -789,7 +789,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "5min",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "volume", "gt", 500000),
+    filterGroup: tc("change", "lt", 0, "volume", "gt", 500000),
   },
   {
     id: tplId(),
@@ -798,7 +798,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "relative_volume_10d_calc", "gt", 0),
+    filterGroup: tc("change", "lt", 0, "relative_volume_10d_calc", "gt", 0),
   },
   {
     id: tplId(),
@@ -807,7 +807,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: sc("change_percent", "lte", -3),
+    filterGroup: sc("change", "lte", -3),
   },
   {
     id: tplId(),
@@ -816,7 +816,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: sc("change_percent", "lte", -1.5),
+    filterGroup: sc("change", "lte", -1.5),
   },
   {
     id: tplId(),
@@ -825,7 +825,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "bearish",
     timeframe: "Daily",
     popularity: 4,
-    filterGroup: thr("change_percent", "lt", 0, "volume", "gt", 200000, "close", "gt", 50),
+    filterGroup: thr("change", "lt", 0, "volume", "gt", 200000, "close", "gt", 50),
   },
 
   // ============================================================
@@ -838,7 +838,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 1, "volume", "gt", 200000),
+    filterGroup: tc("change", "gt", 1, "volume", "gt", 200000),
   },
   {
     id: tplId(),
@@ -847,7 +847,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 2.5, "volume", "gt", 500000),
+    filterGroup: tc("change", "gt", 2.5, "volume", "gt", 500000),
   },
   {
     id: tplId(),
@@ -856,7 +856,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "gt", 0, "volume", "gt", 200000),
+    filterGroup: tc("change", "gt", 0, "volume", "gt", 200000),
   },
   {
     id: tplId(),
@@ -865,7 +865,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: tc("change_percent", "gt", 1.5, "volume", "gt", 500000),
+    filterGroup: tc("change", "gt", 1.5, "volume", "gt", 500000),
   },
   {
     id: tplId(),
@@ -874,7 +874,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Daily",
     popularity: 3,
-    filterGroup: tc("change_percent", "gt", 0, "volume", "gt", 300000),
+    filterGroup: tc("change", "gt", 0, "volume", "gt", 300000),
   },
   {
     id: tplId(),
@@ -883,7 +883,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("RSI", "gt", 60, "change_percent", "gt", 0),
+    filterGroup: tc("RSI", "gt", 60, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -892,7 +892,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("close", "gt", 0, "change_percent", "gt", 0),
+    filterGroup: tc("close", "gt", 0, "change", "gt", 0),
   },
   {
     id: tplId(),
@@ -901,7 +901,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bullish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "gt", 1, "volume", "gt", 200000),
+    filterGroup: tc("change", "gt", 1, "volume", "gt", 200000),
   },
 
   // ============================================================
@@ -914,7 +914,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: tc("change_percent", "lt", -1, "volume", "gt", 200000),
+    filterGroup: tc("change", "lt", -1, "volume", "gt", 200000),
   },
   {
     id: tplId(),
@@ -923,7 +923,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "volume", "gt", 300000),
+    filterGroup: tc("change", "lt", 0, "volume", "gt", 300000),
   },
   {
     id: tplId(),
@@ -932,7 +932,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 4,
-    filterGroup: thr("change_percent", "lt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
+    filterGroup: thr("change", "lt", 0, "volume", "gt", 500000, "market_cap_basic", "gt", 5000),
   },
   {
     id: tplId(),
@@ -941,7 +941,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "volume", "gt", 200000),
+    filterGroup: tc("change", "lt", 0, "volume", "gt", 200000),
   },
   {
     id: tplId(),
@@ -950,7 +950,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "lt", 0),
+    filterGroup: sc("change", "lt", 0),
   },
   {
     id: tplId(),
@@ -959,7 +959,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "volume", "gt", 300000),
+    filterGroup: tc("change", "lt", 0, "volume", "gt", 300000),
   },
   {
     id: tplId(),
@@ -968,7 +968,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "15min",
     popularity: 3,
-    filterGroup: sc("change_percent", "lt", 0),
+    filterGroup: sc("change", "lt", 0),
   },
   {
     id: tplId(),
@@ -977,7 +977,7 @@ export const SCREENER_TEMPLATES: ScreenerTemplate[] = [
     category: "intraday_bearish",
     timeframe: "Intraday",
     popularity: 3,
-    filterGroup: tc("change_percent", "lt", 0, "volume", "gt", 300000),
+    filterGroup: tc("change", "lt", 0, "volume", "gt", 300000),
   },
 ];
 

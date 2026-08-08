@@ -24,7 +24,7 @@ const FIELD_OPTIONS: FieldOption[] = [
   { value: "open", label: "Open", category: "Price", type: "number", hint: "Today's opening price (₹)", placeholder: "e.g. 510" },
   { value: "high", label: "High", category: "Price", type: "number", hint: "Today's high price (₹)", placeholder: "e.g. 520" },
   { value: "low", label: "Low", category: "Price", type: "number", hint: "Today's low price (₹)", placeholder: "e.g. 490" },
-  { value: "change", label: "Change (₹)", category: "Price", type: "number", hint: "Absolute price change (₹)", placeholder: "e.g. 10.5" },
+  { value: "change", label: "Change (%)", category: "Price", type: "number", hint: "Daily % change (TradingView for NSE)", placeholder: "e.g. 2.5" },
   { value: "change_percent", label: "% Change", category: "Price", type: "number", hint: "Daily % change", placeholder: "e.g. 2.5" },
   { value: "52_week_high", label: "52W High", category: "Price", type: "number", hint: "52-week high price (₹)", placeholder: "e.g. 1500" },
   { value: "52_week_low", label: "52W Low", category: "Price", type: "number", hint: "52-week low price (₹)", placeholder: "e.g. 800" },
@@ -55,6 +55,7 @@ const FIELD_OPTIONS: FieldOption[] = [
   { value: "ADX", label: "ADX", category: "Technical", type: "number", hint: "Trend strength (0-100). 25+ = strong", placeholder: "e.g. 30" },
   { value: "ATR", label: "ATR", category: "Technical", type: "number", hint: "Average true range (₹)", placeholder: "e.g. 15" },
   // Performance
+  { value: "Perf.5D", label: "5D Performance", category: "Performance", type: "number", hint: "5-day return %", placeholder: "e.g. 3" },
   { value: "Perf.W", label: "1W Performance", category: "Performance", type: "number", hint: "1-week return %", placeholder: "e.g. 5" },
   { value: "Perf.M", label: "1M Performance", category: "Performance", type: "number", hint: "1-month return %", placeholder: "e.g. 10" },
   { value: "Perf.3M", label: "3M Performance", category: "Performance", type: "number", hint: "3-month return %", placeholder: "e.g. 20" },
