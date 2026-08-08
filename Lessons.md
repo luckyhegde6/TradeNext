@@ -1034,9 +1034,21 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: For TradingView/NSE, treat `change` as % and `change_percent` as non-existent. Verify field semantics with a live probe (filter + sort) before mass-using them in templates; a template that silently matches 0 is worse than a broken one — it looks fine.
 
+### 55. E2E Flakiness on a Live-Data App: Viewport, WebKit Inputs, or Dev-Server Starvation
+**Issue**: The new Playwright suite failed differently on every full run — 7 Firefox nav failures, then 3 WebKit nav timeouts (a *different* page each run), an advanced-screener empty-state test showing "2000 stocks found" instead of empty, and a marquee assertion that never appeared.
+
+**Root Causes** (in order of frequency):
+1. **Viewport/media-query mismatch (Firefox)**: the header nav is `hidden xl:flex` (≥1280px), but the `Desktop Firefox` device defaults to exactly 1280×720 and Firefox evaluates media queries against the scrollbar-excluded width → the nav never renders. Fix: desktop viewport **1440×900** in all desktop projects.
+2. **WebKit drops `fill()` on controlled `<input type="number">`**: Playwright's fill sets the value programmatically; React re-renders and restores the old value, so the scan silently ran with the default (`close > 0` → 2000 stocks). Fix: `click()` → `ControlOrMeta+a` → `Delete` → `pressSequentially(...)` and assert with `toHaveValue`.
+3. **Single-threaded dev server starvation**: heavy TradingView scans (30–60s, running in 3 browser projects) starve parallel SSR navigations. Fix: serial nav describe + `Promise.all([waitForURL, click({ noWaitAfter: true })])` (URL commit, not load) + 60s URL timeout; `retries: CI ? 2 : 1`, `workers: CI ? 1 : 2`. A test that fails twice on the SAME assertion is a real bug; one retried-then-passed under full load is environment.
+4. **Live-data widgets render null by design**: `MarqueeBanner` returns `null` when `/api/nse/marquee` is slow/empty — never assert live NSE values (prices/indices/marquee); assert containers, contracts, or row counts only.
+
+**Rule**: When e2e flakiness appears on a live-data app, fix the root cause in config/specs (viewport, input strategy, serialization, timeouts). Do NOT loosen assertions, add `waitForTimeout` sleeps, or bump retries to hide a real regression. Keep `retries`/`workers` as documented load knobs, not failure-hiders. `tsc` typechecks `e2e/*.ts` — keep specs type-clean.
+
 ---
 
 ## Update Log
+- 2026-08-08: Added Lesson 55 (Playwright e2e flakiness on live-data apps: Firefox xl-nav viewport 1440×900, WebKit controlled number-input keystrokes, single-threaded dev-server nav starvation → serial + noWaitAfter + retries, live NSE values never asserted); added v3.5.3 e2e suite entry
 - 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)
 - 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)
 - 2026-08-07: Added Lessons 50-51 (open PR → move work to existing head branch, never fork; dev DB without migration history → `db push` not `migrate deploy`); added v3.5.0 run trigger source + BUY/SELL filter + AI monitoring persistence lessons

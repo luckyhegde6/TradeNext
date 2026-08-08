@@ -12,6 +12,7 @@ These docs are the **single source of truth** for the subsystems they cover. If 
 | [Tasks, Cron & Workers](./tasks-cron-workers.md) | CronJob scheduling, WorkerTask queue, worker engine loop, heartbeat, task orchestration, task actions | `lib/services/worker/worker-engine.ts`, `lib/services/worker/worker-service.ts`, `lib/services/worker/task-orchestrator.ts`, `app/api/admin/workers/*`, `app/api/admin/cron/route.ts` |
 | [Monitoring & Logging](./monitoring-and-logging.md) | DB-backed logs (serverless-safe), worker file logs, monitoring API tabs, AI monitoring, unified events, health metrics | `lib/services/db-logger.ts`, `lib/services/worker/worker-logger.ts`, `lib/services/ai/ai-monitoring.ts`, `app/api/admin/monitoring/route.ts`, `app/api/admin/ai/monitoring/route.ts`, `lib/services/unifiedEventService.ts`, `lib/services/systemHealthService.ts` |
 | [Alerts System](./alerts-system.md) | Price alerts (simple), rule engine (FilterGroup), delivery channels (email/webhook/telegram/in-app), events & delivery logs | `lib/alerts/alert-engine.ts`, `lib/alerts/delivery/index.ts`, `lib/alerts/delivery/{email,webhook,telegram}.ts`, `app/api/alerts/*` |
+| [Playwright E2E](./playwright-e2e.md) | Committed e2e suite (`e2e/`): project matrix, auth bootstrap, agent workflow, reports/Trace Viewer, troubleshooting (browser quirks + dev-server-load flakiness) | `playwright.config.ts`, `e2e/auth.setup.ts`, `e2e/*.spec.ts`, `.github/workflows/playwright.yml` |
 
 ## How to Use These Docs
 

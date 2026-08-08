@@ -5,13 +5,25 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-08 (v3.5.2)
+2026-08-08 (v3.5.3)
 
 ---
 
 ## Current Project Status
 
-### v3.5.2 — Screener `change` = % Fix (Aug 8 2026) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT PENDING
+### v3.5.3 — Playwright E2E Suite + CI + Docs (Aug 8 2026) — ✅ SUITE GREEN, DOCS DONE, COMMIT TO PR #85 PENDING
+**What**: Committed cross-browser e2e regression suite for the v3.5.2 screener fix + the full app.
+**Suite**: `e2e/` (11 specs, 89 tests) via `npm run test:e2e` against the local dev server on :3000 with live NSE/TradingView data. Projects: chromium/firefox/webkit @1440×900 + Mobile Chrome (Pixel 5), demo-auth storage state from `auth.setup.ts`; `chromium-logged-out` for the login form.
+**Root causes fixed while hardening** (all encoded in `playwright.config.ts` + specs — do not regress):
+- Firefox `hidden xl:flex` nav needs ≥1280px but Firefox measures scrollbar-inclusive → desktop viewport **1440×900**.
+- WebKit drops `fill()` on controlled `<input type="number">` → keystroke input + `toHaveValue` in the advanced-screener empty-state test.
+- Single-threaded dev server starves parallel SSR navs under TradingView scans → `navigation.spec.ts` serial + `Promise.all([waitForURL, click({noWaitAfter:true})])` + 60s URL timeout; `retries: CI?2:1`, `workers: CI?1:2`.
+- Live-data flakiness → removed marquee assertion (renders `null` when NSE slow); never assert live NSE values.
+**CI**: `.github/workflows/playwright.yml` — `timescale/timescaledb` service (migrations need the extension/hypertable), `prisma migrate deploy` + `prisma db seed`, dev server via webServer block, artifact 30d.
+**Verification**: full suite green — 87/89 first attempt + 2 flaky passing on retry (webkit nav SSR starvation + Firefox `RenderCompositorSWGL` teardown crash, both environmental); 317 Jest tests pass; e2e files typecheck clean.
+**Status**: suite green + verified; docs written (`.agents/docs/playwright-e2e.md`, `playwright-e2e` skill ×2, AGENTS.md v3.5.3 row/commands/lessons, README badge, CHANGELOG, matrix). **Commit everything to the open PR #85 (`fix/screener-change-percent`) — never auto-merge.**
+
+### v3.5.2 — Screener `change` = % Fix (Aug 8 2026) — ✅ COMMITTED (b692d64 + 2daf72a), PR #85 OPEN
 **Issue**: ~60 screener templates using `change_percent` silently matched 0 stocks (TV `change_percent` null/unsupported on NSE as column/filter/sort); "Short Term Breakouts" returned 0; `getTopMovers` gainers returned `[]`; UI Change column displayed ₹ from a wrong % formula.
 **Root Cause**: TradingView's `change` field IS the percent change on NSE (RELIANCE 1334.8 vs prev 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink). `change_percent` is null/unsupported.
 **Fix Applied**:
@@ -280,6 +292,13 @@
 ---
 
 ## Session History
+
+### Session 14 (August 8, 2026) — Playwright E2E Suite hardening + docs (v3.5.3)
+- **Root-caused + fixed all flaky/failing e2e tests**: Firefox `xl` nav viewport (1440×900), WebKit `fill()` on controlled number inputs (keystrokes), single-threaded dev-server starvation (serial nav + `noWaitAfter` + 60s + retries), live-marquee flakiness (assertion removed).
+- **Full suite verified green**: 87/89 first attempt + 2 flaky passing on retry #1 (webkit nav SSR starvation, Firefox `RenderCompositorSWGL` teardown crash — both environmental); 317 Jest unit tests pass; e2e files typecheck clean.
+- **CI workflow**: `.github/workflows/playwright.yml` hardened with `timescale/timescaledb` service (migrations require the extension), `prisma migrate deploy` + seed, Playwright install, HTML report artifact.
+- **Docs written**: `.agents/docs/playwright-e2e.md` (implementation + agent guide, reports/Trace Viewer, troubleshooting), `playwright-e2e` skill (machine + human mirror), `playwright-cli` skill cross-references + MCP tool guidance, AGENT-SKILL-MATRIX row, AGENTS.md v3.5.3 row/commands/lessons, `.agents/CHANGELOG.md` + `versions-v3.md` v3.5.3 entry, README CI badge + Testing section.
+- **Status**: docs done; commit everything (e2e stack + docs) to open PR #85 (`fix/screener-change-percent`), never auto-merge.
 
 ### Session 13 (August 8, 2026) — Screener `change` = % Fix (v3.5.2)
 - **Root-caused**: TradingView's `change` field IS the percent change on NSE; `change_percent` is null/unsupported as column/filter/sort → ~60 templates silently matched 0, `getTopMovers` gainers returned `[]`.

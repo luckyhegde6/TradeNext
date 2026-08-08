@@ -8,7 +8,7 @@
 
 | File | Contents |
 |------|----------|
-| [versions-v3.md](./changelog/versions-v3.md) | v3.5.2 → v3.0.0 (screener `change`=% fix, target/SL ₹0 fix + SSE live prices, recommendation performance & archival, Telegram bot, recommendations engine, risk metrics, CSV export) |
+| [versions-v3.md](./changelog/versions-v3.md) | v3.5.3 → v3.0.0 (Playwright e2e suite, screener `change`=% fix, target/SL ₹0 fix + SSE live prices, recommendation performance & archival, Telegram bot, recommendations engine, risk metrics, CSV export) |
 | [versions-v2.md](./changelog/versions-v2.md) | v2.2.0 → v2.1.0 (alert engine, admin alert config, 98 screener templates) |
 | [versions-v1.md](./changelog/versions-v1.md) | v1.16.1 → v1.0.0 (advanced screener, agent handoff, MCP API, security, workers) |
 | [changelog/screener.md](./changelog/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement) |

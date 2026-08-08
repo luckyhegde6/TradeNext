@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-08T10:30:00Z"
-feature: "screener-change-percent-fix"
+last_updated: "2026-08-08T16:00:00Z"
+feature: "playwright-e2e-suite"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Session v3.5.2 (Screener `change` = % Fix) on branch `fix/screener-change-percent` (from main @ `c7a30ba`): TradingView `change` IS % change on NSE (`change_percent` null/unsupported) → "Short Term Breakouts" rewritten to `change>0, relative_volume_10d_calc>1, Perf.5D>3` → **250 stocks (was 0), 18/20 Chartink overlap**; all 57 `change_percent` template args mass-fixed to `change`; `Perf.5D` added to FILTER_FIELDS; `getTopMovers` gainers/losers/active fixed; advanced route `percentChange ?? change`; UI `change` labeled "Change (%)" with ₹ derived from %. **All verification passed**: 45 screener tests, tsc clean on 6 touched files, Playwright "250 stocks found · 574ms" + sortable % values + zero console errors. Docs updated. **Remaining: commit 6 files → push → PR (never auto-merge)** — user's Playwright files (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) must stay untracked/untouched — see `.agents/session-todos.md`.
+**No active handoff.** Session v3.5.3 (Playwright E2E Suite + CI + Docs) on branch `fix/screener-change-percent` (PR #85 OPEN): the user's e2e stack (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) was hardened to green — Firefox `xl`-nav viewport **1440×900**, WebKit controlled-number-input **keystroke** fill, single-threaded dev-server nav starvation → serial `navigation.spec.ts` + `Promise.all([waitForURL, click({noWaitAfter:true})])` + 60s URL timeout, `retries: CI?2:1`, `workers: CI?1:2`, live-marquee assertion removed. **Full suite GREEN** (87/89 first attempt + 2 env-flaky on retry #1); 317 Jest tests pass; e2e files typecheck clean. CI workflow hardened (timescale service + migrate deploy + seed + artifact). All docs written (`.agents/docs/playwright-e2e.md`, `playwright-e2e` skill ×2, AGENTS.md v3.5.3 row/commands/lessons, README badge, CHANGELOG, matrix, Primer Session 14, agent-memory, Lessons 55). **Remaining: commit everything to PR #85 → push → report merge-ready (never auto-merge)** — see `.agents/session-todos.md`.
 
 ---
 
@@ -80,3 +80,4 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | v1.3 | 2026-08-06 | Added `.agents/docs/` subsystem deep-dive reference (recommendations engine, tasks/cron/workers, monitoring & logging, alerts) |
 | v1.4 | 2026-08-07 | Session ph20 (recommendation performance tracking, v3.5.0): updated state to ph20, session-todos refreshed |
 | v1.5 | 2026-08-07 | Session ph21 (carry-forward, v3.5.1): target/SL ₹0 fix + SSE live prices + HistoryTab null-guard; state updated to ph21 |
+| v1.6 | 2026-08-08 | Session v3.5.3 (Playwright e2e suite): state updated to e2e docs/commit phase; feature `playwright-e2e-suite` |

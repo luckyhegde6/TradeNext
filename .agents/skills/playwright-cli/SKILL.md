@@ -277,3 +277,18 @@ playwright-cli close
 * **Tracing** [references/tracing.md](references/tracing.md)
 * **Video recording** [references/video-recording.md](references/video-recording.md)
 * **Agent Testing Guide** [AGENT-TESTING-GUIDE.md](AGENT-TESTING-GUIDE.md)
+
+## Related skills & tooling
+
+- **`.opencode/skills/playwright-e2e/SKILL.md`** — the committed e2e test suite
+  (`e2e/`, `npm run test:e2e`). Use it for scripted regression guards, cross-browser
+  + mobile matrix, and before merge/PR. Deep-dive: `.agents/docs/playwright-e2e.md`.
+  This CLI skill is for **exploratory/one-off** browser automation (debug a page, test
+  a form manually, capture a snapshot) — prefer the e2e suite for repeatable checks.
+- **MCP `playwright`** (`@playwright/mcp`, in `.opencode/opencode.json`) — agentic
+  browser automation (navigate/click/fill/snapshot/console) for UI/UX audits and bug
+  reproduction.
+- **MCP `chrome-devtools`** — performance traces, Lighthouse audits, network
+  inspection, device emulation.
+- **Snapshots**: always use `--filename=.playwright-cli/snapshots/<name>.yaml` —
+  bare snapshots land in the repo root as `*.yaml` and must be deleted (code hygiene).
