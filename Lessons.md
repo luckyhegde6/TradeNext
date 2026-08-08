@@ -1025,9 +1025,19 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: Any AI/fallback path that produces price-derived fields (target/SL/exit) must derive them from the stock price — literal `0`/`null` defaults silently poison downstream UI and analytics. Also: `tsx` scripts need `--env-file=.env` (else `SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string` on local Postgres).
 
+### 54. TradingView `change` IS Percent Change on NSE — Never Use `change_percent`
+**Issue**: ~60 screener templates using `change_percent` silently matched 0 stocks; `getTopMovers("gainers")` returned `[]`; "Short Term Breakouts" returned 0 (Chartink shows ~20).
+
+**Root Cause**: On NSE via TradingView, the `change` column **is already the percent change** (RELIANCE 1334.8 vs prev 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink). `change_percent` is null/unsupported as a column, a TV-side filter, AND a sort key (probe `change_percent > 1` → 0 rows). Any filter group using `change_percent` evaluates to empty.
+
+**Solution**: Use `change` everywhere: templates (`thr("change","gt",0,...)`), `getTopMovers` (gainers `change > 3`, losers `< -3`), advanced route (`percentChange ?? change` — TV change is already %; do NOT derive `(change/(close-change))*100`). When displaying, label the column "Change (%)" and derive the ₹ amount client-side only: `close * pct / (100 + pct)`. Before assuming a TV field exists, probe it as a filter AND a sort key — a field can exist in the response yet be unusable as a server-side filter.
+
+**Rule**: For TradingView/NSE, treat `change` as % and `change_percent` as non-existent. Verify field semantics with a live probe (filter + sort) before mass-using them in templates; a template that silently matches 0 is worse than a broken one — it looks fine.
+
 ---
 
 ## Update Log
+- 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)
 - 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)
 - 2026-08-07: Added Lessons 50-51 (open PR → move work to existing head branch, never fork; dev DB without migration history → `db push` not `migrate deploy`); added v3.5.0 run trigger source + BUY/SELL filter + AI monitoring persistence lessons
 - 2026-08-07: Added Lessons 48-49 (GitHub wiki lazy-creation + strict mermaid; UI sort keys vs API zod enums); added v3.5.0 performance/archival + wiki + skills-system lessons

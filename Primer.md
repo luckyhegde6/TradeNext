@@ -5,11 +5,21 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-07 (ph21)
+2026-08-08 (v3.5.2)
 
 ---
 
 ## Current Project Status
+
+### v3.5.2 — Screener `change` = % Fix (Aug 8 2026) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT PENDING
+**Issue**: ~60 screener templates using `change_percent` silently matched 0 stocks (TV `change_percent` null/unsupported on NSE as column/filter/sort); "Short Term Breakouts" returned 0; `getTopMovers` gainers returned `[]`; UI Change column displayed ₹ from a wrong % formula.
+**Root Cause**: TradingView's `change` field IS the percent change on NSE (RELIANCE 1334.8 vs prev 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink). `change_percent` is null/unsupported.
+**Fix Applied**:
+- "Short Term Breakouts" rewritten to TV-native proxy: `change > 0` + `relative_volume_10d_calc > 1` + `Perf.5D > 3` → **250 stocks (was 0), 18/20 Chartink overlap**
+- Mass-fix all 57 remaining `change_percent` → `change` template args (0 remain); `Perf.5D` added to `FILTER_FIELDS` + FilterBuilder
+- `getTopMovers` filters fixed (gainers change > 3, losers < -3, active vol > 1M); advanced route `percentChange ?? change`
+- UI `change` labeled "Change (%)"; ₹ derived `close*pct/(100+pct)` in results; % Change column sortable
+**Status**: 45 screener tests pass; tsc clean on 6 touched files; Playwright verified (250 stocks · 574ms, SBIN +1.12%, MOTHERSON +8.71%, TATATECH +8.89%, zero console errors). Docs updated. **Commit pending** — 6 files; user's Playwright files (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) left untracked/untouched.
 
 ### ph21 — Carry-Forward: Target/SL ₹0.00 Fix + SSE Live Prices + HistoryTab Null-Guard (v3.5.1) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT PENDING
 **Issue (from prod)**: Performance tab showed `targetPrice: 0 / stopLoss: 0` on every tracker; History cards rendered bare "🟡 %"; SSE live-price hooks existed but weren't wired into Portfolio/Watchlist/Dashboard.
@@ -270,6 +280,15 @@
 ---
 
 ## Session History
+
+### Session 13 (August 8, 2026) — Screener `change` = % Fix (v3.5.2)
+- **Root-caused**: TradingView's `change` field IS the percent change on NSE; `change_percent` is null/unsupported as column/filter/sort → ~60 templates silently matched 0, `getTopMovers` gainers returned `[]`.
+- **Short Term Breakouts rewritten** (`change > 0, relative_volume_10d_calc > 1, Perf.5D > 3`) → **250 stocks (was 0)**, 18/20 Chartink overlap. `Perf.5D` added to `FILTER_FIELDS`.
+- **Mass-fixed** all 57 remaining `change_percent` → `change` template args (0 remain).
+- **Fixed** `getTopMovers` gainers/losers/active filters + advanced-route `percentChange ?? change` (removed ₹-based formula).
+- **UI**: `change` labeled "Change (%)", ₹ derived from % in results table; % Change column sortable.
+- **Verified**: 45 screener tests pass; Playwright — template loads 3 conditions, Run Scan "250 stocks found · 574ms", sortable % values real (SBIN +1.12%, MOTHERSON +8.71%, TATATECH +8.89%), zero console errors.
+- **Status**: docs updated (AGENTS.md, CHANGELOG, TODO, Primer, screener.md); commit pending — 6 files, user's Playwright files (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) left untracked/untouched.
 
 ### Session 12 (August 7, 2026) — ph21: Target/SL ₹0.00 Fix + SSE Live Prices Wiring (v3.5.1)
 - **PR #81 merged** (commit `bf584e2`) → new branch `fix/ph21-carryforward-perftab` from main.

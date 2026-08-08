@@ -35,6 +35,18 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-08-08 | Screener `change` = % Fix (v3.5.2) — 0 → 250 template matches
+- **Action**: Root-caused and fixed ~60 screener templates silently matching 0 stocks on NSE (TradingView `change` IS % change; `change_percent` null/unsupported). Rewrote "Short Term Breakouts" to a validated TV-native proxy → 250 stocks (was 0), 18/20 Chartink overlap.
+- **Branch**: `fix/screener-change-percent` (from main @ `c7a30ba`)
+- **Root cause**: TV `change` = % (RELIANCE 1334.8 vs 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink); probe `change_percent > 1` → 0 rows.
+- **Template rewrite**: `thr("change","gt",0,"relative_volume_10d_calc","gt",1,"Perf.5D","gt",3)` (L503–511); mass-fixed all 57 remaining `change_percent` → `change` args (0 remain).
+- **Field + service + route + UI**: `Perf.5D` added to `FILTER_FIELDS` + FilterBuilder; `getTopMovers` gainers/losers/active fixed; advanced route `percentChange ?? change`; `change` labeled "Change (%)", ₹ derived `close*pct/(100+pct)` in results; % Change column sortable.
+- **Rejected**: server-side NSE history lookback enrichment (~65 min for 882 candidates; TV pre-filter does it in ~1s).
+- **Verification**: 45 screener tests pass; tsc clean on 6 touched files; Playwright — "250 stocks found · 574ms", SBIN +1.12%, MOTHERSON +8.71%, TATATECH +8.89%, zero console errors.
+- **Files Modified**: `lib/screener/screener-templates.ts`, `lib/screener/condition-tree.ts`, `lib/services/tradingview-service.ts`, `app/api/screener/advanced/route.ts`, `app/components/screener/ScannedResultsTable.tsx`, `app/components/screener/FilterBuilder.tsx`
+- **Docs Updated**: AGENTS.md (v3.5.2 row), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([3.5.2]), TODO.md, Primer.md (status + Session 13), `.agents/changelog/screener.md`, `.agents/session-todos.md`, `.agents/handoffs/active/latest.md`
+- **Status**: Commit pending — 6 files; user's Playwright files left untracked/untouched.
+
 ### 2026-08-06 | Git Workflow & Agent Operating Model (v3.4.2) — Tracked Hooks + Gardenify Docs Port
 - **Action**: Applied gardenify git/agentic patterns — versioned `.githooks/` directory + git-flow/code-hygiene/documentation docs + AGENTS.md operating model.
 - **Branch**: main (v3.4.2)

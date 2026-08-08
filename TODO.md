@@ -58,6 +58,7 @@
 | Performance Tab Target/SL ₹0.00 Fix (v3.5.1) | [x] Complete (price-based AI fallback + backfill script, local 149 rows; prod pending) |
 | SSE Live Prices Wiring (v3.5.1) | [x] Complete (HoldingsTable + Watchlist + MarqueeBanner; useLivePrices loop fixed) |
 | History Tab Null-Guard (v3.5.1) | [x] Complete (top-stocks coalesce + HistoryTab "—") |
+| Screener `change` = % fix (v3.5.2) | [x] Complete (TV `change` IS % on NSE; `change_percent` unsupported → 57 templates mass-fixed, Short Term Breakouts rewritten → 250 stocks was 0, Perf.5D field added, getTopMovers fixed) |
 
 ---
 

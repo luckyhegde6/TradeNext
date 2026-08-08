@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-07T16:45:00Z"
-feature: "ph21-carryforward-perftab"
+last_updated: "2026-08-08T10:30:00Z"
+feature: "screener-change-percent-fix"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Session ph21 (Carry-Forward, v3.5.1) — **PR #81 (ph20) MERGED** (`bf584e2`). On branch `fix/ph21-carryforward-perftab`: Performance-tab ₹0.00 target/SL bug fixed (price-based AI fallback `price*1.1`/`price*0.95` + backfill script fixed 149 local trackers), SSE live prices wired into Portfolio (HoldingsTable) + Watchlist + MarqueeBanner, `useLivePrices` infinite-loop fixed, HistoryTab/top-stocks null-guard (no more bare "🟡 %"). **All verification passed**: full suite 317 passed / 11 skipped / 0 failed, tsc + eslint clean on touched files, Playwright desktop + mobile zero console errors. Docs updated. **Remaining: pre-commit hygiene → commit → push → PR (never auto-merge)** + prod backfill / Netlify `OPENROUTERKEY` (needs user) — see `.agents/session-todos.md`.
+**No active handoff.** Session v3.5.2 (Screener `change` = % Fix) on branch `fix/screener-change-percent` (from main @ `c7a30ba`): TradingView `change` IS % change on NSE (`change_percent` null/unsupported) → "Short Term Breakouts" rewritten to `change>0, relative_volume_10d_calc>1, Perf.5D>3` → **250 stocks (was 0), 18/20 Chartink overlap**; all 57 `change_percent` template args mass-fixed to `change`; `Perf.5D` added to FILTER_FIELDS; `getTopMovers` gainers/losers/active fixed; advanced route `percentChange ?? change`; UI `change` labeled "Change (%)" with ₹ derived from %. **All verification passed**: 45 screener tests, tsc clean on 6 touched files, Playwright "250 stocks found · 574ms" + sortable % values + zero console errors. Docs updated. **Remaining: commit 6 files → push → PR (never auto-merge)** — user's Playwright files (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) must stay untracked/untouched — see `.agents/session-todos.md`.
 
 ---
 
