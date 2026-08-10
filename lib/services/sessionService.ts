@@ -90,13 +90,17 @@ export async function createUserSession(params: CreateSessionParams): Promise<st
 }
 
 /**
- * Invalidate a session by token
+ * Invalidate a session by its record id (UUID) or session token.
+ * The admin UI passes the record id; the auth signOut flow passes the session token.
  */
-export async function invalidateSession(sessionToken: string): Promise<boolean> {
+export async function invalidateSession(sessionIdOrToken: string): Promise<boolean> {
   try {
     const result = await prisma.userSession.updateMany({
       where: {
-        sessionToken,
+        OR: [
+          { id: sessionIdOrToken },
+          { sessionToken: sessionIdOrToken },
+        ],
         isActive: true,
       },
       data: {
@@ -106,7 +110,7 @@ export async function invalidateSession(sessionToken: string): Promise<boolean> 
 
     logger.info({ 
       msg: "Session: Invalidated session", 
-      sessionToken: sessionToken.substring(0, 8) + "...",
+      sessionToken: sessionIdOrToken.substring(0, 8) + "...",
       count: result.count
     });
 

@@ -8,21 +8,21 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-08) — v3.5.3: Playwright E2E Suite + CI + Docs
+## Current Session (2026-08-10) — v3.5.4: Fix #69 session persistence (branch `fix/prod-issues-68-69`)
 
-**Branch**: `fix/screener-change-percent` (PR #85 OPEN — 4 commits: `b692d64` (v3.5.2 fix), `2daf72a` (v3.5.2 docs), `b810998` (e2e suite + CI + docs), `7d2b745` (CodeQL permissions fix))
+**Branch**: `fix/prod-issues-68-69` (base: main @ PR #85 merged). NOT yet merged — user approves PR.
 
 ### Completed
-- [x] Root-caused + fixed all e2e failures: Firefox `xl` nav viewport (1440×900), WebKit `fill()` on controlled number inputs (keystrokes), single-threaded dev-server nav starvation (serial + `noWaitAfter` + 60s + retries), live-marquee flakiness (assertion removed)
-- [x] Full suite GREEN: 87/89 first attempt + 2 flaky passing on retry #1 (env issues); 317 Jest tests pass; e2e files typecheck clean
-- [x] CI workflow `.github/workflows/playwright.yml`: timescale service + migrate deploy + seed + playwright install + artifact
-- [x] Docs: `.agents/docs/playwright-e2e.md`, `playwright-e2e` skill ×2, playwright-cli skill cross-refs + MCP guidance, AGENT-SKILL-MATRIX row, AGENTS.md (v3.5.3 row/commands/lessons/skills), `.agents/CHANGELOG.md` + `versions-v3.md`, README badge + section, Primer.md (status + Session 14), agent-memory.md, Lessons.md (Lesson 55)
-- [x] **Committed + pushed everything to PR #85** (`b810998`, pushed via SSH — HTTPS OAuth token lacks `workflow` scope): e2e/ + playwright.config.ts + workflow + docs + skill files + README + AGENTS.md + .gitignore + package.json + netlify.toml → reported merge-ready (never auto-merge)
-- [x] Netlify secrets-scan hardening: `e2e` added to `SECRETS_SCAN_OMIT_PATHS`; e2e creds moved to `E2E_DEMO_EMAIL`/`E2E_DEMO_PASSWORD` env pattern (user chose "Both")
-- [x] GitHub Advanced Security CodeQL fix: added `permissions: contents: read` to `playwright.yml` (Medium finding) — committed `7d2b745` + pushed via SSH; PR #85 now has 4 commits, merge-ready
+- [x] Prod UI audit (live tradenext6.netlify.app, demo + admin): Screener v3.5.2 fix verified deployed (2,000 stocks, "Last synced from TradingView: 8/10/2026 2:19:30 PM", change = value + %); Recommendations still stale "Last updated: 19/7/2026"; DB Logs tab now populated (624 entries Aug 7-10 — #68 largely fixed by v3.5.0 trackAiCall deploy); Server Log Files tab still "No log files found" (serverless FS limitation); Rate Limits tab transient 500 (cold-start, direct fetch 200)
+- [x] #69 root-cause confirmed: `createUserSession()` never called anywhere; `lib/auth.ts` events only wrote audit logs
+- [x] **#69 fix implemented**: `lib/auth.ts` `jwt` callback now calls `createUserSession()` at login (IP via `x-forwarded-for`/`x-real-ip`, UA, derived deviceInfo from UA), stores returned token in JWT claim `dbSessionToken`; `events.signOut` invalidates via `invalidateSession()`; `invalidateSession` in `lib/services/sessionService.ts` now matches by record id (admin UI) OR sessionToken (signOut)
+- [x] Tests: `lib/__tests__/sessionService.test.ts` (18 tests) — create/invalidate-by-id-or-token/invalidateAll/activity/stats/tokenVersion. Full suite: **335 passed, 0 failures** (27 suites)
+- [x] Verified locally with Playwright + DB probes: login → row created with IP/UA/device ("Chrome on Windows"), 30d expiry; server-side signOut POST → `isActive: false` + LOGOUT audit; `/api/admin/sessions` now returns `{total:2, active:1, expired:1, usersWithSessions:1}` + full session rows (was all-zero)
+- [x] BUGS.md updated: #68 DB logs populated (serverless FS note), #69 in-progress row, stale recs ~22d, rate-limits transient 500, screener verified
 
-### Pending (carried forward from v3.5.2/v3.5.1)
-- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window
+### Pending (carried forward)
+- [ ] Get user approval → push `fix/prod-issues-68-69` (SSH) → create PR for #69 fix; NEVER auto-merge
+- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window (still 0 successful runs since Jul 19)
 - [ ] Re-seed demo holdings on prod
 - [ ] F&O Analytics UI (services + API done, UI pending)
-- [ ] Fix prod issues #68 (monitoring logs — DB Logs tab likely fixed by OPENROUTERKEY; Server Logs file tab still serverless-FS-limited) + #69 (sessions — `createUserSession` never wired into auth) — still open
+- [ ] #68 remaining: Server Log Files tab serverless-aware notice ("FS-based logging unavailable on serverless — use DB Logs tab")
