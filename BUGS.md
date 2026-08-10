@@ -8,9 +8,10 @@
 
 | # | Issue | Severity | GitHub | Status |
 |---|-------|----------|--------|--------|
-| 1 | **Prod: server/DB logs empty** on `/admin/utils/monitoring` (works locally) — FS-based log tab can't work on serverless; DB logger not wired to all sinks | High | [#68](https://github.com/luckyhegde6/TradeNext/issues/68) | Open |
-| 2 | **Prod: admin sessions page empty** — `createUserSession`/`updateSessionActivity` are never called, so `user_sessions` table stays empty | High | [#69](https://github.com/luckyhegde6/TradeNext/issues/69) | Open |
-| 3 | **Recommendations data stale (17 days)** — daily rec cron not producing successful runs since Jul 19; txn-timeout likely (fixed locally, awaiting deploy) | High | — | Open |
+| 1 | **Prod: Server Log Files tab empty on `/admin/utils/monitoring`** — FS-based log tab can't work on serverless (no persistent FS). **DB Logs tab is now populated** (624 entries Aug 7-10, verified 2026-08-10) — persistence path fixed by v3.5.0 `trackAiCall` + OPENROUTERKEY deploy. Remaining work: make Server Log Files tab show a serverless-aware notice instead of silent "No log files found" | Medium | [#68](https://github.com/luckyhegde6/TradeNext/issues/68) | Open |
+| 2 | **Prod: admin sessions page empty** — `createUserSession` is never called, so `user_sessions` table stays empty; `/admin/sessions` shows Total 0 / Active 0 / Expired 0 / Users 0 (reproduced 2026-08-10 while admin was logged in). **Fix in progress on `fix/prod-issues-68-69`** — wire `createUserSession` into auth `jwt` callback + `invalidateSession` on `signOut` | High | [#69](https://github.com/luckyhegde6/TradeNext/issues/69) | Open |
+| 3 | **Recommendations data stale (~22 days)** — "Last updated: 19/7/2026" on prod (verified 2026-08-10); daily rec cron not producing successful runs since Jul 19; txn-timeout fixed locally awaiting deploy + run verification | High | — | Open |
+| 3a | **Monitoring: Rate Limits tab 500 (transient)** — `/api/admin/monitoring?type=rate-limits` threw 500 once during cold start (2026-08-10); immediate direct fetch returned 200 `"[]"` — intermittent cold-start flake, monitor | Low | — | Open |
 | 4 | **History cards render bare "🟡" + "%"** for ~600/643 stocks — `recommendation`/`confidence` null in DB (AI fell back to HOLD without persisting) | Medium | — | Open |
 | 5 | **643 recommendations too many** — cap to top 50 (`rankAndCapRecommendations` implemented locally, needs deploy) | Medium | — | Open |
 | 6 | ~~NSE Large Deals API returns empty data~~ (`/api/nse/deals`) — **RESOLVED** via `mode` param | High | [#70](https://github.com/luckyhegde6/TradeNext/issues/70) | Resolved |
