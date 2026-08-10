@@ -1,8 +1,18 @@
 # TradeNext - Smart NSE Analytics & Portfolio Manager
 
 [![Netlify Status](https://api.netlify.com/api/v1/badges/78401e5d-b137-4b6d-94bb-ad1ec8de6b05/deploy-status)](https://app.netlify.com/projects/tradenext6/deploys)
+[![Playwright Tests](https://github.com/your-org/tradenext/actions/workflows/playwright.yml/badge.svg)](https://github.com/your-org/tradenext/actions/workflows/playwright.yml)
 
 **Live Demo:** https://tradenext6.netlify.app/
+
+## Latest Update - v3.5.3 (August 8, 2026)
+
+### Playwright E2E Test Suite (89 Tests, Cross-Browser)
+- **Committed suite** (`e2e/`): 11 spec files, 89 tests across Chromium, Firefox, WebKit (desktop 1440×900) + Mobile Chrome (Pixel 5) — login, header nav, home, screener + advanced screener (regression guard for the v3.5.2 `change`=% fix), recommendations, portfolio, watchlist, alerts, profile, responsive
+- **Auth bootstrap**: `e2e/auth.setup.ts` logs in the demo user once → storage state reused by every project
+- **CI workflow**: `.github/workflows/playwright.yml` — TimescaleDB service container, `prisma migrate deploy` + seed, dev server, `npx playwright test`, HTML report artifact (30 days)
+- **Commands**: `npm run test:e2e` (full suite) · `npm run test:e2e:ui` (UI mode) · `npx playwright show-report` (last report) · `npx playwright show-trace <file>` (traces)
+- **Docs**: `.agents/docs/playwright-e2e.md` (implementation + agent guide, report/Trace Viewer workflow, troubleshooting playbook)
 
 ## Latest Update - v3.5.0 (August 7, 2026)
 

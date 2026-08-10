@@ -8,6 +8,8 @@
 
 | Ver | Date | Summary |
 |-----|------|---------|
+| **v3.5.3** | Aug 8 2026 | Playwright E2E suite (`e2e/`, 89 tests): cross-browser (Chromium/Firefox/WebKit @1440×900) + Mobile Chrome (Pixel 5) + auth-storage projects; regression guard for the v3.5.2 screener fix; nav/auth/portfolio/watchlist/alerts/profile/responsive specs; CI workflow `.github/workflows/playwright.yml` (timescale service + migrate/seed); docs `.agents/docs/playwright-e2e.md` + `playwright-e2e` skill (machine + human); README badge; root causes: Firefox `xl` nav needs >1280px viewport, WebKit drops `fill()` on controlled number inputs, single-threaded dev-server load → serial nav + `noWaitAfter` + retries |
+| **v3.5.2** | Aug 8 2026 | Screener fix: TradingView `change` field IS % change on NSE (`change_percent` null/unsupported → ~60 templates silently matched 0). "Short Term Breakouts" rewritten to validated TV-native proxy (`change>0, relative_volume_10d_calc>1, Perf.5D>3`) → **250 stocks (was 0), 18/20 Chartink overlap**; mass-fix all 57 `change_percent`→`change` template args; `Perf.5D` added to FILTER_FIELDS; `getTopMovers` gainers/losers/active filters fixed; advanced-route `percentChange ?? change`; UI `change` labeled "Change (%)" with ₹ derived from % |
 | **v3.5.1** | Aug 7 2026 | Post-merge carry-forward: Performance tab target/SL ₹0.00 fix (AI fallback now price-based `price*1.1`/`price*0.95` in `recommendation-agent.ts`; `normalizeRecommendation` no longer persists literal 0), backfill script `scripts/backfill-recommendation-targets.ts` (local run fixed 149 trackers), SSE live prices wired into HoldingsTable + Watchlist (+ ● Live badge, MarqueeBanner 30s refresh), `useLivePrices` infinite-loop fix (`symbolsRef` stable callbacks), HistoryTab/top-stocks null-coalescing (no more bare "🟡 %"), 4 new hook tests (317 total) |
 | **v3.5.0** | Aug 7 2026 | Recommendation Performance Tracking & Archival: 3-status lifecycle (`tracking → target_achieved/stop_loss_hit → archived` 360d), 4 PM IST Mon–Fri SYSTEM perf-check cron (`30 10 * * 1-5`), `RecommendationArchive` snapshot table + `DailyRecommendationStock.trackerId` SetNull, weekday cron parser support, `triggeredBy: system`, categories extended to `btst|short|swing|medium|long`, public Performance tab (dynamic columns, sort, filters, pagination), sort-enum fix (10 keys), 24 new tests + session follow-up: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) + Run History Manual/System badge, Today's Picks BUY/SELL filter (All/Buy/Sell pills), AI monitoring persistence fix (awaited `trackAiCall` + `memory\|database\|hybrid` reads), 21 rec-service tests (312 total) |
 | **v3.4.3** | Aug 6 2026 | Subsystem architecture docs in `.agents/docs/` (recs engine, tasks/cron/workers, monitoring, alerts) with Mermaid diagrams + Agent Hints |
@@ -63,6 +65,10 @@ npm run build            # Migrations + Next.js build
 npm run quickbuild       # Next.js build only
 npm run test             # Jest — RUN ALONE, never chained with ';' (Windows quirk)
 npm run test:watch       # Watch mode
+npm run test:e2e         # Playwright e2e — full suite (all browsers/projects) against dev server on :3000
+npm run test:e2e:ui      # Playwright UI mode (watch/filter/step)
+npx playwright show-report   # Open last Playwright HTML report
+npx playwright show-trace test-results/<dir>/trace.zip   # View a trace
 npm run lint             # ESLint
 npx tsc --noEmit         # Typecheck production files
 npx prisma generate      # Regenerate client after schema change
@@ -108,7 +114,7 @@ git config core.hooksPath .githooks    # Enable versioned hooks (fresh clone)
 | `.agents/linear-history.md` | Git flow & branching strategy (warn-only main) |
 | `.agents/code-hygiene.md` | Code quality rules (ponytail minimal-code style) |
 | `.agents/documentation-standards.md` | Documentation standards |
-| `.agents/docs/` | Subsystem deep-dives (recommendations, tasks/cron/workers, monitoring, alerts) — read before editing those subsystems |
+| `.agents/docs/` | Subsystem deep-dives (recommendations, tasks/cron/workers, monitoring, alerts, playwright-e2e) — read before editing those subsystems |
 | `.agents/AGENT-SKILL-MATRIX.md` | Agent ↔ Skill ↔ Command mapping matrix |
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
 | `.agents/handoffs/flow/` | Handoff flows: session-cycle, agent-to-agent, agent-to-human, error-recovery |
@@ -135,7 +141,7 @@ git config core.hooksPath .githooks
 
 ## Plugins & MCP (how agents extend TradeNext)
 
-`.opencode/opencode.json`: plugins `opencode-helicone-session`, `opencode-wakatime`; MCP: Context7 (library docs), Playwright (UI testing), gh_grep (code search), sequential-thinking, memory (knowledge graph), chrome-devtools, filesystem.
+`.opencode/opencode.json`: plugins `opencode-helicone-session`, `opencode-wakatime`; MCP: Context7 (library docs), Playwright (UI testing — agentic browser automation for exploratory checks; scripted regression guards live in the `playwright-e2e` skill/`e2e/` suite), gh_grep (code search), sequential-thinking, memory (knowledge graph), chrome-devtools (performance/Lighthouse/network), filesystem.
 
 ## Skills, Agents & Commands (extensible system)
 
@@ -157,6 +163,7 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `wiki-creator` | wiki-publisher | `/wiki-publish` | publish GitHub wiki pages (GitHub-renderer-safe mermaid) |
 | `bug-finder` | bug-hunter | `/find-bugs` | hunt/reproduce/verify bugs, layer contract audits |
 | `ux-enhancer` | ux-designer | `/ux-audit` | UI/UX audit (states/responsive/dark-mode) + enhancement |
+| `playwright-e2e` | — | — | committed e2e suite (`e2e/`, `npm run test:e2e`): regression guards, cross-browser (Chromium/Firefox/WebKit) + Mobile Chrome, report/trace diagnostics — see `.agents/docs/playwright-e2e.md` |
 
 **Adding a new skill**: create `.opencode/skills/<name>/SKILL.md` → mirror `.agents/skills/<name>.md` → profile + command → wire `opencode.json` → update matrix + this table.
 
@@ -238,6 +245,12 @@ syncService.syncFinancials(symbol, data).catch(err =>
 1. Start dev server (`npm run local`); test login (demo credentials); verify UI renders; check responsive (375/768/1920); check console errors; **cleanup dev server** (port 3000/3001) after.
 2. **Never kill port 4096 (OpenCode web UI)** or DB ports.
 3. `npx playwright-cli snapshot --filename=.playwright-cli/snapshots/test.yaml` — ALWAYS use `--filename` to avoid root junk.
+4. **Committed e2e suite** (`e2e/`, `npm run test:e2e`) is the regression guard — run it after UI/UX/screener/auth changes and before merge/PR. Deep-dive: `.agents/docs/playwright-e2e.md`.
+5. **Browser quirks** (all captured in the config/specs — don't regress):
+   - Desktop viewport **1440×900** — Firefox's `hidden xl:flex` header nav needs ≥1280px but Firefox measures scrollbar-inclusive, so the default 1280×720 hides it.
+   - **WebKit drops `fill()` on controlled `<input type="number">`** (React restores the old value) — use click → `ControlOrMeta+a` → `Delete` → `pressSequentially()` and verify with `toHaveValue`.
+   - The Next dev server is **single-threaded** — heavy TradingView scans starve parallel SSR navigations. `navigation.spec.ts` is serial with `waitForURL` + `noWaitAfter`; `retries: CI ? 2 : 1`, `workers: CI ? 1 : 2`.
+   - **Never assert live NSE values** (prices/marquee/indices) — `MarqueeBanner` renders `null` when the NSE marquee is slow; assert containers/contracts instead.
 
 ### Switch Case Best Practices
 Always use block scope `{}` in switch cases to avoid variable hoisting:

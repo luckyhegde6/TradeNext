@@ -2,6 +2,29 @@
 
 > Legacy feature deep-dive. Index: [../CHANGELOG.md](../CHANGELOG.md).
 
+## Fix (v3.5.2): `change` = % semantics for NSE — 0 → 250 template matches
+
+### Root Cause
+TradingView's `change` field **is** the percent change for NSE (RELIANCE 1334.8 vs prev 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink). `change_percent` is null/unsupported as an NSE column, TV-side filter, AND sort key (probe `change_percent > 1` → 0 rows). Consequence: ~60 screener templates using `change_percent` silently matched 0 stocks, and `getTopMovers("gainers")` returned `[]`.
+
+### Fixes Applied
+| Area | Change |
+|------|--------|
+| **Short Term Breakouts template** | `change_percent > 0, volume > 100000, close > 0` → `change > 0, relative_volume_10d_calc > 1, Perf.5D > 3` (L503–511). Live: 2000 rows, 627ms, **250 matched** (was 0), 18/20 Chartink overlap. |
+| **Mass-fix** | All 57 remaining `change_percent` template args → `change` (0 remain; grep-verified). |
+| **`Perf.5D` field** | Added to `FILTER_FIELDS` (`condition-tree.ts`) + `FilterBuilder` FIELD_OPTIONS — was missing, so `validateFilterGroup` would have 400'd the template. |
+| **`getTopMovers`** | `gainers: change > 3`, `losers: change < -3`, `active: volume > 1,000,000` (`tradingview-service.ts`). |
+| **Advanced route** | `percentChange ?? change` (TV `change` is already %); removed `(change/(close-change))*100` formula. |
+| **UI semantics** | `change` labeled "Change (%)" (was ₹); ₹ derived `close*pct/(100+pct)` in results; % Change column sortable. |
+
+### Why Not Server-Side Lookback Enrichment
+`daily_prices` has only 12 rows; NSE history fetch 4.4s/symbol → 882-candidate universe ≈ 65 min; TV has no lookback columns (~50 probed). TV pre-filter `change>0 & vol>50k` → 882 stocks in ~1s — the native proxy is the right approach.
+
+### Verification
+45 screener tests pass; tsc clean on all 6 touched files; Playwright: template loads 3 conditions, Run Scan → "250 stocks found · 574ms", % Change sortable with real values (SBIN +1.12%, MOTHERSON +8.71%, TATATECH +8.89%, NEULANDLAB +6.09%, AVALON +10.75%), zero console errors.
+
+---
+
 ## New Features (v1.16.0)
 
 ### Advanced Screener System

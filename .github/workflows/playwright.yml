@@ -1,0 +1,62 @@
+name: Playwright Tests
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    # TimescaleDB service — the Prisma migrations require the `timescaledb`
+    # extension + `create_hypertable`, so a plain Postgres container will not work.
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradenext
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tradenext"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradenext
+      # NextAuth requires a non-empty secret (any value is fine for CI)
+      AUTH_SECRET: ci-playwright-e2e-secret
+      # Seed defaults match these; keep them explicit so CI is reproducible
+      DEMO_PASSWORD: demo123
+      ADMIN_EMAIL: admin@tradenext6.app
+      ADMIN_PASSWORD: admin123
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+        cache: npm
+    - name: Install dependencies
+      run: npm ci
+      # postinstall runs `prisma generate`, so the client is ready after this step
+    - name: Apply database migrations
+      run: npx prisma migrate deploy
+    - name: Seed database (demo user + sample data)
+      run: npx prisma db seed
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+    # The playwright.config.ts webServer block starts `npm run dev` on CI and
+    # waits for http://localhost:3000 before the first test.
+    - name: Run Playwright tests
+      run: npx playwright test
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30

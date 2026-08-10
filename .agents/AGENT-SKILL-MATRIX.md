@@ -33,7 +33,8 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | bug-finder | `.opencode/skills/bug-finder/` | `.agents/skills/bug-finder.md` | hunt/reproduce/verify bugs |
 | ux-enhancer | `.opencode/skills/ux-enhancer/` | `.agents/skills/ux-enhancer.md` | UI/UX audit + enhancement |
 | nse-integration | `.opencode/skills/nse-integration/` | `.agents/skills/nse-integration.md` | NSE API integration |
-| playwright-cli | `.opencode/skills/playwright-cli/` | `.agents/skills/playwright-cli/` | browser testing |
+| playwright-cli | `.opencode/skills/playwright-cli/` | `.agents/skills/playwright-cli/` | browser testing (exploratory CLI) |
+| playwright-e2e | `.opencode/skills/playwright-e2e/` | `.agents/skills/playwright-e2e/` | committed e2e suite (`e2e/`, `npm run test:e2e`) — regression guards, cross-browser + mobile |
 
 ## Command inventory
 

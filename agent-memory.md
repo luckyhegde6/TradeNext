@@ -35,6 +35,34 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-08-08 | Playwright E2E Suite + CI + Docs (v3.5.3)
+- **Action**: Hardened the committed e2e suite to green, added CI workflow + comprehensive Playwright docs/skills, prepared commit to open PR #85.
+- **Branch**: `fix/screener-change-percent` (PR #85 open; v3.5.2 app fix committed `b692d64` + docs `2daf72a`; e2e stack was user-owned/untracked)
+- **Root causes fixed while hardening** (all encoded in `playwright.config.ts` + specs — don't regress):
+  - **Firefox `xl` nav**: header nav is `hidden xl:flex` (≥1280px); Firefox measures media queries scrollbar-inclusive so the default 1280×720 never shows it → viewport override **1440×900** on all desktop projects.
+  - **WebKit `fill()` on controlled `<input type="number">`**: WebKit drops the programmatic fill (React restores old value) — advanced-screener empty-state silently ran default `close > 0` ("2000 stocks found") → switched to click → `ControlOrMeta+a` → `Delete` → `pressSequentially('99999999')` + `toHaveValue`.
+  - **Single-threaded dev-server starvation**: heavy TradingView scans starve parallel SSR navs → `navigation.spec.ts` rewritten to `mode: 'serial'` + `Promise.all([waitForURL, click({ noWaitAfter: true })])` (URL commit, not load) + `URL_TIMEOUT = 60_000`, `HEADING_TIMEOUT = 30_000`; `retries: CI ? 2 : 1`, `workers: CI ? 1 : 2`.
+  - **Live-data flakiness**: `MarqueeBanner` renders `null` when `/api/nse/marquee` is slow → removed marquee assertion from `home.spec.ts` (never assert live NSE values).
+- **Full suite GREEN**: 87/89 first attempt + 2 flaky passing on retry #1 (webkit nav Contact SSR starvation; Firefox `RenderCompositorSWGL` headless teardown crash — both environmental). Unit: 317 passed / 26 suites / 1 pre-existing skip. `e2e/` files typecheck clean (pre-existing tsc errors only in jest-dom test files + `scripts/tmp-*`).
+- **CI workflow**: `.github/workflows/playwright.yml` hardened — `timescale/timescaledb:latest-pg16` service (migrations `0001_timescale_init.sql` + `202512_add_market_tables.sql` require `CREATE EXTENSION timescaledb` + `create_hypertable`), `DATABASE_URL` + `AUTH_SECRET` env, `prisma migrate deploy` + `npx prisma db seed` (seed is data-only, no NSE fetch), `npx playwright install --with-deps`, dev server auto-started by the config webServer block, HTML report artifact 30d, `workflow_dispatch` added.
+- **Docs**: `.agents/docs/playwright-e2e.md` (implementation + agent workflow + report/Trace Viewer + troubleshooting playbook), `playwright-e2e` skill (machine `.opencode/skills/playwright-e2e/SKILL.md` + human mirror `.agents/skills/playwright-e2e/SKILL.md`), `playwright-cli` skill ×2 cross-references + MCP tool guidance (`playwright` MCP for exploratory/agentic, `chrome-devtools` for perf/Lighthouse), AGENT-SKILL-MATRIX row, AGENTS.md (v3.5.3 row, e2e commands, focused-skills table, Plugins & MCP, lessons), `.agents/CHANGELOG.md` + `versions-v3.md` v3.5.3 entry, README.md CI badge + "Latest Update - v3.5.3" section, Primer.md (status + Session 14).
+- **Files Created**: `e2e/` (11 specs), `playwright.config.ts`, `.github/workflows/playwright.yml`, `.agents/docs/playwright-e2e.md`, `.opencode/skills/playwright-e2e/SKILL.md`, `.agents/skills/playwright-e2e/SKILL.md`
+- **Files Modified**: `package.json` (+`test:e2e`, `test:e2e:ui`, `@playwright/test` devDep), `package-lock.json`, `.gitignore`, `AGENTS.md`, `.agents/CHANGELOG.md`, `.agents/changelog/versions-v3.md`, `.agents/AGENT-SKILL-MATRIX.md`, `.opencode/skills/playwright-cli/SKILL.md`, `.agents/skills/playwright-cli/SKILL.md`, `README.md`, `Primer.md`, `agent-memory.md`
+- **Lesson**: e2e flakiness on a live-data app is almost always (1) viewport/media-query mismatch, (2) WebKit controlled-input quirks, or (3) single-threaded dev-server load starvation — fix the root cause in config/specs, don't loosen assertions or bump retries to hide real regressions.
+- **Status**: Docs done; commit everything to open PR #85 (`fix/screener-change-percent`) — never auto-merge.
+
+### 2026-08-08 | Screener `change` = % Fix (v3.5.2) — 0 → 250 template matches
+- **Action**: Root-caused and fixed ~60 screener templates silently matching 0 stocks on NSE (TradingView `change` IS % change; `change_percent` null/unsupported). Rewrote "Short Term Breakouts" to a validated TV-native proxy → 250 stocks (was 0), 18/20 Chartink overlap.
+- **Branch**: `fix/screener-change-percent` (from main @ `c7a30ba`)
+- **Root cause**: TV `change` = % (RELIANCE 1334.8 vs 1325 = +0.74%; EEPL +20.0%, SBCL +19.99% — matches Chartink); probe `change_percent > 1` → 0 rows.
+- **Template rewrite**: `thr("change","gt",0,"relative_volume_10d_calc","gt",1,"Perf.5D","gt",3)` (L503–511); mass-fixed all 57 remaining `change_percent` → `change` args (0 remain).
+- **Field + service + route + UI**: `Perf.5D` added to `FILTER_FIELDS` + FilterBuilder; `getTopMovers` gainers/losers/active fixed; advanced route `percentChange ?? change`; `change` labeled "Change (%)", ₹ derived `close*pct/(100+pct)` in results; % Change column sortable.
+- **Rejected**: server-side NSE history lookback enrichment (~65 min for 882 candidates; TV pre-filter does it in ~1s).
+- **Verification**: 45 screener tests pass; tsc clean on 6 touched files; Playwright — "250 stocks found · 574ms", SBIN +1.12%, MOTHERSON +8.71%, TATATECH +8.89%, zero console errors.
+- **Files Modified**: `lib/screener/screener-templates.ts`, `lib/screener/condition-tree.ts`, `lib/services/tradingview-service.ts`, `app/api/screener/advanced/route.ts`, `app/components/screener/ScannedResultsTable.tsx`, `app/components/screener/FilterBuilder.tsx`
+- **Docs Updated**: AGENTS.md (v3.5.2 row), `.agents/CHANGELOG.md` + `versions-v3.md`, CHANGELOG.md ([3.5.2]), TODO.md, Primer.md (status + Session 13), `.agents/changelog/screener.md`, `.agents/session-todos.md`, `.agents/handoffs/active/latest.md`
+- **Status**: Commit pending — 6 files; user's Playwright files left untracked/untouched.
+
 ### 2026-08-06 | Git Workflow & Agent Operating Model (v3.4.2) — Tracked Hooks + Gardenify Docs Port
 - **Action**: Applied gardenify git/agentic patterns — versioned `.githooks/` directory + git-flow/code-hygiene/documentation docs + AGENTS.md operating model.
 - **Branch**: main (v3.4.2)

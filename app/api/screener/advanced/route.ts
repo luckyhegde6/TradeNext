@@ -83,13 +83,14 @@ export async function POST(req: Request) {
       offset: body.offset || 0,
     });
 
-    // 6. Normalize response — ensure percentChange field
+    // 6. Normalize response — TradingView's `change` field is already the
+    // percent change for NSE (the `change_percent` column is not exposed).
     const normalized = filtered.map((s: Record<string, unknown>) => {
       const close = typeof s.close === 'number' ? s.close : parseFloat(String(s.close || 0));
       const change = typeof s.change === 'number' ? s.change : parseFloat(String(s.change || 0));
       return {
         ...s,
-        percentChange: s.percentChange ?? s.change_percent ?? (close > 0 ? (change / (close - change)) * 100 : 0),
+        percentChange: s.percentChange ?? change,
         close,
         change,
       };

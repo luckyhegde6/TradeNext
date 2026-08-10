@@ -345,8 +345,9 @@ export const TECHNICAL_COLUMNS = [
  */
 export async function getTopMovers(type: "gainers" | "losers" | "active", limit = 20): Promise<TradingViewScanResult[]> {
   const filterMap = {
-    gainers: { left: "change_percent", operation: "greater", right: 3 },
-    losers: { left: "change_percent", operation: "less", right: -3 },
+    // TV's `change` field IS the percent change for NSE (change_percent is null)
+    gainers: { left: "change", operation: "greater", right: 3 },
+    losers: { left: "change", operation: "less", right: -3 },
     active: { left: "volume", operation: "egreater", right: 1000000 },
   };
 

@@ -25,6 +25,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "generate-client": "node scripts/generate-client.js",
     "ingest:run": "NODE_ENV=development node ./scripts/runIngest.js",
     "ingest:zip": "ts-node scripts/ingest_nse_zip.ts",
@@ -91,6 +93,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@netlify/plugin-nextjs": "^5.15.8",
+    "@playwright/test": "^1.62.1",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",

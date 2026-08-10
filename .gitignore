@@ -70,3 +70,9 @@ server_logs/
 .playwright-mcp
 test-results/
 .playwright
+
+# Playwright
+node_modules/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

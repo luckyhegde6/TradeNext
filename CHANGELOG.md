@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release features
 
+## [3.5.2] - 2026-08-08
+
+### Fixed
+- **Screener templates silently matched 0 stocks**: TradingView's `change` field IS the percent change for NSE; `change_percent` is null/unsupported as column, filter, and sort key (probe `change_percent > 1` → 0 rows). ~60 templates using `change_percent` all matched nothing; `getTopMovers("gainers")` returned `[]`.
+- **"Short Term Breakouts" template rewritten** to a validated TradingView-native proxy: `change > 0` + `relative_volume_10d_calc > 1` + `Perf.5D > 3` → **250 stocks matched (was 0)**, 18/20 overlap with Chartink's list. `Perf.5D` field added to `FILTER_FIELDS` + FilterBuilder.
+- **Mass-fix** `change_percent` → `change` across all ~57 remaining template filter groups.
+- **`getTopMovers`** filters now use `change` (gainers > 3%, losers < -3%, active volume > 1M).
+- **Advanced route normalization**: `percentChange ?? change` (was ₹-based formula); TV `change` is already %.
+- **UI change-field semantics**: `change` labeled "Change (%)" (was ₹), ₹ amount derived from % in results table (SBIN `+12.2 +1.12%` verified), % Change column sortable.
+
 ## [Unreleased]
 
 ### Added

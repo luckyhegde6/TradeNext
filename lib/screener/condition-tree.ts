@@ -23,7 +23,7 @@ export const FILTER_FIELDS = {
   open: { label: "Open", category: "price", type: "number" },
   high: { label: "High", category: "price", type: "number" },
   low: { label: "Low", category: "price", type: "number" },
-  change: { label: "Change (₹)", category: "price", type: "number" },
+  change: { label: "Change (%)", category: "price", type: "number" },
   change_percent: { label: "% Change", category: "price", type: "number" },
   "52_week_high": { label: "52W High", category: "price", type: "number" },
   "52_week_low": { label: "52W Low", category: "price", type: "number" },
@@ -72,6 +72,7 @@ export const FILTER_FIELDS = {
   Beta_3Y: { label: "Beta (3Y)", category: "technical", type: "number" },
 
   // Performance
+  "Perf.5D": { label: "5D Performance", category: "performance", type: "number" },
   "Perf.W": { label: "1W Performance", category: "performance", type: "number" },
   "Perf.M": { label: "1M Performance", category: "performance", type: "number" },
   "Perf.3M": { label: "3M Performance", category: "performance", type: "number" },
