@@ -12,6 +12,7 @@ import {
   getTaskStats,
 } from "@/lib/services/worker/task-orchestrator";
 import { executeTask } from "@/lib/services/worker/worker-service";
+import { recordCronRun, RECOMMENDATION_CRON_NAME, RECOMMENDATION_PERFORMANCE_CRON_NAME } from "@/lib/services/recommendationCronService";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,31 @@ const taskActionSchema = z.object({
   action: z.enum(["runNow", "cancel", "retry", "delete"]),
   taskId: z.string().min(1),
 });
+
+/**
+ * Best-effort ledger update for manually re-run recommendation tasks.
+ * Only tasks WITHOUT a cronJobId are recorded here — tasks spawned via
+ * spawnCronTask (cronJobId set) are already counted at spawn time, so
+ * recording again would double-count. Hosted on-serverless (Netlify) the
+ * scheduled path runs directly (netlify/functions/run-cron-background →
+ * recordCronRun), and this route covers the admin "Run Now"/"Retry" path
+ * (spawnRegularTask → PATCH runNow/retry → executeTask).
+ */
+async function recordManualRunLedger(task: { taskType: string; cronJobId: string | null }, result: { success: boolean }) {
+  if (task.cronJobId) return; // already counted at spawn
+  const jobName =
+    task.taskType === "recommendations"
+      ? RECOMMENDATION_CRON_NAME
+      : task.taskType === "recommendation_performance"
+        ? RECOMMENDATION_PERFORMANCE_CRON_NAME
+        : null;
+  if (!jobName) return;
+  try {
+    await recordCronRun(jobName, result.success);
+  } catch (error) {
+    logger.warn({ msg: "Failed to record manual run in cron ledger (non-fatal)", taskType: task.taskType, error });
+  }
+}
 
 // GET - List worker tasks
 export async function GET(req: Request) {
@@ -275,6 +301,9 @@ export async function PATCH(req: Request) {
         // Execute the task
         const result = await executeTask(taskId, task.taskType, task.payload as Record<string, unknown>);
 
+        // Record manual recommendation runs into the SYSTEM cron ledger
+        await recordManualRunLedger(task, result);
+
         return NextResponse.json({ 
           success: true, 
           action: "runNow",
@@ -325,6 +354,9 @@ export async function PATCH(req: Request) {
 
         // Execute the task
         const result = await executeTask(taskId, task.taskType, task.payload as Record<string, unknown>);
+
+        // Record manual recommendation runs into the SYSTEM cron ledger
+        await recordManualRunLedger(task, result);
 
         return NextResponse.json({ 
           success: true, 

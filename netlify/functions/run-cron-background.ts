@@ -49,12 +49,24 @@ export default async (req: Request) => {
     const task = cron.schedule(
       "* * * * * *",
       async () => {
+        // Ledger helper: records the run against the SYSTEM-managed CronJob
+        // so Admin → Utils → Cron shows lastRun/runCount/success/failure.
+        // Best-effort; never throws.
+        const recordRun = (success: boolean) =>
+          import("../../lib/services/recommendationCronService").then((m) =>
+            m.recordCronRun(
+              action === "performance" ? m.RECOMMENDATION_PERFORMANCE_CRON_NAME : m.RECOMMENDATION_CRON_NAME,
+              success,
+            ),
+          );
+
         try {
           if (action === "performance") {
             const { checkRecommendationPerformance } = await import(
               "../../lib/services/dailyRecommendationService"
             );
             const result = await checkRecommendationPerformance();
+            await recordRun(true);
             console.log(
               `[run-cron-background] performance done: checked=${result.checked} ` +
                 `targetAchieved=${result.targetAchieved} stopLossHit=${result.stopLossHit} ` +
@@ -65,6 +77,7 @@ export default async (req: Request) => {
               "../../lib/services/dailyRecommendationService"
             );
             const result = await runDailyRecommendations({ triggeredBy });
+            await recordRun(true);
             console.log(
               `[run-cron-background] recommendations done: runId=${result.runId} ` +
                 `totalStocks=${result.totalStocks} unique=${result.uniqueStocks} ` +
@@ -75,6 +88,7 @@ export default async (req: Request) => {
           resolve(new Response("ok", { status: 200 }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          await recordRun(false).catch(() => {}); // record the failure in the ledger
           console.error(`[run-cron-background] action=${action} failed: ${message}`, error);
           resolve(new Response(`failed: ${message}`, { status: 500 }));
         }

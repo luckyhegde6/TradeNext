@@ -15,6 +15,7 @@ import {
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
+import { loadConfig } from "./ai/config";
 import { getAICircuitBreaker, CircuitBreakerError } from "./ai/circuit-breaker";
 import { getRecommendationMetrics } from "./ai/performance-monitor";
 import { recordPrediction } from "./ai/prediction-tracker";
@@ -317,9 +318,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const circuitBreaker = getAICircuitBreaker();
     let aiResults: StockAnalysisResult[] = [];
 
+    // Resolve the effective AI config (DB `ai_config` Secret > env) so the admin's
+    // saved model selection actually reaches the recommendation pipeline. Without
+    // this, the pipeline fell back to the env-only default model and every run
+    // defaulted to HOLD when that model 404'd on OpenRouter.
+    const aiConfig = await loadConfig();
+
     try {
       const aiStart = Date.now();
-      aiResults = await circuitBreaker.call(() => analyzeStocks(aiInput));
+      aiResults = await circuitBreaker.call(() => analyzeStocks(aiInput, aiConfig));
       const aiMs = Date.now() - aiStart;
 
       // Record AI performance metrics

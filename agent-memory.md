@@ -35,6 +35,20 @@ echo "" >> agent-memory.md
 
 ## Activity Log
 
+### 2026-08-11 | Stale Recommendations (code) + Cron Ledger Fix + Session Memory Infra (v3.5.4)
+- **Action**: Root-caused and fixed (code-only, no deploy) the stale public recommendations page (all-HOLD runs) and the Admin cron ledger showing no runs; added mandatory per-session decisions/flow memory.
+- **Branch**: `fix/ai-config-cron-ledger` (from main @ `c995a10`)
+- **Root cause 1**: `dailyRecommendationService.ts` L322 called `analyzeStocks(aiInput)` with NO AI config → env-only default → DB `ai_config` Secret never reached pipeline → prod all-HOLD → BUY/SELL-filtered public page stale since Jul 19 (verified after API-side prod config was already fixed).
+- **Root cause 2**: `DEFAULT_MODEL`/`AVAILABLE_MODELS` pointed at nonexistent OpenRouter models (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free`, `inclusionai/ling-3.0-flash:free`) → HTTP 404 (verified vs live catalog, 399 models). New default: `nvidia/nemotron-3-ultra-550b-a55b:free`.
+- **Root cause 3**: `CronJob` ledger (`lastRun`/`runCount`/`successCount`/`failureCount`/`nextRun`) only written by `spawnCronTask`/resident scheduler (never on serverless); `successCount`/`failureCount` had NO writer; `netlify/functions/run-cron-background.ts` bypassed the ledger entirely.
+- **Fixes**: shared async `loadConfig()` (DB Secret > env, lazy prisma import) + pipeline passes config + test route deduped; `recordCronRun(jobName, success)` (name lookup, counters, nextRun via `calculateNextRun`, safe no-op) wired into `run-cron-background.ts` (success+failure) + admin PATCH runNow/retry via `recordManualRunLedger` (skips cronJobId-linked tasks).
+- **Memory infra**: `.agents/rules/session-decisions-flow.md` (MANDATORY decisions.md + flow.md) + `sessions/2026-08-11-c995a10/` (D1–D8).
+- **Tests**: new `lib/__tests__/recommendationCronService.test.ts` (5). Full suite: **340 passed / 11 skipped / 0 failures** (28 suites). tsc clean on touched production files; ESLint repo-wide blocked by pre-existing eslintrc circular-JSON config error (`next lint` removed in Next 16) — out of scope.
+- **Files Created**: `lib/__tests__/recommendationCronService.test.ts`, `.agents/rules/session-decisions-flow.md`, `.agents/sessions/2026-08-11-c995a10/decisions.md`, `.agents/sessions/2026-08-11-c995a10/flow.md`
+- **Files Modified**: `lib/services/ai/config.ts`, `lib/services/dailyRecommendationService.ts`, `app/api/admin/ai/test/route.ts`, `lib/services/recommendationCronService.ts`, `netlify/functions/run-cron-background.ts`, `app/api/admin/workers/route.ts`, `AGENTS.md`, `.agents/CHANGELOG.md`, `.agents/changelog/versions-v3.md`, `.agents/rules/README.md`, `.agents/rules/session-memory-rules.md`, `.agents/sessions/README.md`, `Primer.md`, `agent-memory.md`, `Lessons.md`, `BUGS.md`, `.agents/session-todos.md`, `.agents/handoffs/active/latest.md`
+- **Docs Updated**: AGENTS.md (v3.5.4 row), `.agents/CHANGELOG.md` + `versions-v3.md`, Primer.md (status + Session 15), `.agents/handoffs/active/latest.md` (rewritten v1.1), BUGS.md, `.agents/session-todos.md`
+- **Status**: commit pending on `fix/ai-config-cron-ledger`; no deploy this session (user explicit). Prod rerun (verify BUY/SELL picks + fresh public date) + cron-ledger verification deferred to a user-approved deploy session.
+
 ### 2026-08-08 | Playwright E2E Suite + CI + Docs (v3.5.3)
 - **Action**: Hardened the committed e2e suite to green, added CI workflow + comprehensive Playwright docs/skills, prepared commit to open PR #85.
 - **Branch**: `fix/screener-change-percent` (PR #85 open; v3.5.2 app fix committed `b692d64` + docs `2daf72a`; e2e stack was user-owned/untracked)

@@ -59,6 +59,9 @@
 | SSE Live Prices Wiring (v3.5.1) | [x] Complete (HoldingsTable + Watchlist + MarqueeBanner; useLivePrices loop fixed) |
 | History Tab Null-Guard (v3.5.1) | [x] Complete (top-stocks coalesce + HistoryTab "—") |
 | Screener `change` = % fix (v3.5.2) | [x] Complete (TV `change` IS % on NSE; `change_percent` unsupported → 57 templates mass-fixed, Short Term Breakouts rewritten → 250 stocks was 0, Perf.5D field added, getTopMovers fixed) |
+| Playwright E2E suite + CI (v3.5.3) | [x] Complete (89 tests, 5 projects, CI workflow) |
+| Stale recs AI-config plumbing (v3.5.4) | [x] Complete (loadConfig shared, pipeline passes config, DEFAULT_MODEL → nemotron-3-ultra-550b:free + refreshed catalog; committed on `fix/ai-config-cron-ledger`, **deploy pending**) |
+| Cron ledger fix (v3.5.4) | [x] Complete (recordCronRun wired into run-cron-background + admin runNow/retry; **deploy pending**) |
 
 ---
 

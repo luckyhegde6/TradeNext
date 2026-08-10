@@ -28,6 +28,80 @@ export interface EnsureRecommendationCronsResult {
   jobs: Array<{ name: string; taskType: string; cronExpression: string }>;
 }
 
+export interface RecordCronRunResult {
+  found: boolean;
+  lastRun?: Date | null;
+  runCount?: number;
+  successCount?: number;
+  failureCount?: number;
+  nextRun?: Date | null;
+}
+
+/**
+ * Record an execution of a SYSTEM-managed recommendation cron job.
+ *
+ * WHY THIS EXISTS:
+ * On Netlify (serverless) the actual scheduled runs execute directly via
+ * netlify/functions/run-cron-background.ts → runDailyRecommendations() /
+ * checkRecommendationPerformance() — they never pass through
+ * spawnCronTask() or the resident worker-engine scheduler loop, so the
+ * CronJob ledger (lastRun / runCount / successCount / failureCount /
+ * nextRun) stayed at defaults and the Admin → Utils → Cron page showed
+ * "no recent runs". successCount/failureCount previously had NO writer.
+ *
+ * This is the single ledger-writer for the real execution paths:
+ *   - netlify/functions/run-cron-background.ts (scheduled runs, success+failure)
+ *   - app/api/admin/workers/route.ts PATCH runNow/retry (manual runs for
+ *     tasks WITHOUT a cronJobId — cronJobId-linked tasks are already counted
+ *     at spawn time by spawnCronTask, so we skip them to avoid double-count)
+ *
+ * Job is located by stable name (idempotent with ensureRecommendationCrons).
+ * Safe no-op (found:false) when the job does not exist — never throws.
+ */
+export async function recordCronRun(jobName: string, success: boolean): Promise<RecordCronRunResult> {
+  try {
+    const job = await prisma.cronJob.findFirst({ where: { name: jobName } });
+    if (!job) {
+      logger.warn({ msg: "recordCronRun: cron job not found (no-op)", jobName });
+      return { found: false };
+    }
+
+    const nextRun = calculateNextRun(job.cronExpression);
+    const updated = await prisma.cronJob.update({
+      where: { id: job.id },
+      data: {
+        lastRun: new Date(),
+        runCount: { increment: 1 },
+        successCount: success ? { increment: 1 } : undefined,
+        failureCount: success ? undefined : { increment: 1 },
+        nextRun,
+      },
+    });
+
+    logger.info({
+      msg: "Recorded cron job run",
+      jobName,
+      success,
+      runCount: updated.runCount,
+      successCount: updated.successCount,
+      failureCount: updated.failureCount,
+      nextRun: updated.nextRun,
+    });
+
+    return {
+      found: true,
+      lastRun: updated.lastRun,
+      runCount: updated.runCount,
+      successCount: updated.successCount,
+      failureCount: updated.failureCount,
+      nextRun: updated.nextRun,
+    };
+  } catch (error) {
+    logger.error({ msg: "Failed to record cron job run (non-fatal)", jobName, error });
+    return { found: false };
+  }
+}
+
 export async function ensureRecommendationCrons(): Promise<EnsureRecommendationCronsResult> {
   const definitions = [
     {

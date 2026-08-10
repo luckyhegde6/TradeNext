@@ -1045,9 +1045,26 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: When e2e flakiness appears on a live-data app, fix the root cause in config/specs (viewport, input strategy, serialization, timeouts). Do NOT loosen assertions, add `waitForTimeout` sleeps, or bump retries to hide a real regression. Keep `retries`/`workers` as documented load knobs, not failure-hiders. `tsc` typechecks `e2e/*.ts` — keep specs type-clean.
 
+### 56. Serverless Cron Ledger — Scheduled Functions Must Write the `CronJob` Ledger Themselves
+**Issue**: Admin → Utils → Cron showed no runs at all on prod: both system jobs `lastRun: null, runCount: 0, successCount: 0, failureCount: 0` with a stale `nextRun` — even though the daily recommendation cron ran (some) scheduled executions via Netlify functions.
+
+**Root Cause**: `CronJob` ledger fields (`lastRun`/`runCount`/`successCount`/`failureCount`/`nextRun`) were only written by `spawnCronTask()` and the resident worker-engine scheduler loop — code paths that **never run on serverless** (no persistent process to poll the schedule). The real scheduled path (`netlify/functions/cron-recommendations` / `cron-performance` → `run-cron-background.ts`) called the domain service directly and never touched the ledger. Worse: `successCount`/`failureCount` had **no writer anywhere in the codebase**.
+
+**Solution**: Add a single `recordCronRun(jobName, success)` in `recommendationCronService.ts` (name-based `CronJob` lookup → `lastRun: now`, `runCount +1`, `successCount|failureCount +1`, `nextRun` advanced via the shared `calculateNextRun`; log-and-return on missing job, never throw). Call it in the scheduled-function success **and** error branches, and in the admin PATCH runNow/retry path (`recordManualRunLedger`, which skips `cronJobId`-linked tasks `spawnCronTask` already records to avoid double-counting). 5 unit tests cover success/failure/missing-job/prisma-find-error/prisma-update-error.
+
+**Rule**: On serverless, a cron ledger is only ever updated at the exact call sites that execute the job — the scheduled function, the admin runNow/retry handler, and any manual trigger. Grep for every execution path of a job before assuming the ledger is being written; the resident-scheduler path is a local-only illusion on Netlify. Also: every ledger column needs a writer — `grep successCount` should never return only the schema and the read side.
+
+### 57. AI Config Must Flow Through the Pipeline — Never Rely on Env-Only Defaults at the Call Site
+**Issue**: Daily recommendation runs produced all-HOLD recommendations on prod even after the DB `ai_config` Secret was correctly set via the admin API. Root cause: `dailyRecommendationService` called `analyzeStocks(aiInput)` with **no config argument**, so the pipeline used the env-only default and the DB-stored Secret (model/API key) never reached the LLM provider.
+
+**Solution**: A shared async `loadConfig()` (`lib/services/ai/config.ts`) — DB `ai_config` Secret merged over env, returning `model/apiKey/temperature/maxTokens/enabled` — used by both the admin test route and the daily pipeline that now passes `aiConfig` into `analyzeStocks`. Also refresh `DEFAULT_MODEL`/`AVAILABLE_MODELS` against the live provider catalog: two of the three "free" model IDs didn't exist (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free` → HTTP 404), which meant even a correctly-passed config hit a nonexistent model.
+
+**Rule**: When an admin-managed config Secret is load-bearing for a background pipeline, grep the call site chain (service → agent → provider) and verify the config actually reaches the provider call — an env-only default silently bypasses the DB Secret. And verify model IDs against the live catalog (`GET /api/v1/models`), never trust hardcoded free-model IDs from memory; a 404 model produces a clean all-HOLD fallback that looks like a strategy result, not a failure.
+
 ---
 
 ## Update Log
+- 2026-08-11: Added Lessons 56-57 (serverless cron ledger must be written by the scheduled-function/admin call sites — `recordCronRun`; AI config must flow to `analyzeStocks` via shared `loadConfig` — env-only defaults + nonexistent free-model IDs caused prod all-HOLD runs)
 - 2026-08-08: Added Lesson 55 (Playwright e2e flakiness on live-data apps: Firefox xl-nav viewport 1440×900, WebKit controlled number-input keystrokes, single-threaded dev-server nav starvation → serial + noWaitAfter + retries, live NSE values never asserted); added v3.5.3 e2e suite entry
 - 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)
 - 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)

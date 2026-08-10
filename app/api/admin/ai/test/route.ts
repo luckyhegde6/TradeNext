@@ -1,33 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/prisma";
 import { directPrompt } from "@/lib/services/ai/llm-provider";
-import { getDefaultConfig, type AIConfig } from "@/lib/services/ai/config";
+import { loadConfig } from "@/lib/services/ai/config";
 import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
-
-/**
- * Load the current AI config from DB (with env fallback).
- */
-async function loadConfig(): Promise<AIConfig> {
-  const envConfig = getDefaultConfig();
-  try {
-    const stored = await prisma.secret.findFirst({ where: { name: "ai_config" } });
-    if (stored?.metadata) {
-      const db = stored.metadata as Record<string, unknown>;
-      return {
-        ...envConfig,
-        model: (db.model as string) || envConfig.model,
-        temperature: (db.temperature as number) ?? envConfig.temperature,
-        maxTokens: (db.maxTokens as number) ?? envConfig.maxTokens,
-        enabled: (db.enabled as boolean) ?? envConfig.enabled,
-      };
-    }
-  } catch { /* fallback to env */ }
-  return envConfig;
-}
 
 /**
  * POST /api/admin/ai/test — Test AI connection with a simple prompt
@@ -43,7 +21,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const prompt = body.prompt || "What is 2 + 2? Reply with just the number.";
 
-    // Use the current saved config (DB + env fallback)
+    // Use the current saved config (DB ai_config Secret + env fallback)
     const config = await loadConfig();
 
     const start = Date.now();

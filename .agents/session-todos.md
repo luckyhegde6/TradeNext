@@ -8,21 +8,29 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-10) — v3.5.4: Fix #69 session persistence (branch `fix/prod-issues-68-69`)
+## Current Session (2026-08-11) — v3.5.4: AI config plumbing + cron ledger (branch `fix/ai-config-cron-ledger`)
 
-**Branch**: `fix/prod-issues-68-69` (base: main @ PR #85 merged). NOT yet merged — user approves PR.
+**Branch**: `fix/ai-config-cron-ledger` (base: main @ `c995a10`). Code + tests + docs done. Commit pending. **No deploy this session** (user explicit).
 
 ### Completed
-- [x] Prod UI audit (live tradenext6.netlify.app, demo + admin): Screener v3.5.2 fix verified deployed (2,000 stocks, "Last synced from TradingView: 8/10/2026 2:19:30 PM", change = value + %); Recommendations still stale "Last updated: 19/7/2026"; DB Logs tab now populated (624 entries Aug 7-10 — #68 largely fixed by v3.5.0 trackAiCall deploy); Server Log Files tab still "No log files found" (serverless FS limitation); Rate Limits tab transient 500 (cold-start, direct fetch 200)
-- [x] #69 root-cause confirmed: `createUserSession()` never called anywhere; `lib/auth.ts` events only wrote audit logs
-- [x] **#69 fix implemented**: `lib/auth.ts` `jwt` callback now calls `createUserSession()` at login (IP via `x-forwarded-for`/`x-real-ip`, UA, derived deviceInfo from UA), stores returned token in JWT claim `dbSessionToken`; `events.signOut` invalidates via `invalidateSession()`; `invalidateSession` in `lib/services/sessionService.ts` now matches by record id (admin UI) OR sessionToken (signOut)
-- [x] Tests: `lib/__tests__/sessionService.test.ts` (18 tests) — create/invalidate-by-id-or-token/invalidateAll/activity/stats/tokenVersion. Full suite: **335 passed, 0 failures** (27 suites)
-- [x] Verified locally with Playwright + DB probes: login → row created with IP/UA/device ("Chrome on Windows"), 30d expiry; server-side signOut POST → `isActive: false` + LOGOUT audit; `/api/admin/sessions` now returns `{total:2, active:1, expired:1, usersWithSessions:1}` + full session rows (was all-zero)
-- [x] BUGS.md updated: #68 DB logs populated (serverless FS note), #69 in-progress row, stale recs ~22d, rate-limits transient 500, screener verified
+- [x] Prod root-cause #1: `dailyRecommendationService` L322 called `analyzeStocks(aiInput)` with NO AI config → env-only default → DB `ai_config` Secret never reached pipeline → prod all-HOLD → BUY/SELL-filtered public page stale since Jul 19 (prod run after API-side config fix still all-HOLD = code-side confirmed)
+- [x] Prod root-cause #2: `DEFAULT_MODEL`/`AVAILABLE_MODELS` stale — `tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free`, `inclusionai/ling-3.0-flash:free` don't exist (404 verified vs live 399-model catalog); new default `nvidia/nemotron-3-ultra-550b-a55b:free` + refreshed list
+- [x] Fix: shared async `loadConfig()` (DB Secret > env, lazy prisma import) in `lib/services/ai/config.ts`; pipeline passes config to `analyzeStocks`; admin AI test route deduped onto `loadConfig()`
+- [x] Prod root-cause #3: `CronJob` ledger (`lastRun`/`runCount`/`successCount`/`failureCount`/`nextRun`) only written by `spawnCronTask`/resident scheduler (never on serverless); `successCount`/`failureCount` had NO writer; `run-cron-background.ts` bypassed ledger
+- [x] Fix: `recordCronRun(jobName, success)` (name lookup, counters, `nextRun` via `calculateNextRun`, safe no-op) wired into `netlify/functions/run-cron-background.ts` (success+failure) + admin PATCH runNow/retry via `recordManualRunLedger` (skips cronJobId-linked tasks)
+- [x] Tests: `lib/__tests__/recommendationCronService.test.ts` (5). Full suite: **340 passed / 11 skipped / 0 failures** (28 suites); tsc clean on touched production files
+- [x] Memory infra: `.agents/rules/session-decisions-flow.md` (MANDATORY decisions.md + flow.md) + `sessions/2026-08-11-c995a10/` (D1–D8)
+- [x] Docs: AGENTS.md v3.5.4 row, `.agents/CHANGELOG.md` + `versions-v3.md`, Primer.md (status + Session 15), agent-memory.md, Lessons.md (56–57), BUGS.md (#3 + #2a), session-todos.md, handoff latest.md v1.1
+- [x] Branch created `fix/ai-config-cron-ledger` from main; full suite + tsc verified
 
-### Pending (carried forward)
+### Pending (this session)
+- [ ] Commit `fix/ai-config-cron-ledger` (11 modified + 3 untracked) — pre-commit hygiene first (git status, junk artifacts, secrets grep)
+- [ ] Push (SSH) + open PR; never auto-merge
+
+### Pending (carried forward — other branches / later sessions)
+- [ ] **Deploy v3.5.4 to Netlify (user-approved) → rerun recommendations → verify BUY/SELL picks + fresh public date; verify cron ledger populates after next scheduled run**
 - [ ] Get user approval → push `fix/prod-issues-68-69` (SSH) → create PR for #69 fix; NEVER auto-merge
-- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window (still 0 successful runs since Jul 19)
+- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window
 - [ ] Re-seed demo holdings on prod
 - [ ] F&O Analytics UI (services + API done, UI pending)
 - [ ] #68 remaining: Server Log Files tab serverless-aware notice ("FS-based logging unavailable on serverless — use DB Logs tab")

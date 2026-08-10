@@ -5,11 +5,21 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-08 (v3.5.3)
+2026-08-11 (v3.5.4 work-in-progress — code + tests + docs done on `fix/ai-config-cron-ledger`, commit pending)
 
 ---
 
 ## Current Project Status
+
+### v3.5.4 — Stale Recommendations (code) + Cron Ledger Fix + Session Memory Infra (Aug 11 2026) — ✅ CODE + TESTS + DOCS COMPLETE, COMMIT PENDING
+**Branch**: `fix/ai-config-cron-ledger` (from main @ `c995a10`). **No deploy this session** (user explicit).
+**Issue 1 (stale public recs, "Last updated: 19/7/2026")**: `dailyRecommendationService` L322 called `analyzeStocks(aiInput)` with NO AI config (env-only default → DB `ai_config` Secret never reached pipeline) + `DEFAULT_MODEL`/`AVAILABLE_MODELS` pointed at nonexistent OpenRouter models (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free` → HTTP 404) → prod runs all-HOLD → BUY/SELL-filtered public page stale.
+**Fix**: shared async `loadConfig()` (DB Secret > env, lazy prisma import) in `lib/services/ai/config.ts`; pipeline passes config to `analyzeStocks`; test route deduped; `DEFAULT_MODEL` → `nvidia/nemotron-3-ultra-550b-a55b:free` + model list refreshed vs live catalog.
+**Issue 2 (Admin → Utils → Cron shows no runs)**: `CronJob` ledger only written by `spawnCronTask`/resident scheduler (never runs on serverless); `successCount`/`failureCount` had NO writer. Scheduled path (`netlify/functions/run-cron-background.ts`) called the service directly.
+**Fix**: `recordCronRun(jobName, success)` in `recommendationCronService.ts` (name-based lookup, lastRun/runCount/success|failureCount, nextRun via `calculateNextRun`, safe no-op) wired into `run-cron-background.ts` (success+failure) + admin PATCH runNow/retry via `recordManualRunLedger` (skips cronJobId-linked tasks, no double-count). 5 new tests.
+**Memory infra (D7)**: MANDATORY per-session `decisions.md`/`flow.md` (`session-decisions-flow.md` rule; `sessions/2026-08-11-c995a10/`).
+**Verification**: full suite **340 passed / 11 skipped / 0 failures** (28 suites); `npx tsc --noEmit` clean on all touched files. ESLint blocked repo-wide by pre-existing eslintrc circular-JSON config error (`next lint` removed in Next 16) — out of scope.
+**Status**: code + tests + docs done; commit pending (11 modified + 3 untracked). Deploy + prod rerun + ledger verification pending (separate user-approved deploy session).
 
 ### v3.5.3 — Playwright E2E Suite + CI + Docs (Aug 8 2026) — ✅ SUITE GREEN, DOCS DONE, COMMIT TO PR #85 PENDING
 **What**: Committed cross-browser e2e regression suite for the v3.5.2 screener fix + the full app.
@@ -292,6 +302,14 @@
 ---
 
 ## Session History
+
+### Session 15 (August 11, 2026) — Stale Recommendations (code) + Cron Ledger + Session Memory Infra (v3.5.4, branch `fix/ai-config-cron-ledger`)
+- **Root-caused stale public recs**: `analyzeStocks(aiInput)` called with no AI config (env-only default) + nonexistent OpenRouter models (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free` → 404 verified vs live catalog) → prod all-HOLD runs → BUY/SELL-filtered page stale since Jul 19 even after API-side prod config was fixed.
+- **Root-caused cron ledger**: `CronJob` ledger written only by `spawnCronTask`/resident scheduler (never on serverless); `successCount`/`failureCount` had no writer anywhere; scheduled path bypassed the ledger entirely.
+- **Fixed**: shared `loadConfig()` (DB `ai_config` Secret > env, lazy prisma) + pipeline passes config; `DEFAULT_MODEL` → `nvidia/nemotron-3-ultra-550b-a55b:free` + refreshed catalog; `recordCronRun()` wired into `run-cron-background.ts` (success+failure) + admin PATCH runNow/retry (skip cronJobId-linked tasks).
+- **Memory infra**: new MANDATORY `.agents/rules/session-decisions-flow.md` (decisions.md + flow.md per session) + first archive `sessions/2026-08-11-c995a10/` (D1–D8).
+- **Verification**: full suite **340 passed / 11 skipped / 0 failures** (28 suites); tsc clean on touched files. ESLint repo-wide blocked (pre-existing eslintrc circular-JSON config; `next lint` removed in Next 16).
+- **Status**: code + tests + docs complete, commit pending on `fix/ai-config-cron-ledger`; no deploy this session; prod rerun + ledger verification deferred to a user-approved deploy session.
 
 ### Session 14 (August 8, 2026) — Playwright E2E Suite hardening + docs (v3.5.3)
 - **Root-caused + fixed all flaky/failing e2e tests**: Firefox `xl` nav viewport (1440×900), WebKit `fill()` on controlled number inputs (keystrokes), single-threaded dev-server starvation (serial nav + `noWaitAfter` + 60s + retries), live-marquee flakiness (assertion removed).
