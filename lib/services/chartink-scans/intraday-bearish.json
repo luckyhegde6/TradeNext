@@ -1,0 +1,67 @@
+[
+  {
+    "id": "intraday-bearish.sell-open-high-7",
+    "name": "SELL OPEN=HIGH",
+    "url": "https://chartink.com/scanner/sell-open-high-7"
+  },
+  {
+    "id": "intraday-bearish.my-intraday-buy-setup",
+    "name": "My Intraday sell setup",
+    "url": "https://chartink.com/scanner/my-intraday-buy-setup"
+  },
+  {
+    "id": "intraday-bearish.fully-bearish-with-selling-seen-in-last-15min",
+    "name": "FULLY BEARISH WITH SELLING SEEN IN LAST 15MIN",
+    "url": "https://chartink.com/scanner/fully-bearish-with-selling-seen-in-last-15min"
+  },
+  {
+    "id": "intraday-bearish.intraday-future-sell-with-supertrend-80-accuracy",
+    "name": "Intraday Future Sell with SuperTrend -80 % Accuracy",
+    "url": "https://chartink.com/scanner/intraday-future-sell-with-supertrend-80-accuracy"
+  },
+  {
+    "id": "intraday-bearish.mohan-sure-sell-candidate",
+    "name": "Mohan'S sure sell candidate -- MACD CROSS",
+    "url": "https://chartink.com/scanner/mohan-sure-sell-candidate"
+  },
+  {
+    "id": "intraday-bearish.day-short-trade",
+    "name": "Day Short Trade",
+    "url": "https://chartink.com/scanner/day-short-trade"
+  },
+  {
+    "id": "intraday-bearish.stocks-near-support-level-bearish-parimal-wadiwala",
+    "name": "Stocks near support level - bearish (Parimal Wadiwala) 15 minutes",
+    "url": "https://chartink.com/scanner/stocks-near-support-level-bearish-parimal-wadiwala"
+  },
+  {
+    "id": "intraday-bearish.shoot-up",
+    "name": "Shot Down",
+    "url": "https://chartink.com/scanner/shoot-up"
+  },
+  {
+    "id": "intraday-bearish.ichimoku-cloud-bottom-crossover",
+    "name": "Ichimoku Cloud Bottom Crossover",
+    "url": "https://chartink.com/scanner/ichimoku-cloud-bottom-crossover"
+  },
+  {
+    "id": "intraday-bearish.secondary-gap-up-opening-open-high-short-intraday",
+    "name": "Secondary Gap Up Opening, Open-High - SHORT Intraday",
+    "url": "https://chartink.com/scanner/secondary-gap-up-opening-open-high-short-intraday"
+  },
+  {
+    "id": "intraday-bearish.intra-opt-1",
+    "name": "Intra Opt pe 5",
+    "url": "https://chartink.com/scanner/intra-opt-1"
+  },
+  {
+    "id": "intraday-bearish.intraday-bearish-but-longer-time-frame-bullish",
+    "name": "Intraday bearish but longer time frame bullish",
+    "url": "https://chartink.com/scanner/intraday-bearish-but-longer-time-frame-bullish"
+  },
+  {
+    "id": "intraday-bearish.intra-pe-15",
+    "name": "Intra PE 15",
+    "url": "https://chartink.com/scanner/intra-pe-15"
+  }
+]

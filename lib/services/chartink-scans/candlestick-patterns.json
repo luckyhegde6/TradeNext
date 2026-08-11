@@ -1,0 +1,67 @@
+[
+  {
+    "id": "candlestick.short-term-breakouts",
+    "name": "Short term breakouts",
+    "url": "https://chartink.com/scanner/short-term-breakouts"
+  },
+  {
+    "id": "candlestick.doji-daily-64",
+    "name": "Doji - daily",
+    "url": "https://chartink.com/scanner/doji-daily-64"
+  },
+  {
+    "id": "candlestick.tweezer-bottom-15min-timeframe-scan",
+    "name": "Tweezer Bottom 15min-Timeframe Scan",
+    "url": "https://chartink.com/scanner/tweezer-bottom-15min-timeframe-scan"
+  },
+  {
+    "id": "candlestick.bullish-marubozu-for-15-min",
+    "name": "Bullish marubozu for 15 min",
+    "url": "https://chartink.com/scanner/bullish-marubozu-for-15-min"
+  },
+  {
+    "id": "candlestick.tweezer-top-15-timeframe-scan",
+    "name": "Tweezer Top 15-Timeframe Scan",
+    "url": "https://chartink.com/scanner/tweezer-top-15-timeframe-scan"
+  },
+  {
+    "id": "candlestick.dark-cloud-cover-15min-timeframe",
+    "name": "Dark cloud cover 15min timeframe",
+    "url": "https://chartink.com/scanner/dark-cloud-cover-15min-timeframe"
+  },
+  {
+    "id": "candlestick.dragonfly-doji-15min",
+    "name": "Dragonfly Doji - 15min",
+    "url": "https://chartink.com/scanner/dragonfly-doji-15min"
+  },
+  {
+    "id": "candlestick.bearish-harami-for-15min-timeframe-1",
+    "name": "Bearish harami for 15min-timeframe",
+    "url": "https://chartink.com/scanner/bearish-harami-for-15min-timeframe-1"
+  },
+  {
+    "id": "candlestick.piercing-pattern-15min-timeframe",
+    "name": "Piercing pattern 15min timeframe",
+    "url": "https://chartink.com/scanner/piercing-pattern-15min-timeframe"
+  },
+  {
+    "id": "candlestick.bullish-engulfing-for-15minute-timeframe",
+    "name": "Bullish Engulfing For 15minute Timeframe",
+    "url": "https://chartink.com/scanner/bullish-engulfing-for-15minute-timeframe"
+  },
+  {
+    "id": "candlestick.hanging-man-daily-6",
+    "name": "Hanging man - daily",
+    "url": "https://chartink.com/scanner/hanging-man-daily-6"
+  },
+  {
+    "id": "candlestick.bullish-harami-for-15min-timeframe",
+    "name": "Bullish harami for 15min-timeframe",
+    "url": "https://chartink.com/scanner/bullish-harami-for-15min-timeframe"
+  },
+  {
+    "id": "candlestick.bearish-spinning-top-for-previous-15min-timeframe",
+    "name": "Bearish Spinning top for previous 15min timeframe",
+    "url": "https://chartink.com/scanner/bearish-spinning-top-for-previous-15min-timeframe"
+  }
+]

@@ -1,0 +1,67 @@
+[
+  {
+    "id": "bearish.perfect",
+    "name": "PERFECT BEARISH",
+    "url": "https://chartink.com/scanner/perfect"
+  },
+  {
+    "id": "bearish.yesterday-bearish-engulifing",
+    "name": "Bearish Engulifing-see after 3:15 PM for Next day trade",
+    "url": "https://chartink.com/scanner/yesterday-bearish-engulifing"
+  },
+  {
+    "id": "bearish.sell-volume-change",
+    "name": "Intraday Sell",
+    "url": "https://chartink.com/scanner/sell-volume-change"
+  },
+  {
+    "id": "bearish.copy-chanakya-bearish-scanner-working-11",
+    "name": "Chanakya Bearish Scanner - Working",
+    "url": "https://chartink.com/scanner/copy-chanakya-bearish-scanner-working-11"
+  },
+  {
+    "id": "bearish.my-intraday-sell-setup-adx",
+    "name": "My-intraday-sell-setup-ADX",
+    "url": "https://chartink.com/scanner/my-intraday-sell-setup-adx"
+  },
+  {
+    "id": "bearish.sell-15-min",
+    "name": "Sell 15 Min",
+    "url": "https://chartink.com/scanner/sell-15-min"
+  },
+  {
+    "id": "bearish.highly-bearish-i-day",
+    "name": "Highly Bearish I-day",
+    "url": "https://chartink.com/scanner/highly-bearish-i-day"
+  },
+  {
+    "id": "bearish.bearish-rsi-stoc",
+    "name": "Bearish RSi-Stoc",
+    "url": "https://chartink.com/scanner/bearish-rsi-stoc"
+  },
+  {
+    "id": "bearish.volume-spike-in-5-minutes",
+    "name": "Volume Spike in 5 minutes",
+    "url": "https://chartink.com/scanner/volume-spike-in-5-minutes"
+  },
+  {
+    "id": "bearish.stocks-in-downtrend",
+    "name": "Stocks in Downtrend",
+    "url": "https://chartink.com/scanner/stocks-in-downtrend"
+  },
+  {
+    "id": "bearish.adx-future-5-min",
+    "name": "ADX Future 15 Min",
+    "url": "https://chartink.com/scanner/adx-future-5-min"
+  },
+  {
+    "id": "bearish.momentum-sell-rdx-4",
+    "name": "Momentum sell (RDX)",
+    "url": "https://chartink.com/scanner/momentum-sell-rdx-4"
+  },
+  {
+    "id": "bearish.bearish-pinbar-eod",
+    "name": "Bearish Pinbar - EOD",
+    "url": "https://chartink.com/scanner/bearish-pinbar-eod"
+  }
+]

@@ -9,7 +9,8 @@
  * @version 3.3.0
  */
 
-import { runDailyScreeners, type ScreenerResult } from "./chartinkService";
+import { runChartinkUnifiedScreeners } from "./chartinkUnifiedScreenerService";
+import type { ScreenerResult } from "./chartinkService";
 import {
   analyzeStocks,
   type StockAnalysisInput,
@@ -163,15 +164,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       metadata: { runId: run.id, triggerSource: triggeredBy },
     });
 
-    // 3. Run all screeners
-    const screenerResults = await runDailyScreeners({ forceRefresh: true });
+    // 3. Run all screeners (Chartink 117 registry primary → TradingView fallback)
+    const screenerResults = await runChartinkUnifiedScreeners({ forceRefresh: true });
 
     // 4. Compute screener stats (from the FULL result set, before capping)
     const successfulScreenerNames = new Set(
       screenerResults.flatMap((s) => s.screenerNames),
     );
     const totalRawHits = screenerResults.reduce(
-      (sum, s) => sum + s.screenerCount,
+      (sum, s) => sum + (s.screenerCount || 0),
       0,
     );
 

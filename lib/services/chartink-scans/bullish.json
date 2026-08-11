@@ -1,0 +1,67 @@
+[
+  {
+    "id": "bullish.pure-bullish-trend-stocks",
+    "name": "pure bullish trend stocks",
+    "url": "https://chartink.com/scanner/pure-bullish-trend-stocks"
+  },
+  {
+    "id": "bullish.bullish-engulfing-pattern-1",
+    "name": "Bullish Engulfing Pattern",
+    "url": "https://chartink.com/scanner/bullish-engulfing-pattern-1"
+  },
+  {
+    "id": "bullish.morning-star-bullish-pattern",
+    "name": "Morning Star - Bullish Pattern",
+    "url": "https://chartink.com/scanner/morning-star-bullish-pattern"
+  },
+  {
+    "id": "bullish.bullish-rsi-stochastic",
+    "name": "bullish-rsi-stochastic",
+    "url": "https://chartink.com/scanner/bullish-rsi-stochastic"
+  },
+  {
+    "id": "bullish.bullish-engulf-3",
+    "name": "Bullish Engulf",
+    "url": "https://chartink.com/scanner/bullish-engulf-3"
+  },
+  {
+    "id": "bullish.tss-momentum-long",
+    "name": "TSS Momentum Long",
+    "url": "https://chartink.com/scanner/tss-momentum-long"
+  },
+  {
+    "id": "bullish.bullish-momentum-stocks",
+    "name": "Bullish - Momentum Stocks",
+    "url": "https://chartink.com/scanner/bullish-momentum-stocks"
+  },
+  {
+    "id": "bullish.testing-btst-bullish-engulfing",
+    "name": "Enhanced BTST bullish engulfing",
+    "url": "https://chartink.com/scanner/testing-btst-bullish-engulfing"
+  },
+  {
+    "id": "bullish.bullish-harami-11",
+    "name": "BULLISH HARAMI",
+    "url": "https://chartink.com/scanner/bullish-harami-11"
+  },
+  {
+    "id": "bullish.abhishek-bullish-rsi-divergence",
+    "name": "Abhishek Bullish RSI Divergence",
+    "url": "https://chartink.com/scanner/abhishek-bullish-rsi-divergence"
+  },
+  {
+    "id": "bullish.fno-strong-uptrend-stocks-price-180-rs",
+    "name": "Strong Uptrend F&O Stocks ( price > 180 RS) - Prabhu",
+    "url": "https://chartink.com/scanner/fno-strong-uptrend-stocks-price-180-rs"
+  },
+  {
+    "id": "bullish.momentumhourlybearish-amitb",
+    "name": "MomentumHourlyBearish_AmitB",
+    "url": "https://chartink.com/scanner/momentumhourlybearish-amitb"
+  },
+  {
+    "id": "bullish.momentumdailybearish-amitb",
+    "name": "MomentumDailyBearish_AmitB",
+    "url": "https://chartink.com/scanner/momentumdailybearish-amitb"
+  }
+]
