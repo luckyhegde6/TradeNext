@@ -5,11 +5,20 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-12 (v3.6.1 recs-tab default sorts + performance currentPrice bridge + AI context enrichment + pen/perf TODO plans — code + 9 tests + docs + Playwright :3000 verification done; **commit pending user**, no deploy; still carries v3.5.4→v3.6.0 holds)
+2026-08-12 (v3.6.2 DividendCalendar timezone fix — noon-UTC ex-dates landed 1 day late in IST; 4-test suite + docs + Playwright :3000 verification done; **commit pending user**, no deploy; still carries v3.5.4→v3.6.1 holds)
 
 ---
 
 ## Current Project Status
+
+### v3.6.2 — DividendCalendar Timezone Fix (Aug 12 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
+**Branch**: work-in-progress (carries v3.5.4→v3.6.1 holds + this v3.6.2; commit **pending user approval** — no deploy).
+**Symptom**: user reported `/dividends` calendar looked shifted while summary cards showed `0 / ₹0 / ₹0 / —`.
+**Part 1 — cards are CORRECT (data freshness)**: all 19 local corp-action ex-dates are stored at noon UTC (seed `parseDateCA` → `new Date(y,m,d)` local midnight = UTC prev-day 18:30); 9 syms ex-date `2026-08-10T12:00Z`, 10 syms `2026-08-11T12:00Z`; today Aug 12 → ZERO future ex-dates locally → v3.6.0 `getUpcomingDividendSummary` correctly returns zeros. Prod populates via the v3.6.0 daily market-sync cron. No card code change.
+**Part 2 — REAL BUG (fixed)**: `DividendMonthView` bucketed ex-dates by UTC key `toISOString().split("T")[0]` while grid cells were keyed via `toISOString()` from LOCAL dates → in IST (+05:30) local Aug-11 cell converts to `2026-08-10T18:30Z` (key `2026-08-10`) → Aug-10 noon-UTC dividends matched the WRONG (next-day) cell → 9 divs on day 11 (+6), 10 divs on day 12 (+7). Fix: exported `toLocalDateKey(date)` (local Y/M/D padStart) used for BOTH bucketing + grid cells; `data-testid="cell-<localKey>"` per cell. `DividendListView` (`toLocaleDateString("en-IN")`) already correct.
+**Regression test**: NEW `app/components/dividends/__tests__/DividendMonthView.test.tsx` (4 tests) with `process.env.TZ = "Asia/Kolkata"` pinned (jest runs UTC where the shift never reproduces). Verified: old code **4 FAIL** → fix **4 PASS**. Suite **453 passed / 11 skipped** (449 + 4); tsc clean on touched files.
+**Live verify (dev :3000)**: day 10 = PTC/JIOFIN/MAJESAUT +6 (9), day 11 = RATNAMANI/DVL/CASTROLIND +7 (10), day 12 empty, footer "19 dividends this month", cards still `0/₹0/₹0/—` (correct), 0 console errors.
+- **Status**: docs updated (AGENTS.md v3.6.2, CHANGELOG/versions-v3, TODO, Primer, agent-memory, session D26 + flow §13); NOT committed; NO deploy.
 
 ### v3.6.1 — Recs-Tab Default Sorts + Performance Price Bridge + AI Context Enrichment + Pen/Perf Plans (Aug 12 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
 **Branch**: work-in-progress (carries v3.5.4→v3.6.0 holds + this v3.6.1; commit on a new branch **pending user approval** — no deploy).
