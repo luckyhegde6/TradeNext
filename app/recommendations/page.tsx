@@ -13,6 +13,7 @@ import DividendIncomeChart from "@/app/components/dividends/DividendIncomeChart"
 import type {
   DividendCalendarData,
   DividendEvent,
+  DividendSummary,
   MonthlyIncome,
 } from "@/lib/services/dividendCalendarService";
 
@@ -67,6 +68,7 @@ export default function RecommendationsPage() {
   const [divActiveTab, setDivActiveTab] = useState<DividendViewTab>("calendar");
   const [calendarData, setCalendarData] = useState<DividendCalendarData | null>(null);
   const [allDividends, setAllDividends] = useState<DividendEvent[]>([]);
+  const [upcomingSummary, setUpcomingSummary] = useState<DividendSummary | null>(null);
   const [incomeData, setIncomeData] = useState<MonthlyIncome[]>([]);
   const [divLoading, setDivLoading] = useState(true);
   const [divError, setDivError] = useState("");
@@ -109,6 +111,7 @@ export default function RecommendationsPage() {
       if (listRes.ok) {
         const listData = await listRes.json();
         setAllDividends(listData.dividends || []);
+        setUpcomingSummary(listData.summary || null);
       }
       if (incRes.ok) {
         const incData = await incRes.json();
@@ -237,9 +240,10 @@ export default function RecommendationsPage() {
 
           {activeTab === "dividends" && (
             <div className="space-y-6">
-              {/* Dividend Summary */}
+              {/* Dividend Summary — from the upcoming view (today → next 12 months),
+                  so the cards don't zero out once the viewed month's ex-dates pass. */}
               <DividendSummaryCards
-                summary={calendarData?.summary || { upcomingCount: 0, estMonthlyIncome: 0, estAnnualIncome: 0, avgYield: null, totalDividends: 0 }}
+                summary={upcomingSummary || calendarData?.summary || { upcomingCount: 0, estMonthlyIncome: 0, estAnnualIncome: 0, avgYield: null, totalDividends: 0 }}
                 loading={divLoading}
               />
 

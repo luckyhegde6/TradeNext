@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { updateJoinRequestStatus } from "@/lib/services/userService";
+import { createAuditLog } from "@/lib/audit";
+import { notifyUser } from "@/lib/services/notificationService";
 import bcrypt from "bcryptjs";
 import logger from "@/lib/logger";
 
@@ -57,6 +59,25 @@ export async function POST(
 
         // 2. Update status
         await updateJoinRequestStatus(id, 'approved');
+
+        // 3. Notify the new user (in-app + Telegram best-effort if linked).
+        //    NO password in the message — the temp password goes to the admin
+        //    through the API response (shared out-of-band).
+        await notifyUser(
+            user.id,
+            "Welcome to TradeNext!",
+            `Your access request was approved, ${joinRequest.name}. Contact your administrator to receive your temporary password and sign in.`,
+            "/auth/signin"
+        );
+
+        await createAuditLog({
+            userId: user.id,
+            userEmail: joinRequest.email,
+            action: 'JOIN_REQUEST_APPROVED',
+            resource: 'JoinRequest',
+            resourceId: id,
+            metadata: { approvedBy: session.user.email },
+        });
 
         logger.info({ msg: "Join request approved", email: joinRequest.email, userId: user.id });
 

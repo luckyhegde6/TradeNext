@@ -123,7 +123,12 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
                     </div>
                 </form>
 
-                <div className="mt-8 text-center text-sm text-surface-foreground/60">
+                <div className="mt-4 text-center text-sm text-surface-foreground/60">
+                    <Link href="/auth/password-reset" onClick={onClose} className="text-primary hover:underline font-semibold">
+                        Forgot password?
+                    </Link>
+                </div>
+                <div className="mt-4 text-center text-sm text-surface-foreground/60">
                     Don&apos;t have an account?{" "}
                     <Link href="/auth/join" onClick={onClose} className="text-primary hover:underline font-bold transition-colors">
                         Join Now

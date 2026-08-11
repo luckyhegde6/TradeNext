@@ -144,6 +144,74 @@
 
 ---
 
+## D18. Daily market-sync cron: dedicated Netlify scheduled function (`1 1 * * 1-5`) + `market-sync` background action
+
+**Decision:** Add a new Netlify scheduled function `cron-market-sync` running `1 1 * * 1-5` (weekday mornings) that triggers a `market-sync` action in `run-cron-background.ts` executing `executeStockSync`/`executeCorpActionsSync`/`executeScreenerSync`; register a `MARKET_SYNC_CRON_NAME = "Daily Market Sync (System)"` cron entry.
+
+- *Context:* Prod had no daily refresh of stock/corp-actions/screener data — the only crons were recommendations generation + performance. User requirement: "market sync daily cron".
+- *Why this approach:* Follows the existing Netlify scheduled-function pattern (per-function `schedule` in metadata + x-cron-secret guard + action dispatch in `run-cron-background.ts`) exactly like cron-recommendations. A dedicated function keeps the schedule declarative and reuses the proven background executor.
+- *Impact:* NEW `netlify/functions/cron-market-sync.ts`; `netlify/functions/run-cron-background.ts` (market-sync branch); `lib/services/worker/worker-service.ts` (exported `executeStockSync`/`executeCorpActionsSync`/`executeScreenerSync`); `lib/services/recommendationCronService.ts` (`MARKET_SYNC_CRON_NAME` + expr).
+
+## D19. Zeroed dividend cards: summary cards must be UPCOMING, not month-scoped
+
+**Decision:** New `getUpcomingDividendSummary(userId?)` (upcoming = this-month ex-dates, all statuses, maybeDelisted aware) fed into `/api/dividends/calendar?view=upcoming` and used as the primary source for the Recommendations Dividends tab + `/dividends` summary cards.
+
+- *Context:* User-reported bug — Recommendations + `/dividends` pages showed `0 / ₹0 / ₹0 / —` on their summary cards. Root cause: cards were computed from month-scoped `getDividendSummary` which returns zeros for a month containing no ex-dates.
+- *Why this approach:* The cards' semantic is "what's coming up this month", not "what's in the currently selected month view". A dedicated upcoming query keeps the month view unchanged while fixing the cards in both call sites (recs page + dividends page + calendar API).
+- *Impact:* `lib/services/dividendCalendarService.ts` (+getUpcomingDividendSummary), `app/api/dividends/calendar/route.ts` (view=upcoming), `app/dividends/page.tsx`, `app/recommendations/page.tsx`; NEW 11-test suite.
+
+## D20. Password reset requests: full admin-moderated mirror of JoinRequest (NEW model + migration)
+
+**Decision:** Add `PasswordResetRequest` Prisma model (id, email NOT unique, reason?, status pending/approved/rejected, createdAt/updatedAt + `@@index([status])`/`@@index([email])`, map `password_reset_requests`), migration `20260811150000_add_password_reset_request` (generated via `migrate diff` git-HEAD→current + shadow 33-migration replay + `db push` on local + ledger row).
+
+- *Context:* Requirement — "password reset requests for existing users so the admin can approve + give them the default password; no self-service password change (mirror JoinRequest moderation)".
+- *Why this approach:* Reusing the JoinRequest pattern (moderated by admins, DEFAULT_PASSWORD env value set on approval) keeps a single approval UX and avoids a public password-change attack surface. Email is NOT unique because a user can legitimately request again later; dedup is enforced only against pending rows at creation.
+- *Impact:* `prisma/schema.prisma` + migration folder + `.agents/docs/db-migrations.md` ledger row; `lib/services/userService.ts` (5 DB fns: hasPending / create / getPending / getById / updateStatus).
+
+## D21. Reset flow security: anti-enumeration + admin-only temp password + session invalidation + notifications
+
+**Decision:** (a) Public POST `/api/auth/password-reset` returns the SAME success message for unknown emails (no account creation; logged warn) — no user enumeration; (b) admin approve sets bcrypt-hashed `DEFAULT_PASSWORD` (500 guard if env missing) + `isVerified:true` + `invalidateUserTokens(user.id)`; the temp password is returned to the ADMIN only in the API response/alert (never in notification bodies); (c) NEW `lib/services/notificationService.ts` (`notifyAdmins`/`notifyUser` — in-app + best-effort Telegram via `sendAlertToUser` only when linked+verified, failures logged never thrown); (d) join routes get audit + welcome notify.
+
+- *Context:* Security requirements from prior sessions (credential hygiene D16, no secrets in client D14) + user: "the admin approves and the user receives the default password; notify admins".
+- *Why this approach:* Reusing `invalidateUserTokens` (sessionService) kills the requester's stale sessions on password change — critical since the old password is replaced. Telegram is best-effort delivery only (never a gate); `[EMAIL MOCK]` console.log remains. Anti-enumeration mirrors the JoinRequest design (create only for existing users, generic message otherwise).
+- *Impact:* NEW `app/api/auth/password-reset/route.ts`, `app/api/admin/password-reset-requests/route.ts` + `[id]/approve|reject`; `lib/audit.ts` (+6 tags: JOIN_REQUEST_CREATED/APPROVED/REJECTED, PASSWORD_RESET_REQUESTED/APPROVED/REJECTED); join approve route (+welcome notify).
+
+## D22. Legacy signup disabled + admin Password Resets tab + UI links (kebab wiring)
+
+**Decision:** `/api/users/signup` → 410 (redirectTo /auth/join), `/users/new` → server redirect to /auth/join, `NewUserForm.tsx` deleted, `/users` page Create-User link → "Join / Request Access"; admin `/admin/users` gains a 3rd "Password Resets" tab (`?tab=password-resets` deep-link — used by notification links), approve/reject handlers (confirm dialog explains DEFAULT_PASSWORD + session invalidation; success alert shows the temp password); `/auth/password-reset` page + signin/LoginModal "Forgot password?" links; e2e login.spec updated.
+
+- *Context:* After the reset flow exists, the old admin-created-user/signup paths are bypasses — keep the admin "Create User" form but kill the public self-signup surface. Notification links must land on the right tab.
+- *Why this approach:* Minimal surface change — the admin Create User form stays (admin-controlled), only the public/legacy paths are hardened; deep-link via `useSearchParams` matches the existing Notification pattern.
+- *Impact:* `app/api/users/signup/route.ts`, `app/users/new` (+deleted NewUserForm.tsx), `app/users/page.tsx`, `app/admin/users/page.tsx`, `app/auth/signin/page.tsx`, `app/components/modals/LoginModal.tsx`, NEW `app/auth/password-reset/page.tsx`, `e2e/login.spec.ts`.
+
+---
+
+## D23. Recs tabs default sort = created-date descending (Performance + Today's Picks + History)
+
+**Decision:** Change every recommendations tab's default sort to newest-first: PerformanceTab `returnPercent` → `createdAt` (desc); HistoryTab `screenerCount` → `date` (desc); DailyPicksTab gains a NEW "Newest" sort option (`createdAt` desc, screener-count tiebreak) and it becomes the default.
+
+- *Context:* User report — Performance tab "was not initially sorted by created date desc (defaulted to return %)". Verified: the API default sort IS `createdAt` desc (service default), but the UI's `useState("returnPercent")` overrode it. User confirmed the same default applies to Today's Picks/History. Prod + local data are actually fully populated (1691/732 trackers, 0 empty Entry/Current) — so the "empty columns" perception was a sort artifact, not missing data.
+- *Why this approach:* Sort defaults belong in the UI (the API contract is already correct). For Today's Picks all stocks come from the latest run (identical `createdAt`), so `createdAt` desc is a stable no-op with a screener-count tiebreak preserving ranking — it satisfies the "same default" requirement without breaking the existing cap-priority sort. History's date option already existed and sorts desc.
+- *Impact:* `app/components/recommendations/PerformanceTab.tsx`, `HistoryTab.tsx`, `DailyPicksTab.tsx`. Verified live on :3000 — History "Date" active, Performance "Recommended ▼" active, 0 console errors.
+
+## D24. Performance current-price bridge: fill null `currentPrice` from daily_prices (no N+1)
+
+**Decision:** Add `bridgeMissingCurrentPrices<T>` to `recommendationPerformanceService.ts` — after fetching list rows, ONE batched `SELECT DISTINCT ON (ticker) … close::float8 FROM daily_prices WHERE ticker = ANY(…) ORDER BY ticker, "tradeDate" DESC` fills rows whose `currentPrice` is null; run BEFORE `toListItem` so `returnPercent` uses the bridged price; graceful catch → warn + rows unchanged.
+
+- *Context:* The 4PM perf-check cron updates `currentPrice` for all trackers, but a fresh tracker created before its first check (or a missed cron) shows "—" in Current and Return %. User wanted Current/Return % never blank when a price exists.
+- *Why this approach:* Same `DISTINCT ON` pattern already proven in the perf-check cron (L735-740) and dividend enrichment (dividendCalendarService L263). One query for the whole page (not N per-symbol queries) honors the no-N+1 checklist rule. Bridging before `toListItem` means return % is computed consistently for bridged and non-bridged rows alike. `close::float8` cast keeps the raw-query result a plain number (as the cron path does).
+- *Impact:* `lib/services/recommendationPerformanceService.ts` (+helper, wired into both `getPerformanceList` paths), `lib/__tests__/recommendationPerformanceService.test.ts` (+3 tests, prisma mock +`$queryRaw`). Suite 449 pass.
+
+## D25. AI recommendation context enrichment: fundamentals in the prompt (batched corp actions + announcements + quarterly results)
+
+**Decision:** NEW `lib/services/ai/recommendation-context.ts` — `getRecommendationContext(symbols)` returns per-symbol `StockContext` (corp actions + announcements from DB, quarterly results from ONE cached NSE `getCorporateResults("Quarterly")` call), each source `Promise.allSettled` with per-source caps (3/2/1) and graceful fallback (never throws). `StockAnalysisInput.context?` + `formatStockContext()` appends an indented Context block to the agent prompt; `dailyRecommendationService.ts` enriches ONCE per run after the MAX_AI_STOCKS cap slice.
+
+- *Context:* User approving follow-up scope — "corp actions (DB), corporate announcements (DB) and financial results (NSE cached getCorporateResults) as the third source". The AI currently sees only price/momentum/screener signals; fundamentals arrive late (a stock with a tanking quarter still gets momentum-based BUY).
+- *Why this approach:* All DB lookups are batched `symbol IN (...)` (no N+1); NSE results payload is fetched once per run and already 1h-cached inside `getCorporateResults` — context costs 2 DB queries + 1 cached NSE call regardless of batch size. `allSettled` means a failing source degrades gracefully (never blocks the pipeline — checklist rule). Prompt rule "weigh context alongside technicals; mention in reasoning" keeps the model honest without forcing structure changes (JSON schema unchanged).
+- *Impact:* NEW `lib/services/ai/recommendation-context.ts`; `lib/services/ai/recommendation-agent.ts` (`StockAnalysisInput.context`, prompt + system rule, `indent()` helper); `lib/services/dailyRecommendationService.ts` (one enrichment call per run); NEW `lib/__tests__/recommendation-context.test.ts` (6 tests).
+
+---
+
 ## Accidental prod mutations logged (transparency)
 
 - UI clicks on `/admin/ai` removed custom models `google/gemma-4-26b-a4b-it:free` + `google/lyria-3-pro-preview` on prod; both restored via `POST /api/admin/ai/custom-models`.

@@ -5,11 +5,20 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-11 (v3.5.7 auth join→approve→login fix + server logs `logs/` dir + **`DEFAULT_PASSWORD` env var + credential-masking git hooks + README rewrite + `/llms.txt`/robots LLM-discovery** — code + 7 tests + docs + Playwright e2e + dev :3000 route checks verified; **commit/PR pending user**, no deploy; v3.5.6/v3.5.5 code + tests + docs done, commit/migration pending)
+2026-08-12 (v3.6.1 recs-tab default sorts + performance currentPrice bridge + AI context enrichment + pen/perf TODO plans — code + 9 tests + docs + Playwright :3000 verification done; **commit pending user**, no deploy; still carries v3.5.4→v3.6.0 holds)
 
 ---
 
 ## Current Project Status
+
+### v3.6.1 — Recs-Tab Default Sorts + Performance Price Bridge + AI Context Enrichment + Pen/Perf Plans (Aug 12 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
+**Branch**: work-in-progress (carries v3.5.4→v3.6.0 holds + this v3.6.1; commit on a new branch **pending user approval** — no deploy).
+**Default sorts** (user report: Performance tab "not initially sorted by created date desc (defaulted to return %)", confirmed for Today's Picks + History): PerformanceTab default `returnPercent`→`createdAt` (desc); HistoryTab default `screenerCount`→`date` (desc); DailyPicksTab gains NEW "Newest" sort (`createdAt` desc, screener-count tiebreak) as default. Root: UI `useState` default overrode the already-correct API default (`createdAt` desc); prod/local tracker data is actually fully populated (1691/732) — the "empty columns" perception was a sort artifact.
+**Price bridge**: `bridgeMissingCurrentPrices<T>` in `recommendationPerformanceService.ts` — ONE batched `SELECT DISTINCT ON (ticker) … close::float8 FROM daily_prices WHERE ticker = ANY(…) ORDER BY ticker,"tradeDate" DESC` fills null `currentPrice` before `toListItem` on both `getPerformanceList` paths → Current/Return % never blank when a price exists; graceful catch → rows unchanged; +3 tests.
+**AI context enrichment**: NEW `lib/services/ai/recommendation-context.ts` — per-symbol `StockContext` (batched DB corp actions + announcements, quarterly results from ONE cached `getCorporateResults("Quarterly")` call; caps 3/2/1; `Promise.allSettled` per source → context failure never blocks pipeline); `StockAnalysisInput.context?` + prompt Context blocks + system rule; wired ONCE per `runDailyRecommendations` run (after MAX_AI_STOCKS cap slice); 6 new tests.
+**Pen/perf plans**: NEW `TODO-PENTESTING.md` + `TODO-PERF-TESTING.md` (checklists + findings logs; records known `GET /api/recommendations/performance?offset≥1001` → 500 bug — not fixed this session).
+- **Verification**: full suite **449 passed / 11 skipped / 0 failures**; `npx tsc --noEmit` clean on all new/changed files; Playwright dev :3000 — History "Date" active, Performance "Recommended ▼" active, 0 console errors.
+- **Status**: docs updated (AGENTS.md v3.6.1, CHANGELOG versions-v3, TODO, Primer, agent-memory, session D23–D25 + flow §12); NOT committed; NO deploy.
 
 ### v3.5.7 — Auth Join→Approve→Login Fix + Server Logs `logs/` Dir (Aug 11 2026) — ✅ CODE + TESTS + DOCS + E2E VERIFIED, COMMIT PENDING
 **Branch**: work-in-progress (v3.5.5/3.5.6 chartink work still uncommitted on `fix/ai-config-cron-ledger`; commit on a new branch **pending user approval** — no deploy, consistent with v3.5.4/3.5.5/3.5.6 holds).

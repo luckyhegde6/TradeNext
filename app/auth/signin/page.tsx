@@ -82,9 +82,14 @@ function SignInForm() {
                     Sign In
                 </button>
             </form>
+            <div className="mt-4 text-center text-sm text-surface-foreground opacity-70">
+                    <a href="/auth/password-reset" className="text-primary hover:underline font-semibold">
+                        Forgot password?
+                    </a>
+                </div>
             <div className="mt-6 text-center text-sm text-surface-foreground opacity-70">
                 Don&apos;t have an account?{" "}
-                <a href="/users/new" className="text-primary hover:underline font-semibold">
+                <a href="/auth/join" className="text-primary hover:underline font-semibold">
                     Join Now
                 </a>
             </div>

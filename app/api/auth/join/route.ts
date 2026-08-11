@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createJoinRequest } from "@/lib/services/userService";
 import logger from "@/lib/logger";
+import { createAuditLog } from "@/lib/audit";
 import { z } from "zod";
 
 const joinRequestSchema = z.object({
@@ -18,6 +19,13 @@ export async function POST(req: Request) {
         logger.info({ msg: "Join request received", email: validatedData.email });
 
         await createJoinRequest(validatedData);
+
+        await createAuditLog({
+            userEmail: validatedData.email,
+            action: 'JOIN_REQUEST_CREATED',
+            resource: 'JoinRequest',
+            metadata: { name: validatedData.name },
+        });
 
         return NextResponse.json({
             success: true,

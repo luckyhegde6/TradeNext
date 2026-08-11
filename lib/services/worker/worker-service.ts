@@ -118,7 +118,7 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
 /**
  * Daily Stock Sync - Syncs stocks from NSE
  */
-async function executeStockSync(payload?: Record<string, unknown>): Promise<unknown> {
+export async function executeStockSync(payload?: Record<string, unknown>): Promise<unknown> {
   const indexName = (payload?.indexName as string) || "NIFTY TOTAL MARKET";
 
   logger.info({ msg: "Starting stock sync", indexName, payload });
@@ -194,7 +194,7 @@ function parseActionPurpose(purpose: string): { actionType: string; dividendAmou
   return { actionType, dividendAmount };
 }
 
-async function executeCorpActionsSync(payload?: Record<string, unknown>): Promise<unknown> {
+export async function executeCorpActionsSync(payload?: Record<string, unknown>): Promise<unknown> {
   const { getIndexCorporateActions } = await import("@/lib/index-service");
 
   logger.info({ msg: "Starting corporate actions sync" });
@@ -258,7 +258,7 @@ async function executeCorpActionsSync(payload?: Record<string, unknown>): Promis
 /**
  * Screener Sync - Full TradingView scan status daily snapshot
  */
-async function executeScreenerSync(payload?: Record<string, unknown>): Promise<unknown> {
+export async function executeScreenerSync(payload?: Record<string, unknown>): Promise<unknown> {
   const { syncDailyScreener } = await import("@/lib/services/worker/screener-service");
   logger.info({ msg: "Starting full screener sync task" });
 

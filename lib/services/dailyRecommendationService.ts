@@ -17,6 +17,7 @@ import {
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
 import { loadConfig } from "./ai/config";
+import { getRecommendationContext } from "./ai/recommendation-context";
 import { getAICircuitBreaker, CircuitBreakerError } from "./ai/circuit-breaker";
 import { getRecommendationMetrics } from "./ai/performance-monitor";
 import { recordPrediction } from "./ai/prediction-tracker";
@@ -300,6 +301,25 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         total: stockEntries.length,
         processing: aiInput.length,
         skipped: cappedCount,
+      });
+    }
+
+    // Enrich each stock's AI input with fundamental context (corp actions,
+    // announcements, quarterly results) — batched once per run, best-effort:
+    // a context failure drops the context, never the pipeline.
+    const stockContextMap = await getRecommendationContext(
+      aiInput.map((s) => s.symbol),
+    );
+    for (const entry of aiInput) {
+      const ctx = stockContextMap[entry.symbol];
+      if (ctx) entry.context = ctx;
+    }
+    const enrichedCount = Object.keys(stockContextMap).length;
+    if (enrichedCount > 0) {
+      logger.info({
+        msg: "AI context enriched",
+        enriched: enrichedCount,
+        total: aiInput.length,
       });
     }
 

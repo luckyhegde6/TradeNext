@@ -19,8 +19,11 @@ test.describe('Sign-in page (logged out)', () => {
     await expect(page.getByPlaceholder('••••••••')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible();
 
-    // Link to create an account
-    await expect(page.getByRole('link', { name: 'Join Now' })).toHaveAttribute('href', '/users/new');
+    // Link to request access — self-signup was removed in v3.6.0, so the
+    // primary CTA points to the admin-moderated join flow.
+    await expect(page.getByRole('link', { name: 'Join Now' })).toHaveAttribute('href', '/auth/join');
+    // Forgot-password link → reset request flow (admin-approved)
+    await expect(page.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/auth/password-reset');
   });
 
   test('shows an error for invalid credentials', async ({ page }) => {

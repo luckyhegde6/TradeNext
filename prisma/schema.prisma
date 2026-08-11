@@ -63,6 +63,19 @@ model JoinRequest {
   @@map("join_requests")
 }
 
+model PasswordResetRequest {
+  id        String   @id @default(cuid())
+  email     String
+  reason    String?
+  status    String   @default("pending") // pending | approved | rejected
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([email])
+  @@map("password_reset_requests")
+}
+
 model Post {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())

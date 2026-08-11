@@ -84,7 +84,7 @@ export default function PerformanceTab({ loading: _initialLoading }: Performance
   const [recFilter, setRecFilter] = useState("all");
   const [sortBy, setSortBy] = useState<
     "createdAt" | "returnPercent" | "symbol" | "confidence" | "entryPrice" | "currentPrice" | "targetPrice" | "stopLoss" | "daysTracked" | "lastCheckedAt"
-  >("returnPercent");
+  >("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
 

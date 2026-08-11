@@ -164,6 +164,42 @@ function toListItem(t: {
 // ─── Public list (cached 15 min) ─────────────────────────────────────────
 
 /**
+ * Bridge trackers whose currentPrice is null with the latest close from
+ * `daily_prices` (single batched DISTINCT ON query — no N+1). The 4PM IST
+ * perf-check cron keeps currentPrice fresh for trackers, but newly settled
+ * trackers or days without a run can lag; this guarantees the Current column
+ * and Return % never show "—" while a daily_prices row exists.
+ */
+async function bridgeMissingCurrentPrices<T extends { symbol: string; currentPrice: number | null }>(
+  rows: T[],
+): Promise<T[]> {
+  const missing = rows.filter((r) => r.currentPrice == null);
+  if (missing.length === 0) return rows;
+
+  const symbols = [...new Set(missing.map((r) => r.symbol))];
+  try {
+    const priceRows = await prisma.$queryRaw<{ ticker: string; close: number }[]>`
+      SELECT DISTINCT ON (ticker) ticker, close::float8 as close
+      FROM daily_prices
+      WHERE ticker = ANY(${symbols})
+      ORDER BY ticker, "tradeDate" DESC
+    `;
+    const priceMap = new Map(priceRows.map((p) => [p.ticker, p.close]));
+    return rows.map((r) =>
+      r.currentPrice == null && priceMap.has(r.symbol)
+        ? { ...r, currentPrice: priceMap.get(r.symbol)! }
+        : r,
+    );
+  } catch (error) {
+    logger.warn({
+      msg: "Current-price bridge failed for performance list",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return rows;
+  }
+}
+
+/**
  * Get the performance list of recommendation trackers.
  *
  * Only trackers created BEFORE today are shown ("next-day promotion") so the
@@ -216,7 +252,8 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
       orderBy,
       take: 5000, // safety bound; cache makes re-fetch cheap
     });
-    const allItems = all.map(toListItem);
+    const bridged = await bridgeMissingCurrentPrices(all);
+    const allItems = bridged.map(toListItem);
     allItems.sort((a, b) => {
       const av = a.returnPercent ?? -Infinity;
       const bv = b.returnPercent ?? -Infinity;
@@ -240,7 +277,8 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     skip: offset,
   });
 
-  const items = rows.map(toListItem);
+  const bridged = await bridgeMissingCurrentPrices(rows);
+  const items = bridged.map(toListItem);
 
   const response: PerformanceListResponse = {
     items,

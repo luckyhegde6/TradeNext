@@ -4,11 +4,19 @@ import logger from "@/lib/logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 
 /**
- * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0).
+ * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0)
+ * plus the Daily Market Sync (v3.5.8).
  *
- * Ensures the two SYSTEM-managed recommendation jobs exist and are active:
+ * Ensures the three SYSTEM-managed jobs exist and are active:
  *   - Daily Recommendations          `30 4 * * 1-5`   = 10:00 AM IST (Mon-Fri)
  *   - Recommendation Performance     `30 10 * * 1-5`  = 04:00 PM IST (Mon-Fri)
+ *   - Daily Market Sync              `1 1 * * 1-5`    = 06:31 AM IST (Mon-Fri)
+ *
+ * The Market Sync job exists for the ledger + admin visibility: on Netlify the
+ * actual morning sync runs via the scheduled function cron-market-sync → the
+ * `market-sync` action of netlify/functions/run-cron-background.ts, which
+ * records the run against MARKET_SYNC_CRON_NAME (same as the two
+ * recommendation jobs). It never flows through the worker scheduler loop.
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
  * picks up due jobs via `nextRun` and spawns tasks through `spawnCronTask`,
@@ -20,8 +28,10 @@ import { calculateNextRun } from "@/lib/cron-parser";
  */
 export const RECOMMENDATION_CRON_NAME = "Daily Recommendations (System)";
 export const RECOMMENDATION_PERFORMANCE_CRON_NAME = "Recommendation Performance Check (System)";
+export const MARKET_SYNC_CRON_NAME = "Daily Market Sync (System)";
 export const RECOMMENDATION_CRON_EXPR = "30 4 * * 1-5"; // 10:00 AM IST Mon-Fri
 export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM IST Mon-Fri
+export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
 
 export interface EnsureRecommendationCronsResult {
   ensured: number;
@@ -115,6 +125,12 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       description: "System-managed recommendation performance check + archival (04:00 PM IST, Mon-Fri)",
       taskType: "recommendation_performance",
       cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR,
+    },
+    {
+      name: MARKET_SYNC_CRON_NAME,
+      description: "System-managed daily NSE market sync — corporate actions + stock list (06:31 AM IST, Mon-Fri)",
+      taskType: "market_data",
+      cronExpression: MARKET_SYNC_CRON_EXPR,
     },
   ];
 
