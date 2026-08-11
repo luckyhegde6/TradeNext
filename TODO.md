@@ -62,6 +62,12 @@
 | Playwright E2E suite + CI (v3.5.3) | [x] Complete (89 tests, 5 projects, CI workflow) |
 | Stale recs AI-config plumbing (v3.5.4) | [x] Complete (loadConfig shared, pipeline passes config, DEFAULT_MODEL → nemotron-3-ultra-550b:free + refreshed catalog; committed on `fix/ai-config-cron-ledger`, **deploy pending**) |
 | Cron ledger fix (v3.5.4) | [x] Complete (recordCronRun wired into run-cron-background + admin runNow/retry; **deploy pending**) |
+| Chartink template capture → DB (v3.5.5) | [x] Complete (3 Prisma models + chartinkScreenerService + Playwright capture tool; 35 new tests, 394 total; **migration + commit pending user approval, no deploy**) |
+| Chartink 117-registry PRIMARY + TV fallback (v3.5.6) | [x] Complete (chartinkUnifiedScreenerService source chain db→live→tv, daily-recs engine switched, GET/POST /api/screener/chartink, TemplatesPanel Chartink·117/TradingView·98 toggle, 18 new tests — caught catalog-only-TV-fallback bug; suite 412 pass; **commit pending user, no deploy**) |
+| Auth join→approve→login fix (v3.5.7) | [x] Complete (removed `isVerified` gate from `lib/auth.ts` authorize() — approved join-request users can log in; **join approve sets the `DEFAULT_PASSWORD` env var value — no literal in repo, missing env → 500 guard**; admin confirm shows env-var name, success alert shows API-returned password; dead UNVERIFIED branches removed from signin page + LoginModal; suite 419 pass) |
+| Server logs `logs/` dir + monitoring tab fix (v3.5.7) | [x] Complete (`server_logs/`→`logs/`, `readLogsByDate` path bug fixed, general logger mirrors every line to `server-logs` Blob store on Netlify + store-aware `readBlobLog`/`deleteBlobLog`/`listBlobLogs` strips `.log`; monitoring Server Logs tab now displays logs; 7 new logger tests; **commit pending user, no deploy** — consistent with v3.5.4/5/6 holds) |
+| Credential masking + docs hygiene (v3.5.7) | [x] Complete (`DEFAULT_PASSWORD` env-only; literal join password redacted to `********` in all committed docs; NEW `.githooks/commit-msg` blocks credential literals + `.githooks/pre-commit` #6 `.env` never staged + #7 secret literals in staged diff/`.md`; README rewritten/polished; **commit pending user, no deploy**) |
+| AI & Agent Discovery — `llms.txt` + robots (v3.5.7) | [x] Complete (NEW `app/llms.txt/route.ts` llmstxt.org-style index with Boundaries; `app/robots.ts` LLM-crawler rules + explicit `/llms.txt` allow + internal-path blocks; verified 200 for `/llms.txt` `/robots.txt` `/sitemap.xml` `/api/openapi` on dev :3000; **commit pending user, no deploy**) |
 
 ---
 

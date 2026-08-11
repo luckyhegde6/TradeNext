@@ -12,13 +12,13 @@ status: "in_progress"              # ready | in_progress | handoff_required | re
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-08T16:00:00Z"
-feature: "playwright-e2e-suite"
+last_updated: "2026-08-11T12:00:00Z"
+feature: "v3.5.7-auth-login-fix-logs-dir"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Session v3.5.3 (Playwright E2E Suite + CI + Docs) on branch `fix/screener-change-percent` (PR #85 OPEN): the user's e2e stack (`e2e/`, `playwright.config.ts`, `.github/workflows/playwright.yml`, `@playwright/test`) was hardened to green — Firefox `xl`-nav viewport **1440×900**, WebKit controlled-number-input **keystroke** fill, single-threaded dev-server nav starvation → serial `navigation.spec.ts` + `Promise.all([waitForURL, click({noWaitAfter:true})])` + 60s URL timeout, `retries: CI?2:1`, `workers: CI?1:2`, live-marquee assertion removed. **Full suite GREEN** (87/89 first attempt + 2 env-flaky on retry #1); 317 Jest tests pass; e2e files typecheck clean. CI workflow hardened (timescale service + migrate deploy + seed + artifact). All docs written (`.agents/docs/playwright-e2e.md`, `playwright-e2e` skill ×2, AGENTS.md v3.5.3 row/commands/lessons, README badge, CHANGELOG, matrix, Primer Session 14, agent-memory, Lessons 55). **Remaining: commit everything to PR #85 → push → report merge-ready (never auto-merge)** — see `.agents/session-todos.md`.
+**No active handoff.** Session v3.5.7 (Auth Join→Approve→Login Fix + Server Logs `logs/` Dir + Credential Hygiene + AI/Agent Discovery) on branch `fix/ai-config-cron-ledger` (work-in-progress, NOT committed): removed the `isVerified` auth gate that locked out approved join-request users (password compare is now the single authoritative gate); join approval sets the **`DEFAULT_PASSWORD` env var** value (no literal in repo; missing env → 500 guard), admin confirm shows the env-var NAME, success alert shows the API-returned password; dead UNVERIFIED branches removed from signin page + LoginModal. Server logs moved `server_logs/`→`logs/`, `readLogsByDate` path bug fixed (was always `[]`), general logger now mirrors every line to the `server-logs` Blob store on Netlify + store-aware blob reads → monitoring Server Logs tab displays logs. Credential masking enforced (`.githooks/commit-msg` + pre-commit #6/#7); all docs redacted to `********`; README rewritten/polished; NEW `/llms.txt` (llmstxt.org-style index with Boundaries) + `app/robots.ts` LLM-crawler rules (verified 200 for `/llms.txt` `/robots.txt` `/sitemap.xml` `/api/openapi` on dev :3000). **Full suite 419 passed / 11 skipped / 0 failures** (7 new logger tests); Playwright e2e verified (join → approve → login → redirect; monitoring lists `2026-08-11` 40 KB). Docs updated (AGENTS.md, CHANGELOG, TODO, Primer, agent-memory, Lessons 58–60, handoff latest.md). **Remaining: commit v3.5.7 on a new branch (or bundle with pending v3.5.5/3.5.6 chartink work) → push → PR (ask first); NO deploy** (user holds v3.5.4→v3.5.7) — see `.agents/session-todos.md`.
 
 ---
 
@@ -81,3 +81,4 @@ No active handoff. Session ph19 code + docs complete; pending test run, deploy, 
 | v1.4 | 2026-08-07 | Session ph20 (recommendation performance tracking, v3.5.0): updated state to ph20, session-todos refreshed |
 | v1.5 | 2026-08-07 | Session ph21 (carry-forward, v3.5.1): target/SL ₹0 fix + SSE live prices + HistoryTab null-guard; state updated to ph21 |
 | v1.6 | 2026-08-08 | Session v3.5.3 (Playwright e2e suite): state updated to e2e docs/commit phase; feature `playwright-e2e-suite` |
+| v1.7 | 2026-08-11 | Session v3.5.7 (auth join→approve→login fix + server logs `logs/` dir): state updated; feature `v3.5.7-auth-login-fix-logs-dir`; commit/PR pending, no deploy |

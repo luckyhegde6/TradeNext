@@ -1,53 +1,44 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260811-stale-recs-cron-ledger"
+session_id: "sess-20260811-auth-logs"
 agent: "system"
-timestamp: "2026-08-11T06:00:00Z"
+timestamp: "2026-08-11T12:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260810-session-persistence"
+parent_session: "sess-20260811-stale-recs-cron-ledger"
 child_sessions: []
-checkpoint: "ai-config-plumbing-fix-code-tested-docs-done"
+checkpoint: "v3.5.7-auth-logs-cred-hygiene-discovery-code-tests-e2e-docs-done"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.5.4/3.5.5 — fix stale Daily Recommendations (public `/recommendations` stuck at Jul 19) + cron job ledger showing no runs on prod. Also built the per-session `decisions.md`/`flow.md` memory system (user request).
-- **Branch**: `fix/ai-config-cron-ledger` (created from main @ `c995a10`; PRs #86/#87 already merged into main). All session changes are uncommitted on this branch — commit pending (user: "create a branch and test the changes and commit and update docs").
-- **Priority pending**: user chose **code-fix only, NO deploy** for the cron-ledger fix.
+- **Task**: v3.5.7 — (1) auth join→approve→login fix: approved join-request users could never log in, (2) server logs invisible: `server_logs/` dir + a broken `readLogsByDate` path + general logger never mirroring to the `server-logs` Blob store → monitoring Server Logs tab empty, (3) credential hygiene: join default password moved to the `DEFAULT_PASSWORD` env var (no literal in repo/docs) + git hooks enforce it, (4) AI/agent discovery: README rewrite + `/llms.txt` + robots LLM-crawler rules.
+- **Branch**: work-in-progress on `fix/ai-config-cron-ledger` (contains uncommitted v3.5.4 + v3.5.5 + v3.5.6 + v3.5.7 work). Commit on a new branch **pending user approval** — NO deploy (user consistent holds v3.5.4→v3.5.7).
 
 ## Progress
-- [x] **#68/#69/v3.5.2 verified on prod** (earlier): sessions page real rows; DB Logs tab 722 entries; screener 2,000 stocks synced today.
-- [x] **Stale-recs ROOT CAUSE (two defects)**:
-  - A) `dailyRecommendationService.ts:322` called `analyzeStocks(aiInput)` with NO config → env-only default → DB `ai_config` Secret never reached the pipeline.
-  - B) `DEFAULT_MODEL`/`AVAILABLE_MODELS` pointed at nonexistent OpenRouter models (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free` → HTTP 404 → all-HOLD runs → `getLatestRecommendations` BUY/SELL filter hides them → stale page).
-- [x] **Prod AI config fixed via API**: model = `nvidia/nemotron-3-ultra-550b-a55b:free` (verifies 200). Prod run after fix STILL all-HOLD → proves defect A is code-side.
-- [x] **Code fixes implemented (local, uncommitted)**:
-  - `lib/services/ai/config.ts`: `loadConfig()` (DB `ai_config` Secret + env fallback, lazy Prisma import), `DEFAULT_MODEL` + `AVAILABLE_MODELS` refreshed vs live catalog.
-  - `lib/services/dailyRecommendationService.ts`: passes `aiConfig` to `analyzeStocks`.
-  - `app/api/admin/ai/test/route.ts`: deduped to shared `loadConfig()`.
-- [x] **Session memory system (D7)**: `.agents/rules/session-decisions-flow.md` (new MANDATORY rule), `.agents/sessions/2026-08-11-c995a10/{decisions,flow}.md` (live logs), index/docs updated (sessions/README, session-memory-rules §3, rules/README, AGENTS.md).
-- [x] **Cron ledger fix (D8, user-reported)**: prod `GET /api/admin/cron` → both system jobs `lastRun:null runCount:0 success/failure:0` + stale nextRun. Root cause: ledger only written by `spawnCronTask`/resident scheduler — never by the real Netlify scheduled-function path. Implemented:
-  - `lib/services/recommendationCronService.ts`: `recordCronRun(jobName, success)` (lastRun/runCount/successCount/failureCount + nextRun advance; name-based; safe no-op).
-  - `netlify/functions/run-cron-background.ts`: records success + failure for both actions.
-  - `app/api/admin/workers/route.ts`: PATCH runNow/retry → `recordManualRunLedger` (skips `cronJobId`-linked tasks to avoid double-count).
-  - Test `lib/__tests__/recommendationCronService.test.ts` (5 tests).
-- [x] **Verification (FULL)**: `npm run test` → **28 suites, 340 passed / 11 skipped / 0 failures**; `npx tsc --noEmit` clean on ALL touched files (only pre-existing errors in untouched test files remain). ESLint repo-wide blocked by pre-existing eslintrc circular-config error (Next 16 removed `next lint`) — out of scope, noted.
-- [x] **Docs updated (all)**: AGENTS.md v3.5.4 row, `.agents/CHANGELOG.md` + `versions-v3.md`, TODO.md Quick Reference, BUGS.md (#3 root cause + fix, #2a cron-ledger row), Primer.md (status + Session 15), agent-memory.md, Lessons.md (56–57), `.agents/session-todos.md`, handoff latest.md.
+- [x] **Auth fix**: `lib/auth.ts` authorize() — removed the `isVerified` gate that threw "Email not verified" BEFORE the bcrypt compare (approved join-request users, `isVerified=false`, could never log in; dead branch). Password compare is now the single authoritative gate; blocked-account check retained.
+- [x] **Approve route**: `app/api/admin/join-requests/[id]/approve/route.ts` — reads `process.env.DEFAULT_PASSWORD` (bcrypt-hashed value from `.env`, cost 12; **no literal in repo**, missing env → 500 guard); response returns `{success, userId, defaultPassword, email}`.
+- [x] **Admin UI**: `app/admin/users/page.tsx` — approve confirm dialog references the env-var NAME + success alert shows the API-returned password + email. Dead `UNVERIFIED` branches removed from `app/auth/signin/page.tsx` + `app/components/modals/LoginModal.tsx`.
+- [x] **Logging fix**: `lib/logger.ts` `logs/` dir (was `server_logs/`), `readLogsByDate` path bug fixed (`logs/<YYYY-MM>/<YYYY-MM-DD>.log`, was computing `logs/<YYYY>/<YYYYMM>/…` → always `[]`), general logger mirrors every line to the date-keyed `server-logs` Blob store on Netlify (fire-and-forget). `lib/netlify-logger.ts` — store-paramaterized `readBlobLog`/`deleteBlobLog`/`writeBlobLog` (blob `.log` keys → `server-logs` store), `appendServerLogLine`, `listBlobLogs` strips `.log`. `.gitignore` + `logs/`.
+- [x] **Credential hygiene (enforced)**: NEW `.githooks/commit-msg` (blocks credential literals in commit messages) + `.githooks/pre-commit` checks #6 (real `.env` never staged) + #7 (secret literals in staged diff / `.md` password assignments); both `bash -n` clean + functional-tested. All literal join-password values redacted to backtick-quoted `********` in committed docs; `.env.example` documents only the NAME. Public sandbox demo creds (seed/e2e/README tables) remain exempt — documented public demo logins, not production secrets.
+- [x] **README.md rewritten/polished** + **AI & Agent Discovery**: NEW `app/llms.txt/route.ts` (llmstxt.org-style index with Boundaries) + `app/robots.ts` rewritten (first-rule `/llms.txt` allow, LLM-crawler UA list GPTBot/ClaudeBot/anthropic-ai/PerplexityBot/Google-Extended/FacebookBot/Applebot-Extended/Bytespider, Googlebot/Bingbot rules, internal-path blocks `/.agents/` `/docs/` `/*.md`).
+- [x] **Tests**: NEW `lib/__tests__/logger-paths.test.ts` (7 tests, `@jest-environment node`; `jest.setup.js` window mocks guarded with `typeof window !== 'undefined'`). **Full suite: 419 passed / 11 skipped / 0 failures** (was 412). tsc clean on all touched files.
+- [x] **E2E verification (Playwright, dev :3000)**: join request → admin approve → success alert → logout → login with env-configured password → redirect `/`. Monitoring → Server Logs lists `2026-08-11` (40 KB).
+- [x] **Route checks (curl dev :3000)**: `/llms.txt` 200 text/plain, `/robots.txt` 200, `/sitemap.xml` 200 application/xml, `/api/openapi` 200 OpenAPI 3.0.3 JSON (first 404 was a stale Turbopack watcher — timestamp-touch re-registered; no code change). Cleanup: killed dev server tree (PID 16588) + deleted `next-llms-verify*.log`.
+- [x] **Docs updated (all)**: AGENTS.md v3.5.7 row, `.agents/CHANGELOG.md` index + `changelog/versions-v3.md` v3.5.7 entry, TODO.md Quick Reference (4 rows), Primer.md (Last Updated + status section), agent-memory.md entry, Lessons.md 58–60 + update log, session `decisions.md` (D13–D16) + `flow.md` (§9), handoff `latest.md`.
 
 ## Decisions
-- Config: single shared `loadConfig()` in `lib/services/ai/config.ts`; DB Secret wins over env; lazy prisma import keeps file client-safe.
-- Models: `DEFAULT_MODEL = nvidia/nemotron-3-ultra-550b-a55b:free` (only real free+tool model verified live).
-- Cron ledger: single ledger-writer `recordCronRun`; PATCH route skips cronJobId-linked tasks (spawnCronTask already counts at spawn); netlify background function records success + failure.
-- NO deploy this session (user explicit).
+- Auth: multi-condition login gates must keep the password compare LAST and authoritative; status flags must not early-throw. System-issued credentials (default passwords) must be surfaced in the creating admin flow.
+- Credentials: new credential values are env-var-only (`DEFAULT_PASSWORD`); docs/commits reference env var NAMES; git hooks block literals; public sandbox demo creds (documented public demo logins) remain centrally documented and exempt.
+- Logger: single source of truth per axis — `logs/<YYYY-MM>/<YYYY-MM-DD>.log` on both write+read; blob store derived from key (`.log` → `server-logs`); `listBlobLogs` strips `.log` for UI date parity.
+- Discovery: `/llms.txt` + robots serve machine-readable public info only — never credentials, never `.agents/`; Boundaries documented (no `/admin/*`, `/users/*`, internal paths).
+- NO deploy this session (user explicit; consistent with v3.5.4/3.5.5/3.5.6 holds).
 
 ## Blockers
-- **Nothing committed yet** — this session's changes (AI config plumbing + cron ledger fix + memory infra + docs) are uncommitted on `fix/ai-config-cron-ledger`. Needs commit + PR (SSH push), then a SEPARATE user-approved deploy.
-- Prod stale-recs verification (fresh BUY/SELL run) still requires deploy + re-run.
+- **Nothing committed** — v3.5.4 through v3.5.7 changes are uncommitted on `fix/ai-config-cron-ledger`; clean-up decision needed: commit v3.5.7 (auth+logs+hygiene+discovery) alone on a new branch, or bundle with the pending chartink v3.5.5/3.5.6 work. Needs user approval. No deploy.
 
 ## Next Steps
-1. **Commit `fix/ai-config-cron-ledger`** (pre-commit hygiene first: git status, junk artifacts, secrets grep) — conventional `type(scope):` message per `.agents/linear-history.md`.
-2. Push via SSH + open PR (ask user before creating PR per repo flow).
-3. Deploy to Netlify (user approval), then: re-trigger `PATCH /api/admin/workers runNow` → verify BUY/SELL picks + fresh "Last updated" on public page.
-4. After next scheduled run (10 AM IST), verify cron ledger on prod (`lastRun`/`runCount` populated; nextRun advanced).
+1. User decision: pack the pending work — (a) v3.5.7 auth+logs+hygiene+discovery only on a new branch (recommended, smallest diff), or (b) one branch with v3.5.5/3.5.6/3.5.7; then `git status`/pre-commit hygiene (junk artifacts, secrets grep) → conventional commit → push → open PR (ask before PR per repo flow).
+2. NO deploy this batch (user holds). Deploy + prod verification (approve a real join request, check prod server-logs Blob) in a separate user-approved session — separate from the v3.5.4/3.5.5/3.5.6 holds.
+3. Optional follow-up: prod exports the joined user's default password to the applicant (currently `[EMAIL MOCK]` only).
