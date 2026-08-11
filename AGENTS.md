@@ -121,7 +121,7 @@ git config core.hooksPath .githooks    # Enable versioned hooks (fresh clone)
 | `.agents/linear-history.md` | Git flow & branching strategy (warn-only main) |
 | `.agents/code-hygiene.md` | Code quality rules (ponytail minimal-code style) |
 | `.agents/documentation-standards.md` | Documentation standards |
-| `.agents/docs/` | Subsystem deep-dives (recommendations, tasks/cron/workers, monitoring, alerts, playwright-e2e) — read before editing those subsystems |
+| `.agents/docs/` | Subsystem deep-dives (recommendations, tasks/cron/workers, monitoring, alerts, playwright-e2e) + DB-migration ledger (what/why/decisions for every migration) — read before editing those subsystems |
 | `.agents/AGENT-SKILL-MATRIX.md` | Agent ↔ Skill ↔ Command mapping matrix |
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
 | `.agents/handoffs/flow/` | Handoff flows: session-cycle, agent-to-agent, agent-to-human, error-recovery |
