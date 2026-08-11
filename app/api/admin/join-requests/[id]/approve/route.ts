@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { updateJoinRequestStatus } from "@/lib/services/userService";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -35,9 +34,15 @@ export async function POST(
         }
 
         // 1. Create the User
-        // Generate a temporary password
-        const tempPassword = crypto.randomBytes(8).toString('hex');
-        const hashedPassword = await bcrypt.hash(tempPassword, 12);
+        // Default password comes from the DEFAULT_PASSWORD env var (server-only,
+        // never hardcoded in the repo). The value is returned in the response so
+        // the admin UI can share it with the applicant.
+        const DEFAULT_PASSWORD = process.env.DEFAULT_PASSWORD ?? "";
+        if (!DEFAULT_PASSWORD) {
+            logger.error({ msg: "DEFAULT_PASSWORD env not set — cannot approve join request" });
+            return NextResponse.json({ error: "Server not configured: DEFAULT_PASSWORD missing" }, { status: 500 });
+        }
+        const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 12);
 
         const user = await prisma.user.create({
             data: {
@@ -55,10 +60,10 @@ export async function POST(
 
         logger.info({ msg: "Join request approved", email: joinRequest.email, userId: user.id });
 
-        // In a real app, send email with tempPassword here
-        console.log(`[EMAIL MOCK] Welcome to TradeNext! Your temporary password is: ${tempPassword}`);
+        // In a real app, send email with the default password here
+        console.log(`[EMAIL MOCK] Welcome to TradeNext! Your default password is: ${DEFAULT_PASSWORD}`);
 
-        return NextResponse.json({ success: true, userId: user.id });
+        return NextResponse.json({ success: true, userId: user.id, defaultPassword: DEFAULT_PASSWORD, email: joinRequest.email });
     } catch (error) {
         logger.error({ msg: "Approval failed", error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: "Failed to approve request" }, { status: 500 });

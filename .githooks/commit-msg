@@ -1,0 +1,18 @@
+#!/bin/sh
+# Commit-msg hook — TradeNext (gardenify pattern)
+# Blocks commit messages that contain literal credential values (v3.5.7 rule).
+# Rule: reference env var NAMES (DEFAULT_PASSWORD, DEMO_PASSWORD, ...) — never values.
+# Enable via: git config core.hooksPath .githooks
+
+MSG_FILE="$1"
+
+if grep -E '12345678|demo123|admin123|password[[:space:]]*=[[:space:]]*[^&|;]' "$MSG_FILE" >/dev/null 2>&1; then
+    echo ""
+    echo "=== Commit Message Security Check ==="
+    echo "  CRITICAL: Commit message contains a literal credential value or password assignment."
+    echo "  Reference env var NAMES only (e.g. DEFAULT_PASSWORD)."
+    echo "  Example: 'fix(auth): read join default password from DEFAULT_PASSWORD env'"
+    exit 1
+fi
+
+exit 0

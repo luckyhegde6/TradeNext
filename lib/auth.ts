@@ -91,11 +91,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             throw new Error("Account is blocked. Please contact support.");
           }
 
-          if (!(user as any).isVerified) {
-            logger.warn({ msg: "Auth: Email not verified", email });
-            throw new Error("Email not verified");
-          }
-
+          // Email-verification gate removed — approved join-request users and
+          // admin-created users log in directly with their password.
           const isPasswordValid = await compare(password, user.password);
 
           if (!isPasswordValid) {

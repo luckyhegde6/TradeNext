@@ -89,12 +89,13 @@ export default function AdminUsersPage() {
     }, [activeTab]);
 
     const handleApproveRequest = async (id: string) => {
-        if (!confirm('Are you sure you want to approve this request? An account will be created and a temporary password will be generated.')) return;
+        if (!confirm('Are you sure you want to approve this request? An account will be created with the configured default password (DEFAULT_PASSWORD env). The password is shown after approval — share it with the applicant so they can sign in.')) return;
         setProcessingRequest(id);
         try {
             const res = await fetch(`/api/admin/join-requests/${id}/approve`, { method: 'POST' });
             if (!res.ok) throw new Error('Failed to approve request');
-            alert('Request approved successfully!');
+            const data = await res.json();
+            alert(`Request approved successfully! Default password: ${data.defaultPassword || '(not returned)'} (for ${data.email || 'the applicant'}).`);
             fetchRequests();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
