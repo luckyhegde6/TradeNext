@@ -405,7 +405,7 @@ flowchart TD
 
 <section id="mcp">
   <h2>7. MCP Integration</h2>
-  <p>The MCP API (<code>POST /api/mcp</code> or <code>GET /api/mcp?function=...</code>) exposes 23 functions for external NSE data. <code>getHistoricalData</code> (added Aug 6, 2026) reuses <code>getBacktestData()</code> so MCP and the backtester share one data path.</p>
+  <p>The MCP API (<code>POST /api/mcp</code> or <code>GET /api/mcp?function=...</code>) exposes 26 functions for external NSE data. <code>getHistoricalData</code> (added Aug 6, 2026) reuses <code>getBacktestData()</code> so MCP and the backtester share one data path. <code>getIpoAnalysis</code> / <code>getIpoIssueDetail</code> / <code>getNseEvents</code> (added Aug 12, 2026) expose the IPO report v2, IPO issue size, and the NSE events feed.</p>
   <table>
     <tr><th>Function</th><th>Params</th><th>Returns</th></tr>
     <tr><td><code>getHistoricalData</code></td><td><code>symbol</code>, <code>from</code>, <code>to</code></td><td><code>{ symbol, source, barCount, rangeStart, rangeEnd, fetchedAt, ohlcv[] }</code></td></tr>

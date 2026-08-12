@@ -19,6 +19,7 @@ PostgreSQL/TimescaleDB and deployed serverless on Netlify.
 | **Screener** | 2,000+ NSE stocks · 40+ filter fields · 98 TradingView templates + 117-entry Chartink registry · backtest engine · CSV export |
 | **Portfolio** | Holdings P&L with live SSE prices, transactions, CSV import/export, tax reports (ST/LT), rebalancer, risk metrics (Sharpe, beta, max DD) |
 | **AI Recommendations** | Daily picks from Chartink + TradingView hybrid scan, analyzed by an AI agent (OpenRouter) with confidence/target/SL, performance tracking + archival |
+| **IPOs & Events** | IPO issue details — **Issue Size: shares per lot + ₹ per lot** — plus AI IPO analysis rendered as a JSON report (GMP, peers, risk matrix, strategy) and an **NSE events feed** (listing ceremonies etc.) on the dashboard |
 | **Alerts & Telegram** | Price alerts, multi-condition rules, channels, event history, and **@tradenext6Bot** real-time delivery with rate limiting & user verification |
 | **Platform** | Role-based auth (join-request flow), admin console (users, cron, workers, monitoring, AI config), background jobs, audit logging, MCP API |
 
@@ -36,6 +37,8 @@ PostgreSQL/TimescaleDB and deployed serverless on Netlify.
 | Stock Screener | ✅ Working | 2,000+ stocks, multiple filters, backtest, templates |
 | Advanced Screener | ✅ Working | Chartink·117 / TradingView·98 templates, unified runner, per-template runs |
 | Recommendations | ✅ Working | Today's Picks, History, Performance tracking, Dividends, Subscribe |
+| IPOs | ✅ Working | Issue Size (shares per lot + ₹ per lot), AI IPO analysis as JSON report (GMP/peers/risk/strategy) |
+| NSE Events Feed | ✅ Working | Dashboard widget below Corporate Announcements (PAST/UPCOMING pills, thumbnails) |
 | Alerts | ✅ Working | Multi-tab: Simple, Rules, Channels, Events, Telegram Bot |
 | Watchlist | ✅ UI Ready | Empty state (expected) |
 | Session Management | ✅ Working | Admin can view/invalidate sessions |
@@ -123,8 +126,9 @@ node scripts/dev-checks/test-auth.js
 
 ## Testing
 
-- **Unit/component** (Jest, `lib/__tests__/`, 419 passing): services (screener engine, technical
-  analysis, backtest, recommendations, chartink unified runner, cron ledger, tax, logger paths, …).
+- **Unit/component** (Jest, `lib/__tests__/`, 533 passing): services (screener engine, technical
+  analysis, backtest, recommendations, chartink unified runner, cron ledger, IPO report/issue size,
+  NSE events, tax, logger paths, …).
 - **E2E** (`e2e/`, 89 tests, 5 Playwright projects): login, nav, home, screener + advanced screener,
   recommendations, portfolio, watchlist, alerts, profile, responsive. CI: `.github/workflows/playwright.yml`
   (TimescaleDB service, migrate + seed, HTML report artifact 30 days).
@@ -141,8 +145,9 @@ POST /api/mcp        # JSON body: { "function": "getStockQuote", "params": {...}
 GET  /api/mcp?function=getStockQuote&symbol=RELIANCE
 ```
 
-- **23 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
-  corporate info, marquee, deals, announcements, insider trading, events, heatmap, symbols, trends + discovery.
+- **26 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
+  corporate info, marquee, deals, announcements, insider trading, events, heatmap, symbols, trends,
+  IPO analysis / IPO issue detail / NSE events + discovery.
 - Optional auth via `x-api-key` header (`MCP_API_KEY` env). Caching: quotes 60s, market 2m, corp actions 5m.
 - Discovery: `listFunctions`, `help`, `describe`, `schema` · Full Swagger reference: **/api/openapi**.
 

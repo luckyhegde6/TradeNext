@@ -6,6 +6,8 @@ import DailyPicksTab from "@/app/components/recommendations/DailyPicksTab";
 import HistoryTab from "@/app/components/recommendations/HistoryTab";
 import PerformanceTab from "@/app/components/recommendations/PerformanceTab";
 import SubscribeTab from "@/app/components/recommendations/SubscribeTab";
+import IposTab from "@/app/components/recommendations/IposTab";
+import IdeasTab from "@/app/components/recommendations/IdeasTab";
 import DividendMonthView from "@/app/components/dividends/DividendMonthView";
 import DividendSummaryCards from "@/app/components/dividends/DividendSummaryCards";
 import DividendListView from "@/app/components/dividends/DividendListView";
@@ -17,7 +19,7 @@ import type {
   MonthlyIncome,
 } from "@/lib/services/dividendCalendarService";
 
-type Tab = "picks" | "history" | "performance" | "dividends" | "subscribe";
+type Tab = "picks" | "history" | "performance" | "dividends" | "ipos" | "ideas" | "subscribe";
 type DividendViewTab = "calendar" | "list" | "income";
 
 interface Stock {
@@ -157,6 +159,8 @@ export default function RecommendationsPage() {
     { id: "history", label: "History", icon: "📜" },
     { id: "performance", label: "Performance", icon: "📈" },
     { id: "dividends", label: "Dividends", icon: "💰" },
+    { id: "ipos", label: "IPOs", icon: "🚀" },
+    { id: "ideas", label: "Ideas", icon: "💡" },
     { id: "subscribe", label: "Subscribe", icon: "🔔", authRequired: true },
   ];
 
@@ -170,14 +174,17 @@ export default function RecommendationsPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Daily Recommendations</h1>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-2xl">📈</span>
+            <h1 className="text-3xl font-bold text-white">Daily Recommendations</h1>
+          </div>
           <p className="text-gray-400 text-sm">
             AI-powered stock recommendations from 7 Chartink screeners with performance tracking
           </p>
         </div>
 
-        {/* Summary Cards */}
-        {!loading && stocks.length > 0 && (
+        {/* Summary Cards — only on Today's Picks */}
+        {activeTab === "picks" && !loading && stocks.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 text-center">
               <div className="text-2xl font-bold text-white">{stocks.length}</div>
@@ -198,30 +205,41 @@ export default function RecommendationsPage() {
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div className="flex gap-1 mb-6 border-b border-gray-800 overflow-x-auto">
-          {tabs.map(tab => {
-            // Skip subscribe tab for non-logged-in users
-            if (tab.authRequired && !isLoggedIn) return null;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? "border-blue-500 text-blue-400"
-                    : "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600"
-                }`}
-              >
-                <span>{tab.icon}</span>
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {/* Sidebar Navigation + Content */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Sidebar nav — sticky on desktop */}
+          <aside className="lg:w-56 shrink-0">
+            <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible rounded-xl bg-gray-900/60 border border-gray-800 p-1.5 lg:p-2 lg:sticky lg:top-24">
+              <div className="hidden lg:block px-3 pt-1.5 pb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+                Sections
+              </div>
+              {tabs.map(tab => {
+                // Skip subscribe tab for non-logged-in users
+                if (tab.authRequired && !isLoggedIn) return null;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+                      active
+                        ? "bg-blue-500/15 text-blue-300 border border-blue-500/20 shadow-sm"
+                        : "text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 border border-transparent"
+                    }`}
+                  >
+                    <span className="text-base">{tab.icon}</span>
+                    <span>{tab.label}</span>
+                    {active && (
+                      <span className="ml-auto hidden lg:block w-1.5 h-1.5 rounded-full bg-blue-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
 
-        {/* Tab Content */}
-        <div className="min-h-[400px]">
+          {/* Content */}
+          <div className="flex-1 min-w-0 min-h-[400px]">
           {activeTab === "picks" && (
             <DailyPicksTab
               stocks={stocks}
@@ -294,23 +312,32 @@ export default function RecommendationsPage() {
             </div>
           )}
 
+          {activeTab === "ipos" && (
+            <IposTab loading={loading} />
+          )}
+
+          {activeTab === "ideas" && (
+            <IdeasTab loading={loading} />
+          )}
+
           {activeTab === "subscribe" && (
             <SubscribeTab isLoggedIn={isLoggedIn} />
           )}
-        </div>
 
-        {/* Error state */}
-        {error && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
-            <p className="text-sm text-red-300">{error}</p>
-            <button
-              onClick={fetchRecommendations}
-              className="mt-2 px-4 py-1.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded text-xs text-red-300 transition-colors"
-            >
-              Retry
-            </button>
+            {/* Error state */}
+            {error && (
+              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
+                <p className="text-sm text-red-300">{error}</p>
+                <button
+                  onClick={fetchRecommendations}
+                  className="mt-2 px-4 py-1.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded text-xs text-red-300 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

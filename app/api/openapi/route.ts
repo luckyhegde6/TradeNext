@@ -23,7 +23,7 @@ const openapi = {
         description: `## TradeNext Market Intelligence Platform API
 
 ### Quick Links
-- [MCP API](/api/mcp) - Unified NSE data queries (23 functions)
+- [MCP API](/api/mcp) - Unified NSE data queries (26 functions)
 - [API Documentation](/api/openapi) - This OpenAPI spec
 
 ### For AI Agents

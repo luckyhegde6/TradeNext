@@ -9,6 +9,7 @@ import { directPrompt } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
 import { trackAiCall } from "./ai-monitoring";
 import { formatStockContext, type StockContext } from "./recommendation-context";
+import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
 import logger from "@/lib/logger";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -309,10 +310,27 @@ function normalizeRecommendation(raw: Record<string, unknown>, stock: StockAnaly
   const validRec = rec === "BUY" || rec === "SELL" ? rec : "HOLD";
 
   const confidence = clamp(toNumber(raw.confidence), 0, 100);
-  // Fall back to price-based defaults when the model returns 0 (per prompt: "Set to 0 if not
-  // determinable"). Prevents ₹0.00 targets/stops from reaching trackers and the Performance tab.
-  const targetPrice = toNumber(raw.targetPrice) || Math.round(stock.price * DEFAULT_TARGET_MULTIPLIER * 100) / 100;
-  const stopLoss = toNumber(raw.stopLoss) || Math.round(stock.price * DEFAULT_STOP_LOSS_MULTIPLIER * 100) / 100;
+  // Validate + correct target/SL direction-aware (BUY: target>price>stop;
+  // SELL: target<price<stop; HOLD: tight band). Falls back to price-based
+  // defaults when the model returns 0/contradictory/out-of-bounds levels —
+  // prevents ₹0.00 targets AND inverted SELL levels from reaching trackers.
+  const evaluation = evaluateRecommendationLevels({
+    direction: validRec,
+    price: stock.price,
+    targetPrice: toNumber(raw.targetPrice),
+    stopLoss: toNumber(raw.stopLoss),
+  });
+  const targetPrice = evaluation.targetPrice;
+  const stopLoss = evaluation.stopLoss;
+
+  if (!evaluation.valid && evaluation.corrections.length > 0) {
+    logger.warn({
+      msg: "Recommendation levels corrected by evaluator",
+      symbol: stock.symbol,
+      direction: validRec,
+      corrections: evaluation.corrections,
+    });
+  }
 
   const horizon = toUpper(raw.timeHorizon);
   const validHorizon: "short" | "medium" | "long" =

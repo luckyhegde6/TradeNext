@@ -2,6 +2,7 @@ import Link from "next/link";
 import { lazy, Suspense } from "react";
 import MarqueeBanner from "@/app/components/MarqueeBanner";
 import CorporateAnnouncementsWidget from "@/app/components/CorporateAnnouncementsWidget";
+import EventsFeedWidget from "@/app/components/EventsFeedWidget";
 import IndexCorporateActions from "@/app/components/IndexCorporateActions";
 import StockSearchBar from "@/app/components/StockSearchBar";
 import { auth } from "@/lib/auth";
@@ -83,8 +84,11 @@ export default async function Home() {
       {/* ── Secondary Feed Section ── */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Corporate Announcements */}
-          <CorporateAnnouncementsWidget />
+          {/* Left: Corporate Announcements + NSE Events feed */}
+          <div className="space-y-6">
+            <CorporateAnnouncementsWidget />
+            <EventsFeedWidget />
+          </div>
 
           {/* Right: Corporate Actions + Quick Links */}
           <div className="space-y-4">

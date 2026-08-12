@@ -34,9 +34,10 @@ server-side (never from the browser) through a caching proxy.
 - /auth/signin, /auth/join — authentication pages
 
 ## Public APIs
-- MCP API — POST/GET /api/mcp — 23 functions for external NSE data (quotes, indices, historical OHLCV,
+- MCP API — POST/GET /api/mcp — 26 functions for external NSE data (quotes, indices, historical OHLCV,
   gainers/losers, most active, corporate actions, corporate info, marquee, deals, announcements, insider
-  trading, events, heatmap, symbols, trends, discovery). Optional x-api-key (MCP_API_KEY).
+  trading, events, heatmap, symbols, trends, IPO analysis, IPO issue detail, NSE events, discovery).
+  Optional x-api-key (MCP_API_KEY).
   Discovery: listFunctions, help, describe, schema. Full reference: /api/openapi (Swagger UI).
 - GET /api/recommendations — latest AI daily recommendations
 - GET /api/recommendations/performance — paginated, sortable performance table (cached 15 min)

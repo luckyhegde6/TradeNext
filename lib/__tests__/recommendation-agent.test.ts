@@ -293,6 +293,32 @@ describe("recommendation-agent", () => {
       expect(results[0].aiRecommendation.stopLoss).toBe(2375);
     });
 
+    test("corrects SELL levels that contradict direction (target below, stop above)", async () => {
+      // Real bug: ITC SELL @ ₹279 returned target ₹306.9 / stop ₹265.05 —
+      // a BUY-style layout on a SELL rec. The evaluator must invert them.
+      const stock = makeStock({ price: 279 });
+      mockDirectPrompt.mockResolvedValue(JSON.stringify([
+        { symbol: "RELIANCE", recommendation: "SELL", confidence: 65, targetPrice: 306.9, stopLoss: 265.05, timeHorizon: "short", reasoning: "Bearish.", riskFactors: [] },
+      ]));
+
+      const results = await analyzeStocks([stock], VALID_AI_CONFIG);
+      const { targetPrice, stopLoss } = results[0].aiRecommendation;
+      // Corrected: target BELOW price, stop ABOVE price (direction-aware defaults)
+      expect(targetPrice).toBeLessThan(279);
+      expect(stopLoss).toBeGreaterThan(279);
+    });
+
+    test("keeps valid SELL levels unchanged (target below, stop above)", async () => {
+      const stock = makeStock({ price: 2500 });
+      mockDirectPrompt.mockResolvedValue(JSON.stringify([
+        { symbol: "RELIANCE", recommendation: "SELL", confidence: 70, targetPrice: 2300, stopLoss: 2600, timeHorizon: "medium", reasoning: "Bearish.", riskFactors: [] },
+      ]));
+
+      const results = await analyzeStocks([stock], VALID_AI_CONFIG);
+      expect(results[0].aiRecommendation.targetPrice).toBe(2300);
+      expect(results[0].aiRecommendation.stopLoss).toBe(2600);
+    });
+
     test("defaults timeHorizon to medium for invalid values", async () => {
       const stock = makeStock();
       mockDirectPrompt.mockResolvedValue(JSON.stringify([

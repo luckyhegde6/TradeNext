@@ -734,28 +734,27 @@ This returns immediately with the PID, and the dev server runs independently.
 taskkill /PID <PID> /F
 ```
 
-### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0)
+### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0, recurred v3.6.4)
 **Issue**: Build fails with `Module not found: Can't resolve 'dns'` or `pg` when client components import from service files that import Prisma.
 
-**Root Cause**: Next.js client bundle attempts to resolve all imports from a client component, including Node.js built-in modules and database drivers used by services. Even though client components only use types, the bundler follows the entire import chain.
+**Root Cause**: Next.js client bundle attempts to resolve ALL VALUE imports from a client component, including Node.js built-in modules and database drivers used by services. `import type { … }` is erased at compile and is safe; a VALUE import of even one pure function from a service file pulls the service's entire top-level import graph into the browser bundle.
 
-**Solution**: Extract type definitions and constants into a separate `rebalancerTypes.ts` file that has ZERO server-side imports:
+**Solution**: Extract the shared pure helpers/types/constants into a separate file that has ZERO server-side imports (both `rebalancerTypes.ts` and `ipoIssueSize.ts` follow this pattern):
 ```typescript
-// lib/services/rebalancerTypes.ts — Client-safe types
-export interface AllocationCategory { ... }
-export interface RebalancerAction { ... }
-export const DEFAULT_SECTOR_TARGETS = [ ... ];
+// lib/services/ipoIssueSize.ts — Client-safe pure helpers (zero imports)
+export function formatIssueSize(...) { ... }
 
-// lib/services/rebalancerService.ts — Server-only logic (imports Prisma)
-import { PrismaClient } from '@prisma/client';
-import { AllocationCategory } from './rebalancerTypes';
+// lib/services/nseIpoService.ts — Server-only logic (imports prisma chain)
+import { formatIssueSize } from "@/lib/services/ipoIssueSize";
+export { formatIssueSize } from "@/lib/services/ipoIssueSize"; // re-export keeps server callers/tests unchanged
 ```
 
 **Key Rules**:
-1. Client components ONLY import from the `*Types.ts` file
+1. Client components ONLY value-import from the `*Types.ts`/pure helper file; `import type { … }` from service files is fine (erased at compile)
 2. Server API routes import from the main service file
-3. NEVER import Prisma, database adapters, or Node.js modules in files that client components import
+3. NEVER import Prisma, database adapters, or Node.js modules in files that client components value-import
 4. Check all client component imports of a service file when introducing a new one
+5. Symptom signature: `Module not found: Can't resolve 'dns'` + import trace ending in a `.tsx` Client Component — grep that component's value imports immediately
 
 ## Lessons from Daily Recommendations Implementation (v3.3.0)
 

@@ -782,11 +782,23 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
     let newStatus: string | null = null;
 
-    // Check target/SL conditions in priority order (target wins on tie)
-    if (currentPrice >= tracker.targetPrice) {
+    // Check target/SL conditions in priority order (target wins on tie).
+    // Direction-aware since v3.6.3: for SELL recommendations the levels are
+    // inverted (target below entry, stop above), so the price crossing check
+    // must flip too. BUY/HOLD: price >= target → achieved; price <= stop → hit.
+    // SELL: price <= target → achieved; price >= stop → hit.
+    const isSell = tracker.aiRecommendation === "SELL";
+    const targetReached = isSell
+      ? currentPrice <= tracker.targetPrice
+      : currentPrice >= tracker.targetPrice;
+    const stopReached = isSell
+      ? currentPrice >= tracker.stopLoss
+      : currentPrice <= tracker.stopLoss;
+
+    if (targetReached) {
       newStatus = "target_achieved";
       targetAchieved++;
-    } else if (currentPrice <= tracker.stopLoss) {
+    } else if (stopReached) {
       newStatus = "stop_loss_hit";
       stopLossHit++;
     }

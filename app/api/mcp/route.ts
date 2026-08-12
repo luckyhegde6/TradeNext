@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { nseFetch } from "@/lib/nse-client";
 import cache from "@/lib/cache";
 import { getBacktestData } from "@/lib/services/backtestDataService";
+import { getUpcomingIpoIssues, getIpoIssueDetail } from "@/lib/services/nseIpoService";
+import { getNseEvents } from "@/lib/services/nseEventsService";
 
 // ============================================================================
 // Type Definitions
@@ -36,6 +38,9 @@ type McpFunction =
   | "getCorpActions"      // Corporate actions by index
   | "getAnnouncementsByIndex" // Announcements by index
   | "getStockCorporate"   // Stock-specific corporate data
+  | "getIpoAnalysis"      // AI IPO IPO analysis by symbol
+  | "getIpoIssueDetail"   // Per-issue IPO detail (Bid Lot → shares per lot)
+  | "getNseEvents"        // NSE events / notifications feed
   | "listFunctions"       // List available functions (for discovery)
   | "describe"            // Get function description
   | "help"                // Get help with MCP usage
@@ -116,6 +121,9 @@ function getFunctionList() {
     { name: "getCorpActions", description: "Get corporate actions (param: indexName)" },
     { name: "getAnnouncementsByIndex", description: "Get announcements by index (param: indexName)" },
     { name: "getStockCorporate", description: "Get stock corporate data (param: symbol)" },
+    { name: "getIpoAnalysis", description: "Get AI IPO analysis by symbol (param: symbol)" },
+    { name: "getIpoIssueDetail", description: "Get per-issue IPO detail incl. Bid Lot/shares per lot (param: symbol)" },
+    { name: "getNseEvents", description: "Get NSE events / notifications feed" },
   ];
 }
 
@@ -146,6 +154,9 @@ function getFunctionDescription(functionName: string): string | null {
     getCorpActions: "Returns corporate actions for an index. Parameters: indexName.",
     getAnnouncementsByIndex: "Returns corporate announcements for an index. Parameters: indexName.",
     getStockCorporate: "Returns corporate data specific to a stock. Parameters: symbol.",
+    getIpoAnalysis: "Returns the cached AI IPO analysis (14-step / v2 JSON report) for a symbol. Parameters: symbol (e.g., 'SHIPROCKET'). Returns the cached result if generated; no symbol triggers generation.",
+    getIpoIssueDetail: "Returns per-issue IPO detail (Bid Lot → shares per lot, Issue Size text, price range, registrar). Parameters: symbol (e.g., 'SHIPROCKET'). Cached 24h per-symbol.",
+    getNseEvents: "Returns the NSE events / notifications feed (listing ceremonies etc.) with thumbnails. No parameters required. Cached 6h.",
   };
   return descriptions[functionName] || null;
 }
@@ -212,6 +223,25 @@ function getFunctionSchema(functionName: string): object | null {
         mode: { type: "string", enum: ["block_deals", "bulk_deals"], description: "Deals type" },
       },
       required: ["mode"],
+    },
+    getIpoAnalysis: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "IPO symbol (e.g., 'SHIPROCKET')" },
+      },
+      required: ["symbol"],
+    },
+    getIpoIssueDetail: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "IPO symbol (e.g., 'SHIPROCKET')" },
+      },
+      required: ["symbol"],
+    },
+    getNseEvents: {
+      type: "object",
+      properties: {},
+      required: [],
     },
   };
   return schemas[functionName] || null;
@@ -591,6 +621,68 @@ async function handleGetStockCorporate(params: Record<string, unknown>): Promise
 }
 
 /**
+ * Handler: getIpoAnalysis - Cached AI IPO analysis (14-step / v2 JSON report)
+ */
+async function handleGetIpoAnalysis(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = params.symbol as string;
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const cacheKey = generateCacheKey("getIpoAnalysis", { symbol });
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  // Return the cached analysis (memory/DB) — generation is auth-gated via the
+  // web UI; MCP surfaces the current cached/stale output, never blocks on AI.
+  const { getIpoAnalysis } = await import("@/lib/services/ipoAnalysisService");
+  const result = await getIpoAnalysis(symbol);
+  const data = {
+    symbol: result.symbol,
+    companyName: result.companyName,
+    recommendation: result.recommendation,
+    verdict: result.verdict,
+    report: result.report ?? null,
+    generatedAt: result.generatedAt,
+    source: result.source,
+    cachedAt: result.cachedAt,
+  };
+  cache.set(cacheKey, data, 43200); // 12h — aligns with IPO analysis cache TTL
+  return data;
+}
+
+/**
+ * Handler: getIpoIssueDetail - Per-issue IPO detail (Bid Lot → shares per lot)
+ */
+async function handleGetIpoIssueDetail(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = params.symbol as string;
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const cacheKey = generateCacheKey("getIpoIssueDetail", { symbol });
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const detail = await getIpoIssueDetail(symbol);
+  cache.set(cacheKey, detail.data, 3600);
+  return detail.data;
+}
+
+/**
+ * Handler: getNseEvents - NSE events / notifications feed
+ */
+async function handleGetNseEvents(): Promise<unknown> {
+  const cacheKey = generateCacheKey("getNseEvents");
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const events = await getNseEvents();
+  cache.set(cacheKey, events.data, 21600); // 6h — aligns with the events TTL
+  return events.data;
+}
+
+/**
  * Handler: help - Get usage help
  */
 function handleHelp(): object {
@@ -754,6 +846,15 @@ export async function POST(request: NextRequest) {
       case "getStockCorporate":
         result = await handleGetStockCorporate(parameters);
         break;
+      case "getIpoAnalysis":
+        result = await handleGetIpoAnalysis(parameters);
+        break;
+      case "getIpoIssueDetail":
+        result = await handleGetIpoIssueDetail(parameters);
+        break;
+      case "getNseEvents":
+        result = await handleGetNseEvents();
+        break;
       default:
         return NextResponse.json(
           { 
@@ -848,6 +949,15 @@ export async function GET(request: NextRequest) {
         break;
       case "getHistoricalData":
         result = await handleGetHistoricalData(parameters);
+        break;
+      case "getIpoAnalysis":
+        result = await handleGetIpoAnalysis(parameters);
+        break;
+      case "getIpoIssueDetail":
+        result = await handleGetIpoIssueDetail(parameters);
+        break;
+      case "getNseEvents":
+        result = await handleGetNseEvents();
         break;
       case "getMarquee":
         result = await handleGetMarquee();
