@@ -1589,7 +1589,9 @@ This API is designed for programmatic access. Key endpoints:
                                             'getCorporateActions', 'getCorporateInfo', 'getMarquee', 'getDeals',
                                             'getAnnouncements', 'getInsiderTrading', 'getEvents', 'getHeatmap',
                                             'getSymbols', 'getTrends', 'getCorpActions', 'getAnnouncementsByIndex',
-                                            'getStockCorporate'
+                                            'getStockCorporate',
+                                            'getIpoAnalysis', 'getIpoIssueDetail', 'getNseEvents',
+                                            'getOptionChain', 'getFoExpiries'
                                         ]
                                     },
                                     parameters: { 
@@ -1694,6 +1696,58 @@ This API is designed for programmatic access. Key endpoints:
                                         { name: 'getIndexData', description: 'All market indices' }
                                     ]
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/api/fo/chain': {
+            get: {
+                summary: 'Get F&O option chain (NSE option-chain-v3)',
+                description: 'Returns the option chain for a symbol (NIFTY/BANKNIFTY/FINNIFTY/SENSEX/BANKEX → Indices, else Stocks) with optional expiry filter. Includes CE/PE records (bid/ask, OI, volume, IV, Greeks, OI change) + top-level filtered totals (total OI/volume per side) + strike prices + expiry dates.',
+                tags: ['F&O'],
+                parameters: [
+                    { name: 'symbol', in: 'query', required: true, schema: { type: 'string', example: 'NIFTY' }, description: 'Index or stock symbol (e.g. NIFTY, BANKNIFTY, RELIANCE)' },
+                    { name: 'expiry', in: 'query', schema: { type: 'string', example: '2026-08-27' }, description: 'Expiry date (ISO YYYY-MM-DD) — optional, defaults to nearest expiry' }
+                ],
+                responses: {
+                    '200': {
+                        description: 'Option chain data (v3 shape: records + top-level filtered totals)',
+                        content: {
+                            'application/json': {
+                                example: {
+                                    underlyingValue: 24200,
+                                    timestamp: '2026-08-13T10:00:00Z',
+                                    expiryDates: ['2026-08-20', '2026-08-27'],
+                                    strikePrices: [24000, 24100, 24200],
+                                    filtered: { CE: { totOI: 1000, totVol: 500 }, PE: { totOI: 900, totVol: 450 } },
+                                    records: [{ strikePrice: 24200, CE: { openInterest: 100, buyPrice1: 50, sellPrice1: 55 }, PE: { openInterest: 90, buyPrice1: 45, sellPrice1: 48 } }]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/api/fo/expiries': {
+            get: {
+                summary: 'Get F&O expiry dates',
+                description: 'Returns available expiry dates for a symbol with weekly/monthly flags (weekly = ≤35 days to expiry for indices).',
+                tags: ['F&O'],
+                parameters: [
+                    { name: 'symbol', in: 'query', required: true, schema: { type: 'string', example: 'NIFTY' }, description: 'Index or stock symbol (e.g. NIFTY, BANKNIFTY, RELIANCE)' }
+                ],
+                responses: {
+                    '200': {
+                        description: 'Expiry dates list (array)',
+                        content: {
+                            'application/json': {
+                                example: [
+                                    { symbol: 'NIFTY', expiryDate: '2026-08-20T00:00:00.000Z', daysToExpiry: 7, weekly: true },
+                                    { symbol: 'NIFTY', expiryDate: '2026-08-27T00:00:00.000Z', daysToExpiry: 14, weekly: true },
+                                    { symbol: 'NIFTY', expiryDate: '2026-09-24T00:00:00.000Z', daysToExpiry: 42, weekly: false }
+                                ]
                             }
                         }
                     }

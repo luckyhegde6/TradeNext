@@ -45,7 +45,7 @@
 | Tax Reports (v3.2.0) | [x] Complete |
 | Portfolio Rebalancer (v3.2.0) | [x] Complete |
 | Telegram Bot (v3.2.0) | [x] Complete |
-| Options/F&O Analytics (v3.2.0) | [x] Partial — Services + API done, UI pending |
+| Options/F&O Analytics (v3.2.0) | [x] Complete (v3.7.0 — full UI + NSE option-chain-v3) |
 | AI Agent Layer (v3.2.0) | [x] Complete |
 | Daily Recommendations (v3.3.0) | [x] Complete |
 | Self-Heal AI Agents (v3.3.0) | [x] Complete |
@@ -83,6 +83,9 @@
 | AI IPO report v2 — JSON (v3.6.4) | [x] Complete (NEW pure `lib/services/ipoReport.ts` — 18-section `IpoReport` schema, `buildIpoReportPrompt` ("return ONE valid JSON object"), `parseIpoReportJson` (fence→braces), `normalizeReport` (never throws); `ipoAnalysisService` derives `report?: IpoReport | null` (legacy markdown → null, client falls back), prompt switched to JSON; NEW premium renderer `IpoReportView.tsx` (GMP gauge, peers table, risk matrix, strategy probability bars, targets, finalScore /100, disclaimer) wired into `IpoAnalysisModal` + `IpoAnalysisPanel`; analysis API adds `report: result.report ?? null`; **commit pending user, no deploy**) |
 | MCP: getIpoAnalysis / getIpoIssueDetail / getNseEvents (v3.6.4) | [x] Complete (3 new functions in `app/api/mcp/route.ts` — mem caches 43200s/3600s/21600s — added to union/list/descriptions/schemas/POST+GET switches; 26 total; **commit pending user, no deploy**) |
 | Telegram `/ipo` `/ipo-analysis` `/events` commands (v3.6.4) | [x] Complete (NEW commands in `lib/services/telegramBotService.ts` — dynamic imports so bot stays lightweight — registered in `COMMAND_MAP` + `KNOWN_COMMANDS` + help text; **commit pending user, no deploy**) |
+| F&O Analytics UI — full dashboard (v3.7.0) | [x] Complete (NEW `app/fo/page.tsx` + `FoClient.tsx` — positions dashboard, 4 stat cards, add-position modal, option chain, expiries, Greeks, P&L summary; NEW `app/components/fo/` — `FOPositionTable` (sortable, P&L color-coded), `FOPnlSummary` (realized/unrealized + win rate), `AddPositionForm` (Futures/CE/PE, Greeks-aware), `GreekCards` (Δ/Γ/Θ/V), `ExpiryCalendar` (weekly/monthly pills + countdown), `OptionChainViewer` (rewritten for v3); `app/Header.tsx` F&O nav link; **commit pending user, no deploy**) |
+| NSE option-chain-v3 migration (v3.7.0) | [x] Complete (`lib/services/nse-fo-api.ts` REWRITE → `https://www.nseindia.com/api/option-chain-v3` with `type=Indices|Stocks` (NIFTY/BANKNIFTY/FINNIFTY/SENSEX/BANKEX → Indices, else Stocks) + `expiry=DD-MMM-YYYY`; NEW pure exported parsers `parseNseExpiryDate`/`parseNseTimestamp`/`toNseExpiryParam`/`isIndexSymbol`/`parseOptionChainV3`; `filtered` totals = TOP-LEVEL sibling of `records` (v3 shape change); empty `{}` CE/PE strike rows skipped; `FOContract` + `FOChainData` extended; NSE fallback preserved; `app/api/fo/chain/route.ts` gains `expiry` param; 27 new parser tests; **commit pending user, no deploy**) |
+| MCP: getOptionChain / getFoExpiries (v3.7.0) | [x] Complete (2 new functions in `app/api/mcp/route.ts` — mem caches 300s/3600s — added to union/list/descriptions/schemas/POST+GET switches; **28 total**; **commit pending user, no deploy**) |
 
 ---
 

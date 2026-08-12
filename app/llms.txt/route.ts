@@ -28,15 +28,17 @@ server-side (never from the browser) through a caching proxy.
 - /watchlist — watchlist (auth)
 - /alerts — price alerts, alert rules, channels, event history, Telegram bot subscription (auth)
 - /recommendations — AI daily picks, history with performance, dividends, Telegram subscribe
+- /fo — F&O analytics: positions dashboard, option chain, expiries, Greeks, P&L summary
 - /news — market news (India/Global)
 - /compare — stock comparison + NIFTY 50 benchmark
 - /contact — contact page
 - /auth/signin, /auth/join — authentication pages
 
 ## Public APIs
-- MCP API — POST/GET /api/mcp — 26 functions for external NSE data (quotes, indices, historical OHLCV,
+- MCP API — POST/GET /api/mcp — 28 functions for external NSE data (quotes, indices, historical OHLCV,
   gainers/losers, most active, corporate actions, corporate info, marquee, deals, announcements, insider
-  trading, events, heatmap, symbols, trends, IPO analysis, IPO issue detail, NSE events, discovery).
+  trading, events, heatmap, symbols, trends, IPO analysis, IPO issue detail, NSE events, F&O option chain,
+  F&O expiries, discovery).
   Optional x-api-key (MCP_API_KEY).
   Discovery: listFunctions, help, describe, schema. Full reference: /api/openapi (Swagger UI).
 - GET /api/recommendations — latest AI daily recommendations

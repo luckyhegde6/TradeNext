@@ -8,29 +8,24 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-12) — v3.6.4: IPO Issue Size + NSE events + AI IPO report v2 (JSON) + MCP/Telegram
+## Current Session (2026-08-13) — v3.7.0: F&O Analytics UI complete + NSE option-chain-v3 migration + MCP getOptionChain/getFoExpiries + #68 serverless logs notice
 
-**Working tree**: uncommitted v3.5.4→v3.6.4 work on main (per earlier pending-commit holds). Code + tests + docs + Playwright verify done. Commit pending user approval. **No deploy.**
+**Working tree**: docs pass done (AGENTS.md v3.7.0 row + MCP 28, CHANGELOG index + versions-v3.md, TODO rows, Primer, agent-memory, session-todos). Checks ran on `fix/ai-config-cron-ledger`: full suite **560 pass** (was 533, +27 nseFoApi), 11 skipped; `npx tsc --noEmit` clean on all touched files (remaining repo errors are pre-existing test-only noise). Commit pending (user approved commit — run pre-commit + hygiene first). **No deploy.**
 
 ### Completed
-- [x] Issue Size: pure helpers (`parseSharesPerLot`, `parsePriceBandLow`, `perLotInvestment`, `formatIssueSize`, `IssueSizeInput`) → "154 shares per lot · ₹14,168 per lot"; server proxy `app/api/recommendations/ipos/[symbol]/detail/route.ts` (24h cache, memory→NSE→DB); landing IPO page + `IposTab.tsx` batched per-symbol detail fetch
-- [x] NSE events feed: `lib/services/nseEventsService.ts` (6h TTL, EVENTS_FETCH audit, https thumbnail prefix) + `app/api/events/route.ts` + `app/components/EventsFeedWidget.tsx` wired below Corporate Announcements
-- [x] AI IPO report v2 = JSON: `lib/services/ipoReport.ts` (18-section `IpoReport` schema, `buildIpoReportPrompt`, `parseIpoReportJson`, `normalizeReport`); `ipoAnalysisService` derives `report?` (legacy markdown → null); `IpoReportView.tsx` premium renderer wired into modal + panel; analysis API adds `report`
-- [x] MCP 23→26: `getIpoAnalysis` (43200s), `getIpoIssueDetail` (3600s), `getNseEvents` (21600s) in union/list/descriptions/schemas/POST+GET switches
-- [x] Telegram: `/ipo <SYMBOL>`, `/ipo-analysis <SYMBOL>`, `/events` (dynamic imports) in COMMAND_MAP + KNOWN_COMMANDS + help
-- [x] Client-bundle leak fix: NEW zero-import `lib/services/ipoIssueSize.ts`; `nseIpoService.ts` re-exports; `IposTab.tsx` value-imports only from pure module (fixes `Can't resolve 'dns'/'fs'` HTTP 500)
-- [x] Tests: 533 pass (+26: 10 ipoReport, 6 nseEvents, +7 nseIpoService, +3 ipoAnalysis v2; fixed `@/lib/logger` mock gap `debug`); scoped tsc clean
-- [x] Docs: AGENTS.md row + MCP 26 functions, CHANGELOG index + versions-v3.md, TODO.md rows, Primer.md, agent-memory.md, README.md, docs/architecture.html (23→26)
-- [x] Playwright verified: home events feed (3 real events), IposTab Issue Size cells in all 3 sections, landing page Issue Size card, mobile 375px — 0 console errors (3 expected OpenRouter-429 degrade logs on landing = self-heal works)
-- [x] Cleanup: deleted tmp-probe scripts (events/ipo-detail/check-sync/diff-ipo/ipo-probe); git status clean of junk (`.playwright-mcp` gitignored)
+- [x] F&O Analytics UI (closes v3.2.0 "Partial"): `app/fo/page.tsx` + `FoClient.tsx` (positions dashboard, 4 stat cards, add-position modal, option chain, expiries, Greeks, P&L summary) + 6 new `app/components/fo/` components; `app/Header.tsx` F&O nav link
+- [x] NSE option-chain-v3 migration: `lib/services/nse-fo-api.ts` rewrite (v3 URL, `type=Indices|Stocks`, `expiry=DD-MMM-YYYY`) + pure exported parsers (`parseNseExpiryDate`/`parseNseTimestamp`/`toNseExpiryParam`/`isIndexSymbol`/`parseOptionChainV3`); `filtered` totals top-level of `records`; empty `{}` strike rows skipped; `FOContract`/`FOChainData` extended
+- [x] API: `app/api/fo/chain/route.ts` gains `expiry` query param (ISO → pass-through)
+- [x] MCP 26→28: `getOptionChain` (300s), `getFoExpiries` (3600s) in union/list/descriptions/schemas/POST+GET switches
+- [x] Tests: NEW `lib/__tests__/nseFoApi.test.ts` (27); full suite **560 pass**; tsc clean on touched files
+- [x] Docs: AGENTS.md v3.7.0 row + MCP 28 functions, CHANGELOG index + versions-v3.md, TODO.md rows (F&O section + 3 v3.7.0 rows), Primer.md, agent-memory.md, session-todos
+- [x] #68 carried: serverless-aware Server Logs notice (monitoring route `serverless: true` + page amber banner → DB Logs tab)
 
 ### Pending (this session)
-- [ ] Pre-commit review (Lessons.md, security checklist, hygiene — mostly done; final `git status` + secret grep)
-- [ ] Commit v3.6.4 (working tree has v3.5.4→v3.6.4 accumulated) — ONLY after user approval; no `--no-verify`; no deploy
-- [ ] v3.6.3 backfill script `scripts/backfill-recommendation-levels.ts` still awaits user consent (separate item)
+- [ ] Pre-commit review + commit v3.7.0 (no --no-verify) on `fix/ai-config-cron-ledger` (linear history; user approved commit)
+- [ ] Wiki update (user-requested): F&O/option-chain-v3 highlights + rewrites + changes; guides — join/login/reset password + Telegram linking; new-user guide with screenshots (recommendations, alerts, other features)
+- [ ] v3.6.3 backfill script `scripts/backfill-recommendation-levels.ts` still awaits user consent (separate item — fixes persisted trackers incl. ITC)
 
 ### Pending (carried forward — other branches / later sessions)
 - [ ] **Deploy to Netlify (user-approved) → rerun recommendations → verify BUY/SELL picks + fresh public date; verify cron ledger populates after next scheduled run**
 - [ ] Re-seed demo holdings on prod
-- [ ] F&O Analytics UI (services + API done, UI pending)
-- [ ] #68 remaining: Server Log Files tab serverless-aware notice ("FS-based logging unavailable on serverless — use DB Logs tab")

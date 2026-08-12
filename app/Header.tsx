@@ -144,6 +144,9 @@ export default function Header() {
                 <NavLink href="/watchlist" active={isActive("/watchlist")}>
                   Watchlist
                 </NavLink>
+                <NavLink href="/fo" active={isActive("/fo")}>
+                  F&O
+                </NavLink>
                 <NavLink href="/profile" active={isActive("/profile")}>
                   Profile
                 </NavLink>
@@ -324,6 +327,12 @@ export default function Header() {
               >
                 Portfolio
               </button>
+            )}
+
+            {isLoggedIn && (
+              <MobileNavLink href="/fo" active={isActive("/fo")} onClick={() => setIsMobileMenuOpen(false)}>
+                F&O Analytics
+              </MobileNavLink>
             )}
           </div>
 

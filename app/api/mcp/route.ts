@@ -41,6 +41,8 @@ type McpFunction =
   | "getIpoAnalysis"      // AI IPO IPO analysis by symbol
   | "getIpoIssueDetail"   // Per-issue IPO detail (Bid Lot → shares per lot)
   | "getNseEvents"        // NSE events / notifications feed
+  | "getOptionChain"      // F&O option chain (option-chain-v3)
+  | "getFoExpiries"       // F&O contract expiry dates
   | "listFunctions"       // List available functions (for discovery)
   | "describe"            // Get function description
   | "help"                // Get help with MCP usage
@@ -124,6 +126,8 @@ function getFunctionList() {
     { name: "getIpoAnalysis", description: "Get AI IPO analysis by symbol (param: symbol)" },
     { name: "getIpoIssueDetail", description: "Get per-issue IPO detail incl. Bid Lot/shares per lot (param: symbol)" },
     { name: "getNseEvents", description: "Get NSE events / notifications feed" },
+    { name: "getOptionChain", description: "Get F&O option chain (params: symbol, optional expiry)" },
+    { name: "getFoExpiries", description: "Get F&O contract expiry dates (param: symbol)" },
   ];
 }
 
@@ -157,6 +161,8 @@ function getFunctionDescription(functionName: string): string | null {
     getIpoAnalysis: "Returns the cached AI IPO analysis (14-step / v2 JSON report) for a symbol. Parameters: symbol (e.g., 'SHIPROCKET'). Returns the cached result if generated; no symbol triggers generation.",
     getIpoIssueDetail: "Returns per-issue IPO detail (Bid Lot → shares per lot, Issue Size text, price range, registrar). Parameters: symbol (e.g., 'SHIPROCKET'). Cached 24h per-symbol.",
     getNseEvents: "Returns the NSE events / notifications feed (listing ceremonies etc.) with thumbnails. No parameters required. Cached 6h.",
+    getOptionChain: "Returns the F&O option chain (option-chain-v3) for a symbol — CE/PE contracts with last price, OI, OI-change %, IV, volume, bid/ask, plus per-side totals (total OI + volume) and available expiries. Parameters: symbol (e.g., 'NIFTY', 'RELIANCE'), optional expiry (ISO date 'YYYY-MM-DD' to filter server-side). Cached 300s.",
+    getFoExpiries: "Returns the available F&O contract expiry dates for a symbol with days-to-expiry and weekly/monthly flag. Parameters: symbol (e.g., 'NIFTY'). Cached 3600s.",
   };
   return descriptions[functionName] || null;
 }
@@ -242,6 +248,21 @@ function getFunctionSchema(functionName: string): object | null {
       type: "object",
       properties: {},
       required: [],
+    },
+    getOptionChain: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "F&O symbol (e.g., 'NIFTY', 'RELIANCE')" },
+        expiry: { type: "string", description: "Optional expiry (ISO date 'YYYY-MM-DD', e.g. '2026-08-18')" },
+      },
+      required: ["symbol"],
+    },
+    getFoExpiries: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "F&O symbol (e.g., 'NIFTY')" },
+      },
+      required: ["symbol"],
     },
   };
   return schemas[functionName] || null;
@@ -683,6 +704,44 @@ async function handleGetNseEvents(): Promise<unknown> {
 }
 
 /**
+ * Handler: getOptionChain - F&O option chain (option-chain-v3)
+ */
+async function handleGetOptionChain(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = (params.symbol as string)?.toUpperCase();
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const cacheKey = generateCacheKey("getOptionChain", { symbol, expiry: params.expiry });
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const { fetchOptionChain } = await import("@/lib/services/nse-fo-api");
+  const chain = await fetchOptionChain(symbol, params.expiry as string | undefined);
+  cache.set(cacheKey, chain, 300); // 5 min — market data
+  return chain;
+}
+
+/**
+ * Handler: getFoExpiries - F&O contract expiry dates
+ */
+async function handleGetFoExpiries(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = (params.symbol as string)?.toUpperCase();
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const cacheKey = generateCacheKey("getFoExpiries", { symbol });
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const { fetchExpiries } = await import("@/lib/services/nse-fo-api");
+  const expiries = await fetchExpiries(symbol);
+  cache.set(cacheKey, expiries, 3600); // 1h — expiries change weekly
+  return expiries;
+}
+
+/**
  * Handler: help - Get usage help
  */
 function handleHelp(): object {
@@ -855,6 +914,12 @@ export async function POST(request: NextRequest) {
       case "getNseEvents":
         result = await handleGetNseEvents();
         break;
+      case "getOptionChain":
+        result = await handleGetOptionChain(parameters);
+        break;
+      case "getFoExpiries":
+        result = await handleGetFoExpiries(parameters);
+        break;
       default:
         return NextResponse.json(
           { 
@@ -958,6 +1023,12 @@ export async function GET(request: NextRequest) {
         break;
       case "getNseEvents":
         result = await handleGetNseEvents();
+        break;
+      case "getOptionChain":
+        result = await handleGetOptionChain(parameters);
+        break;
+      case "getFoExpiries":
+        result = await handleGetFoExpiries(parameters);
         break;
       case "getMarquee":
         result = await handleGetMarquee();

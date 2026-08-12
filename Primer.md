@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-12 (v3.6.4 IPO Issue Size — shares per lot + ₹ per lot — + NSE events feed + AI IPO report v2 JSON + MCP/Telegram; pure helpers + services + renderer + tests + client-bundle fix + Playwright verified, suite 533 pass; **commit pending user**, no deploy; still carries v3.5.4→v3.6.3 holds)
+2026-08-13 (v3.7.0 F&O Analytics UI complete + NSE option-chain-v3 migration + MCP getOptionChain/getFoExpiries; 27 new parser tests, suite 560 pass; carries pending serverless-aware Server Logs notice (#68); **commit pending user**, no deploy; still carries v3.5.4→v3.6.4 holds)
 
 ---
 
 ## Current Project Status
+
+### v3.7.0 — F&O Analytics UI Complete + NSE Option-Chain-v3 Migration + MCP getOptionChain/getFoExpiries (Aug 13 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
+**Branch**: `fix/ai-config-cron-ledger` (carries v3.5.4→v3.6.4 holds; commit **pending user approval** — no deploy).
+**F&O UI (Feature 1 — closes the last open v3.2.0 "Partial" item)**: NEW `app/fo/page.tsx` + `app/fo/FoClient.tsx` — positions dashboard (list, 4 stat cards, Add Position modal, option chain, expiries, Greeks, P&L summary, live underlying). NEW `app/components/fo/`: `FOPositionTable` (sortable, P&L color-coded), `FOPnlSummary` (realized/unrealized + win rate), `AddPositionForm` (Futures/CE/PE, Greeks-aware), `GreekCards` (Δ/Γ/Θ/V on selected position), `ExpiryCalendar` (weekly/monthly pills + countdown), `OptionChainViewer` (REWRITTEN for v3 — symbol/expiry/strike selects, per-side Bid/Ask/OI/Vol/IV/Greeks, CE/PE totals bar, ΔOI %). `app/Header.tsx` F&O nav link.
+**Option-chain-v3 (Feature 2 — `lib/services/nse-fo-api.ts` REWRITE)**: base URL → `https://www.nseindia.com/api/option-chain-v3` with `type=Indices|Stocks` (NIFTY/BANKNIFTY/FINNIFTY/SENSEX/BANKEX → Indices via new pure `isIndexSymbol`, else Stocks) + `expiry=DD-MMM-YYYY`. NEW pure exported parsers `parseNseExpiryDate` (DD-MMM-YYYY / DD-MM-YYYY / ISO), `parseNseTimestamp`, `toNseExpiryParam`, `parseOptionChainV3` (skips empty `{}` CE/PE strike rows; **`filtered` totals are TOP-LEVEL siblings of `records`** — v2→v3 shape change caught by tests). `FOContract` extended (`pchangeinOpenInterest`, `totalBuyQuantity`, `totalSellQuantity`); `FOChainData` gains `filtered: FOFilteredTotals` + `strikePrices: number[]`. `fetchExpiries` weekly flag `daysToExpiry <= 35` for indices. NSE fallback (`FALLBACK_UNDERLYING_VALUE`) preserved.
+**API + MCP**: `app/api/fo/chain/route.ts` gains `expiry` query param (ISO → passed through); MCP NEW `getOptionChain` (300s) + `getFoExpiries` (3600s) in union/list/descriptions/schemas/POST+GET switches — **28 functions**.
+**Verification**: NEW `lib/__tests__/nseFoApi.test.ts` — 27 tests (v3 fixture with top-level `filtered` + empty `{}` 24600 row; parsers, weekly flags, chain mapping). Full suite **560 passed / 11 skipped / 0 failures** (was 533). `npx tsc --noEmit` clean on all touched files (remaining repo errors are pre-existing test-only noise). **Also carried**: monitoring #68 serverless-aware Server Logs notice (`serverless: true` + amber banner → DB Logs tab).
+- **Status**: docs updated (AGENTS.md v3.7.0 row + MCP 28, CHANGELOG index + versions-v3, TODO rows, Primer, agent-memory, session-todos); NOT committed; NO deploy.
 
 ### v3.6.4 — IPO Issue Size (shares per lot + ₹ per lot) + NSE Events Feed + AI IPO Report v2 (JSON) + MCP/Telegram (Aug 12 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
 **Branch**: work-in-progress (carries v3.5.4→v3.6.3 holds; commit **pending user approval** — no deploy).
@@ -368,6 +376,12 @@
 ---
 
 ## Session History
+
+### Session 17 (August 13, 2026) — F&O Analytics UI Complete + NSE Option-Chain-v3 Migration + MCP getOptionChain/getFoExpiries (v3.7.0)
+- **F&O UI complete** (services + API were already done — closes the v3.2.0 "Partial"): `app/fo/page.tsx` + `FoClient.tsx` dashboard (4 stat cards, add-position modal, option chain, expiries, Greeks, P&L summary) + 6 new `app/components/fo/` components; `app/Header.tsx` F&O nav link.
+- **NSE option-chain-v3 migration**: `lib/services/nse-fo-api.ts` rewritten — v3 URL + `type=Indices|Stocks` + `expiry=DD-MMM-YYYY`; new pure exported parsers (`parseNseExpiryDate`/`parseNseTimestamp`/`toNseExpiryParam`/`isIndexSymbol`/`parseOptionChainV3`); `filtered` totals top-level of `records`; empty `{}` strike rows skipped; `FOContract`/`FOChainData` extended.
+- **MCP**: `getOptionChain` (300s) + `getFoExpiries` (3600s) → **28 functions**. **API**: `/api/fo/chain` gains `expiry` param.
+- **Verification**: 27 new parser tests; full suite **560 pass (was 533)**; tsc clean on touched files. Carried: monitoring #68 serverless-aware Server Logs notice. Status: docs done; commit pending user; NO deploy (consistent with v3.5.4→v3.6.4 holds).
 
 ### Session 16 (August 12, 2026) — IPO Issue Size + NSE Events Feed + AI IPO Report v2 JSON + MCP/Telegram (v3.6.4, session `2026-08-12-8f2a11d`)
 - **IPO Issue Size**: pure helpers in `nseIpoService.ts` (`parseSharesPerLot`/`parsePriceBandLow`/`perLotInvestment`/`formatIssueSize` — structural `IssueSizeInput`) → "154 shares per lot · ₹14,168 per lot"; NEW server proxy `/api/recommendations/ipos/[symbol]/detail` → `getIpoIssueDetail` (24h cache, memory→NSE→DB); landing IPO page + `IposTab` batched per-symbol detail fetch.
