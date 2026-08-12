@@ -5,18 +5,26 @@ import { calculateNextRun } from "@/lib/cron-parser";
 
 /**
  * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0)
- * plus the Daily Market Sync (v3.5.8).
+ * plus the Daily Market Sync (v3.5.8) and the AI Connection Test (v3.7.1).
  *
- * Ensures the three SYSTEM-managed jobs exist and are active:
- *   - Daily Recommendations          `30 4 * * 1-5`   = 10:00 AM IST (Mon-Fri)
- *   - Recommendation Performance     `30 10 * * 1-5`  = 04:00 PM IST (Mon-Fri)
- *   - Daily Market Sync              `1 1 * * 1-5`    = 06:31 AM IST (Mon-Fri)
+ * Ensures the four SYSTEM-managed jobs exist and are active:
+ *   - Daily Recommendations          `30 4 * * 1-5`    = 10:00 AM IST (Mon-Fri)
+ *   - Recommendation Performance     `30 10 * * 1-5`   = 04:00 PM IST (Mon-Fri)
+ *   - Daily Market Sync              `1 1 * * 1-5`     = 06:31 AM IST (Mon-Fri)
+ *   - AI Connection Test             step 30 every min (08:30–15:30 IST, Mon-Fri)
+ *     (Mon-Fri, every 30 min) — probes the configured AI model + fallback
+ *     routes BEFORE the 10:00 AM IST recommendations run so a dead model is
+ *     caught early instead of producing an all-HOLD run.
  *
  * The Market Sync job exists for the ledger + admin visibility: on Netlify the
  * actual morning sync runs via the scheduled function cron-market-sync → the
  * `market-sync` action of netlify/functions/run-cron-background.ts, which
  * records the run against MARKET_SYNC_CRON_NAME (same as the two
- * recommendation jobs). It never flows through the worker scheduler loop.
+ * recommendation jobs). The AI Connection Test likewise runs via the
+ * scheduled function cron-ai-connection-test → the `ai-connection-test`
+ * action, recorded against AI_CONNECTION_TEST_CRON_NAME. Neither flows
+ * through the worker scheduler loop (the worker switch also handles
+ * `ai_connection_test` for local/admin-triggered runs).
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
  * picks up due jobs via `nextRun` and spawns tasks through `spawnCronTask`,
@@ -29,9 +37,11 @@ import { calculateNextRun } from "@/lib/cron-parser";
 export const RECOMMENDATION_CRON_NAME = "Daily Recommendations (System)";
 export const RECOMMENDATION_PERFORMANCE_CRON_NAME = "Recommendation Performance Check (System)";
 export const MARKET_SYNC_CRON_NAME = "Daily Market Sync (System)";
+export const AI_CONNECTION_TEST_CRON_NAME = "AI Connection Test (System)";
 export const RECOMMENDATION_CRON_EXPR = "30 4 * * 1-5"; // 10:00 AM IST Mon-Fri
 export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM IST Mon-Fri
 export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
+export const AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"; // 08:30–15:30 IST Mon-Fri
 
 export interface EnsureRecommendationCronsResult {
   ensured: number;
@@ -131,6 +141,12 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       description: "System-managed daily NSE market sync — corporate actions + stock list (06:31 AM IST, Mon-Fri)",
       taskType: "market_data",
       cronExpression: MARKET_SYNC_CRON_EXPR,
+    },
+    {
+      name: AI_CONNECTION_TEST_CRON_NAME,
+      description: "System-managed AI provider connection test — probes the configured model + fallback routes (every 30 min, 08:30–15:30 IST, Mon-Fri)",
+      taskType: "ai_connection_test",
+      cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
     },
   ];
 

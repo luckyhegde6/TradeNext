@@ -1087,9 +1087,30 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: Classify credentials first: public sandbox demo creds (documented demo logins) may stay in the README/AGENTS tables + seed + e2e env fallbacks; EVERYTHING else is env-var-only — no literal in code, no literal in docs, no literal in commit messages. Reference env var NAMES in docs. When enforcement matters, ship it in git hooks (they run on every commit, unlike memory or prompts). Before any commit: `git diff | grep -iE 'password|secret|token|api[_-]?key'` and grep the working tree for known literal values. A credential that reaches git history is leaked — redaction later only removes the current copy.
 
+### 61. Never Write `*/` Inside a JSDoc/Block Comment — It Terminates the Comment
+**Issue**: `recommendationCronService.ts` suddenly showed dozens of LSP parse errors ("expression expected", "declaration or statement expected") across unrelated functions — looked like the file was corrupted mid-edit.
+
+**Root Cause**: The new cron constant's documentation comment contained the literal text `*/30` (the cron step for "every 30 minutes"). `*/` is the block-comment terminator, so the comment closed early and the rest of the comment text became code → cascading parse errors through the whole file. The `.ts` file itself was fine.
+
+**Solution**: Reworded the comment to avoid the sequence (`step 30 every min — `). The cron expression string `"*/30 3-10 * * 1-5"` is unaffected — it lives in a string literal, not a comment.
+
+**Rule**: Never place the two characters `*/` inside a `/* */` (or `/** */`) comment — not even inside an example cron expression or regex. If you must mention such text, split it (`* /30`, `\*\/30`) or put it in a string literal. This applies to every comment style that terminates on `*/`.
+
+---
+
+### 62. Closures Must Not Reference `const` Declared Later (TDZ)
+**Issue**: `runAiConnectionTest` threw `ReferenceError: Cannot access 'report' before initialization` — a runtime crash in a brand-new service.
+
+**Root Cause**: An inner `track()` helper (declared and CALLED before `report` was assigned) closed over the outer `report` const. The helper ran during probing, before `const report = {...}` executed → Temporal Dead Zone access.
+
+**Solution**: The helper no longer needs `report` — it stamps its own `new Date().toISOString()` per attempt instead of referencing the later-declared const.
+
+**Rule**: A function that executes before a `const` declaration in the same scope must not reference that binding — even if the code "looks" like it will be in scope by call time. Keep helpers self-contained (pass values as arguments, or use `let` declared earlier), and watch for `AbortSignal.timeout`/Promise callbacks that fire during an async gap.
+
 ---
 
 ## Update Log
+- 2026-08-13: Added Lessons 61-62 (never write `*/` inside a block/JSDoc comment — it terminates the comment early and shatters file parsing, reword `*/30` as `step 30 every min`; closures must not reference `const` declared later — TDZ, stamp per-attempt timestamps instead); added v3.7.1 BUY/SELL-only broadcast + AI connection-test cron + CI e2e fix entry
 - 2026-08-11: Added Lesson 60 (credentials env-var-only — no literals in code/docs/commit messages; `DEFAULT_PASSWORD` env + `.githooks/commit-msg` + pre-commit #6/#7; redact literals to `********`; public sandbox demo creds exempt); added v3.5.7 credential-hygiene + llms.txt/robots discovery entry
 - 2026-08-11: Added Lessons 58-59 (auth gate ordering — password compare must be the final gate, never early-throw on status flags, surface system-issued credentials in the admin flow; log viewer symmetry — write path and read path must construct the same dir/date/blob-store key); added v3.5.7 auth join→approve→login + server logs `logs/` dir entry
 - 2026-08-11: Added Lessons 56-57 (serverless cron ledger must be written by the scheduled-function/admin call sites — `recordCronRun`; AI config must flow to `analyzeStocks` via shared `loadConfig` — env-only defaults + nonexistent free-model IDs caused prod all-HOLD runs)

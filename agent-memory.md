@@ -578,6 +578,17 @@ echo "" >> agent-memory.md
 
 ---
 
+## 2026-08-13 (v3.7.1) — BUY/SELL-only Telegram broadcast + AI connection-test cron + CI e2e fix
+
+- **Broadcast (user-requested: no HOLD suggestions in Telegram)**: NEW pure `lib/services/recommendationBroadcast.ts` (`buildRecommendationBroadcast(stocks, dateLabel?)`, `MAX_BROADCAST_PICKS = 8`) — BUY/SELL only; all-HOLD day → short notice; footer `🟢 N BUY · 🔴 N SELL · ⚪ N HOLD not shown`; 4000-char truncation (slice = 4000 − marker length). Wired into `lib/services/dailyRecommendationService.ts` broadcast block. 9 tests.
+- **AI connection-test cron (user-requested)**: NEW `lib/services/ai/connectionTestService.ts` — `testOpenRouterModel` (raw fetch, never throws, 20s `AbortSignal.timeout`), `runAiConnectionTest()` (configured → fallbacks `openrouter/free`/`openrouter/auto`; short-circuit `!hasValidConfig`), `getLastAiConnectionTests`. **Every attempt persisted via `trackAiCall` (action `connection_test`) AND audit-logged with the full status** — NEW `AI_CONNECTION_TEST`/`AI_CONNECTION_TEST_FAILED` audit tags; overall failure → `notifyAdmins`. 4th system cron (`*/30 3-10 * * 1-5` IST 08:30–15:30 Mon–Fri) in `ensureRecommendationCrons` + worker `executeAiConnectionTest` + `run-cron-background` action `ai-connection-test` + recordRun + `netlify/functions/cron-ai-connection-test.ts` + admin `app/api/admin/ai/connection-tests/route.ts` (GET last N / POST run-now). 9 tests.
+- **CI e2e fix (user-pasted GitHub failure)**: `e2e/advanced-screener.spec.ts` failed 3 browsers — v3.5.6 TemplatesPanel defaults to Chartink mode ("Short term breakouts" lowercase) while the spec asserted TV-mode "Short Term Breakouts" → tests now click `TradingView · 98` toggle (U+00B7); Chartink stays jest-covered. Also fixed nested `<a>` hydration warning on `/markets` (`IndexCard` inner anchor → `<span role="link">`).
+- **Tests**: 22 new (9 broadcast + 9 connection-test + 4 cron-ensure, incl. `cronJob.create` mock). Full suite **582 passed / 11 skipped / 0 failures** (was 560). `npx tsc --noEmit` clean on all touched files (remaining errors pre-existing test-only noise).
+- **Gotchas**: `*/30` inside a JSDoc block comment terminates the comment early (`*/`); a closure used before the `report` const it references → TDZ ReferenceError; truncation marker length must be subtracted from the slice.
+- **Status**: docs updated; NOT committed (pending user, consistent with v3.5.4→v3.7.0 holds); NO deploy.
+
+---
+
 ## How to Use
 
 1. **Start of session**: Read `Primer.md` to understand current state

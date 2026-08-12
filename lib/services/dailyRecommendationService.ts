@@ -566,42 +566,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     // Invalidate cache so next API request gets fresh data
     invalidateRecommendationsCache();
 
-    // Broadcast to Telegram subscribers
+    // Broadcast to Telegram subscribers.
+    // Suggestions = actionable picks only (BUY/SELL). HOLDs are never listed
+    // as suggestions — an all-HOLD day sends a short notice instead (see
+    // buildRecommendationBroadcast in recommendationBroadcast.ts).
     try {
       const { broadcastToSubscribers } = await import("./telegramBotService");
+      const { buildRecommendationBroadcast } = await import("./recommendationBroadcast");
 
-      const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
-
-      // Always send a broadcast (even if all picks are HOLD) so subscribers
-      // get a daily update. Prefer non-HOLD picks, but fall back to HOLDs so
-      // the message is never empty (previously an all-HOLD day sent nothing).
-      const nonHold = aiResults.filter(
-        (r) => r.aiRecommendation.recommendation !== "HOLD",
-      );
-      const topStocks =
-        nonHold.length > 0 ? nonHold.slice(0, 8) : aiResults.slice(0, 8);
-
-      const lines = topStocks.map((r) => {
-        const icon = recIcons[r.aiRecommendation.recommendation] || "⚪";
-        const conf = `${r.aiRecommendation.confidence}%`;
-        const price = r.price ? `₹${r.price.toFixed(2)}` : "";
-        const target = r.aiRecommendation.targetPrice ? `Tgt ₹${r.aiRecommendation.targetPrice.toFixed(2)}` : "";
-        const sl = r.aiRecommendation.stopLoss ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}` : "";
-        const details = [price, target, sl, conf].filter(Boolean).join(" | ");
-        return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
-      });
-
-      let tgMessage = `📈 *Daily Recommendations — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}*\n\n`;
-      tgMessage += lines.join("\n\n");
-
-      const buyCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "BUY").length;
-      const sellCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "SELL").length;
-      tgMessage += `\n\n_Breakdown: 🟢 ${buyCount} BUY · 🔴 ${sellCount} SELL · ⚪ ${aiResults.length - buyCount - sellCount} HOLD_`;
-      tgMessage += `\n\n_View all ${aiResults.length} recommendations on TradeNext → /recommendations_`;
-
-      if (tgMessage.length > 4000) {
-        tgMessage = tgMessage.slice(0, 3990) + "\n\n*(truncated)*";
-      }
+      const tgMessage = buildRecommendationBroadcast(aiResults);
 
       const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
       logger.info({ msg: "Telegram broadcast for recommendations", sent });

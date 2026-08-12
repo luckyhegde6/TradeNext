@@ -2,7 +2,7 @@
 
 import useSWR from "swr";
 import { useState, useMemo, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { TableSkeleton } from "@/app/components/TableSkeleton";
@@ -20,24 +20,25 @@ import { InsiderTradingTable } from "@/app/components/analytics/InsiderTradingTa
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 const TABS = [
-  { key: "advance", label: "Advances / Declines", api: "/api/nse/advance-decline" },
-  { key: "corporate-info", label: "Corporate Info", api: "/api/nse/corporate-info" },
-  { key: "corporate-announcements", label: "Corporate Announcements", api: "/api/nse/corporate-announcements" },
-  { key: "corporate-events", label: "Corp Events", api: "/api/nse/corporate-events" },
-  { key: "corporate-actions", label: "Dividends / Splits / Bonus", api: "/api/corporate-actions/combined" },
-  { key: "insider-trading", label: "Insider Trading", api: "/api/nse/insider-trading" },
-  { key: "results-comparison", label: "Financial Results", api: null }, // Custom tab - no default API
-  { key: "block_deals", label: "Block Deals", api: "/api/nse/deals?dealType=block_deal", dealType: "block_deal", defaultSource: "nse" },
-  { key: "bulk_deals", label: "Bulk Deals", api: "/api/nse/deals?dealType=bulk_deal", dealType: "bulk_deal", defaultSource: "nse" },
-  { key: "short_selling", label: "Short Selling", api: "/api/nse/deals?dealType=short_selling", dealType: "short_selling", defaultSource: "nse" },
-  { key: "deals", label: "Bulk / Large Deals (NSE)", api: "/api/nse/deals", defaultSource: "nse" },
-  { key: "active", label: "Most Active", api: "/api/nse/most-active" },
-  { key: "gainers", label: "Top Gainers", api: "/api/nse/gainers" },
-  { key: "losers", label: "Top Losers", api: "/api/nse/losers" },
+  { key: "advance", label: "Advances / Declines", icon: "📊", api: "/api/nse/advance-decline" },
+  { key: "corporate-info", label: "Corporate Info", icon: "🏢", api: "/api/nse/corporate-info" },
+  { key: "corporate-announcements", label: "Corporate Announcements", icon: "📢", api: "/api/nse/corporate-announcements" },
+  { key: "corporate-events", label: "Corp Events", icon: "📅", api: "/api/nse/corporate-events" },
+  { key: "corporate-actions", label: "Dividends / Splits / Bonus", icon: "💰", api: "/api/corporate-actions/combined" },
+  { key: "insider-trading", label: "Insider Trading", icon: "🕵️", api: "/api/nse/insider-trading" },
+  { key: "results-comparison", label: "Financial Results", icon: "📈", api: null }, // Custom tab - no default API
+  { key: "block_deals", label: "Block Deals", icon: "🧱", api: "/api/nse/deals?dealType=block_deal", dealType: "block_deal", defaultSource: "nse" },
+  { key: "bulk_deals", label: "Bulk Deals", icon: "📦", api: "/api/nse/deals?dealType=bulk_deal", dealType: "bulk_deal", defaultSource: "nse" },
+  { key: "short_selling", label: "Short Selling", icon: "📉", api: "/api/nse/deals?dealType=short_selling", dealType: "short_selling", defaultSource: "nse" },
+  { key: "deals", label: "Bulk / Large Deals (NSE)", icon: "🤝", api: "/api/nse/deals", defaultSource: "nse" },
+  { key: "active", label: "Most Active", icon: "🔥", api: "/api/nse/most-active" },
+  { key: "gainers", label: "Top Gainers", icon: "🟢", api: "/api/nse/gainers" },
+  { key: "losers", label: "Top Losers", icon: "🔴", api: "/api/nse/losers" },
 ];
 
 // Inner component that uses useSearchParams
 function MarketAnalyticsTabsContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   
@@ -117,27 +118,44 @@ function MarketAnalyticsTabsContent() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Tab Navigation */}
-      <div className="flex gap-2 border-b border-gray-200 dark:border-slate-700 overflow-x-auto">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActive(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${active.key === tab.key
-              ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
-              : "text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
-              }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-col lg:flex-row gap-6">
+      {/* Sidebar nav — sticky on desktop, horizontal scroll on mobile */}
+      <aside className="lg:w-56 shrink-0">
+        <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible rounded-xl bg-gray-100/80 dark:bg-gray-900/60 border border-gray-200 dark:border-slate-800 p-1.5 lg:p-2 lg:sticky lg:top-24">
+          <div className="hidden lg:block px-3 pt-1.5 pb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+            Sections
+          </div>
+          {TABS.map((tab) => {
+            const isActive = active.key === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setActive(tab);
+                  router.replace(`/markets/analytics?tab=${tab.key}`, { scroll: false });
+                }}
+                className={`flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+                  isActive
+                    ? "bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-500/20 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-800/60 border border-transparent"
+                }`}
+              >
+                <span className="text-base">{tab.icon}</span>
+                <span>{tab.label}</span>
+                {isActive && (
+                  <span className="ml-auto hidden lg:block w-1.5 h-1.5 rounded-full bg-blue-400" />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
 
       {/* Tab Content */}
-      {isLoading && <TableSkeleton />}
-      {error && <p className="text-red-500">Failed to load data</p>}
-      {!isLoading && !error && (
+      <div className="flex-1 min-w-0">
+        {isLoading && <TableSkeleton />}
+        {error && <p className="text-red-500">Failed to load data</p>}
+        {!isLoading && !error && (
 
         <>
           {/* Handle advance-decline data structure */}
@@ -454,7 +472,8 @@ function MarketAnalyticsTabsContent() {
             );
           })()}
         </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

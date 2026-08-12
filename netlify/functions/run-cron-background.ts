@@ -34,12 +34,8 @@ export default async (req: Request) => {
   let triggeredBy = "system";
   try {
     const body = (await req.json()) as { action?: string; triggeredBy?: string };
-    action =
-      body?.action === "performance"
-        ? "performance"
-        : body?.action === "market-sync"
-          ? "market-sync"
-          : "recommendations";
+    const knownActions = new Set(["performance", "market-sync", "ai-connection-test"]);
+    action = body?.action && knownActions.has(body.action) ? body.action : "recommendations";
     triggeredBy = body?.triggeredBy || "system";
   } catch {
     // default action
@@ -65,7 +61,9 @@ export default async (req: Request) => {
                 ? m.RECOMMENDATION_PERFORMANCE_CRON_NAME
                 : action === "market-sync"
                   ? m.MARKET_SYNC_CRON_NAME
-                  : m.RECOMMENDATION_CRON_NAME,
+                  : action === "ai-connection-test"
+                    ? m.AI_CONNECTION_TEST_CRON_NAME
+                    : m.RECOMMENDATION_CRON_NAME,
               success,
             ),
           );
@@ -117,6 +115,21 @@ export default async (req: Request) => {
                 `stocks=${String((stocks as { total?: number })?.total ?? "?")} ` +
                 `corp=${String((corp as { total?: number })?.total ?? "?")} ` +
                 `screener=${screener ? "ok" : "skipped"} in ${Date.now() - startedAt}ms`,
+            );
+          } else if (action === "ai-connection-test") {
+            const { executeAiConnectionTest } = await import(
+              "../../lib/services/worker/worker-service"
+            );
+            const report = (await executeAiConnectionTest()) as {
+              status?: string;
+              configuredModel?: string;
+              recommendedModel?: string;
+            };
+            await recordRun(true);
+            console.log(
+              `[run-cron-background] ai-connection-test done: status=${report?.status ?? "?"} ` +
+                `model=${report?.configuredModel ?? "?"} ` +
+                `recommended=${report?.recommendedModel ?? "-"} in ${Date.now() - startedAt}ms`,
             );
           } else {
             const { runDailyRecommendations } = await import(

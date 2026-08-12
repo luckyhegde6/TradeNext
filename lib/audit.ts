@@ -58,6 +58,9 @@ export type AuditAction =
   | 'AI_AGENT_SUCCESS'
   | 'AI_AGENT_FAILURE'
   | 'AI_AGENT_FALLBACK'
+  // AI Connection Test Events (v3.7.1)
+  | 'AI_CONNECTION_TEST'
+  | 'AI_CONNECTION_TEST_FAILED'
   // Screener Events
   | 'SCREENER_RUN_START'
   | 'SCREENER_RUN_COMPLETE'

@@ -25,6 +25,7 @@ jest.mock("@/lib/prisma", () => {
     cronJob: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      create: jest.fn(),
     },
   };
   return { __esModule: true, default: mock };
@@ -32,13 +33,25 @@ jest.mock("@/lib/prisma", () => {
 
 // ─── Imports ──────────────────────────────────────────────────────────────
 
-import { recordCronRun, RECOMMENDATION_CRON_NAME } from "@/lib/services/recommendationCronService";
+import {
+  recordCronRun,
+  ensureRecommendationCrons,
+  RECOMMENDATION_CRON_NAME,
+  RECOMMENDATION_CRON_EXPR,
+  RECOMMENDATION_PERFORMANCE_CRON_NAME,
+  RECOMMENDATION_PERFORMANCE_CRON_EXPR,
+  MARKET_SYNC_CRON_NAME,
+  MARKET_SYNC_CRON_EXPR,
+  AI_CONNECTION_TEST_CRON_NAME,
+  AI_CONNECTION_TEST_CRON_EXPR,
+} from "@/lib/services/recommendationCronService";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const prisma = require("@/lib/prisma").default as {
   cronJob: {
     findFirst: jest.Mock;
     update: jest.Mock;
+    create: jest.Mock;
   };
 };
 
@@ -137,5 +150,82 @@ describe("recordCronRun", () => {
     const result = await recordCronRun(RECOMMENDATION_CRON_NAME, true);
 
     expect(result).toEqual({ found: false });
+  });
+});
+
+describe("ensureRecommendationCrons", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("creates the AI Connection Test job (taskType ai_connection_test, step-30 expr) alongside the other three system jobs", async () => {
+    prisma.cronJob.findFirst.mockResolvedValue(null);
+
+    const result = await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.create).toHaveBeenCalledTimes(4);
+    const aiCall = prisma.cronJob.create.mock.calls.find(
+      (args: unknown[]) => (args[0] as { data?: { name?: string } }).data?.name === AI_CONNECTION_TEST_CRON_NAME,
+    );
+    expect(aiCall).toBeDefined();
+    const aiData = (aiCall as unknown[])[0] as { data: { taskType: string; cronExpression: string; isActive: boolean; config: Record<string, unknown> } };
+    expect(aiData.data.taskType).toBe("ai_connection_test");
+    expect(aiData.data.cronExpression).toBe(AI_CONNECTION_TEST_CRON_EXPR);
+    expect(aiData.data.isActive).toBe(true);
+    expect(aiData.data.config).toEqual({ systemManaged: true, timezone: "Asia/Kolkata" });
+
+    expect(result.ensured).toBe(4);
+    expect(result.jobs).toEqual(
+      expect.arrayContaining([
+        {
+          name: AI_CONNECTION_TEST_CRON_NAME,
+          taskType: "ai_connection_test",
+          cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
+        },
+      ]),
+    );
+  });
+
+  it("is a no-op (no create/update) when all four jobs exist unchanged", async () => {
+    const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean }> = {
+      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true },
+      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true },
+      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true },
+      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true },
+    };
+    prisma.cronJob.findFirst.mockImplementation(
+      async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
+    );
+
+    const result = await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.create).not.toHaveBeenCalled();
+    expect(prisma.cronJob.update).not.toHaveBeenCalled();
+    expect(result.ensured).toBe(4);
+  });
+
+  it("self-heals a drifted AI Connection Test job (inactive/old expr) via update", async () => {
+    prisma.cronJob.findFirst.mockResolvedValue({
+      id: "r4",
+      name: AI_CONNECTION_TEST_CRON_NAME,
+      taskType: "ai_connection_test",
+      cronExpression: "0 8 * * 1-5",
+      isActive: false,
+    });
+    prisma.cronJob.update.mockResolvedValue({});
+
+    const result = await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "r4" },
+      data: expect.objectContaining({
+        taskType: "ai_connection_test",
+        cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
+        isActive: true,
+        config: { systemManaged: true, timezone: "Asia/Kolkata" },
+      }),
+    });
+    expect(prisma.cronJob.create).not.toHaveBeenCalled();
+    expect(result.ensured).toBe(4);
   });
 });

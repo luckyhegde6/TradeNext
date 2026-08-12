@@ -43,6 +43,9 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "recommendation_performance":
         result = await executeRecommendationPerformance(payload);
         break;
+      case "ai_connection_test":
+        result = await executeAiConnectionTest(payload);
+        break;
       case "market_data":
         result = await executeMarketDataSync(payload);
         break;
@@ -495,6 +498,31 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error({ msg: "Performance tracking failed", error: errMsg });
+    throw error;
+  }
+}
+
+/**
+ * AI Connection Test - Probe the configured AI model (+ fallback routes)
+ * so a dead/misconfigured model is caught BEFORE the daily recommendations
+ * run (a failed model historically produced all-HOLD runs).
+ */
+export async function executeAiConnectionTest(payload?: Record<string, unknown>): Promise<unknown> {
+  logger.info({ msg: "Starting AI connection test" });
+
+  try {
+    const { runAiConnectionTest } = await import("@/lib/services/ai/connectionTestService");
+    const report = await runAiConnectionTest();
+    logger.info({
+      msg: "AI connection test completed",
+      status: report.status,
+      configuredModel: report.configuredModel,
+      recommendedModel: report.recommendedModel,
+    });
+    return report;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ msg: "AI connection test failed", error: errMsg });
     throw error;
   }
 }
