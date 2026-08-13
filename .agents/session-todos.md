@@ -8,27 +8,24 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-14) — v3.10.0: Historical-price sync into `daily_prices` (Swing indicators "—" fix) + `backtest_history` prod-gap plan (docs only)
+## Current Session (2026-08-14) — v3.10.0: Historical-price sync into `daily_prices` (Swing indicators "—" fix) + `backtest_history` prod-gap FIX (lazy DDL)
 
-**Working tree**: branch `main` → switching to `feat/historical-price-sync`. New service + worker wiring + CLI script + 15 tests uncommitted (see `git status`). Full suite **653 pass / 11 skipped** (was 638); `npx tsc --noEmit` 0 errors on touched files (71 = exact baseline). Local dry-run verified (TCS 5d → 4 EQ bars, 0 written, 0 errors, 0.8s). **`--apply` (local or prod) NOT run — needs explicit user permission. No deploy.**
+**Working tree**: branch `feat/historical-price-sync` — committed `b312de7` (feat) + `4d49e13` (docs [skip ci]), **pushed, PR #91 open**. Local `--apply` EXECUTED (user-approved): 266 symbols, 17,198 bars, 0 errors, 658s → DB 17,411 rows / 286 symbols. Backtest fix committed (uncommitted now: +7 guard tests). Full suite **660 pass / 11 skipped** (was 653); `npx tsc --noEmit` 71 = exact baseline. **No deploy** (user-managed); prod `--apply` NOT needed (market-sync step 4 auto-backfills).
 
 ### Completed
-- [x] Investigate sync infrastructure: `fetchSecurityWiseHistoricalData` (lib/nse-api.ts) + nse-client retry/session; worker-service task switch; run-cron-background knownActions + market-sync steps; DailyPrice model + ingest upsert idiom; RecommendationTracker/ChartinkScreenerResult scope sources; `runInChunks` private copies
-- [x] NEW `lib/services/historicalPriceSyncService.ts` — scope resolution (explicit OR NIFTY 50 ∪ 30d trackers ∪ live screener captures, capped 300), `buildDateRange` (DD-MM-YYYY validated), EQ fetch via existing fetcher, 200ms inter-symbol delay, `maxDurationMs` cap, multi-row `$executeRawUnsafe` ON CONFLICT upserts (chunk 200, `$n` params, BigInt volume), per-symbol error tolerance, dry-run, `db` override
-- [x] Wire `historical_price_sync` case + `executeHistoricalPriceSync` (dry-run default) in worker-service.ts
-- [x] Wire `historical-price-sync` background action (payload passthrough, no ledger) + **step 4 of market-sync** (`dryRun:false`, 6-min budget, non-fatal) in run-cron-background.ts
-- [x] NEW `scripts/backfill-daily-prices.ts` CLI (dry-run default; `--apply`/`--symbols`/`--days`/`--from`/`--to`/`--max-symbols`)
-- [x] Tests: NEW `lib/__tests__/historicalPriceSyncService.test.ts` (15); suite **653 pass**; tsc exact 71 baseline
-- [x] Local dry-run verified (TCS 5d → 4 EQ bars fetched, 0 written, 0 errors, 0.8s)
-- [x] Plan (docs only): `.agents/docs/plan-backtest-history-prod-gap.md` (options A migration deploy / B lazy CREATE TABLE / C daily_prices-first chain) + BUGS.md rows #11 (backtest_history) + #12 (daily_prices gap — fix built)
-- [x] Docs: AGENTS.md v3.10.0 row, CHANGELOG index + versions-v3.md, TODO.md rows, Primer.md, agent-memory.md, Lessons.md #69/#70, session-todos.md
+- [x] NEW `lib/services/historicalPriceSyncService.ts` + tests (15) + CLI `scripts/backfill-daily-prices.ts` — committed `b312de7`
+- [x] Wiring: worker `historical_price_sync` case + `run-cron-background` action + market-sync step 4 — committed `b312de7`
+- [x] Local dry-run verified (TCS 5d → 4 EQ bars, 0 written)
+- [x] **Local `--apply` backfill executed (user-approved)**: 300-symbol scope, 266 fetched, 17,198 bars, 0 errors, 658s; DB verified 17,411 rows / 286 symbols
+- [x] `backtest_history` prod-gap FIX (user override): `ensureBacktestHistoryTable` lazy CREATE TABLE IF NOT EXISTS + 3 indexes, memoized, failure-retried, chain degrades to daily_prices/NSE; `resetBacktestHistoryGuard`; +7 tests; suite **660 pass**; tsc 71 baseline
+- [x] Docs for the fix: plan doc flipped RESOLVED, BUGS.md #11 → fix built, AGENTS.md/CHANGELOG/versions-v3/TODO/Primer/agent-memory updated, Lessons #71 pending
 
 ### Pending (this session)
-- [ ] Commit on `feat/historical-price-sync` (feat + docs `[skip ci]`) — pre-commit tsc clean, never `--no-verify`
-- [ ] Report to user + ask permission for `--apply` backfill (local first, then prod) and deploy
+- [ ] Commit the backtest fix + docs on `feat/historical-price-sync` (PR #91 auto-updates) — pre-commit tsc clean, never `--no-verify`
+- [ ] Report to user + ask: merge PR #91 → main, then deploy?
 
 ### Pending (carried forward — other branches / later sessions)
-- [ ] Apply missing migration / lazy CREATE TABLE for prod `backtest_history` (per `.agents/docs/plan-backtest-history-prod-gap.md`, user decision)
+- [ ] Post-deploy verification: first market-sync run backfills daily_prices → Swing indicators render; MCP `getHistoricalData` no longer 500 (temp table self-heals)
 - [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
 - [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (PR #88 open; pre-commit tsc must pass — never `--no-verify`), live-verify analytics side-nav
 - [ ] **Deploy to Netlify (user-approved) → market-sync run backfills daily_prices → verify Swing indicators render on prod**

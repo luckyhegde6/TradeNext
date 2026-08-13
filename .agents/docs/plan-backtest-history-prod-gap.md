@@ -1,8 +1,11 @@
-# PLAN (docs only — do not build yet): Prod `backtest_history` gap → MCP `getHistoricalData` 500
+# RESOLVED (2026-08-14): Prod `backtest_history` gap → MCP `getHistoricalData` 500
 
-> **Status**: ⏸ Planned — user decision 2026-08-14: *plan it, don't build*. Companion to the
+> **Status**: ✅ **Built** — user override 2026-08-14 ("the backtest_history gap needs to be fixed") shipped
+> **Option B (lazy `CREATE TABLE IF NOT EXISTS`)** in `lib/services/backtestDataService.ts`
+> (`ensureBacktestHistoryTable` + `resetBacktestHistoryGuard`, memoized per process, failures
+> retried, chain degrades to daily_prices/NSE instead of throwing). Companion to the
 > historical-price-sync work (v3.10.0) which fixes the **daily_prices** side of the same
-> "prod has no price history" problem.
+> "prod has no price history" problem. Original plan text preserved below for audit trail.
 
 ## Symptom (live-verified 2026-08-14, prod tradenext6.netlify.app)
 
@@ -18,12 +21,9 @@ prod database. Error surfaces through the backtest data chain (memory → temp t
 ## Root cause
 
 - `BacktestHistory` model exists in `prisma/schema.prisma` but the prod database lacks the table.
-  The model was added (v1.16.0) and its migration either (a) was never applied to prod, or
-  (b) is part of a migration set that was superseded/drifted on prod (netlify `npm run build` runs
-  `prisma migrate deploy`? — verify which). The temp table was likely **only ever created manually
-  on the local DB** or by `db push` in dev, which is why prod has it missing while local works.
+  **Verified 2026-08-14: NO migration ever created `backtest_history`** (`grep -r "backtest_history" prisma/migrations` → zero hits) — the table only exists locally because dev `db push` (schema sync) built it, while prod runs `prisma migrate deploy` which never saw it. **This makes Option A (apply a missing migration) impossible — there is no migration to apply**; the lazy-DDL code fix (Option B) is the only durable fix and self-heals on the next deploy.
 
-## Options (pick at build time — owner: user)
+## Options (decision made 2026-08-14 — B shipped; kept for audit)
 
 ### A. Apply the missing migration on prod (recommended, smallest change)
 1. Identify the migration that creates `backtest_history` (`grep -r "backtest_history" prisma/migrations`).
@@ -31,11 +31,19 @@ prod database. Error surfaces through the backtest data chain (memory → temp t
 3. Verify: `SELECT to_regclass('public.backtest_history');` → non-null; then a live
    `getHistoricalData` call returns `source: "db"`/`"nse"` with bars.
 - **Risk**: minimal (new empty table); prod write permission required before executing.
+- **Status: N/A** — the grep returns ZERO hits; no migration exists to apply. (If a future migration
+  adds the table, this becomes viable again.)
 
-### B. Create the table lazily in `backtestDataService` (code change)
+### B. Create the table lazily in `backtestDataService` (code change) — ✅ SHIPPED
 - Before first use, `CREATE TABLE IF NOT EXISTS` mirroring the Prisma model (raw SQL, camelCase
   columns as Prisma maps them). Self-healing on serverless; no migration needed.
-- **Risk**: schema drift if the model changes; duplicating DDL in code.
+- **Implementation (v3.10.0 PR #91)**: `BACKTEST_HISTORY_STATEMENTS` (create + 3 `IF NOT EXISTS`
+  indexes), `ensureBacktestHistoryTable(db = prisma)` (memoized per process; `Promise.all` of the 4
+  statements; failures logged + returned as `false` and NOT memoized so the next call retries),
+  `resetBacktestHistoryGuard()` test hook; `getBacktestData` skips the temp leg + the upsert when
+  not ready → chain degrades to daily_prices/NSE (no 500). 7 new tests; suite 660 pass.
+- **Risk**: schema drift if the model changes; duplicating DDL in code (accepted — table is a
+  private cache with no FK relations).
 
 ### C. Point `backtestHistory` at `daily_prices` (bigger change)
 - The new v3.10.0 historical-price sync now populates **daily_prices** with N-day EQ bars. The
@@ -54,7 +62,9 @@ prod database. Error surfaces through the backtest data chain (memory → temp t
 
 ## Unblock order (when approved)
 
-1. Verify which migrations prod is missing: `prisma migrate status` against prod URL.
-2. Option A: `prisma migrate deploy` (or the single CREATE TABLE).
+1. ~~Verify which migrations prod is missing: `prisma migrate status` against prod URL.~~ → **Done:
+   none — grep shows NO migration ever created `backtest_history`** (Option A impossible).
+2. ~~Option A: `prisma migrate deploy` (or the single CREATE TABLE).~~ → **Superseded by Option B
+   (shipped)**: `ensureBacktestHistoryTable` creates the table lazily on the next deploy.
 3. Live-verify `getHistoricalData` → 200 + bars.
-4. Optionally later: B (lazy DDL) or C (daily_prices-first chain) as hardening.
+4. Optionally later: C (daily_prices-first chain) as hardening.
