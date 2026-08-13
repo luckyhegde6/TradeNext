@@ -46,6 +46,9 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "ai_connection_test":
         result = await executeAiConnectionTest(payload);
         break;
+      case "historical_price_sync":
+        result = await executeHistoricalPriceSync(payload);
+        break;
       case "market_data":
         result = await executeMarketDataSync(payload);
         break;
@@ -256,6 +259,32 @@ export async function executeCorpActionsSync(payload?: Record<string, unknown>):
   logger.info({ msg: "Corporate actions sync completed", total: actions.length, created, updated });
 
   return { total: actions.length, created, updated };
+}
+
+/**
+ * Historical Price Sync - backfills/refreshes N-day EQ bars into daily_prices
+ * (fixes the Swing indicators "—" data gap: market-sync syncs the stock LIST
+ * but not prices). Idempotent upserts; per-symbol error tolerance. Manual
+ * triggers default to dry-run — pass `dryRun: false` to actually write.
+ */
+export async function executeHistoricalPriceSync(payload?: Record<string, unknown>): Promise<unknown> {
+  const { syncHistoricalPrices } = await import("@/lib/services/historicalPriceSyncService");
+  logger.info({ msg: "Starting historical price sync" });
+
+  const result = await syncHistoricalPrices({
+    symbols: Array.isArray(payload?.symbols) ? (payload!.symbols as string[]) : undefined,
+    days: typeof payload?.days === "number" ? payload.days : undefined,
+    from: typeof payload?.from === "string" ? payload.from : undefined,
+    to: typeof payload?.to === "string" ? payload.to : undefined,
+    maxSymbols: typeof payload?.maxSymbols === "number" ? payload.maxSymbols : undefined,
+    dryRun: typeof payload?.dryRun === "boolean" ? payload.dryRun : true,
+    maxDurationMs: typeof payload?.maxDurationMs === "number" ? payload.maxDurationMs : undefined,
+  });
+
+  if (result.errors.length > 0) {
+    logger.warn({ msg: "Historical price sync completed with per-symbol errors", errorCount: result.errors.length });
+  }
+  return result;
 }
 
 /**
