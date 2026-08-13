@@ -8,27 +8,20 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-13) — v3.9.0: Swing Trading Signals tab (34 swing screeners, family segregation, AI LONG/SHORT/OBSERVE) + scope-aware cache-key fixes + NSE candlestick chart buttons
+## Current Session (2026-08-14) — v3.9.1: Swing `analysisStatus` honesty fix (live-verified prod bug) + live verification of v3.9.0 on tradenext6.netlify.app
 
-**Working tree**: branch `fix/cron-reaper-ai-pipeline` (carries committed v3.8.0 `5b7c5da` feat + `ccf87ee` docs; v3.5.4→v3.7.3 holds remain on other branches). Swing feature + chart buttons + tests uncommitted (see `git status`). Full suite **634 pass / 11 skipped** (was 597); `npx tsc --noEmit` 0 swing errors (total 71 = exact pre-existing baseline). Playwright verified desktop + mobile 375px — 0 console errors; chart-button click tests opened TITAN-EQ / SARDAEN-EQ / NIFTY%2050 correctly (outer Link never fired). **Commit APPROVED by user; NO deploy (deploy on hold per user).**
+**Working tree**: branch `main` (v3.9.0 merged via PR #90 `264dd6c`, deploy green/published). Fix: `analysisStatusAfterBatch` + 3 regression tests uncommitted (see `git status`). Full suite **638 pass / 11 skipped** (was 634); `npx tsc --noEmit` 0 errors on touched files (71 = exact baseline). Live verification of v3.9.0 PASSED on tradenext6.netlify.app (Swing tab + chart buttons, 0 console errors desktop + mobile 375px). **Commit pending user; NO deploy.**
 
 ### Completed
-- [x] Swing API `GET /api/recommendations/swing` (`force=1`/`analyze=0`) — 34 swing-category Chartink templates (`lib/services/chartink-scans/swing.json` + `swing` category) via unified runner (Chartink 419 → TV fallback by design)
-- [x] `lib/services/swingRecommendationService.ts` — family segregation (momentum/breakout/trend/mean-reversion/crossover/bearish), composite rank, top-20 cap, 25-bar indicator enrichment (RSI/SMA/EMA/vol trend; "—" locally = data gap)
-- [x] `lib/services/ai/swing-agent.ts` — batch-5 retry×2 concurrency-3, `trackAiCall("swing_analysis_batch")`, LONG→BUY/SHORT→SELL/OBSERVE→HOLD via `evaluateRecommendationLevels`, fallback OBSERVE conf-40
-- [x] UI: `SwingTab.tsx` + `SwingCard.tsx` wired into `/recommendations` sidebar "🌊 Swing"; daily run `excludeCategoryIds:["swing"]` — Today's Picks unchanged
-- [x] Scope-aware cache keys: `unifiedCacheKey(options)` (templateIds/categoryId/exclusions) + swing `${key}:ai|noai` — regression-tested with REAL registry ids
-- [x] NSE candlestick chart buttons: SwingCard + RecommendationCard (dark-theme ChartBarIcon, `aria-label`+`title`) + Markets index cards ("Chart" icon button, `stopPropagation`) via `openNSEChart` — click-verified, 0 console errors
-- [x] Tests: `swing-agent.test.ts` (30) + `swingRecommendationService.test.ts` (7) + cache-key regression; suite 634 pass
-- [x] Docs: AGENTS.md v3.9.0 row, CHANGELOG index + versions-v3.md, TODO.md rows, Primer.md, agent-memory.md, Lessons.md #67, session-todos.md
-- [x] Playwright verify (desktop + mobile 375px, 0 console errors, chart URL click tests, Swing tab family chips/refresh/expand)
+- [x] Live-verify v3.9.0 on tradenext6.netlify.app: Swing tab "20 picks · 200 flagged · 34 screeners" + family chips + "TV fallback" badges + "+30 more" expand; chart buttons AXISBANK-EQ / NIFTY%20BANK (outer Link never fired); **0 console errors/warnings desktop + mobile 375px**
+- [x] Diagnose prod findings: (a) analysisStatus bug — header "AI targets ready" over all-failed AI batch ("Unusable AI response (p)" ×2 attempts; agent swallows per-stock failures, no throw → catch unreachable → unconditional "done"); (b) indicators all "—" on prod — `daily_prices` 0–1 rows per swing pick (data gap, SQL validated locally); (c) `backtest_history` table missing on prod → MCP getHistoricalData 500s (separate pre-existing gap)
+- [x] Fix: NEW pure `analysisStatusAfterBatch(stocks)` — "done" only when ≥1 stock carries `analysis`, else "failed"; `analyze=false` keeps "skipped"
+- [x] Tests: +3 in `lib/__tests__/swingRecommendationService.test.ts` (partial→done, all-failed→failed regression, empty→failed); suite **638 pass**; tsc exact 71 baseline
+- [x] Docs: AGENTS.md v3.9.1 row, CHANGELOG index + versions-v3.md, TODO.md row, Primer.md, agent-memory.md, Lessons.md #68, session-todos.md
 
 ### Pending (this session)
-- [x] Commit 1 (feat): `cd2b4c4` — swing tab + cache-key fixes + NSE chart buttons + tests (pre-commit tsc clean, never `--no-verify`)
-- [x] Commit 2 (docs): `0692b50` `[skip ci]` — changelog + session docs; session archive `dc2b572` `[skip ci]` — `.agents/sessions/2026-08-13-cd2b4c4/{decisions,flow}.md`
-- [x] Push + PR: branch pushed with upstream; **PR #90** raised → https://github.com/luckyhegde6/TradeNext/pull/90 (base main, 5 commits, +3788/−170)
-- [ ] Review PR #90 feedback (if any) → merge (never auto-merge)
-- [x] Reset Playwright viewport from mobile 375px back to desktop (done — 1440×900)
+- [ ] Commit (feat + docs `[skip ci]`) — pre-commit tsc clean, never `--no-verify`; branch or direct-to-main per user preference; then PR/merge + optional deploy
+- [ ] Report live verification + prod data gaps to user (historical-price sync job into prod `daily_prices`; `backtest_history` creation) — user decides scope
 
 ### Pending (carried forward — other branches / later sessions)
 - [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
