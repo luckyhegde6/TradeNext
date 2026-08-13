@@ -543,7 +543,7 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-07-16 08:25
+2026-08-13 22:15 (v3.9.0 — Lesson 67 added)
 
 ## Advanced Screener Lessons (v1.16.0)
 
@@ -1118,7 +1118,47 @@ export async function checkRecommendationPerformance() {
 
 ---
 
+### 64. Config-Dependent Branches Open in Tests — Jest Loads `.env`/`.env.local`; Mock the Pre-Flight Gate's Default in `beforeEach`
+**Issue**: `dailyRecommendationService.test.ts` broke when the v3.8.0 pre-flight gate was added — the module under test started pulling in Prisma/network at import time and the new gate branch (`hasValidConfig(aiConfig)`) could fire during existing tests, producing all-HOLD runs or network attempts instead of the expected AI path.
+
+**Root Cause**: Next.js + Jest auto-load `.env`/`.env.local`, so `loadConfig()` resolves a VALID AI config in tests (env `OPENROUTERKEY`/model vars present locally) — the gate's `hasValidConfig` branch is therefore LIVE in tests, not a no-op. The real `runAiConnectionTest` calls OpenRouter over the network; without a default mock, tests either hit the network or hit a branch they weren't designed for.
+
+**Solution**: In `beforeEach`, mock the pre-flight service's default return to `status: "ok"` (configured model) so the gate behaves exactly like pre-v3.8.0 for existing tests; add dedicated tests that override the mock per-case (`ok` → configured model, `fallback` → recommendedModel, `failed` → all-HOLD `aiSuccess:false`). Also note the real module imports Prisma/network — keep the mock default in `beforeEach`, not per-test.
+
+**Rule**: Any NEW conditional branch keyed on env/config (valid AI config, feature flag, secrets present) WILL be live under Jest because Next.js loads env files. Add a benign default mock in `beforeEach` for the whole suite, then flip it per-test only where the branch itself is under test. Never assume an env-gated path is inert in tests.
+
+### 65. `jest.mock` Specifier Must Resolve to the SAME Module Identity the Source Imports — `@/` Alias vs Relative Path
+**Issue**: `worker-engine.test.ts` mock for the scheduler's dependencies silently didn't apply — the worker still hit the real service, and tests failed with confusing "real Prisma/network" errors.
+
+**Root Cause**: The test mocked a module by RELATIVE path while the source file imports it via the `@/` alias (or vice versa). Jest keys module registries by resolved absolute path, so the mock and the real import resolved to two different module instances — the mock never replaced the dependency. Same failure mode as aliasing `@/lib/services/worker/…` in one place and `../../lib/services/worker/…` in the other.
+
+**Solution**: Use the exact same specifier the source uses (`@/lib/services/worker/...`), or `jest.requireActual`/`jest.mock` by the resolved path, and verify with a `expect(...).toHaveBeenCalled()` assertion that the mock actually intercepted.
+
+**Rule**: In every `jest.mock(...)` call, copy the import specifier VERBATIM from the file under test — don't "normalize" it to a relative path or shorten it. Jest matches by module identity (resolved absolute file path), not by string similarity. When a new module gets mocked and tests still hit real code, grep the test for BOTH spellings of the path.
+
+### 66. DB-Stored Config Overrides Env Defaults — a Stale `ai_config` Row Defeats a New Default Until Re-Saved
+**Issue**: v3.8.0 raised `maxTokens` default to 8192 in `config.ts`, but prod AI runs still truncated JSON — the new default appeared to "not work".
+
+**Root Cause**: `loadConfig()` merges the DB `ai_config` Secret metadata OVER env-derived defaults (DB wins). Any previously-saved config row (e.g. maxTokens 2048 stored months ago) silently overrides the new default; the code default only applies when no DB row exists.
+
+**Solution**: Document the caveat at the config-defaults change site (AGENTS.md/changelog) — the operator must re-save the AI config via the admin UI (or clear the row) to pick up new defaults. Prefer writing defaults INTO the saved row at load time (migrate-on-read) so new defaults propagate without manual action.
+
+**Rule**: Whenever you change a default that is ALSO persisted in a DB/config store, the persisted value wins over the code default by design — changing the constant alone changes nothing for existing rows. Either migrate-on-read (merge + persist new defaults), or call out the manual re-save step explicitly in the changelog/docs and verify with a DB query that no stale row pins the old value.
+
+### 67. Cache Keys Must Encode EVERY Distinguishing Scope — One Fixed Key Served Wrong Payloads Across Runs
+**Issue**: The v3.5.6 unified Chartink/TV runner cached ALL screener results under ONE fixed key (`chartink-unified:screener-results`) — a daily-recs run (7 templates) and a swing run (34 templates, different category) hit the SAME cache entry, so whichever ran first served its template universe to the other. The swing service compounded it by caching the final payload under one key regardless of `analyze` — an `analyze=false` warm-up call then served a NO-AI payload to the `analyze=true` UI.
+
+**Root Cause**: Cache keys described WHAT the endpoint is, not WHICH QUERY produced the data. Any cache shared by parameterized scopes must bake every distinguishing input into the key or the first writer wins for everyone.
+
+**Solution**: NEW `unifiedCacheKey(options)` encodes templateIds (sorted) / categoryId / exclusions into the read+write key; the swing service uses `${key}:ai|noai` so AI and non-AI payloads are distinct cache entries. Regression test asserts the same template set hits the same key and different sets get different keys.
+
+**Rule**: (1) Any cached function that takes options must include those options in the cache key — sort arrays first so order doesn't split keys; (2) payload-shape flags (AI vs no-AI, enriched vs raw) belong in the key, never in a shared entry; (3) when a regression test exercises a cache fix, verify it actually WRITES the cache (use real IDs that resolve to real data) — a test with fake/empty inputs silently no-ops and proves nothing.
+
+---
+
 ## Update Log
+- 2026-08-13: Added Lesson 67 (cache keys must encode every distinguishing scope — sorted templateIds/category/exclusions in `unifiedCacheKey`, `${key}:ai|noai` for AI vs no-AI payloads, and regression tests must actually write the cache — fake IDs produce empty runs and prove nothing); added v3.9.0 Swing Trading Signals tab + scope-aware cache-key fixes + NSE candlestick chart buttons entry
+- 2026-08-13: Added Lessons 64-66 (config-dependent branches are LIVE in Jest because Next.js loads `.env` — default-mock the pre-flight gate in `beforeEach`; `jest.mock` specifier must be VERBATIM from the source import — `@/` alias vs relative path resolves to different module instances; DB-stored `ai_config` metadata overrides env/code defaults — re-save via admin UI or migrate-on-read to pick up new defaults like maxTokens 8192); added v3.8.0 AI pre-flight gate + cron dedup + stale-task reaping + maxTokens default entry
 - 2026-08-13: Added Lesson 63 (Netlify secrets scan flags EVERY repo file incl. extensionless `.githooks` — omit-list config files; keep example tokens/chat-IDs/codes clearly fake, never plain-six-digit-style, so future env values can't substring-collide; grep scanned extensions after env changes); added v3.7.2 secrets-scan fix + live-site staleness finding entry; v3.7.3 masked the incidental literals this lesson itself had printed
 - 2026-08-13: Added Lessons 61-62 (never write `*/` inside a block/JSDoc comment — it terminates the comment early and shatters file parsing, reword `*/30` as `step 30 every min`; closures must not reference `const` declared later — TDZ, stamp per-attempt timestamps instead); added v3.7.1 BUY/SELL-only broadcast + AI connection-test cron + CI e2e fix entry
 - 2026-08-11: Added Lesson 60 (credentials env-var-only — no literals in code/docs/commit messages; `DEFAULT_PASSWORD` env + `.githooks/commit-msg` + pre-commit #6/#7; redact literals to `********`; public sandbox demo creds exempt); added v3.5.7 credential-hygiene + llms.txt/robots discovery entry

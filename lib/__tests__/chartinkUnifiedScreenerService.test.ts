@@ -291,6 +291,28 @@ describe("runChartinkUnifiedScreeners", () => {
     expect(mockedDbOverview).not.toHaveBeenCalled();
   });
 
+  test("cache key is scope-aware (swing run never shares the full-run cache)", async () => {
+    // A templateId-scoped run writes to its own key...
+    mockedCache.get.mockReturnValue(null);
+    mockedDbOverview.mockResolvedValue([]);
+    await runChartinkUnifiedScreeners({ templateIds: ["fundamental.profit-jump-by-200", "top-loved.short-term-breakouts"] });
+    expect((mockedCache.set as jest.Mock).mock.calls.at(-1)![0]).toBe(
+      "chartink-unified:t:fundamental.profit-jump-by-200,top-loved.short-term-breakouts",
+    );
+
+    // ...and a later scoped run reads the SAME scoped key...
+    const scopedOnly = [{ symbol: "SWING_ONLY", source: "chartink_db", templateIds: ["fundamental.profit-jump-by-200"] }];
+    mockedCache.get.mockReturnValue(scopedOnly);
+    const hit = await runChartinkUnifiedScreeners({ templateIds: ["fundamental.profit-jump-by-200", "top-loved.short-term-breakouts"] });
+    expect(hit).toEqual(scopedOnly);
+
+    // ...while the full (unscoped) run misses on that scoped key and runs the pipeline.
+    mockedCache.get.mockReturnValue(null);
+    mockedDbOverview.mockResolvedValue([]);
+    await runChartinkUnifiedScreeners();
+    expect(mockedDbOverview).toHaveBeenCalled();
+  });
+
   test("forceRefresh bypasses cache and runs the pipeline", async () => {
     mockedCache.get.mockReturnValue([{ symbol: "OLD", source: "chartink_db", templateIds: ["x"] }]);
     mockedDbOverview.mockResolvedValue([]);

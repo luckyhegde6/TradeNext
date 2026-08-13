@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ChartBarIcon } from "@heroicons/react/24/outline";
+import { openNSEChart } from "@/lib/charting";
 
 interface RecommendationCardProps {
   symbol: string;
@@ -68,9 +70,19 @@ export default function RecommendationCard({
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div>
-          <Link href={`/company/${symbol}`} className="text-lg font-bold text-white hover:text-blue-400 transition-colors">
-            {symbol}
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href={`/company/${symbol}`} className="text-lg font-bold text-white hover:text-blue-400 transition-colors">
+              {symbol}
+            </Link>
+            <button
+              onClick={() => openNSEChart(symbol)}
+              aria-label={`Open ${symbol} candlestick chart on NSE`}
+              title="Candlestick chart on NSE"
+              className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <ChartBarIcon className="w-4 h-4" />
+            </button>
+          </div>
           <div className="text-sm text-gray-400 mt-0.5">NSE</div>
         </div>
         <div className={`px-3 py-1.5 rounded-lg border text-sm font-semibold ${recBg} ${recColor}`}>

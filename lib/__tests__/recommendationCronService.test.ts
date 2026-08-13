@@ -24,8 +24,10 @@ jest.mock("@/lib/prisma", () => {
   const mock = {
     cronJob: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       create: jest.fn(),
+      deleteMany: jest.fn(),
     },
   };
   return { __esModule: true, default: mock };
@@ -50,8 +52,10 @@ import {
 const prisma = require("@/lib/prisma").default as {
   cronJob: {
     findFirst: jest.Mock;
+    findMany: jest.Mock;
     update: jest.Mock;
     create: jest.Mock;
+    deleteMany: jest.Mock;
   };
 };
 
@@ -156,6 +160,9 @@ describe("recordCronRun", () => {
 describe("ensureRecommendationCrons", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // No duplicates by default — the v3.8.0 dedupe post-pass is a no-op.
+    prisma.cronJob.findMany.mockResolvedValue([]);
+    prisma.cronJob.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   it("creates the AI Connection Test job (taskType ai_connection_test, step-30 expr) alongside the other three system jobs", async () => {
@@ -226,6 +233,27 @@ describe("ensureRecommendationCrons", () => {
       }),
     });
     expect(prisma.cronJob.create).not.toHaveBeenCalled();
+    expect(result.ensured).toBe(4);
+  });
+
+  it("deletes duplicate system jobs keeping the earliest row (v3.8.0)", async () => {
+    prisma.cronJob.findFirst.mockResolvedValue(null); // all four would be created fresh
+    // …but the DB already holds duplicates from a past findFirst-then-create race
+    prisma.cronJob.findMany.mockResolvedValue([
+      { id: "r1", name: RECOMMENDATION_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
+      { id: "r1-dup", name: RECOMMENDATION_CRON_NAME, createdAt: new Date("2026-08-10T00:00:00Z") },
+      { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
+      { id: "r3", name: MARKET_SYNC_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
+      { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
+    ]);
+    prisma.cronJob.deleteMany.mockResolvedValue({ count: 1 });
+
+    const result = await ensureRecommendationCrons();
+
+    // Keep the EARLIEST row per name, delete only the later duplicate
+    expect(prisma.cronJob.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["r1-dup"] } },
+    });
     expect(result.ensured).toBe(4);
   });
 });

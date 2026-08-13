@@ -1,0 +1,190 @@
+/**
+ * Tests for worker-engine (lib/services/worker/worker-engine.ts) — v3.8.0:
+ *   - reapStaleWorkerTasks: reaps WorkerTasks + DailyRecommendationRuns stuck
+ *     in "running" past the 16-min staleness threshold; graceful on errors.
+ *   - checkScheduledJobs: dedup guard — skips spawning when a task for the
+ *     same cron job is already pending/running (still advances nextRun).
+ *
+ * IMPORTANT: Do NOT use `import { jest } from "@jest/globals"`.
+ * SWC (used by next/jest) requires `jest` to be the global variable
+ * for `jest.mock()` hoisting to work correctly.
+ */
+
+// ─── Mocks (MUST be before any imports — SWC hoists jest.mock) ─────────
+
+jest.mock("@/lib/logger", () => {
+  const mock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+  return { __esModule: true, default: mock, info: mock.info, warn: mock.warn, error: mock.error, debug: mock.debug };
+});
+
+jest.mock("@/lib/prisma", () => {
+  const mock = {
+    workerTask: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+      update: jest.fn(),
+    },
+    dailyRecommendationRun: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    cronJob: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
+    workerStatus: {
+      upsert: jest.fn(),
+    },
+  };
+  return { __esModule: true, default: mock };
+});
+
+jest.mock("@/lib/services/worker/worker-service", () => ({
+  __esModule: true,
+  executeTask: jest.fn(),
+}));
+
+jest.mock("@/lib/services/worker/worker-logger", () => ({
+  __esModule: true,
+  createTaskLogger: jest.fn(() => ({
+    info: jest.fn(),
+    error: jest.fn(),
+  })),
+  writeLog: jest.fn(),
+}));
+
+jest.mock("@/lib/cron-parser", () => ({
+  __esModule: true,
+  calculateNextRun: jest.fn(() => new Date("2026-08-12T04:30:00.000Z")),
+}));
+
+// Dynamically imported inside checkScheduledJobs
+jest.mock("@/lib/services/worker/task-orchestrator", () => ({
+  __esModule: true,
+  spawnCronTask: jest.fn(),
+}));
+
+// ─── Imports ──────────────────────────────────────────────────────────────
+
+import { reapStaleWorkerTasks, checkScheduledJobs } from "@/lib/services/worker/worker-engine";
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const prisma = require("@/lib/prisma").default as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { spawnCronTask: mockSpawnCronTask } = require("@/lib/services/worker/task-orchestrator") as { spawnCronTask: jest.Mock };
+
+describe("reapStaleWorkerTasks", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.workerTask.findMany.mockResolvedValue([]);
+    prisma.dailyRecommendationRun.findMany.mockResolvedValue([]);
+  });
+
+  it("reaps WorkerTasks stuck in running past the threshold", async () => {
+    prisma.workerTask.findMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }]);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 2, reapedRuns: 0 });
+    expect(prisma.workerTask.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["t1", "t2"] } },
+      data: expect.objectContaining({
+        status: "failed",
+        completedAt: expect.any(Date),
+        error: expect.stringContaining("16 min"),
+      }),
+    });
+  });
+
+  it("reaps DailyRecommendationRuns stuck in running (keyed on createdAt)", async () => {
+    prisma.dailyRecommendationRun.findMany.mockResolvedValue([{ id: "run-1" }]);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 1 });
+    expect(prisma.dailyRecommendationRun.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["run-1"] } },
+      data: expect.objectContaining({
+        status: "failed",
+        errorMessage: expect.stringContaining("16 min"),
+      }),
+    });
+  });
+
+  it("is a no-op when nothing is stale", async () => {
+    const result = await reapStaleWorkerTasks();
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+    expect(prisma.workerTask.updateMany).not.toHaveBeenCalled();
+    expect(prisma.dailyRecommendationRun.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("never throws when the DB fails — returns zeros", async () => {
+    prisma.workerTask.findMany.mockRejectedValue(new Error("db down"));
+    prisma.dailyRecommendationRun.findMany.mockRejectedValue(new Error("db down"));
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+  });
+});
+
+describe("checkScheduledJobs", () => {
+  const dueJob = {
+    id: "job-1",
+    name: "Daily Recommendations (System)",
+    isActive: true,
+    nextRun: new Date(Date.now() - 60_000), // due
+    cronExpression: "30 4 * * 1-5",
+    taskType: "recommendations",
+    config: { systemManaged: true },
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.cronJob.findMany.mockResolvedValue([dueJob]);
+    prisma.cronJob.update.mockResolvedValue({});
+    mockSpawnCronTask.mockResolvedValue({});
+  });
+
+  it("skips spawning when a task for the same cron job is already pending/running", async () => {
+    prisma.workerTask.findFirst.mockResolvedValue({ id: "task-1", name: "Scheduled: Daily Recommendations (System)" });
+
+    await checkScheduledJobs();
+
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    // nextRun still advanced so the schedule keeps ticking
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: expect.objectContaining({ nextRun: expect.any(Date) }),
+    });
+  });
+
+  it("spawns a task and advances nextRun when no recent task exists", async () => {
+    prisma.workerTask.findFirst.mockResolvedValue(null);
+
+    await checkScheduledJobs();
+
+    expect(mockSpawnCronTask).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({
+        name: "Scheduled: Daily Recommendations (System)",
+        taskType: "recommendations",
+        triggeredBy: "system",
+      }),
+    );
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: expect.objectContaining({ nextRun: expect.any(Date) }),
+    });
+  });
+
+  it("is a no-op when no cron jobs are due", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([]);
+
+    await checkScheduledJobs();
+
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+});

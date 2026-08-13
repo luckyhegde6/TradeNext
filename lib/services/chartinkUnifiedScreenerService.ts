@@ -56,10 +56,12 @@ export interface UnifiedScreenerResult extends ScreenerResult {
 /** Options for the unified run. */
 export interface UnifiedScreenerOptions {
   forceRefresh?: boolean;
-  /** Restrict the run to these template ids (default: all 117). */
+  /** Restrict the run to these template ids (default: all). */
   templateIds?: string[];
   /** Restrict by category id (default: all). */
   categoryId?: string;
+  /** Exclude whole categories (e.g. the swing tab's scans from the daily run). */
+  excludeCategoryIds?: string[];
   /** Max rows per tradingview fallback template (default 100). */
   tvFallbackLimit?: number;
 }
@@ -75,8 +77,23 @@ interface TemplateRun {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CACHE_KEY = "chartink-unified:screener-results";
 const CACHE_TTL = 300;
+
+/**
+ * Options-aware cache key. The runner is invoked with different scopes
+ * (full daily run, category runs, per-template-id runs like the Swing tab),
+ * and all of them used to share ONE fixed key — a swing run could read the
+ * whole daily list (or overwrite it with swing-only rows). The key encodes
+ * the template-id/category/exclusion scope so each scope has its own cache.
+ */
+function unifiedCacheKey(options: UnifiedScreenerOptions): string {
+  const { templateIds, categoryId, excludeCategoryIds = [] } = options;
+  let scope = "all";
+  if (templateIds && templateIds.length > 0) scope = `t:${templateIds.join(",")}`;
+  else if (categoryId) scope = `c:${categoryId}`;
+  const excl = excludeCategoryIds.length > 0 ? `-x${excludeCategoryIds.join(",")}` : "";
+  return `chartink-unified:${scope}${excl}`;
+}
 
 /** TV universe range — full NSE universe in one scan (matches advanced route). */
 const TV_UNIVERSE: { from: number; to: number } = { from: 0, to: 2000 };
@@ -107,6 +124,7 @@ const CATEGORY_TV_MAP: Record<string, string> = {
   bullish: "bullish",
   bearish: "bearish",
   "intraday-bearish": "intraday_bearish",
+  swing: "range_breakout",
 };
 
 // ---------------------------------------------------------------------------
@@ -249,16 +267,19 @@ export async function runChartinkUnifiedScreeners(
     forceRefresh = false,
     templateIds,
     categoryId,
+    excludeCategoryIds = [],
     tvFallbackLimit = 100,
   } = options;
 
   if (!forceRefresh) {
-    const cached = staticCache.get(CACHE_KEY);
+    const cached = staticCache.get(unifiedCacheKey(options));
     if (cached) return cached as UnifiedScreenerResult[];
   }
 
   const templates = getChartinkTemplates(categoryId).filter(
-    (t) => !templateIds || templateIds.includes(t.id),
+    (t) =>
+      !excludeCategoryIds.includes(t.categoryId) &&
+      (!templateIds || templateIds.includes(t.id)),
   );
   if (templates.length === 0) return [];
 
@@ -396,7 +417,7 @@ export async function runChartinkUnifiedScreeners(
     return { ...r, source: attribution.source, templateIds: attribution.templateIds };
   });
 
-  staticCache.set(CACHE_KEY, results, CACHE_TTL);
+  staticCache.set(unifiedCacheKey(options), results, CACHE_TTL);
 
   logger.info({
     msg: "Chartink unified screeners finished",

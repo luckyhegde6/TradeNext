@@ -26,6 +26,7 @@ import crossoverScans from "./chartink-scans/crossover.json";
 import bullishScans from "./chartink-scans/bullish.json";
 import bearishScans from "./chartink-scans/bearish.json";
 import intradayBearishScans from "./chartink-scans/intraday-bearish.json";
+import swingScans from "./chartink-scans/swing.json";
 
 // ---------------------------------------------------------------------------
 // Category definitions (display order + metadata)
@@ -41,6 +42,7 @@ const CATEGORIES: ReadonlyArray<{ id: string; name: string; file: ChartinkCatego
   { id: "bullish", name: "Bullish Scan", file: bullishScans },
   { id: "bearish", name: "Bearish Scan", file: bearishScans },
   { id: "intraday-bearish", name: "Intraday Bearish Scan", file: intradayBearishScans },
+  { id: "swing", name: "Swing Trading Scan", file: swingScans },
 ];
 
 /** Flattened registry: categoryId -> templates (from the JSON files). */

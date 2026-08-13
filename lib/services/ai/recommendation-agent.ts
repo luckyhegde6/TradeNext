@@ -5,7 +5,7 @@
  * Uses directPrompt() (no tool calling needed — stock data is pre-fetched).
  * Processes in batches of 5 to stay within token limits.
  */
-import { directPrompt } from "./llm-provider";
+import { directPrompt, getPromptTimeoutMs } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
 import { trackAiCall } from "./ai-monitoring";
 import { formatStockContext, type StockContext } from "./recommendation-context";
@@ -51,6 +51,24 @@ const RETRY_MAX = 2;
 const RETRY_BASE_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 8000;
 
+/** Number of batch workers running concurrently (OpenRouter free-tier friendly). */
+const CONCURRENCY = 3;
+
+/**
+ * Hard per-batch wall-clock cap (5 minutes), covering ALL retry attempts for
+ * one batch — never exceeded even if the per-request timeout is raised.
+ * A dead/saturated model must fail fast, not hold the pipeline past the
+ * Netlify 14-minute background-function safety net.
+ */
+const BATCH_TIMEOUT_MS = 5 * 60_000;
+
+function retryDelay(attempt: number): number {
+  return Math.min(
+    RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1),
+    MAX_RETRY_DELAY_MS,
+  );
+}
+
 /** Fallback target/SL multipliers used when AI cannot determine a target (mirrors dailyRecommendationService). */
 const DEFAULT_TARGET_MULTIPLIER = 1.1;
 const DEFAULT_STOP_LOSS_MULTIPLIER = 0.95;
@@ -87,6 +105,11 @@ const RESPONSE_SCHEMA_HINT = `Return a JSON array like:
 /**
  * Analyze a list of stocks in batches of 5.
  * Partial failures are graceful — failed stocks get HOLD defaults.
+ *
+ * Batches run on a bounded-concurrency worker pool (CONCURRENCY=3): a
+ * 50-stock run drops from ~10 sequential 30-90s calls to ~4 waves, keeping
+ * the whole AI phase inside the 14-minute background-function safety net.
+ * Results preserve input order regardless of completion order.
  */
 export async function analyzeStocks(
   stocks: StockAnalysisInput[],
@@ -97,40 +120,53 @@ export async function analyzeStocks(
     return stocks.map((s) => failedResult(s, "AI is not configured"));
   }
 
-  const results: StockAnalysisResult[] = [];
+  const results: StockAnalysisResult[] = new Array(stocks.length);
   const totalBatches = Math.ceil(stocks.length / BATCH_SIZE);
+  let nextIndex = 0;
 
-  for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
-    const batchIndex = Math.floor(i / BATCH_SIZE);
-    const batch = stocks.slice(i, i + BATCH_SIZE);
+  const worker = async (): Promise<void> => {
+    // Claims are synchronous (no await between read+increment), so each batch
+    // is assigned to exactly one worker, in order.
+    while (nextIndex < stocks.length) {
+      const i = nextIndex;
+      nextIndex += BATCH_SIZE;
+      const batch = stocks.slice(i, i + BATCH_SIZE);
+      const batchIndex = Math.floor(i / BATCH_SIZE);
 
-    logger.info({
-      msg: "Analyzing batch",
-      batchIndex: batchIndex + 1,
-      of: totalBatches,
-      symbols: batch.map((s) => s.symbol),
-    });
-
-    try {
-      const batchResults = await analyzeBatch(batch, config);
-      results.push(...batchResults);
-    } catch (e) {
-      logger.warn({
-        msg: "Batch analysis failed",
+      logger.info({
+        msg: "Analyzing batch",
         batchIndex: batchIndex + 1,
-        error: e instanceof Error ? e.message : String(e),
+        of: totalBatches,
+        symbols: batch.map((s) => s.symbol),
       });
-      for (const stock of batch) {
-        results.push(failedResult(stock, e instanceof Error ? e.message : String(e)));
+
+      try {
+        const batchResults = await analyzeBatch(batch, config);
+        batchResults.forEach((r, idx) => {
+          results[i + idx] = r;
+        });
+      } catch (e) {
+        logger.warn({
+          msg: "Batch analysis failed",
+          batchIndex: batchIndex + 1,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        batch.forEach((stock, idx) => {
+          results[i + idx] = failedResult(stock, e instanceof Error ? e.message : String(e));
+        });
       }
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, totalBatches) }, () => worker()),
+  );
 
   logger.info({
     msg: "Stock analysis complete",
     total: stocks.length,
-    succeeded: results.filter((r) => r.success).length,
-    failed: results.filter((r) => !r.success).length,
+    succeeded: results.filter((r) => r && r.success).length,
+    failed: results.filter((r) => !r || !r.success).length,
   });
 
   return results;
@@ -151,50 +187,42 @@ export async function analyzeSingleStock(
 
 /**
  * Analyze a single batch of up to 5 stocks with retry.
+ *
+ * VERIFICATION (v3.8.0): directPrompt never throws — it converts failures
+ * into strings ("AI request failed…", "No response from AI.", empty content
+ * on timeouts). Previously that meant an empty/timed-out/truncated answer was
+ * accepted as a "successful" batch and silently produced all-HOLD defaults
+ * with NO retry. Now the response must parse into a recommendation for EVERY
+ * stock in the batch; anything else counts as an attempt failure and is
+ * retried (up to RETRY_MAX).
  */
 async function analyzeBatch(
   stocks: StockAnalysisInput[],
   config?: AIConfig
 ): Promise<StockAnalysisResult[]> {
   const prompt = buildAnalysisPrompt(stocks);
+  // Hard per-batch deadline: the whole retry loop (attempts + backoffs) must
+  // finish within BATCH_TIMEOUT_MS. Each attempt's request timeout is clamped
+  // to the remaining budget so a single call cannot overrun the cap.
+  const batchDeadline = Date.now() + BATCH_TIMEOUT_MS;
   let lastError: string | undefined;
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+    const remaining = batchDeadline - Date.now();
+    if (remaining <= 0) {
+      lastError = `Batch exceeded ${BATCH_TIMEOUT_MS / 1000}s timeout`;
+      logger.warn({ msg: "Batch timed out", attempt, of: RETRY_MAX, error: lastError });
+      break;
+    }
+
+    const attemptStart = Date.now();
+    let response: string;
     try {
-      const batchStart = Date.now();
-      const response = await directPrompt(prompt, config);
-      const batchMs = Date.now() - batchStart;
-
-      const recommendations = parseAIResponse(response, stocks);
-
-      const batchResults = stocks.map((stock, idx) => {
-        const rec = recommendations[idx];
-        if (!rec) {
-          return failedResult(stock, "No recommendation returned for this stock");
-        }
-        return {
-          ...stock,
-          aiRecommendation: rec,
-          tokensUsed: estimateTokens(prompt) + estimateTokens(response),
-          executionMs: batchMs,
-          success: true,
-        };
-      });
-
-      // Track AI call for monitoring (await so it persists on serverless)
-      await trackAiCall({
-        timestamp: new Date().toISOString(),
-        action: "recommendation_batch",
-        model: config?.model || "unknown",
-        status: "success",
-        tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
-        responseTimeMs: batchMs,
-        analysisType: "recommendation",
-        prompt: prompt.slice(0, 500),
-        result: response.slice(0, 1000),
-      });
-
-      return batchResults;
+      response = await directPrompt(
+        prompt,
+        config,
+        Math.min(remaining, getPromptTimeoutMs()),
+      );
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
       logger.warn({
@@ -203,15 +231,56 @@ async function analyzeBatch(
         of: RETRY_MAX,
         error: lastError,
       });
-
-      if (attempt < RETRY_MAX) {
-        const delay = Math.min(
-          RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1),
-          MAX_RETRY_DELAY_MS
-        );
-        await sleep(delay);
-      }
+      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
+      continue;
     }
+    const attemptMs = Date.now() - attemptStart;
+
+    // Guard: mocks/network may yield non-string — treat as empty.
+    const raw = typeof response === "string" ? response : "";
+
+    const recommendations = parseAIResponse(raw, stocks);
+    if (!recommendations) {
+      lastError = `Unusable AI response (${describeUnusable(raw)})`;
+      logger.warn({
+        msg: "Batch response unusable — retrying",
+        attempt,
+        of: RETRY_MAX,
+        error: lastError,
+        preview: raw.slice(0, 200),
+      });
+      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
+      continue;
+    }
+
+    const batchResults = stocks.map((stock, idx) => {
+      const rec = recommendations[idx];
+      if (!rec) {
+        return failedResult(stock, "No recommendation returned for this stock");
+      }
+      return {
+        ...stock,
+        aiRecommendation: rec,
+        tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
+        executionMs: attemptMs,
+        success: true,
+      };
+    });
+
+    // Track AI call for monitoring (await so it persists on serverless)
+    await trackAiCall({
+      timestamp: new Date().toISOString(),
+      action: "recommendation_batch",
+      model: config?.model || "unknown",
+      status: "success",
+      tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
+      responseTimeMs: attemptMs,
+      analysisType: "recommendation",
+      prompt: prompt.slice(0, 500),
+      result: raw.slice(0, 1000),
+    });
+
+    return batchResults;
   }
 
   // All retries exhausted — track failure
@@ -228,6 +297,17 @@ async function analyzeBatch(
   });
 
   throw new Error(`Batch failed after ${RETRY_MAX} attempts: ${lastError || "unknown"}`);
+}
+
+/**
+ * Classify an unusable response for the retry log (never throws on input).
+ */
+function describeUnusable(response: string): string {
+  const t = response.trim();
+  if (!t) return "empty response";
+  if (t.startsWith("AI request failed")) return "provider error";
+  if (t.includes("No response from AI")) return "empty content";
+  return "unparseable JSON";
 }
 
 /**
@@ -255,9 +335,14 @@ IMPORTANT: Return ONLY the JSON array. No markdown, no explanation.`;
 
 /**
  * Parse the AI response into structured recommendations.
- * Handles: raw JSON, markdown code blocks, partial text wrapping.
+ *
+ * Returns null when the response is NOT usable — unparseable, or the array
+ * lacks a recommendation for one or more stocks (e.g. JSON truncated at the
+ * maxTokens cap). The caller treats null as an attempt failure and retries,
+ * instead of silently accepting all-HOLD defaults from a broken response.
+ * Symbol matching is order-independent; index position is a lenient fallback.
  */
-function parseAIResponse(response: string, stocks: StockAnalysisInput[]): AIRecommendation[] {
+function parseAIResponse(response: string, stocks: StockAnalysisInput[]): AIRecommendation[] | null {
   // Try 1: Direct JSON parse
   let parsed = tryParseJSON(response);
 
@@ -273,20 +358,28 @@ function parseAIResponse(response: string, stocks: StockAnalysisInput[]): AIReco
 
   if (!Array.isArray(parsed)) {
     logger.warn({ msg: "Failed to parse AI response into array", preview: response.slice(0, 200) });
-    return stocks.map((s) => getDefaultRecommendation(s));
+    return null;
   }
 
-  // Map parsed objects to our schema, matching by index
-  return stocks.map((stock, idx) => {
+  // Map parsed objects to our schema, matching by symbol (order-independent).
+  const recommendations: AIRecommendation[] = [];
+  for (let idx = 0; idx < stocks.length; idx++) {
+    const stock = stocks[idx];
     const raw = findRecommendationBySymbol(parsed, stock.symbol) || parsed[idx];
 
     if (!raw) {
-      logger.warn({ msg: "No recommendation found for stock", symbol: stock.symbol });
-      return getDefaultRecommendation(stock);
+      logger.warn({
+        msg: "AI response missing recommendation for stock — treating as unusable",
+        symbol: stock.symbol,
+        responseCount: parsed.length,
+      });
+      return null;
     }
 
-    return normalizeRecommendation(raw, stock);
-  });
+    recommendations.push(normalizeRecommendation(raw, stock));
+  }
+
+  return recommendations;
 }
 
 /**

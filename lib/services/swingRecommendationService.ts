@@ -1,0 +1,369 @@
+// lib/services/swingRecommendationService.ts
+// Swing-tab pipeline on /recommendations:
+//   1. Run the swing-trading Chartink screeners (33-template registry) through
+//      the unified runner (chartink_db → chartink_live → tradingview fallback).
+//   2. Segregate each stock by signal family (trend/breakout/reversal/momentum/
+//      volume/range) derived from the flagging screeners' names.
+//   3. Dedupe by symbol (union families + screener tags).
+//   4. Rank and cap at SWING_TOP_N (market cap + screener agreement + momentum).
+//   5. Enrich with momentum indicators from daily_prices (~20 sessions).
+//   6. Optional AI target analysis (lib/services/ai/swing-agent.ts).
+//
+// The whole result is cached 30 min (analysis is expensive); forceRefresh
+// bypasses the cache and re-scans/re-analyzes.
+
+import logger from "@/lib/logger";
+import { staticCache } from "@/lib/cache";
+import {
+  getChartinkTemplates,
+  getChartinkTemplate,
+} from "@/lib/services/chartinkTemplates";
+import {
+  runChartinkUnifiedScreeners,
+  type UnifiedScreenerResult,
+} from "@/lib/services/chartinkUnifiedScreenerService";
+import type { ScreenerResult } from "@/lib/services/chartinkService";
+import { analyzeSwingStocks, type SwingAnalysisInput } from "@/lib/services/ai/swing-agent";
+import { loadConfig } from "@/lib/services/ai/config";
+import type {
+  SignalFamily,
+  SwingIndicators,
+  SwingResponse,
+  SwingStock,
+} from "@/lib/services/swing-types";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const SWING_TOP_N = 20;
+const SWING_CACHE_KEY = "swing:recommendations";
+const SWING_CACHE_TTL = 30 * 60; // 30 min — AI analysis is expensive
+
+/**
+ * Extra (non-swing-category) templates that belong in the swing feed — e.g. the
+ * "Stocks closing below the supertrend line" crossover scan from the user's list.
+ */
+const SWING_EXTRA_TEMPLATE_IDS = [
+  "crossover.stocks-closing-below-the-supertrend-line-4",
+];
+
+/** Names/pattern → signal family segregation (matched on template NAME). */
+const FAMILY_RULES: Array<{ family: SignalFamily; pattern: RegExp }> = [
+  { family: "trend", pattern: /supertrend|sma|ema|moving average|trend|renko|200 day|100\/200|100-200/i },
+  { family: "breakout", pattern: /breakout|line break|swing high|200 day high|potential/i },
+  { family: "reversal", pattern: /reversal|rsi|dip|buy on dip|star|higher low|swing low|morning/i },
+  { family: "momentum", pattern: /cci|momentum|compounder|wealth|gaint/i },
+  { family: "volume", pattern: /volume|vol >|5lac/i },
+  { family: "range", pattern: /range|consolidat|btwn ema|between ema/i },
+];
+
+const EMPTY_INDICATORS: SwingIndicators = {
+  momentum10: null,
+  momentum20: null,
+  volatility20: null,
+  distanceFrom20dHigh: null,
+};
+
+// ---------------------------------------------------------------------------
+// Template / family resolution (pure, exported for tests)
+// ---------------------------------------------------------------------------
+
+/** All swing template ids: swing category + extra crossover scans. */
+export function getSwingTemplateIds(): string[] {
+  const swing = getChartinkTemplates("swing").map((t) => t.id);
+  const extra = SWING_EXTRA_TEMPLATE_IDS.filter((id) => !!getChartinkTemplate(id));
+  return [...swing, ...extra];
+}
+
+/** Signal families for ONE template (by its registry name). */
+export function templateFamilies(id: string, name: string): SignalFamily[] {
+  const matched = new Set<SignalFamily>();
+  for (const rule of FAMILY_RULES) {
+    if (rule.pattern.test(name)) matched.add(rule.family);
+  }
+  if (matched.size === 0) {
+    // Swing scans are inherently trend-oriented — default to trend.
+    matched.add("trend");
+  }
+  return [...matched];
+}
+
+/** Union of families across the templates that flagged a stock. */
+export function swingFamiliesForTemplates(
+  templateIds: string[],
+  nameById: Map<string, string>,
+): SignalFamily[] {
+  const families = new Set<SignalFamily>();
+  for (const id of templateIds) {
+    const name = nameById.get(id) ?? id;
+    for (const f of templateFamilies(id, name)) families.add(f);
+  }
+  return [...families];
+}
+
+/** Merge raw results → symbol-unique SwingStocks with families + screener tags. */
+export function segregateAndDedupe(
+  results: UnifiedScreenerResult[],
+  nameById: Map<string, string>,
+): SwingStock[] {
+  const map = new Map<string, SwingStock>();
+  for (const r of results) {
+    const symbol = r.symbol.toUpperCase();
+    const families = swingFamiliesForTemplates(r.templateIds, nameById);
+    const existing = map.get(symbol);
+    if (existing) {
+      existing.families = Array.from(new Set([...existing.families, ...families]));
+      existing.screenerNames = Array.from(new Set([...existing.screenerNames, ...r.screenerNames]));
+      existing.screenerCount = existing.screenerNames.length;
+      if (r.price > 0) existing.price = r.price;
+      if (r.changePercent !== 0) existing.changePercent = r.changePercent;
+      if (r.volume > 0) existing.volume = r.volume;
+    } else {
+      map.set(symbol, {
+        ...r,
+        symbol,
+        families,
+        momentumScore: 0,
+        indicators: EMPTY_INDICATORS,
+        analysis: null,
+        analysisError: null,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+// ---------------------------------------------------------------------------
+// Ranking (pure, exported for tests)
+// ---------------------------------------------------------------------------
+
+/** Market-cap band score: ₹10,000Cr+ → 3, ₹1,000Cr+ → 2, ₹100Cr+ → 1. */
+export function marketCapScoreOf(marketCap?: number): number {
+  if (!marketCap || marketCap <= 0) return 0;
+  if (marketCap >= 1e11) return 3;
+  if (marketCap >= 1e10) return 2;
+  if (marketCap >= 1e9) return 1;
+  return 0;
+}
+
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n));
+}
+
+/** Composite rank score: screener agreement dominates, then market cap, then momentum. */
+export function swingCompositeScore(
+  r: Pick<ScreenerResult, "screenerCount" | "changePercent" | "marketCap">,
+): number {
+  const marketCapScore = marketCapScoreOf(r.marketCap);
+  const momentum = clamp01((r.changePercent + 5) / 10);
+  return r.screenerCount * 10 + marketCapScore * 2 + momentum;
+}
+
+/** Display momentum score 0–100 derived from today's change (pre-AI). */
+export function momentumScoreOf(r: Pick<ScreenerResult, "changePercent">): number {
+  return Math.round(clamp01((r.changePercent + 5) / 10) * 100);
+}
+
+/** Sort by composite score (tie-break: screener agreement) and cap at topN. */
+export function rankSwingStocks(stocks: SwingStock[], topN = SWING_TOP_N): SwingStock[] {
+  return [...stocks]
+    .sort((a, b) => {
+      const scoreDiff = swingCompositeScore(b) - swingCompositeScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.screenerCount - a.screenerCount;
+    })
+    .slice(0, topN)
+    .map((s) => ({ ...s, momentumScore: momentumScoreOf(s) }));
+}
+
+/** Family → count across a stock list (the "segregation" breakdown). */
+export function countSegregation(stocks: SwingStock[]): Record<SignalFamily, number> {
+  const counts: Record<SignalFamily, number> = {
+    trend: 0,
+    breakout: 0,
+    reversal: 0,
+    momentum: 0,
+    volume: 0,
+    range: 0,
+  };
+  for (const s of stocks) {
+    for (const f of s.families) counts[f] = (counts[f] ?? 0) + 1;
+  }
+  return counts;
+}
+
+// ---------------------------------------------------------------------------
+// Indicators (pure + DB fetch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Momentum/indicator context from a chronologically-ordered close series.
+ * PURE — unit-testable without a database.
+ */
+export function computeIndicatorsFromSeries(closes: number[]): SwingIndicators {
+  if (closes.length < 2) return { ...EMPTY_INDICATORS };
+
+  const last = closes[closes.length - 1];
+  const pct = (prev: number | undefined): number | null =>
+    prev && prev > 0 ? ((last - prev) / prev) * 100 : null;
+
+  const momentum10 = closes.length >= 10 ? pct(closes[closes.length - 10]) : null;
+  const momentum20 = closes.length >= 20 ? pct(closes[closes.length - 20]) : null;
+
+  const high20 = Math.max(...closes.slice(-20));
+  const distanceFrom20dHigh = high20 > 0 ? ((high20 - last) / high20) * 100 : null;
+
+  const returns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const prev = closes[i - 1];
+    if (prev > 0) returns.push((closes[i] - prev) / prev);
+  }
+  let volatility20: number | null = null;
+  if (returns.length > 0) {
+    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+    const vol = Math.sqrt(variance) * 100;
+    if (Number.isFinite(vol)) volatility20 = vol;
+  }
+
+  return { momentum10, momentum20, volatility20, distanceFrom20dHigh };
+}
+
+/** Batch-fetch up to 25 latest daily closes per symbol → computed indicators. */
+async function fetchRecentCloses(
+  symbols: string[],
+): Promise<Map<string, SwingIndicators>> {
+  if (symbols.length === 0) return new Map();
+  const prisma = (await import("@/lib/prisma")).default;
+  const rows = await prisma.$queryRaw<{ ticker: string; close: number }[]>`
+    SELECT ticker, close::float8 AS close
+    FROM (
+      SELECT ticker, close, "tradeDate",
+             ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY "tradeDate" DESC) AS rn
+      FROM daily_prices
+      WHERE ticker = ANY(${symbols.map((s) => s.toUpperCase())}::text[])
+    ) t
+    WHERE t.rn <= 25
+    ORDER BY t.ticker, t."tradeDate" ASC
+  `;
+
+  const bySymbol = new Map<string, number[]>();
+  for (const row of rows) {
+    const list = bySymbol.get(row.ticker) ?? [];
+    list.push(Number(row.close));
+    bySymbol.set(row.ticker, list);
+  }
+
+  const out = new Map<string, SwingIndicators>();
+  for (const [symbol, closes] of bySymbol) {
+    out.set(symbol, computeIndicatorsFromSeries(closes));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Orchestration
+// ---------------------------------------------------------------------------
+
+/** Convert a ranked SwingStock into the agent's input shape. */
+function toAnalysisInput(stock: SwingStock): SwingAnalysisInput {
+  return {
+    symbol: stock.symbol,
+    price: stock.price,
+    changePercent: stock.changePercent,
+    volume: stock.volume,
+    screenerNames: stock.screenerNames,
+    families: stock.families,
+    marketCap: stock.marketCap,
+    momentum10: stock.indicators.momentum10,
+    momentum20: stock.indicators.momentum20,
+    volatility20: stock.indicators.volatility20,
+    distanceFrom20dHigh: stock.indicators.distanceFrom20dHigh,
+  };
+}
+
+/**
+ * Full swing pipeline (see file header). Cached 30 min; forceRefresh bypasses.
+ * Never throws for feed/indicator failures — the tab must degrade gracefully
+ * (empty feed / no indicators), not 500.
+ */
+export async function getSwingRecommendations(
+  options: { forceRefresh?: boolean; analyze?: boolean } = {},
+): Promise<SwingResponse> {
+  const { forceRefresh = false, analyze = true } = options;
+
+  // The analyze flag changes the cached payload (AI-analyzed vs screener-only):
+  // an `analyze=false` warm-up must never serve its no-AI result to the tab's
+  // `analyze=true` request (and vice versa) — keep separate cache entries.
+  const cacheKey = `${SWING_CACHE_KEY}:${analyze ? "ai" : "noai"}`;
+  if (!forceRefresh) {
+    const cached = staticCache.get<SwingResponse>(cacheKey);
+    if (cached) return cached;
+  }
+
+  const templateIds = getSwingTemplateIds();
+  logger.info({ msg: "Swing run starting", templates: templateIds.length, analyze });
+
+  const unified = await runChartinkUnifiedScreeners({ templateIds, forceRefresh });
+  const nameById = new Map(
+    templateIds.map((id) => [id, getChartinkTemplate(id)?.name ?? id]),
+  );
+
+  const deduped = segregateAndDedupe(unified, nameById);
+  const ranked = rankSwingStocks(deduped);
+
+  // Momentum indicators from daily_prices — batch, never blocks the feed.
+  let indicatorMap = new Map<string, SwingIndicators>();
+  try {
+    indicatorMap = await fetchRecentCloses(ranked.map((s) => s.symbol));
+  } catch (e) {
+    logger.warn({
+      msg: "Swing indicators unavailable — continuing without them",
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+  const enriched = ranked.map((s) => ({
+    ...s,
+    indicators: indicatorMap.get(s.symbol) ?? EMPTY_INDICATORS,
+  }));
+
+  // AI target analysis — optional; failure never kills the feed.
+  let analysisStatus: SwingResponse["analysisStatus"] = "skipped";
+  if (analyze && enriched.length > 0) {
+    try {
+      const config = await loadConfig();
+      const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
+      const bySymbol = new Map(analyzed.map((a) => [a.symbol.toUpperCase(), a]));
+      for (const s of enriched) {
+        const a = bySymbol.get(s.symbol);
+        if (a && a.success && a.analysis) {
+          s.analysis = a.analysis;
+        } else {
+          s.analysisError = a?.error ?? "Analysis failed";
+        }
+      }
+      analysisStatus = "done";
+    } catch (e) {
+      logger.error({
+        msg: "Swing AI analysis failed — falling back to screener-only feed",
+        error: e instanceof Error ? e.message : String(e),
+      });
+      analysisStatus = "failed";
+    }
+  }
+
+  const response: SwingResponse = {
+    success: true,
+    generatedAt: new Date().toISOString(),
+    templateCount: templateIds.length,
+    totalRaw: deduped.length,
+    topN: enriched.length,
+    segregation: countSegregation(enriched),
+    analysisStatus,
+    stocks: enriched,
+  };
+
+  staticCache.set(cacheKey, response, SWING_CACHE_TTL);
+  return response;
+}

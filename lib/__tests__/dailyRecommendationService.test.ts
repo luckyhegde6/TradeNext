@@ -131,6 +131,14 @@ jest.mock("@/lib/services/systemHealthService", () => ({
   recordMetric: (...args: any[]) => mockRecordMetric(args[0]),
 }));
 
+// v3.8.0 pre-flight gate — MUST be mocked: the real module pulls in
+// notificationService + ai-monitoring which touch unmocked prisma models.
+const mockRunAiConnectionTest = jest.fn() as any;
+jest.mock("@/lib/services/ai/connectionTestService", () => ({
+  __esModule: true,
+  runAiConnectionTest: (...args: any[]) => mockRunAiConnectionTest(args[0]),
+}));
+
 jest.mock("@/lib/audit", () => ({
   __esModule: true,
   createAuditLog: jest.fn(() => Promise.resolve()),
@@ -225,6 +233,17 @@ describe("dailyRecommendationService", () => {
     mockPrisma.recommendationStatusHistory.create.mockResolvedValue({});
     mockPrisma.$queryRaw.mockResolvedValue([]);
     mockPrisma.$transaction.mockImplementation((ops: any[]) => Promise.all(ops));
+    // Default pre-flight result: "ok" so the v3.8.0 gate behaves exactly like
+    // the pre-gate flow for tests that don't exercise it. (next/jest loads
+    // .env/.env.local, which sets OPENROUTERKEY on this machine, so
+    // hasValidConfig() is true and the gate runs whenever aiInput is non-empty.)
+    mockRunAiConnectionTest.mockResolvedValue({
+      testedAt: new Date().toISOString(),
+      status: "ok",
+      configuredModel: "test-model",
+      primary: { model: "test-model", ok: true, responseTimeMs: 1 },
+      fallbacks: [],
+    });
   });
 
   // ── runDailyRecommendations ──────────────────────────────────────────
@@ -262,6 +281,89 @@ describe("dailyRecommendationService", () => {
       expect(mockPrisma.dailyRecommendationRun.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ triggeredBy: "admin" }) }),
       );
+    });
+
+    // ── AI pre-flight gate (v3.8.0) ────────────────────────────────────
+    // loadConfig() falls back to env (prisma mock has no `secret`), so
+    // hasValidConfig() only returns true when OPENROUTERKEY is set.
+
+    test("pre-flight OK → analyzes with the configured model", async () => {
+      process.env.OPENROUTERKEY = "test-key";
+      try {
+        mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+        mockAnalyzeStocks.mockResolvedValue([makeAIResult()]);
+        mockRunAiConnectionTest.mockResolvedValue({
+          testedAt: new Date().toISOString(),
+          status: "ok",
+          configuredModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          primary: { model: "nvidia/nemotron-3-ultra-550b-a55b:free", ok: true, responseTimeMs: 120 },
+          fallbacks: [],
+        });
+
+        const result = await runDailyRecommendations();
+
+        // Gate probes with the longer pre-flight budget
+        expect(mockRunAiConnectionTest).toHaveBeenCalledWith(120_000);
+        expect(mockAnalyzeStocks).toHaveBeenCalledWith(
+          expect.any(Array),
+          expect.objectContaining({ model: "nvidia/nemotron-3-ultra-550b-a55b:free" }),
+        );
+        expect(result.aiProcessed).toBe(1);
+      } finally {
+        delete process.env.OPENROUTERKEY;
+      }
+    });
+
+    test("pre-flight fallback → runs THIS run with the recommended model", async () => {
+      process.env.OPENROUTERKEY = "test-key";
+      try {
+        mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+        mockAnalyzeStocks.mockResolvedValue([makeAIResult()]);
+        mockRunAiConnectionTest.mockResolvedValue({
+          testedAt: new Date().toISOString(),
+          status: "fallback",
+          configuredModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          primary: { model: "nvidia/nemotron-3-ultra-550b-a55b:free", ok: false, responseTimeMs: 120, error: "timeout" },
+          fallbacks: [{ model: "openrouter/free", ok: true, responseTimeMs: 10 }],
+          recommendedModel: "openrouter/free",
+        });
+
+        await runDailyRecommendations();
+
+        expect(mockAnalyzeStocks).toHaveBeenCalledWith(
+          expect.any(Array),
+          expect.objectContaining({ model: "openrouter/free" }),
+        );
+      } finally {
+        delete process.env.OPENROUTERKEY;
+      }
+    });
+
+    test("pre-flight FAILED → skips AI entirely (all-HOLD), fails fast", async () => {
+      process.env.OPENROUTERKEY = "test-key";
+      try {
+        mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+        mockAnalyzeStocks.mockResolvedValue([makeAIResult()]); // must NOT be reached
+        mockRunAiConnectionTest.mockResolvedValue({
+          testedAt: new Date().toISOString(),
+          status: "failed",
+          configuredModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          primary: { model: "nvidia/nemotron-3-ultra-550b-a55b:free", ok: false, responseTimeMs: 120, error: "timeout" },
+          fallbacks: [],
+        });
+
+        const result = await runDailyRecommendations();
+
+        expect(mockAnalyzeStocks).not.toHaveBeenCalled();
+        expect(result.aiProcessed).toBe(0);
+        expect(result.aiFailed).toBe(1);
+        // HOLD defaults written with success:false
+        const stockUpdate = mockPrisma.dailyRecommendationStock.update.mock.calls[0];
+        expect(stockUpdate[0].data.aiRecommendation).toBe("HOLD");
+        expect(stockUpdate[0].data.aiSuccess).toBe(false);
+      } finally {
+        delete process.env.OPENROUTERKEY;
+      }
     });
 
     test("marks run as failed when screeners throw", async () => {

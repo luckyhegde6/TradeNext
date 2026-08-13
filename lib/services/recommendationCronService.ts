@@ -204,5 +204,38 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
     }
   }
 
+  // Post-pass dedupe (v3.8.0): CronJob.name has NO unique constraint, so two
+  // Netlify instances racing the findFirst-then-create above can leave
+  // duplicate rows for the same system job. Migration-free fix: keep the
+  // EARLIEST row per system name and delete the rest. Scoped strictly to the
+  // four system names — user-created crons are never touched.
+  const systemNames = definitions.map((d) => d.name);
+  const systemCrons = await prisma.cronJob.findMany({
+    where: { name: { in: systemNames } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, createdAt: true },
+  });
+
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  for (const row of systemCrons) {
+    if (seen.has(row.name)) {
+      duplicateIds.push(row.id);
+    } else {
+      seen.add(row.name);
+    }
+  }
+
+  if (duplicateIds.length > 0) {
+    await prisma.cronJob.deleteMany({
+      where: { id: { in: duplicateIds } },
+    });
+    logger.warn({
+      msg: "Removed duplicate system cron jobs",
+      count: duplicateIds.length,
+      names: Array.from(seen),
+    });
+  }
+
   return { ensured, jobs };
 }
