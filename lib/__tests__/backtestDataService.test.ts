@@ -38,6 +38,7 @@ jest.mock("@/lib/nse-api", () => ({
 
 jest.mock("@/lib/prisma", () => {
   const mock = {
+    $executeRawUnsafe: jest.fn(),
     backtestHistory: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
@@ -61,6 +62,8 @@ import {
   pruneTempTable,
   formatNseDate,
   defaultDateRange,
+  ensureBacktestHistoryTable,
+  resetBacktestHistoryGuard,
 } from "@/lib/services/backtestDataService";
 import { historicalCache } from "@/lib/cache";
 
@@ -79,6 +82,7 @@ const makeBars = (n: number, startTs = 1000) =>
 describe("backtestDataService cache ordering", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    resetBacktestHistoryGuard(); // clear memoized ensure promise between tests
     historicalCache.flushAll();
   });
 
@@ -221,6 +225,135 @@ describe("backtestDataService cache ordering", () => {
     mockPrisma.backtestHistory.deleteMany.mockRejectedValue(new Error("db down"));
     // Should not throw to the caller
     await expect(pruneTempTable()).rejects.toThrow("db down");
+  });
+});
+
+describe("backtestDataService temp-table self-healing (prod gap fix)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetBacktestHistoryGuard();
+    historicalCache.flushAll();
+  });
+
+  it("issues CREATE TABLE IF NOT EXISTS mirroring the BacktestHistory model", async () => {
+    mockPrisma.$executeRawUnsafe.mockResolvedValue(1);
+
+    await expect(ensureBacktestHistoryTable()).resolves.toBe(true);
+
+    const sqls = mockPrisma.$executeRawUnsafe.mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(sqls).toHaveLength(4); // create + 3 indexes
+    expect(sqls[0]).toMatch(/CREATE TABLE IF NOT EXISTS "backtest_history"/);
+    expect(sqls[0]).toContain('"fromDate" TEXT NOT NULL');
+    expect(sqls[0]).toContain('"toDate" TEXT NOT NULL');
+    expect(sqls[0]).toContain('"series" TEXT NOT NULL DEFAULT \'EQ\'');
+    expect(sqls[0]).toContain('"ohlcv" JSONB NOT NULL');
+    expect(sqls[0]).toContain('"barCount" INTEGER NOT NULL DEFAULT 0');
+    expect(sqls[0]).toContain('"fetchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP');
+    expect(sqls[1]).toContain('"backtest_history_symbol_fromDate_toDate_series_key"');
+    expect(sqls[2]).toContain('"backtest_history_symbol_idx"');
+    expect(sqls[3]).toContain('"backtest_history_fetchedAt_idx"');
+  });
+
+  it("is memoized per process — DDL issued exactly once", async () => {
+    mockPrisma.$executeRawUnsafe.mockResolvedValue(1);
+
+    await ensureBacktestHistoryTable();
+    await ensureBacktestHistoryTable();
+
+    expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(4);
+  });
+
+  it("resetBacktestHistoryGuard clears the memo", async () => {
+    mockPrisma.$executeRawUnsafe.mockResolvedValue(1);
+
+    await ensureBacktestHistoryTable();
+    expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(4);
+
+    resetBacktestHistoryGuard();
+    await ensureBacktestHistoryTable();
+    expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(8);
+  });
+
+  it("retries the DDL after a failure (failures are not memoized)", async () => {
+    mockPrisma.$executeRawUnsafe.mockRejectedValue(new Error("permission denied"));
+
+    await expect(ensureBacktestHistoryTable()).resolves.toBe(false);
+    await expect(ensureBacktestHistoryTable()).resolves.toBe(false);
+
+    expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(8); // 4 stmts × 2 attempts
+  });
+
+  it("degrades to daily_prices/NSE when the table cannot be ensured (no 500)", async () => {
+    mockPrisma.$executeRawUnsafe.mockRejectedValue(new Error("relation does not exist"));
+    const rows = makeBars(60).map((b) => ({
+      tradeDate: new Date(b.timestamp),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    }));
+    mockPrisma.dailyPrice.findMany.mockResolvedValue(rows);
+
+    const result = await getBacktestData("RELIANCE", "01-01-2020", "01-01-2025");
+
+    expect(result.source).toBe("db");
+    expect(result.barCount).toBe(60);
+    // temp leg skipped entirely — no 500, no upsert attempt
+    expect(mockPrisma.backtestHistory.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.backtestHistory.upsert).not.toHaveBeenCalled();
+  });
+
+  it("NSE path still serves bars when the temp table is missing (upsert skipped)", async () => {
+    mockPrisma.$executeRawUnsafe.mockRejectedValue(new Error("relation does not exist"));
+    mockPrisma.dailyPrice.findMany.mockResolvedValue([]); // < 50 rows
+    mockNseApi.fetchSecurityWiseHistoricalData.mockResolvedValue(
+      makeBars(4).map((b, i) => ({
+        symbol: "RELIANCE",
+        series: "EQ",
+        timestamp: b.timestamp,
+        date: "2025-01-0" + (i + 1),
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        previousClose: b.close - 1,
+        vwap: b.close,
+        volume: b.volume,
+        value: b.volume * b.close,
+        trades: 100,
+        deliveryQty: null,
+        deliveryPercent: null,
+      }))
+    );
+
+    const result = await getBacktestData("RELIANCE", "01-01-2020", "01-01-2025");
+
+    expect(result.source).toBe("nse");
+    expect(result.barCount).toBe(4);
+    expect(mockPrisma.backtestHistory.upsert).not.toHaveBeenCalled();
+    // memory still populated for the next call
+    expect(historicalCache.get("backtest:RELIANCE:01-01-2020:01-01-2025")).toBeDefined();
+  });
+
+  it("serves the temp table when it exists (normal prod path after self-heal)", async () => {
+    mockPrisma.$executeRawUnsafe.mockResolvedValue(1); // DDL succeeds
+    const bars = makeBars(2);
+    mockPrisma.backtestHistory.findUnique.mockResolvedValue({
+      symbol: "RELIANCE",
+      fromDate: "01-01-2020",
+      toDate: "01-01-2025",
+      series: "EQ",
+      ohlcv: bars,
+      barCount: 2,
+      fetchedAt: new Date(),
+    });
+
+    const result = await getBacktestData("RELIANCE", "01-01-2020", "01-01-2025");
+
+    expect(result.source).toBe("db");
+    expect(result.barCount).toBe(2);
+    expect(mockPrisma.backtestHistory.findUnique).toHaveBeenCalledTimes(1);
   });
 });
 

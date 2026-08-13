@@ -32,11 +32,20 @@ export default async (req: Request) => {
 
   let action = "recommendations";
   let triggeredBy = "system";
+  let payload: Record<string, unknown> = {};
   try {
-    const body = (await req.json()) as { action?: string; triggeredBy?: string };
-    const knownActions = new Set(["performance", "market-sync", "ai-connection-test"]);
+    const body = (await req.json()) as {
+      action?: string;
+      triggeredBy?: string;
+      [key: string]: unknown;
+    };
+    const knownActions = new Set(["performance", "market-sync", "ai-connection-test", "historical-price-sync"]);
     action = body?.action && knownActions.has(body.action) ? body.action : "recommendations";
     triggeredBy = body?.triggeredBy || "system";
+    // Forward extra fields as the action's payload (e.g. historical-price-sync: dryRun/symbols/days).
+    payload = { ...body };
+    delete payload.action;
+    delete payload.triggeredBy;
   } catch {
     // default action
   }
@@ -109,12 +118,32 @@ export default async (req: Request) => {
                 screenerError,
               );
             }
+            // 4) Historical price backfill into daily_prices (v3.10.0) — THE
+            //    fix for the Swing indicators "—" data gap (0-1 rows per pick
+            //    on prod). N-day EQ window, idempotent upserts, 6-min budget;
+            //    non-fatal like the screener step.
+            let priceSync: unknown = null;
+            try {
+              const { executeHistoricalPriceSync } = await import(
+                "../../lib/services/worker/worker-service"
+              );
+              priceSync = await executeHistoricalPriceSync({
+                dryRun: false,
+                maxDurationMs: 6 * 60 * 1000,
+              });
+            } catch (priceSyncError) {
+              console.warn(
+                "[run-cron-background] market-sync historical price sync failed (non-fatal)",
+                priceSyncError,
+              );
+            }
             await recordRun(true);
             console.log(
               `[run-cron-background] market-sync done: ` +
                 `stocks=${String((stocks as { total?: number })?.total ?? "?")} ` +
                 `corp=${String((corp as { total?: number })?.total ?? "?")} ` +
-                `screener=${screener ? "ok" : "skipped"} in ${Date.now() - startedAt}ms`,
+                `screener=${screener ? "ok" : "skipped"} ` +
+                `priceSync=${priceSync ? "ok" : "skipped"} in ${Date.now() - startedAt}ms`,
             );
           } else if (action === "ai-connection-test") {
             const { executeAiConnectionTest } = await import(
@@ -130,6 +159,26 @@ export default async (req: Request) => {
               `[run-cron-background] ai-connection-test done: status=${report?.status ?? "?"} ` +
                 `model=${report?.configuredModel ?? "?"} ` +
                 `recommended=${report?.recommendedModel ?? "-"} in ${Date.now() - startedAt}ms`,
+            );
+          } else if (action === "historical-price-sync") {
+            // Ad-hoc daily_prices backfill (manual trigger only — no dedicated
+            // scheduled cron, so no ledger row). Dry-run by default: an
+            // operator must send { dryRun: false } to actually write.
+            const { executeHistoricalPriceSync } = await import(
+              "../../lib/services/worker/worker-service"
+            );
+            const result = (await executeHistoricalPriceSync(payload)) as {
+              scope?: unknown[];
+              barsFetched?: number;
+              barsWritten?: number;
+              errors?: unknown[];
+            };
+            console.log(
+              `[run-cron-background] historical-price-sync done: ` +
+                `scope=${result?.scope?.length ?? "?"} ` +
+                `barsFetched=${result?.barsFetched ?? "?"} ` +
+                `barsWritten=${result?.barsWritten ?? "?"} ` +
+                `errors=${result?.errors?.length ?? "?"} in ${Date.now() - startedAt}ms`,
             );
           } else {
             const { runDailyRecommendations } = await import(

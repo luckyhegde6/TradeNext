@@ -38,6 +38,64 @@ const TEMP_TABLE_FRESH_MS = 24 * 60 * 60 * 1000; // 24 hours
 /** Temp-table rows older than this are pruned to stop the cache table growing. */
 const TEMP_TABLE_PRUNE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// ─── Prod gap fix: `backtest_history` table self-healing ─────────────────────
+// No migration ever created `backtest_history` — locally it only exists because
+// `db push` (dev schema sync) built it; prod runs `prisma migrate deploy`, which
+// never saw the table, so `prisma.backtestHistory.*` threw "relation
+// `backtest_history` does not exist" → MCP getHistoricalData 500. Fix: lazily
+// CREATE TABLE IF NOT EXISTS (mirroring the BacktestHistory Prisma model) before
+// first use, memoized per process. On DDL failure the chain degrades to
+// daily_prices/NSE instead of throwing (and retries next call).
+
+const BACKTEST_HISTORY_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS "backtest_history" (
+    "id" TEXT NOT NULL,
+    "symbol" TEXT NOT NULL,
+    "fromDate" TEXT NOT NULL,
+    "toDate" TEXT NOT NULL,
+    "series" TEXT NOT NULL DEFAULT 'EQ',
+    "ohlcv" JSONB NOT NULL,
+    "barCount" INTEGER NOT NULL DEFAULT 0,
+    "fetchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "backtest_history_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "backtest_history_symbol_fromDate_toDate_series_key"
+    ON "backtest_history" ("symbol", "fromDate", "toDate", "series")`,
+  `CREATE INDEX IF NOT EXISTS "backtest_history_symbol_idx" ON "backtest_history" ("symbol")`,
+  `CREATE INDEX IF NOT EXISTS "backtest_history_fetchedAt_idx" ON "backtest_history" ("fetchedAt")`,
+];
+
+let tempTableEnsurePromise: Promise<boolean> | null = null;
+
+/** Test hook — clears the memoized ensure promise (call in beforeEach). */
+export function resetBacktestHistoryGuard(): void {
+  tempTableEnsurePromise = null;
+}
+
+/**
+ * Ensure the temp backtest table exists (prod gap fix). Memoized per process;
+ * idempotent; never throws — returns false on DDL failure so the caller can
+ * degrade to the daily_prices/NSE legs. Failures are NOT memoized, so the next
+ * call retries.
+ */
+export async function ensureBacktestHistoryTable(db = prisma): Promise<boolean> {
+  if (!tempTableEnsurePromise) {
+    tempTableEnsurePromise = (async () => {
+      try {
+        await Promise.all(BACKTEST_HISTORY_STATEMENTS.map((sql) => db.$executeRawUnsafe(sql)));
+        logger.info({ msg: "[BacktestData] Temp table ensured" });
+        return true;
+      } catch (e) {
+        logger.warn({ msg: "[BacktestData] Temp table ensure failed — degrading to daily_prices/NSE", error: e });
+        return false;
+      }
+    })();
+  }
+  const ok = await tempTableEnsurePromise;
+  if (!ok) tempTableEnsurePromise = null; // allow retry on next call
+  return ok;
+}
+
 /** Format a Date as DD-MM-YYYY (NSE historical API expects this). */
 export function formatNseDate(d: Date): string {
   const dd = String(d.getDate()).padStart(2, "0");
@@ -99,9 +157,14 @@ export async function getBacktestData(
   }
 
   // 2) Temp DB table (persistent across serverless cold starts)
-  const tempRow = await prisma.backtestHistory.findUnique({
-    where: { symbol_fromDate_toDate_series: { symbol: sym, fromDate: from, toDate: to, series: "EQ" } },
-  });
+  // Prod gap fix: ensure the table exists first — if the DB user can't create
+  // it, skip the temp leg and degrade to daily_prices/NSE (never throw here).
+  const tempReady = await ensureBacktestHistoryTable();
+  const tempRow = tempReady
+    ? await prisma.backtestHistory.findUnique({
+        where: { symbol_fromDate_toDate_series: { symbol: sym, fromDate: from, toDate: to, series: "EQ" } },
+      })
+    : null;
 
   if (tempRow && Date.now() - tempRow.fetchedAt.getTime() < TEMP_TABLE_FRESH_MS) {
     const ohlcv = (tempRow.ohlcv as unknown as OHLCV[]) ?? [];
@@ -154,7 +217,6 @@ export async function getBacktestData(
   // 3) NSE live — fetch, then sync to memory + temp table, then age-prune
   logger.info({ msg: "[BacktestData] Fetching from NSE", symbol: sym, from, to });
   const nseBars = await fetchSecurityWiseHistoricalData(sym, from, to, "EQ");
-
   if (nseBars.length === 0) {
     // If we had a stale temp row, fall back to it rather than failing hard
     if (tempRow) {
@@ -179,16 +241,20 @@ export async function getBacktestData(
 
   historicalCache.set(cacheKey, { ohlcv, fetchedAt: fetchedAt.getTime() });
 
-  await prisma.backtestHistory.upsert({
-    where: { symbol_fromDate_toDate_series: { symbol: sym, fromDate: from, toDate: to, series: "EQ" } },
-    create: { symbol: sym, fromDate: from, toDate: to, series: "EQ", ohlcv: ohlcv as unknown as object, barCount: ohlcv.length, fetchedAt },
-    update: { ohlcv: ohlcv as unknown as object, barCount: ohlcv.length, fetchedAt },
-  });
+  // Cache to the temp table only when it exists (tempReady from step 2) —
+  // otherwise NSE bars are still served from memory/this response.
+  if (tempReady) {
+    await prisma.backtestHistory.upsert({
+      where: { symbol_fromDate_toDate_series: { symbol: sym, fromDate: from, toDate: to, series: "EQ" } },
+      create: { symbol: sym, fromDate: from, toDate: to, series: "EQ", ohlcv: ohlcv as unknown as object, barCount: ohlcv.length, fetchedAt },
+      update: { ohlcv: ohlcv as unknown as object, barCount: ohlcv.length, fetchedAt },
+    });
 
-  // Age-prune the temp table (fire-and-forget — never blocks the response)
-  pruneTempTable().catch((err) =>
-    logger.warn({ msg: "[BacktestData] Temp table prune failed", error: err })
-  );
+    // Age-prune the temp table (fire-and-forget — never blocks the response)
+    pruneTempTable().catch((err) =>
+      logger.warn({ msg: "[BacktestData] Temp table prune failed", error: err })
+    );
+  }
 
   return {
     ohlcv,

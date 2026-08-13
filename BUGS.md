@@ -20,6 +20,8 @@
 | 8 | No user profile management page reachable from header | Medium | — | Open |
 | 9 | Demo user shows 2 portfolios in admin panel (seed upsert duplicates) | Low | — | Open |
 | 10 | Portfolio page brief "Loading..." flash (UX polish) | Low | — | Open |
+| 11 | **Prod: MCP `getHistoricalData` 500 — `public.backtest_history` table missing** (live-verified 2026-08-14). Backtest chain (`backtestDataService`) unconditionally queries the temp table → "relation does not exist" on prod; local works because local DB was fully migrated. **FIX (v3.10.0 PR #91)**: lazy `CREATE TABLE IF NOT EXISTS` (`ensureBacktestHistoryTable` in `backtestDataService.ts` — memoized, retried on failure, chain degrades to daily_prices/NSE instead of throwing; NO migration ever created the table, so migrate-deploy cannot fix it). **Deploy pending** — after deploy the table self-heals on first backtest call | Medium | — | Open (fix built, deploy pending) |
+| 12 | **Prod: swing indicators render "—" — `daily_prices` has 0–1 rows per pick** (live-verified 2026-08-14). market-sync (v3.6.0) syncs the stock LIST, not prices; indicators need ≥2 bars (momentum 10/20). **FIX (v3.10.0)**: new historical-price sync job (service + market-sync step + background action + `scripts/backfill-daily-prices.ts`) upserts N-day EQ bars idempotently — **deploy + first market-sync run pending** | High | — | Open (fix built, deploy pending) |
 
 ---
 
