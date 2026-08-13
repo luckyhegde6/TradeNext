@@ -24,9 +24,11 @@
 - [x] Playwright verify (desktop + mobile 375px, 0 console errors, chart URL click tests, Swing tab family chips/refresh/expand)
 
 ### Pending (this session)
-- [ ] Commit 1 (feat): swing tab + cache-key fixes + NSE chart buttons + tests — e.g. `feat(swing): v3.9.0 Swing Trading Signals tab + NSE candlestick chart buttons` (pre-commit tsc must pass — never `--no-verify`)
-- [ ] Commit 2 (docs) `[skip ci]`; create `.agents/sessions/2026-08-13-<feat-hash>/{decisions.md,flow.md}` after feat commit
-- [ ] Reset Playwright viewport from mobile 375px back to desktop when resuming browser checks
+- [x] Commit 1 (feat): `cd2b4c4` — swing tab + cache-key fixes + NSE chart buttons + tests (pre-commit tsc clean, never `--no-verify`)
+- [x] Commit 2 (docs): `0692b50` `[skip ci]` — changelog + session docs; session archive `dc2b572` `[skip ci]` — `.agents/sessions/2026-08-13-cd2b4c4/{decisions,flow}.md`
+- [x] Push + PR: branch pushed with upstream; **PR #90** raised → https://github.com/luckyhegde6/TradeNext/pull/90 (base main, 5 commits, +3788/−170)
+- [ ] Review PR #90 feedback (if any) → merge (never auto-merge)
+- [x] Reset Playwright viewport from mobile 375px back to desktop (done — 1440×900)
 
 ### Pending (carried forward — other branches / later sessions)
 - [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
