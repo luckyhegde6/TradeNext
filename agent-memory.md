@@ -578,6 +578,8 @@ echo "" >> agent-memory.md
 
 ---
 
+## 2026-08-13 (v3.7.3) — Credential-literal masking follow-up — Lessons.md + hook block-lists assembled at runtime, pushed directly to main (post-merge Netlify scan fix)
+
 ## 2026-08-13 (v3.7.2) — Netlify secrets-scan build-failure fix + live-site health/staleness finding + v3.6.3 levels backfill executed
 
 - **Netlify secrets-scan build failure (user-reported)**: Netlify "Secrets scanning found secrets in build." Root causes: (1) `.githooks/` (extensionless) still held demo-credential literals from v3.5.7 masking and was NOT in `netlify.toml` `SECRETS_SCAN_OMIT_PATHS` (AGENTS.md/README.md/seed already were) → added `.githooks`; (2) grep sweep found placeholder-looking numeric secrets in scanned app/test files — `lib/alerts/delivery/telegram.ts` example botToken/chatId, `TelegramSubscription.tsx` placeholder chatId, `app/api/user/telegram/verify/route.ts` JSDoc example code, `lib/__tests__/nse-api.test.ts` fixture timestamps → all replaced with clearly-fake values (`87654321:AAfake0token1for2docs3only`, `-1008765432100`, `876543210`, `654321`).
