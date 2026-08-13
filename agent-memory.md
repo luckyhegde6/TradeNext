@@ -643,6 +643,20 @@ echo "" >> agent-memory.md
 
 ---
 
+## Session 2026-08-14 — v3.10.0: Historical-Price Sync into `daily_prices` (Swing Indicators "—" Fix) + `backtest_history` Prod-Gap Plan (docs only)
+
+- **NEW `lib/services/historicalPriceSyncService.ts`** — `syncHistoricalPrices({symbols?, days?, from?, to?, maxSymbols?, series?, fetchDelayMs?, dryRun?, maxDurationMs?, db?})`: scope = explicit list OR NIFTY 50 ∪ 30-day `RecommendationTracker.symbol` ∪ live `ChartinkScreenerResult.symbol` (expiresAt > now), deduped/uppercased, capped 300; **empty explicit list = sync NOTHING** (no default fallback — found + fixed by test); N-day window via `fetchSecurityWiseHistoricalData(symbol, from, to, "EQ")`; 200ms inter-symbol NSE delay; `maxDurationMs` hard stop; multi-row `prisma.$executeRawUnsafe` upsert `INSERT INTO daily_prices (ticker,"tradeDate",open,high,low,close,volume,vwap) VALUES … ON CONFLICT (ticker,"tradeDate") DO UPDATE SET …` chunked 200 bars/statement (PostgreSQL `$n` params, `BigInt` volume, falsy volume → null); per-symbol errors collected never thrown; `db` override → Prisma-independent tests.
+- **Wiring**: `lib/services/worker/worker-service.ts` — `historical_price_sync` case + exported `executeHistoricalPriceSync` (**dry-run default true**); `netlify/functions/run-cron-background.ts` — NEW `historical-price-sync` action (payload passthrough incl. `dryRun`, no cron-ledger row — ad-hoc) AND **step 4 of market-sync** (`dryRun:false`, `maxDurationMs: 6*60_000`, non-fatal like the screener step) → prod daily 06:31 IST market-sync backfills N-day bars → Swing indicators populate.
+- **NEW `scripts/backfill-daily-prices.ts`** CLI — dry-run default; `--apply` / `--symbols A,B` / `--days N` / `--from|--to DD-MM-YYYY` / `--max-symbols N`; prints scope/bars/errors summary.
+- **Tests**: NEW `lib/__tests__/historicalPriceSyncService.test.ts` (15): `formatNseDate`/`buildDateRange` (defaults/overrides/malformed+inverted throws), `dedupeSymbols`, `resolveSyncScope` (explicit/default-merge/cap/graceful-degradation/empty-explicit), `buildUpsertSql` (8-params-per-row, ON CONFLICT, BigInt volume, uppercase), `syncHistoricalPrices` (empty-scope short-circuit, dry-run no-write, apply multi-chunk >200 bars, per-symbol tolerance, `maxDurationMs` stop). Full suite **653 pass / 11 skipped / 0 fail** (was 638); `npx tsc --noEmit` 71 = exact baseline (0 new).
+- **Bugs found while testing**: explicit-empty-scope fell back to default; `maxDurationMs: 0` falsy-guard bug (typeof check); `$1` regex matched `$11`/`$12` (→ `/\$1(?![0-9])/`); `$executeRawUnsafe` spread-args count (`first.length - 1`); `jest.clearAllMocks` leaked implementations across tests (→ `resetAllMocks`); second-row param index 8 (not 14); maxDurationMs test made deterministic (cap 50ms + fetchDelayMs 200).
+- **Local dry-run verified**: `npx tsx --env-file=.env scripts/backfill-daily-prices.ts --symbols TCS --days 5` → **4 EQ bars fetched** (09→14-08-2026), **0 written**, 0 errors, 0.8s. (`npx tsx` scripts report a shell "timeout" post-completion due to a lingering node handle — output is complete/correct.)
+- **Plan only (user decision)**: `.agents/docs/plan-backtest-history-prod-gap.md` — prod `public.backtest_history` missing → MCP `getHistoricalData` 500; options A apply-missing-migration (recommended) / B lazy CREATE TABLE / C daily_prices-first chain; BUGS.md rows **#11** (backtest gap, planned) + **#12** (daily_prices gap, fix built, deploy pending).
+- **Docs**: AGENTS.md v3.10.0 row, CHANGELOG index + versions-v3.md, TODO.md rows, BUGS.md, Primer.md, Lessons.md #69/#70, session-todos.md.
+- **Status**: committing on `feat/historical-price-sync`; **`--apply` (local or prod) NOT run — needs explicit user permission**; NO deploy.
+
+---
+
 ## How to Use
 
 1. **Start of session**: Read `Primer.md` to understand current state
