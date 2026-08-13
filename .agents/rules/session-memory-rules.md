@@ -30,10 +30,13 @@
 
 ## 3. Session Memory (`.agents/sessions/`)
 
-- Filename: `YYYY-MM-DD-<first-8-commit-hash>.md` (timestamp + commit for navigation)
-- Keep archives **short & crisp** — bullets only, no prose dumps
-- Archive template (see `sessions/README.md`): Date, Commit, Work Completed, Todos Carried Forward, Issues/Bugs
-- **Only load an archive when needed** (e.g., "what did we do on X?" → read that file). Do NOT read all archives at session start.
+- **Folder per session**: `YYYY-MM-DD-<first-8-commit-hash>/` (timestamp + commit for navigation).
+- Every session folder contains **two LIVE files** (written during work, not retrofitted):
+  - `decisions.md` — every meaningful decision (approach/package/code change) + reasoning. Hard-rule detail: `.agents/rules/session-decisions-flow.md`.
+  - `flow.md` — execution flow: entry point → call order, code changed this session, verification matrix.
+- Keep archives **short & crisp** — bullets only, no prose dumps. Summarize the folder in `sessions/README.md`.
+- Old flat-file format `YYYY-MM-DD-<hash>.md` (Date/Commit/Work Completed/Todos/Issues) is superseded by the folder format; when archiving legacy sessions, either keep the flat file or convert to the folder shape.
+- **Only load an archive when needed** (e.g., "what did we do on X?" → read that folder's `flow.md`/`decisions.md`). Do NOT read all archives at session start.
 
 ## 4. Handoff (`.agents/handoffs/`)
 

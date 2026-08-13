@@ -37,6 +37,8 @@ export default function RecommendationCard({
   screenerCount = 0,
 }: RecommendationCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [screenerExpanded, setScreenerExpanded] = useState(false);
+  const MAX_VISIBLE_SCREENERS = 3;
   
   // Safe numeric values
   const safePrice = Number(price) || 0;
@@ -113,20 +115,45 @@ export default function RecommendationCard({
           Vol: {formatVolume(safeVolume)}
         </span>
         {safeScreenerCount > 1 && (
-          <span className="px-2 py-0.5 rounded-full text-xs bg-cyan-500/20 text-cyan-300">
-            {safeScreenerCount} screeners
-          </span>
+          <button
+            onClick={() => setScreenerExpanded(!screenerExpanded)}
+            className={`px-2 py-0.5 rounded-full text-xs border transition-colors ${
+              screenerExpanded
+                ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
+                : "bg-cyan-500/10 border-transparent text-cyan-300 hover:bg-cyan-500/20"
+            }`}
+            aria-expanded={screenerExpanded}
+          >
+            {safeScreenerCount} screeners {screenerExpanded ? "▲" : "▼"}
+          </button>
         )}
       </div>
 
-      {/* Screener Attribution */}
+      {/* Screener Attribution (collapsed by default, expand on click) */}
       {safeAttribution.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3">
-          {safeAttribution.map((name, i) => (
-            <span key={i} className="px-2 py-0.5 rounded text-xs bg-gray-700/50 text-gray-400">
-              {name}
-            </span>
-          ))}
+        <div className="mb-3">
+          {screenerExpanded ? (
+            <div className="flex flex-wrap gap-1">
+              {safeAttribution.map((name, i) => (
+                <span key={i} className="px-2 py-0.5 rounded text-xs bg-gray-700/50 text-gray-400">
+                  {name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {safeAttribution.slice(0, MAX_VISIBLE_SCREENERS).map((name, i) => (
+                <span key={i} className="px-2 py-0.5 rounded text-xs bg-gray-700/50 text-gray-400">
+                  {name}
+                </span>
+              ))}
+              {safeAttribution.length > MAX_VISIBLE_SCREENERS && (
+                <span className="px-2 py-0.5 rounded text-xs text-gray-500">
+                  +{safeAttribution.length - MAX_VISIBLE_SCREENERS} more
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

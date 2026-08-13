@@ -40,12 +40,13 @@ interface DailyPicksTabProps {
   loading: boolean;
 }
 
-type SortKey = "screener" | "volume" | "price" | "confidence" | "marketCap";
+type SortKey = "screener" | "volume" | "price" | "confidence" | "marketCap" | "createdAt";
 type CapFilter = "all" | "nifty50" | "bluechip" | "large_cap" | "mid_cap";
 
 const PAGE_SIZE = 20;
 
 const sortOptions: { id: SortKey; label: string }[] = [
+  { id: "createdAt", label: "Newest" },
   { id: "screener", label: "Screener Score" },
   { id: "marketCap", label: "Market Cap" },
   { id: "volume", label: "Volume" },
@@ -65,7 +66,7 @@ export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTa
   // ─── State ─────────────────────────────────────────────────────────
   const [recFilter, setRecFilter] = useState<string>("all");
   const [timeFilter, setTimeFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<SortKey>("screener");
+  const [sortBy, setSortBy] = useState<SortKey>("createdAt");
   const [capFilter, setCapFilter] = useState<CapFilter>("all");
   const [highlightCaps, setHighlightCaps] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -108,6 +109,12 @@ export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTa
 
       // Secondary sort by selected criterion
       switch (sortBy) {
+        case "createdAt":
+          // Newest-first; tie-break on screener count (same-run picks share createdAt)
+          return (
+            (new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()) ||
+            (Number(b.screenerCount) || 0) - (Number(a.screenerCount) || 0)
+          );
         case "marketCap": {
           // Sort by category priority: NIFTY50 > Bluechip > LargeCap > MidCap > other
           const catA = getCategoryMeta(classifyStock(a.symbol));
@@ -293,7 +300,7 @@ export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTa
       </div>
 
       {/* ── Cards Grid ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {visibleStocks.map((stock) => {
           const category = classifyStock(stock.symbol);
           const catMeta = getCategoryMeta(category);

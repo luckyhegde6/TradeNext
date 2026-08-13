@@ -29,11 +29,7 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
             });
 
             if (res?.error) {
-                if (res.error === "Email not verified") {
-                    setError("UNVERIFIED");
-                } else {
-                    setError("Invalid email or password");
-                }
+                setError("Invalid email or password");
             } else {
                 // Success - reload or redirect
                 window.location.href = callbackUrl;
@@ -47,21 +43,6 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
 
     const renderError = () => {
         if (!error) return null;
-
-        if (error === "UNVERIFIED") {
-            return (
-                <div className="mb-4 rounded-xl bg-amber-100 dark:bg-amber-900/30 p-4 text-sm text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 flex flex-col gap-2">
-                    <p className="font-semibold">Your email is not verified yet.</p>
-                    <Link
-                        href={`/auth/verify?email=${encodeURIComponent(email)}`}
-                        onClick={onClose}
-                        className="text-primary hover:underline font-bold inline-flex items-center gap-1"
-                    >
-                        Click here to verify now →
-                    </Link>
-                </div>
-            );
-        }
 
         return (
             <div className="mb-4 rounded-lg bg-red-100 dark:bg-red-900/30 p-3 text-sm text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
@@ -142,7 +123,12 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
                     </div>
                 </form>
 
-                <div className="mt-8 text-center text-sm text-surface-foreground/60">
+                <div className="mt-4 text-center text-sm text-surface-foreground/60">
+                    <Link href="/auth/password-reset" onClick={onClose} className="text-primary hover:underline font-semibold">
+                        Forgot password?
+                    </Link>
+                </div>
+                <div className="mt-4 text-center text-sm text-surface-foreground/60">
                     Don&apos;t have an account?{" "}
                     <Link href="/auth/join" onClick={onClose} className="text-primary hover:underline font-bold transition-colors">
                         Join Now

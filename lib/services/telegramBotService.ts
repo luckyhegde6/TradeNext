@@ -196,12 +196,18 @@ async function handleHelp(ctx: BotCommandContext): Promise<BotCommandResult> {
   const commands = user
     ? `📊 */daily-recommendations* — Today's AI-analyzed stock picks\n`
       + `📈 */recommendations* — Current stock recommendations & picks\n`
+      + `🚀 */ipo <SYMBOL>* — IPO issue details (bid lot, price band)\n`
+      + `🤖 */ipo-analysis <SYMBOL>* — AI IPO report (verdict + scores)\n`
+      + `🎉 */events* — NSE events & notifications feed\n`
       + `🔔 */alerts* — Check your triggered alerts\n`
       + `📢 */updates* — Latest admin announcements\n`
       + `❓ */help* — Show this message`
     : `📋 */start* — Welcome & subscription instructions\n`
       + `📋 */chatid* — Show your Chat ID\n`
       + `📊 */daily-recommendations* — Today's AI stock picks (no auth needed)\n`
+      + `🚀 */ipo <SYMBOL>* — IPO issue details (no auth needed)\n`
+      + `🤖 */ipo-analysis <SYMBOL>* — AI IPO report (cached output)\n`
+      + `🎉 */events* — NSE events feed (no auth needed)\n`
       + `❓ */help* — Show this message\n\n`
       + `*⚠️ Not linked yet?*\n`
       + `Use /start to get your Chat ID, then link it on the TradeNext website.`;
@@ -447,6 +453,144 @@ async function handleUpdates(ctx: BotCommandContext): Promise<BotCommandResult> 
   }
 }
 
+// ─── IPO + Events Commands ────────────────────────────────────────────────
+
+/**
+ * /ipo <SYMBOL> — Per-issue IPO detail (bid lot → shares per lot, price band,
+ * issue size, issue period) from the NSE IPO detail service. Public data.
+ */
+async function handleIpoDetail(ctx: BotCommandContext): Promise<BotCommandResult> {
+  const symbol = (ctx.args[0] || "").trim().toUpperCase();
+  if (!symbol) {
+    return {
+      ok: true,
+      text: `🚀 */ipo* — IPO issue details\n\nUsage: /ipo <SYMBOL>\nExample: /ipo SHIPROCKET\n\nShows Bid Lot, shares per lot, price band, issue size, period & registrar.`,
+    };
+  }
+
+  try {
+    const { getIpoIssueDetail, formatIssueSize } = await import("@/lib/services/nseIpoService");
+    const result = await getIpoIssueDetail(symbol);
+    const d = result.data;
+
+    const issueSize = formatIssueSize(d) || d.issueSizeText || "—";
+    const lotLine = d.sharesPerLot
+      ? `*Lot:* ${d.sharesPerLot.toLocaleString("en-IN")} shares/lot (${issueSize})`
+      : `*Bid Lot:* ${d.bidLot || "—"}`;
+
+    const text =
+      `🚀 *IPO — ${d.companyName}*\n\n`
+      + `<b>${d.symbol}</b> · NSE\n`
+      + `${lotLine}\n`
+      + `*Price Band:* ${d.priceRange || "—"}\n`
+      + `*Face Value:* ${d.faceValue || "—"}\n`
+      + `*Issue Period:* ${d.issuePeriod || "—"}\n`
+      + `*Registrar:* ${d.registrar || "—"}\n`
+      + `\n_Source: NSE · cached 24h · ${/^db$/i.test(result.source) ? "offline" : "live"}_`;
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /ipo failed", symbol, error: err });
+    return {
+      ok: true,
+      text: `⚠️ Could not fetch IPO details for ${symbol}. Check the symbol and try again — e.g. /ipo SHIPROCKET.`,
+    };
+  }
+}
+
+/**
+ * /ipo-analysis <SYMBOL> — AI IPO analysis (cached) for a symbol: verdict,
+ * recommendation, confidence + key scores. Uses the shared 12h cache.
+ */
+async function handleIpoAnalysis(ctx: BotCommandContext): Promise<BotCommandResult> {
+  const symbol = (ctx.args[0] || "").trim().toUpperCase();
+  if (!symbol) {
+    return {
+      ok: true,
+      text: `🤖 */ipo-analysis* — AI IPO analysis\n\nUsage: /ipo-analysis <SYMBOL>\nExample: /ipo-analysis SHIPROCKET\n\nReturns the cached AI equity-research report (verdict, scores, verdict reasons).`,
+    };
+  }
+
+  try {
+    const { getIpoAnalysis } = await import("@/lib/services/ipoAnalysisService");
+    const result = await getIpoAnalysis(symbol);
+
+    if (!result.report) {
+      // Legacy/fallback row — send the extracted verdict.
+      const rec = result.recommendation || "HOLD";
+      return {
+        ok: true,
+        text: `🤖 *AI IPO Analysis — ${result.companyName || symbol}*\n\n`
+          + `*Recommendation:* ${rec}\n\n`
+          + `${result.verdict || "No verdict available."}\n\n`
+          + `_Cached ${new Date(result.generatedAt).toLocaleString("en-IN")} · view on TradeNext → Recommendations → IPOs_`,
+      };
+    }
+
+    const r = result.report;
+    const scoreLine = r.finalScore?.total
+      ? `\n*Score:* ${r.finalScore.total}/100`
+      : "";
+    const reasons = (r.verdict?.reasons ?? []).slice(0, 3)
+      .map((x: string) => `▸ ${x}`)
+      .join("\n");
+
+    const text =
+      `🤖 *AI IPO Analysis — ${r.company.name || result.companyName || symbol}*\n\n`
+      + `*Verdict:* ${r.verdict.label} (${r.verdict.confidencePct}% confidence)${scoreLine}\n`
+      + `${r.verdict.headline ? `\n${r.verdict.headline}\n` : ""}`
+      + `${reasons ? `\n${reasons}\n` : ""}`
+      + `_Cached ${new Date(result.generatedAt).toLocaleString("en-IN")} · full report on TradeNext → Recommendations → IPOs → ${symbol}_`;
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /ipo-analysis failed", symbol, error: err });
+    return {
+      ok: true,
+      text: `⚠️ Could not fetch the AI analysis for ${symbol}. It may not have been generated yet — run it on TradeNext first (Recommendations → IPOs → ${symbol} → AI Analysis), or try /ipo ${symbol} for issue details.`,
+    };
+  }
+}
+
+/**
+ * /events — NSE events / notifications feed (listing ceremonies etc.).
+ * Public data.
+ */
+async function handleNseEvents(): Promise<BotCommandResult> {
+  try {
+    const { getNseEvents } = await import("@/lib/services/nseEventsService");
+    const result = await getNseEvents();
+    const events = result.data;
+
+    if (events.length === 0) {
+      return { ok: true, text: `🎉 *NSE Events*\n\nNo events available right now.` };
+    }
+
+    const fmtDate = (iso: string | null) =>
+      iso
+        ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+        : "—";
+
+    const lines = events.slice(0, 8).map((ev, i) => {
+      const when = ev.dateLabel === "PAST" ? "✅ Past" : "🕐 Upcoming";
+      return `${i + 1}. *${ev.title}*\n   ${when} · ${fmtDate(ev.eventDate)} · ${ev.categoryName || "Event"}`;
+    });
+
+    let text = `🎉 *NSE Events* (${events.length})\n\n${lines.join("\n\n")}`;
+    if (events.length > 8) {
+      text += `\n\n_…and ${events.length - 8} more on TradeNext → NSE Events_`;
+    }
+    if (text.length > 4000) {
+      text = text.slice(0, 3990) + "\n\n*(truncated — view all on TradeNext)*";
+    }
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /events failed", error: err });
+    return { ok: true, text: "⚠️ Could not fetch NSE events. Please try again later." };
+  }
+}
+
 // ─── Unknown Command ──────────────────────────────────────────────────────
 
 async function handleUnknown(ctx: BotCommandContext): Promise<BotCommandResult> {
@@ -469,6 +613,9 @@ const COMMAND_MAP: Record<string, (ctx: BotCommandContext) => Promise<BotCommand
   "/daily-recommendations": handleDailyRecommendations,
   "/alerts": handleAlerts,
   "/updates": handleUpdates,
+  "/ipo": handleIpoDetail,
+  "/ipo-analysis": handleIpoAnalysis,
+  "/events": handleNseEvents,
 };
 
 /**
@@ -506,7 +653,7 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   // set BEFORE any dynamic dispatch. This allowlist check is what
   // neutralizes the untrusted-method-name flow (CWE-470); a plain
   // hasOwnProperty/typeof guard on the resolved value does not.
-  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates"];
+  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates", "/ipo", "/ipo-analysis", "/events"];
   if (!KNOWN_COMMANDS.includes(command)) {
     const result = await handleUnknown(ctx);
     await sendBotMessage(chatId, result.text || "");

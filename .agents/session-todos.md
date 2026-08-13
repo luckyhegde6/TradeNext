@@ -8,21 +8,26 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-10) — v3.5.4: Fix #69 session persistence (branch `fix/prod-issues-68-69`)
+## Current Session (2026-08-13) — v3.7.1: BUY/SELL-only Telegram broadcast + AI connection-test cron (fallback probing + audit + status) + CI e2e fix
 
-**Branch**: `fix/prod-issues-68-69` (base: main @ PR #85 merged). NOT yet merged — user approves PR.
+**Working tree**: full suite **582 pass / 11 skipped** (was 560, +22: 9 broadcast + 9 connection-test + 4 cron-ensure); `npx tsc --noEmit` clean on all touched files (remaining repo errors are pre-existing test-only noise). Docs pass done (AGENTS.md v3.7.1 row, CHANGELOG index + versions-v3.md, TODO rows, Primer, agent-memory, Lessons #61–62, session flow/decisions). Branch `fix/ai-config-cron-ledger` (PR #88 open). **Commit pending user approval; no deploy.**
 
 ### Completed
-- [x] Prod UI audit (live tradenext6.netlify.app, demo + admin): Screener v3.5.2 fix verified deployed (2,000 stocks, "Last synced from TradingView: 8/10/2026 2:19:30 PM", change = value + %); Recommendations still stale "Last updated: 19/7/2026"; DB Logs tab now populated (624 entries Aug 7-10 — #68 largely fixed by v3.5.0 trackAiCall deploy); Server Log Files tab still "No log files found" (serverless FS limitation); Rate Limits tab transient 500 (cold-start, direct fetch 200)
-- [x] #69 root-cause confirmed: `createUserSession()` never called anywhere; `lib/auth.ts` events only wrote audit logs
-- [x] **#69 fix implemented**: `lib/auth.ts` `jwt` callback now calls `createUserSession()` at login (IP via `x-forwarded-for`/`x-real-ip`, UA, derived deviceInfo from UA), stores returned token in JWT claim `dbSessionToken`; `events.signOut` invalidates via `invalidateSession()`; `invalidateSession` in `lib/services/sessionService.ts` now matches by record id (admin UI) OR sessionToken (signOut)
-- [x] Tests: `lib/__tests__/sessionService.test.ts` (18 tests) — create/invalidate-by-id-or-token/invalidateAll/activity/stats/tokenVersion. Full suite: **335 passed, 0 failures** (27 suites)
-- [x] Verified locally with Playwright + DB probes: login → row created with IP/UA/device ("Chrome on Windows"), 30d expiry; server-side signOut POST → `isActive: false` + LOGOUT audit; `/api/admin/sessions` now returns `{total:2, active:1, expired:1, usersWithSessions:1}` + full session rows (was all-zero)
-- [x] BUGS.md updated: #68 DB logs populated (serverless FS note), #69 in-progress row, stale recs ~22d, rate-limits transient 500, screener verified
+- [x] Broadcast = BUY/SELL only: NEW pure `lib/services/recommendationBroadcast.ts` (`MAX_BROADCAST_PICKS = 8`, `buildRecommendationBroadcast(stocks, dateLabel?)` — all-HOLD notice, footer `🟢 N BUY · 🔴 N SELL · ⚪ N HOLD not shown`, 4000-char truncation w/ marker-length fix) wired into `dailyRecommendationService.ts` broadcast block; HOLDs still stored + tracked
+- [x] AI connection-test cron: NEW `lib/services/ai/connectionTestService.ts` — `testOpenRouterModel` (raw fetch, never throws, 20s `AbortSignal.timeout`), `runAiConnectionTest` (configured → fallbacks `openrouter/free` → `openrouter/auto`; short-circuit `!hasValidConfig`), `getLastAiConnectionTests`
+- [x] Audit capture (user-required): NEW `AI_CONNECTION_TEST` / `AI_CONNECTION_TEST_FAILED` tags in `lib/audit.ts`; every attempt `trackAiCall` (action `connection_test`) + overall outcome `createAuditLog` w/ full status metadata; failure → `notifyAdmins` + AI-monitoring link
+- [x] Cron wiring: 4th system job `AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"` in `ensureRecommendationCrons`; worker `executeAiConnectionTest` (exported) + case; `run-cron-background.ts` whitelist + branch + recordRun; NEW `netlify/functions/cron-ai-connection-test.ts`; NEW admin `app/api/admin/ai/connection-tests/route.ts` (GET last N / POST run-now)
+- [x] CI e2e fix: `e2e/advanced-screener.spec.ts` clicks `TradingView · 98` toggle (U+00B7) in template-search tests (Chartink default names "Short term breakouts"); Chartink stays jest-covered; `/markets` nested `<a>` → `<span role="link">` (hydration warning)
+- [x] Tests: NEW `recommendationBroadcast.test.ts` (9), NEW `aiConnectionTestService.test.ts` (9), `recommendationCronService.test.ts` +4 (create mock + ensureRecommendationCrons); suite **582 pass**; tsc clean on touched files
+- [x] Docs: AGENTS.md v3.7.1 row, CHANGELOG index + versions-v3.md entry, TODO.md 3 rows, Primer.md, agent-memory.md, Lessons.md #61–62 (`*/` in block comments; TDZ closures), session flow.md/decisions.md
+- [x] Parked from earlier: analytics side-nav (`app/components/MarketAnalyticsTabs.tsx` — `?tab=` sync + emoji icons) — included in this session's commit, live-verify pending
 
-### Pending (carried forward)
-- [ ] Get user approval → push `fix/prod-issues-68-69` (SSH) → create PR for #69 fix; NEVER auto-merge
-- [ ] Verify prod daily crons (10 AM + 4 PM IST) after deploy — next cron window (still 0 successful runs since Jul 19)
+### Pending (this session)
+- [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (pre-commit tsc must pass — never `--no-verify`), PR #88 updated
+- [ ] Live-verify /markets/analytics side-nav + breadcrumbs via Playwright (:3000 desktop + mobile, 0 console errors)
+- [ ] v3.6.3 backfill script `scripts/backfill-recommendation-levels.ts` still awaits user consent (separate item — fixes persisted trackers incl. ITC)
+
+### Pending (carried forward — other branches / later sessions)
+- [ ] **Deploy to Netlify (user-approved) → rerun recommendations → verify BUY/SELL picks + fresh public date; verify cron ledger populates after next scheduled run**
 - [ ] Re-seed demo holdings on prod
-- [ ] F&O Analytics UI (services + API done, UI pending)
-- [ ] #68 remaining: Server Log Files tab serverless-aware notice ("FS-based logging unavailable on serverless — use DB Logs tab")
+- [ ] Prod: AI Connection Test cron first runs (verify audit entries + AI Monitoring `connection_test` rows after deploy)

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "fundamental.profit-jump-by-200",
+    "name": "Profit jump by 200%",
+    "url": "https://chartink.com/scanner/profit-jump-by-200",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} ( yearly net profit/reported profit after tax > 1 year ago net profit/reported profit after tax * 2 and yearly count( 2, 1 where yearly net profit/reported profit after tax > 0 ) = 0 ) )",
+    "debugClause": "groupcount( 1 where yearly net profit/reported profit after tax > 1 year ago net profit/reported profit after tax * 2),groupcount( 1 where yearly count( 2, 1 where yearly net profit/reported profit after tax > 0 ) = 0)",
+    "columnClause": "Daily Close as 'scan-column-default-close', Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close > 1 day ago close,1) as 'default-percent-change-conditional-filters-color', Daily Volume as 'scan-column-default-volume'",
+    "backtestMaxRows": 160
+  },
+  {
+    "id": "fundamental.large-cap-stocks",
+    "name": "Large cap stocks",
+    "url": "https://chartink.com/scanner/large-cap-stocks"
+  },
+  {
+    "id": "fundamental.stocks-below-book-value",
+    "name": "Stocks below Book value - Undervalued",
+    "url": "https://chartink.com/scanner/stocks-below-book-value"
+  },
+  {
+    "id": "fundamental.low-debt-companies",
+    "name": "Low debt companies",
+    "url": "https://chartink.com/scanner/low-debt-companies"
+  },
+  {
+    "id": "fundamental.mid-cap-stocks",
+    "name": "Mid cap stocks",
+    "url": "https://chartink.com/scanner/mid-cap-stocks"
+  },
+  {
+    "id": "fundamental.sales-jump-by-200",
+    "name": "Sales jump by 200%",
+    "url": "https://chartink.com/scanner/sales-jump-by-200"
+  },
+  {
+    "id": "fundamental.top-stocks-with-the-lowest-pe-pricing-earnings",
+    "name": "Top stocks with the lowest Price Earning Ratios(PE)",
+    "url": "https://chartink.com/scanner/top-stocks-with-the-lowest-pe-pricing-earnings"
+  },
+  {
+    "id": "fundamental.highest-earning-per-share-eps-stocks",
+    "name": "Highest Earning per share - EPS Stocks",
+    "url": "https://chartink.com/scanner/highest-earning-per-share-eps-stocks"
+  },
+  {
+    "id": "fundamental.small-cap-stocks",
+    "name": "Small cap stocks",
+    "url": "https://chartink.com/scanner/small-cap-stocks"
+  },
+  {
+    "id": "fundamental.pious-volume-generator",
+    "name": "pious volume generator",
+    "url": "https://chartink.com/scanner/pious-volume-generator"
+  },
+  {
+    "id": "fundamental.top-stocks-with-the-highest-eps-earning-per-share",
+    "name": "Top stocks with the highest EPS - Earning per share",
+    "url": "https://chartink.com/scanner/top-stocks-with-the-highest-eps-earning-per-share"
+  },
+  {
+    "id": "fundamental.penny-stocks-multi-bagger-1",
+    "name": "Penny Stocks - Multi Bagger",
+    "url": "https://chartink.com/scanner/penny-stocks-multi-bagger-1"
+  },
+  {
+    "id": "fundamental.position-buy-seema",
+    "name": "position buy seema",
+    "url": "https://chartink.com/scanner/position-buy-seema"
+  }
+]

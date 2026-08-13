@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { getDividendCalendar, getMonthlyIncomeProjection, getUpcomingDividends } from "@/lib/services/dividendCalendarService";
+import { getDividendCalendar, getMonthlyIncomeProjection, getUpcomingDividends, getUpcomingDividendSummary } from "@/lib/services/dividendCalendarService";
 
 export const runtime = "nodejs";
 
@@ -34,10 +34,13 @@ export async function GET(req: NextRequest) {
 
     if (view === "upcoming") {
       const dividends = await getUpcomingDividends(100, userId);
-      const summary = await getDividendCalendar(month, year, userId);
+      // Summary comes from the upcoming list (today → next 12 months), NOT the
+      // month-scoped calendar view — otherwise the cards zero out once the
+      // viewed month's ex-dates pass.
+      const summary = await getUpcomingDividendSummary(userId);
       return NextResponse.json({
         dividends,
-        summary: summary.summary,
+        summary,
         month,
         year,
       });

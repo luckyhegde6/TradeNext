@@ -46,7 +46,7 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
   const [stocks, setStocks] = useState<TopStock[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
-  const [sortBy, setSortBy] = useState<"confidence" | "screenerCount" | "date" | "price">("screenerCount");
+  const [sortBy, setSortBy] = useState<"confidence" | "screenerCount" | "date" | "price">("date");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const pageSize = 20;

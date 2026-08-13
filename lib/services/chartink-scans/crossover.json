@@ -1,0 +1,67 @@
+[
+  {
+    "id": "crossover.ichimoku-uptrend-cloud-crossover",
+    "name": "Ichimoku Uptrend Cloud Crossover",
+    "url": "https://chartink.com/scanner/ichimoku-uptrend-cloud-crossover"
+  },
+  {
+    "id": "crossover.ema-crossover-5-13-26-scan",
+    "name": "EMA crossover(5,13,26) scan",
+    "url": "https://chartink.com/scanner/ema-crossover-5-13-26-scan"
+  },
+  {
+    "id": "crossover.futures-crossover",
+    "name": "Futures crossover",
+    "url": "https://chartink.com/scanner/futures-crossover"
+  },
+  {
+    "id": "crossover.chart-link",
+    "name": "Chart Link",
+    "url": "https://chartink.com/scanner/chart-link"
+  },
+  {
+    "id": "crossover.4-moving-average-crossover",
+    "name": "4 moving average crossover-1",
+    "url": "https://chartink.com/scanner/4-moving-average-crossover"
+  },
+  {
+    "id": "crossover.moving-average-bullish-strong-buy",
+    "name": "FNO stocks Bullish Trend scanner (Moving average + ADX + MACD ) - Prabhu",
+    "url": "https://chartink.com/scanner/moving-average-bullish-strong-buy"
+  },
+  {
+    "id": "crossover.stocks-closing-below-the-supertrend-line-4",
+    "name": "Stocks closing below the supertrend line",
+    "url": "https://chartink.com/scanner/stocks-closing-below-the-supertrend-line-4"
+  },
+  {
+    "id": "crossover.macd-and-ema-12-26-crossover",
+    "name": "GOOD WeeKly _MACD AND EMA 12,26 crossover",
+    "url": "https://chartink.com/scanner/macd-and-ema-12-26-crossover"
+  },
+  {
+    "id": "crossover.monthly-rsi-above-50",
+    "name": "Monthly RSI Above 50",
+    "url": "https://chartink.com/scanner/monthly-rsi-above-50"
+  },
+  {
+    "id": "crossover.stocks-above-200-ema",
+    "name": "Stocks above 200 EMA",
+    "url": "https://chartink.com/scanner/stocks-above-200-ema"
+  },
+  {
+    "id": "crossover.moving-average-crossover-2",
+    "name": "Moving Average Crossover (Bullish)",
+    "url": "https://chartink.com/scanner/moving-average-crossover-2"
+  },
+  {
+    "id": "crossover.copy-supertrend-positive-breakout-1652",
+    "name": "my ST breakout",
+    "url": "https://chartink.com/scanner/copy-supertrend-positive-breakout-1652"
+  },
+  {
+    "id": "crossover.copy-200-sma-crossover-135",
+    "name": "Mm 200 SMA crossover",
+    "url": "https://chartink.com/scanner/copy-200-sma-crossover-135"
+  }
+]

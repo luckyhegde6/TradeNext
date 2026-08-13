@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 interface User {
@@ -37,10 +38,21 @@ interface CreateUserData {
     role: 'user' | 'admin';
 }
 
+interface PasswordResetRequest {
+    id: string;
+    email: string;
+    reason: string | null;
+    status: string;
+    createdAt: string;
+}
+
 export default function AdminUsersPage() {
-    const [activeTab, setActiveTab] = useState<'users' | 'requests'>('users');
+    const searchParams = useSearchParams();
+    const initialTab = searchParams.get('tab') === 'password-resets' ? 'password-resets' : searchParams.get('tab') === 'requests' ? 'requests' : 'users';
+    const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'password-resets'>(initialTab);
     const [users, setUsers] = useState<User[]>([]);
     const [requests, setRequests] = useState<JoinRequest[]>([]);
+    const [passwordResets, setPasswordResets] = useState<PasswordResetRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
@@ -79,22 +91,38 @@ export default function AdminUsersPage() {
         }
     };
 
+    const fetchPasswordResets = async () => {
+        try {
+            const response = await fetch('/api/admin/password-reset-requests');
+            if (!response.ok) throw new Error('Failed to fetch password reset requests');
+            const data = await response.json();
+            setPasswordResets(data);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+        } finally {
+            if (activeTab === 'password-resets') setLoading(false);
+        }
+    };
+
     useEffect(() => {
         setLoading(true);
         if (activeTab === 'users') {
             fetchUsers();
-        } else {
+        } else if (activeTab === 'requests') {
             fetchRequests();
+        } else {
+            fetchPasswordResets();
         }
     }, [activeTab]);
 
     const handleApproveRequest = async (id: string) => {
-        if (!confirm('Are you sure you want to approve this request? An account will be created and a temporary password will be generated.')) return;
+        if (!confirm('Are you sure you want to approve this request? An account will be created with the configured default password (DEFAULT_PASSWORD env). The password is shown after approval — share it with the applicant so they can sign in.')) return;
         setProcessingRequest(id);
         try {
             const res = await fetch(`/api/admin/join-requests/${id}/approve`, { method: 'POST' });
             if (!res.ok) throw new Error('Failed to approve request');
-            alert('Request approved successfully!');
+            const data = await res.json();
+            alert(`Request approved successfully! Default password: ${data.defaultPassword || '(not returned)'} (for ${data.email || 'the applicant'}).`);
             fetchRequests();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
@@ -110,6 +138,42 @@ export default function AdminUsersPage() {
             const res = await fetch(`/api/admin/join-requests/${id}/reject`, { method: 'POST' });
             if (!res.ok) throw new Error('Failed to reject request');
             fetchRequests();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+        } finally {
+            setProcessingRequest(null);
+        }
+    };
+
+    const handleApprovePasswordReset = async (id: string) => {
+        if (!confirm('Approve this password reset? The account password will be set to the configured default (DEFAULT_PASSWORD env) and all existing sessions will be invalidated. The new password is shown after approval — share it with the requester.')) return;
+        setProcessingRequest(id);
+        try {
+            const res = await fetch(`/api/admin/password-reset-requests/${id}/approve`, { method: 'POST' });
+            if (!res.ok) {
+                const error = await res.json().catch(() => null);
+                throw new Error(error?.error || 'Failed to approve password reset');
+            }
+            const data = await res.json();
+            alert(`Password reset approved for ${data.email || 'the requester'}! Temporary password: ${data.defaultPassword || '(not returned)'} — share it with the requester.`);
+            fetchPasswordResets();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+        } finally {
+            setProcessingRequest(null);
+        }
+    };
+
+    const handleRejectPasswordReset = async (id: string) => {
+        if (!confirm('Are you sure you want to reject this password reset request?')) return;
+        setProcessingRequest(id);
+        try {
+            const res = await fetch(`/api/admin/password-reset-requests/${id}/reject`, { method: 'POST' });
+            if (!res.ok) {
+                const error = await res.json().catch(() => null);
+                throw new Error(error?.error || 'Failed to reject password reset');
+            }
+            fetchPasswordResets();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
@@ -216,6 +280,17 @@ export default function AdminUsersPage() {
                     {requests.length > 0 && (
                         <span className="ml-2 px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full">
                             {requests.length}
+                        </span>
+                    )}
+                </button>
+                <button
+                    onClick={() => setActiveTab('password-resets')}
+                    className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center ${activeTab === 'password-resets' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700'}`}
+                >
+                    Password Resets
+                    {passwordResets.length > 0 && (
+                        <span className="ml-2 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] rounded-full">
+                            {passwordResets.length}
                         </span>
                     )}
                 </button>
@@ -495,7 +570,7 @@ export default function AdminUsersPage() {
                         </div>
                     </div>
                 </>
-            ) : (
+            ) : activeTab === 'requests' ? (
                 /* Join Requests List */
                 <div className="bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden rounded-2xl">
                     <div className="px-6 py-5 border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50 flex justify-between items-center">
@@ -560,6 +635,82 @@ export default function AdminUsersPage() {
                                                     <button
                                                         onClick={() => handleRejectRequest(request.id)}
                                                         disabled={processingRequest === request.id}
+                                                        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-black hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 transition-all active:scale-95"
+                                                    >
+                                                        Reject
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            ) : (
+                /* Password Reset Requests List */
+                <div className="bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none border border-gray-100 dark:border-slate-800 overflow-hidden rounded-2xl">
+                    <div className="px-6 py-5 border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                            Pending Password Resets <span className="ml-2 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full text-xs">{passwordResets.length}</span>
+                        </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-gray-50/50 dark:bg-slate-800/30 text-xs font-bold text-gray-500 dark:text-slate-500 uppercase tracking-widest border-b dark:border-slate-800">
+                                    <th className="px-6 py-4">Account</th>
+                                    <th className="px-6 py-4">Reason</th>
+                                    <th className="px-6 py-4">Date</th>
+                                    <th className="px-6 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                                {passwordResets.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={4} className="px-6 py-10 text-center text-gray-500 dark:text-slate-400 font-medium"> No password reset requests found. </td>
+                                    </tr>
+                                ) : (
+                                    passwordResets.map((reset) => (
+                                        <tr key={reset.id} className="group hover:bg-gray-50/50 dark:hover:bg-amber-900/10 transition-colors">
+                                            <td className="px-6 py-5">
+                                                <div className="flex items-center">
+                                                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400 font-bold text-lg mr-4">
+                                                        {(reset.email || '?')[0].toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{reset.email}</p>
+                                                        <p className="text-xs text-gray-500 dark:text-slate-400 font-medium">Account password reset</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-5">
+                                                <p className="text-sm text-gray-700 dark:text-gray-300 max-w-xs truncate">
+                                                    {reset.reason || "No reason provided."}
+                                                </p>
+                                            </td>
+                                            <td className="px-6 py-5">
+                                                <p className="text-[11px] text-gray-500 dark:text-slate-400 font-bold">
+                                                    {new Date(reset.createdAt).toLocaleDateString()}
+                                                </p>
+                                                <p className="text-[10px] text-gray-400 dark:text-slate-500">
+                                                    {new Date(reset.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                            </td>
+                                            <td className="px-6 py-5 text-right">
+                                                <div className="flex items-center justify-end space-x-2">
+                                                    <button
+                                                        onClick={() => handleApprovePasswordReset(reset.id)}
+                                                        disabled={processingRequest === reset.id}
+                                                        className="px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-black shadow-lg shadow-green-500/20 hover:bg-green-700 disabled:opacity-50 transition-all active:scale-95"
+                                                        title="Sets the account to the DEFAULT_PASSWORD env value and forces re-login"
+                                                    >
+                                                        {processingRequest === reset.id ? 'Approving...' : 'Approve'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleRejectPasswordReset(reset.id)}
+                                                        disabled={processingRequest === reset.id}
                                                         className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-black hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 transition-all active:scale-95"
                                                     >
                                                         Reject

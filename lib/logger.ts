@@ -59,7 +59,7 @@ const getLogsDir = (): string => {
   }
 
   const cwd = process.cwd();
-  return isServer ? pathModule.join(cwd, 'server_logs') : '';
+  return isServer ? pathModule.join(cwd, 'logs') : '';
 };
 
 // Export for use in other files
@@ -165,7 +165,9 @@ export async function readLogFile(filePath: string, limit: number = 1000): Promi
     try {
       const { readBlobLog } = require('@/lib/netlify-logger');
       const blobKey = filePath.replace('blob:', '');
-      const content = await readBlobLog(blobKey);
+      // Server-log mirror lives in the "server-logs" store (date-keyed).
+      // Worker logs read via readBlobLog without store arg → "worker-logs".
+      const content = await readBlobLog(blobKey, blobKey.endsWith('.log') ? 'server-logs' : undefined);
       if (content) {
         const lines = content.split('\n').filter((line: string) => line.trim());
         return lines.slice(-limit);
@@ -190,9 +192,8 @@ export async function readLogFile(filePath: string, limit: number = 1000): Promi
 export async function readLogsByDate(date: string, limit: number = 1000): Promise<string[]> {
   if (!isServer || !fs || !pathModule) return [];
   const logsDir = getLogsDir();
-  const dateStr = date.replace(/-/g, '');
-  const yearMonth = dateStr.substring(0, 6); // YYYYMM
-  const filePath = pathModule.join(logsDir, yearMonth.substring(0, 4), yearMonth, `${date}.log`);
+  const yearMonth = date.substring(0, 7); // YYYY-MM
+  const filePath = pathModule.join(logsDir, yearMonth, `${date}.log`);
 
   // On Netlify, we might want to check Blobs if local file doesn't exist
   // But the monitoring API uses filePath directly for Blobs now (prefixed with blob:)
@@ -215,7 +216,8 @@ export async function deleteLogFile(filePath: string): Promise<boolean> {
     try {
       const { deleteBlobLog } = require('@/lib/netlify-logger');
       const blobKey = filePath.replace('blob:', '');
-      await deleteBlobLog(blobKey);
+      // Server-log mirror lives in the "server-logs" store (date-keyed).
+      await deleteBlobLog(blobKey, blobKey.endsWith('.log') ? 'server-logs' : undefined);
       return true;
     } catch (error) {
       console.error("Failed to delete log from Netlify Blobs:", error);
@@ -300,6 +302,14 @@ function writeToFile(entry: string, level: LogLevel = 'info') {
     const filePath = getTodayLogPath();
     if (filePath && logsDirAvailable) {
       fs.appendFileSync(filePath, entry + '\n', 'utf-8');
+    }
+
+    // On Netlify, /tmp is per-instance and ephemeral — mirror the line to the
+    // "server-logs" Netlify Blob store (date-keyed) so the admin monitoring
+    // page can list/read server logs across lambda instances. Fire-and-forget.
+    if (process.env.NETLIFY) {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      getNetlifyLogger()?.appendServerLogLine(`${today}.log`, entry + '\n').catch(() => {});
     }
   } catch (error) {
     // File writing failed - we already logged to console above

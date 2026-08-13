@@ -50,6 +50,7 @@ jest.mock("@/lib/prisma", () => {
     recommendationStatusHistory: {
       findMany: jest.fn(),
     },
+    $queryRaw: jest.fn(),
   };
   return { __esModule: true, default: mock };
 });
@@ -77,6 +78,7 @@ const prisma = require("@/lib/prisma").default as {
   recommendationStatusHistory: {
     findMany: jest.Mock;
   };
+  $queryRaw: jest.Mock;
 };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { recommendationsCache } = require("@/lib/cache") as {
@@ -116,6 +118,7 @@ describe("recommendationPerformanceService", () => {
     prisma.recommendationArchive.create.mockReset();
     prisma.recommendationStatusHistory.findMany.mockReset();
     prisma.recommendationStatusHistory.findMany.mockResolvedValue([]);
+    prisma.$queryRaw.mockReset();
     recommendationsCache.keys.mockReset();
     recommendationsCache.keys.mockReturnValue([]);
   });
@@ -151,6 +154,50 @@ describe("recommendationPerformanceService", () => {
 
       const res = await getPerformanceList({});
       expect(res.items[0].returnPercent).toBeCloseTo(4.0, 1); // (2600-2500)/2500*100
+    });
+
+    it("bridges null currentPrice from the latest daily_prices close (single batched query)", async () => {
+      prisma.recommendationTracker.findMany.mockResolvedValue([
+        makeTracker({
+          id: "t-bridge",
+          symbol: "RELIANCE",
+          entryPrice: 2500,
+          currentPrice: null, // fresh tracker — perf-check cron hasn't run yet
+        }),
+      ]);
+      prisma.recommendationTracker.count.mockResolvedValue(1);
+      // One DISTINCT ON batch query returns the latest close
+      prisma.$queryRaw.mockResolvedValue([{ ticker: "RELIANCE", close: 2625 }]);
+
+      const res = await getPerformanceList({});
+
+      expect(res.items[0].currentPrice).toBe(2625);
+      expect(res.items[0].returnPercent).toBeCloseTo(5.0, 1); // (2625-2500)/2500*100
+      // One batched bridge query shared across all null-price symbols — no N+1
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not run the bridge when every tracker already has a currentPrice", async () => {
+      prisma.recommendationTracker.findMany.mockResolvedValue([makeTracker()]);
+      prisma.recommendationTracker.count.mockResolvedValue(1);
+
+      await getPerformanceList({});
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it("gracefully falls back to null currentPrice when the bridge query fails", async () => {
+      prisma.recommendationTracker.findMany.mockResolvedValue([
+        makeTracker({ id: "t-fail", symbol: "RELIANCE", currentPrice: null }),
+      ]);
+      prisma.recommendationTracker.count.mockResolvedValue(1);
+      prisma.$queryRaw.mockRejectedValue(new Error("db down"));
+
+      const res = await getPerformanceList({});
+
+      expect(res.items[0].currentPrice).toBeNull();
+      expect(res.items[0].returnPercent).toBeNull();
+      expect(res.items).toHaveLength(1); // row survives — no crash
     });
 
     it("applies status / category / recommendation filters to the query", async () => {

@@ -99,3 +99,45 @@ export async function updateJoinRequestStatus(id: string, status: 'approved' | '
         data: { status }
     });
 }
+
+export interface PasswordResetRequest {
+    id: string;
+    email: string;
+    reason?: string | null;
+    status: string;
+    createdAt: Date;
+}
+
+export async function hasPendingPasswordResetRequest(email: string): Promise<boolean> {
+    const existing = await prisma.passwordResetRequest.findFirst({
+        where: { email, status: 'pending' },
+        select: { id: true }
+    });
+    return existing !== null;
+}
+
+export async function createPasswordResetRequest(data: { email: string; reason?: string }) {
+    return await prisma.passwordResetRequest.create({
+        data
+    });
+}
+
+export async function getPendingPasswordResetRequests(): Promise<PasswordResetRequest[]> {
+    return await prisma.passwordResetRequest.findMany({
+        where: { status: 'pending' },
+        orderBy: { createdAt: 'desc' }
+    });
+}
+
+export async function getPasswordResetRequestById(id: string) {
+    return await prisma.passwordResetRequest.findUnique({
+        where: { id }
+    });
+}
+
+export async function updatePasswordResetRequestStatus(id: string, status: 'approved' | 'rejected') {
+    return await prisma.passwordResetRequest.update({
+        where: { id },
+        data: { status }
+    });
+}

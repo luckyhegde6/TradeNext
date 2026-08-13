@@ -167,6 +167,30 @@ export default function AdvancedScreenerPage() {
     }, 100);
   };
 
+  // --- CHARTINK TEMPLATE RUN ---
+  const handleChartinkResult = (
+    result: import("@/app/components/screener/TemplatesPanel").ChartinkRunResult,
+  ) => {
+    setError(null);
+    setExecutionMs(0);
+    const mapped: ScannedStock[] = result.stocks.map((s) => ({
+      symbol: s.symbol,
+      name: s.name,
+      close: s.close,
+      change: s.changePercent,
+      change_percent: s.changePercent,
+      percentChange: s.changePercent,
+      volume: s.volume,
+      _chartinkSource: result.source,
+      _chartinkTemplate: result.templateName,
+    }));
+    setStocks(mapped);
+    setTotal(mapped.length);
+    setTotalPages(1);
+    setPage(1);
+    setSortBy("");
+  };
+
   // --- LOAD SAVED CONFIG ---
   const handleLoadConfig = (config: ScanConfig) => {
     // We fetch the config's filterGroup and apply it
@@ -356,6 +380,7 @@ export default function AdvancedScreenerPage() {
           <div className="p-6">
             <TemplatesPanel
               onApply={handleApplyTemplate}
+              onChartinkResult={handleChartinkResult}
               onClose={() => setShowTemplates(false)}
             />
           </div>

@@ -30,6 +30,11 @@ test.describe('Advanced Screener', () => {
     await page.getByRole('button', { name: 'Templates' }).click();
     await expect(page.getByText('Screener Templates')).toBeVisible();
 
+    // The panel defaults to Chartink mode (v3.5.6), where this template is
+    // named "Short term breakouts". Switch to TradingView mode — the mode the
+    // v3.5.2 regression guard was written against — for the exact-name match.
+    await page.getByRole('button', { name: 'TradingView · 98' }).click();
+
     // Search for the breakout template
     await page.getByPlaceholder('Search templates...').fill('Short Term Breakouts');
     await expect(page.getByText('Short Term Breakouts', { exact: true })).toBeVisible();
@@ -39,6 +44,9 @@ test.describe('Advanced Screener', () => {
     // 1. Open templates
     await page.getByRole('button', { name: 'Templates' }).click();
     await expect(page.getByText('Screener Templates')).toBeVisible();
+
+    // Switch to TradingView mode (see the search test above)
+    await page.getByRole('button', { name: 'TradingView · 98' }).click();
 
     // 2. Search + apply the template (auto-runs the scan on apply)
     await page.getByPlaceholder('Search templates...').fill('Short Term Breakouts');

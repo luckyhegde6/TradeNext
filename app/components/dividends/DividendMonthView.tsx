@@ -13,6 +13,22 @@ interface Props {
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/**
+ * Local calendar-date key (YYYY-MM-DD) for a Date.
+ *
+ * Used BOTH for grid cells and dividend bucketing so ex-dates land on the
+ * day they are displayed in the user's local timezone. The previous version
+ * keyed dividends via `toISOString()` (UTC) while the grid cells were local —
+ * in IST a noon-UTC ex-date landed one day late (e.g. 10 Aug shown on the
+ * 11th). Both sides must derive keys from LOCAL components.
+ */
+export function toLocalDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function isToday(date: Date): boolean {
   const today = new Date();
   return (
@@ -39,7 +55,7 @@ export default function DividendMonthView({
   const dividendMap = new Map<string, DividendEvent[]>();
   for (const d of dividends) {
     if (!d.exDate) continue;
-    const dateKey = new Date(d.exDate).toISOString().split("T")[0];
+    const dateKey = toLocalDateKey(new Date(d.exDate));
     const existing = dividendMap.get(dateKey) || [];
     existing.push(d);
     dividendMap.set(dateKey, existing);
@@ -103,13 +119,14 @@ export default function DividendMonthView({
           }
 
           const date = new Date(year, month - 1, day);
-          const dateKey = date.toISOString().split("T")[0];
+          const dateKey = toLocalDateKey(date);
           const dayDividends = dividendMap.get(dateKey) || [];
           const todayClass = isToday(date) ? "bg-blue-100 dark:bg-blue-900/30" : "";
 
           return (
             <div
               key={dateKey}
+              data-testid={`cell-${dateKey}`}
               className={`min-h-[80px] p-1 border-b border-r border-gray-100 dark:border-slate-700/50 relative group ${todayClass}`}
             >
               <span className={`text-xs font-medium ${isToday(date) ? "text-blue-700 dark:text-blue-300" : "text-gray-600 dark:text-gray-400"}`}>

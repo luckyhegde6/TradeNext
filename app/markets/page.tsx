@@ -21,7 +21,7 @@ function Freshness({ meta }: { meta: any }) {
     </div>
   );
 }
-import { getNSEChartUrl } from "@/lib/charting";
+import { openNSEChart } from "@/lib/charting";
 
 const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
     // Refresh interval slightly randomized to avoid thundering herd on client
@@ -56,14 +56,30 @@ const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
                     </div>
                 </div>
                 <div className="mt-4 text-sm text-blue-600 font-medium flex items-center gap-1 group">
-                    <a 
-                        href={getNSEChartUrl({ symbol: indexKey, isIndex: true })} 
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    {/* Nested <a> inside the <Link> is invalid HTML (hydration
+                        warning in CI) — render a span that opens the NSE chart
+                        and stops propagation so the outer card link doesn't fire. */}
+                    <span
+                        role="link"
+                        tabIndex={0}
+                        aria-label={`View ${name} on NSE Charting`}
+                        className="inline-flex items-center gap-1 cursor-pointer"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openNSEChart(indexKey, true);
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openNSEChart(indexKey, true);
+                            }
+                        }}
                     >
                         View Chart & Details
                         <span className="group-hover:translate-x-1 transition-transform">→</span>
-                    </a>
+                    </span>
                 </div>
             </div>
         </Link>

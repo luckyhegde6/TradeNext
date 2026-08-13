@@ -1,109 +1,50 @@
-# TradeNext - Smart NSE Analytics & Portfolio Manager
+# TradeNext — Smart NSE Analytics & Portfolio Manager
 
 [![Netlify Status](https://api.netlify.com/api/v1/badges/78401e5d-b137-4b6d-94bb-ad1ec8de6b05/deploy-status)](https://app.netlify.com/projects/tradenext6/deploys)
 [![Playwright Tests](https://github.com/your-org/tradenext/actions/workflows/playwright.yml/badge.svg)](https://github.com/your-org/tradenext/actions/workflows/playwright.yml)
 
-**Live Demo:** https://tradenext6.netlify.app/
+> Live demo: **https://tradenext6.netlify.app** · Telegram bot: **@tradenext6Bot**
 
-## Latest Update - v3.5.3 (August 8, 2026)
+TradeNext is a Next.js 16 application for **NSE (India) market data, portfolio management, capital-gains tax,
+F&O analytics, dividends, rebalancing, alerts, and AI-driven daily recommendations** — backed by
+PostgreSQL/TimescaleDB and deployed serverless on Netlify.
 
-### Playwright E2E Test Suite (89 Tests, Cross-Browser)
-- **Committed suite** (`e2e/`): 11 spec files, 89 tests across Chromium, Firefox, WebKit (desktop 1440×900) + Mobile Chrome (Pixel 5) — login, header nav, home, screener + advanced screener (regression guard for the v3.5.2 `change`=% fix), recommendations, portfolio, watchlist, alerts, profile, responsive
-- **Auth bootstrap**: `e2e/auth.setup.ts` logs in the demo user once → storage state reused by every project
-- **CI workflow**: `.github/workflows/playwright.yml` — TimescaleDB service container, `prisma migrate deploy` + seed, dev server, `npx playwright test`, HTML report artifact (30 days)
-- **Commands**: `npm run test:e2e` (full suite) · `npm run test:e2e:ui` (UI mode) · `npx playwright show-report` (last report) · `npx playwright show-trace <file>` (traces)
-- **Docs**: `.agents/docs/playwright-e2e.md` (implementation + agent guide, report/Trace Viewer workflow, troubleshooting playbook)
+---
 
-## Latest Update - v3.5.0 (August 7, 2026)
+## Feature Highlights
 
-### Recommendation Performance Tracking & Archival
-- **Performance tab** on `/recommendations`: live table of every recommendation's outcome — entry vs current price, return %, target/stop-loss, status (Tracking / Target Met / SL Hit), category, days tracked
-- **Dynamic columns**: show/hide columns per browser (persisted in localStorage), sortable headers, filters (status/category/recommendation), server-side pagination
-- **3-status lifecycle**: `tracking → target_achieved / stop_loss_hit → archived` (360 days) — replaces the old 30-day expiry
-- **4 PM IST Mon–Fri SYSTEM cron**: automatic price/status check against `daily_prices`, plus a 360-day archival sweep into a frozen `RecommendationArchive` snapshot table (History tab survives via `SetNull`)
-- **Extended categories**: `btst | short | swing | medium | long`
-- **Admin**: manual archive sweep + run/check actions now spawn observable worker tasks (`triggeredBy: "system"`) in `/admin/workers`
-- **Public API**: `GET /api/recommendations/performance` (paginated, filterable, sortable, cached 15 min)
-- **Run trigger source**: `DailyRecommendationRun.triggeredBy` (`system`/`admin`) — Admin Run History shows a Manual/System badge per run; admin-triggered runs are audited as `admin`
-- **Today's Picks BUY/SELL filter**: only actionable runs surface; All/Buy/Sell filter pills (no HOLD pill)
-- **AI monitoring persistence fix**: `trackAiCall()` now awaited in every AI route `finally` — rows survive serverless cold start; merged reads (`memory | database | hybrid`) with source badge
+| Area | What you get |
+|------|--------------|
+| **Market Data** | Live NSE quotes & indices, corporate actions (dividends/bonus/splits), financial results, news, calendar, historical OHLCV |
+| **Screener** | 2,000+ NSE stocks · 40+ filter fields · 98 TradingView templates + 117-entry Chartink registry · backtest engine · CSV export |
+| **Portfolio** | Holdings P&L with live SSE prices, transactions, CSV import/export, tax reports (ST/LT), rebalancer, risk metrics (Sharpe, beta, max DD) |
+| **AI Recommendations** | Daily picks from Chartink + TradingView hybrid scan, analyzed by an AI agent (OpenRouter) with confidence/target/SL, performance tracking + archival |
+| **IPOs & Events** | IPO issue details — **Issue Size: shares per lot + ₹ per lot** — plus AI IPO analysis rendered as a JSON report (GMP, peers, risk matrix, strategy) and an **NSE events feed** (listing ceremonies etc.) on the dashboard |
+| **Alerts & Telegram** | Price alerts, multi-condition rules, channels, event history, and **@tradenext6Bot** real-time delivery with rate limiting & user verification |
+| **Platform** | Role-based auth (join-request flow), admin console (users, cron, workers, monitoring, AI config), background jobs, audit logging, MCP API |
 
-## Latest Update - v3.2.0 (July 18, 2026)
+## Verified Features
 
-### Telegram Bot Alert Delivery
-- **@tradenext6Bot**: Telegram bot for real-time alert delivery and interactive commands
-- **Bot commands**: `/start`, `/chatid`, `/help`, `/recommendations`, `/alerts`, `/updates`
-- **User subscription system**: Register and verify your Telegram Chat ID via Alerts → Telegram Bot tab
-- **Verification flow**: 6-digit code sent to Telegram for secure chat ID verification
-- **Test endpoint**: Send a test message to verify subscription works
-- **Rate limiting**: 5 commands/minute, 20/hour, 3-second cooldown per chat
-- **User verification**: Commands only return your own data after verified linking
-- **Audit logging**: All bot commands logged for security audit
-- **Alert routing**: Triggered alerts can be pushed to verified Telegram subscribers
-- **Broadcast support**: Admin can send announcements to all subscribers
-- **Bot info** endpoint: `/api/telegram/webhook` (GET) for health check
-- **Test message**: `/api/user/telegram/test` (POST) for quick verification
-- **Verify API**: `/api/user/telegram/verify` (POST) with send/confirm actions
-
-## Latest Update - v1.16.0 (July 16, 2026)
-
-### Advanced Screener — Chartink-Like Scanning
-- **Filter Condition Tree**: 40+ filter fields with recursive AND/OR groups, numeric and string operators
-- **Technical Analysis Library**: RSI, MACD, SMA, EMA, Bollinger Bands, ADX, ATR, candlestick patterns
-- **Backtest Engine**: OHLCV-based trade simulator with profit target, stop-loss, trailing stop, position sizing, Sharpe ratio
-- **FilterBuilder UI**: Category-organized field dropdowns, validation hints, multi-value input for list operators
-- **ScannedResultsTable**: 12 sortable columns, color-coded values, pagination, CSV export
-- **Templates**: 98 pre-built Chartink-inspired scans across 9 categories (Fundamental, Technical, Candlestick, Range Breakout, Crossover, Bullish, Bearish, Intraday Bullish, Intraday Bearish)
-- **Scan Configs**: Save/load scans with inline editing, share links, public/private toggle
-- **Backtest Dialog**: Config form, equity curve SVG chart, performance metrics, trade history table
-- **10 API Routes**: Advanced scan, configs CRUD, config execution, CSV export, backtest, templates
-- **45 Unit Tests**: Filter engine (22), technical analysis (16), backtest engine (7)
-- **Chartink Reverse-Engineered**: Analyzed Chartink's DSL, API, and 150,000+ community screeners. Built native TradingView-based equivalent without middleman dependencies.
-
-### Tested Features (July 2026)
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Authentication | ✅ Working | Demo: demo@tradenext6.app / demo123 |
-| Admin | ✅ Working | Admin: admin@tradenext6.app / admin123 |
-| Telegram Bot | ✅ Working | @tradenext6Bot — real-time alerts with rate limiting & auth |
-| Telegram Subscription | ✅ Working | Register & verify Chat ID from Alerts page |
-| Portfolio | ✅ Working | Holdings (5 stocks), P&L tracking |
+| Authentication | ✅ Working | Join request → admin approve → login (default password via `DEFAULT_PASSWORD` env) |
+| Admin Console | ✅ Working | Users, sessions, cron, workers, AI config, monitoring, dividends |
+| Telegram Bot | ✅ Working | @tradenext6Bot — real-time alerts, subscriptions, rate limiting |
+| Portfolio | ✅ Working | Holdings, live prices, P&L, analytics (14 tabs), rebalancer, tax |
 | Markets Overview | ✅ Working | NIFTY 50, BANK, IT, MIDCAP, SMALLCAP, AUTO, PHARMA |
-| Analytics | ✅ Working | 14 tabs including Financial Results |
 | Corporate Actions | ✅ Working | Dividend (₹) and Yield (%) display correctly |
 | Calendar | ✅ Working | Month view with corporate actions |
-| Cron Config | ✅ Working | Create and manage scheduled tasks |
-| Workers | ✅ Working | Task queue with priority and retries |
-| News | ✅ Working | Market news, India/Global filters |
-| Stock Screener | ✅ Working | 2000+ stocks, multiple filters |
-| Watchlist | ✅ UI Ready | Empty state (expected) |
+| Stock Screener | ✅ Working | 2,000+ stocks, multiple filters, backtest, templates |
+| Advanced Screener | ✅ Working | Chartink·117 / TradingView·98 templates, unified runner, per-template runs |
+| Recommendations | ✅ Working | Today's Picks, History, Performance tracking, Dividends, Subscribe |
+| IPOs | ✅ Working | Issue Size (shares per lot + ₹ per lot), AI IPO analysis as JSON report (GMP/peers/risk/strategy) |
+| NSE Events Feed | ✅ Working | Dashboard widget below Corporate Announcements (PAST/UPCOMING pills, thumbnails) |
 | Alerts | ✅ Working | Multi-tab: Simple, Rules, Channels, Events, Telegram Bot |
-| Financial Results | ✅ Working | NSE format (quarters as columns) |
-| TradingView | ✅ Working | Links on dashboard charts |
+| Watchlist | ✅ UI Ready | Empty state (expected) |
 | Session Management | ✅ Working | Admin can view/invalidate sessions |
-| Web Vitals | ✅ New | Core Web Vitals monitoring |
+| Web Vitals | ✅ Working | Core Web Vitals monitoring |
 
-## Overview
-
-TradeNext is a Next.js 16 application providing stock market data visualization and portfolio management for NSE (India).
-
-## Features
-
-- **MCP API**: Unified Machine Communication Protocol API for external NSE data queries (23 functions)
-- **User Management**: Secure signup with email verification, role-based access control (Admin/User)
-- **Portfolio Engine**: Real-time P&L tracking, transaction history, cost-basis analysis
-- **Market Intelligence**: Comprehensive NSE data (quotes, charts, corporate actions)
-- **Corporate Actions Management**: Admin upload via CSV/manual, NSE live integration, combined view with historical data and filtering
-  - **Dividend Tracking**: Dividend per share display with computed yield percentages
-  - **Enhanced UX**: Clickable type filters, search by symbol/company, pagination, sortable columns
-  - **Date Formatting**: Supports both ISO and DD-MMM-YYYY formats with day-of-week display
-- **Technical Analysis**: Piotroski F-Score, technical indicators (RSI, MACD, Bollinger Bands, SMA, EMA)
-- **Stock Screening**: Advanced filtering with multiple criteria
-- **Alert System**: Price alerts, multi-condition rules, and recommendation subscriptions
-- **Telegram Bot (@tradenext6Bot)**: Real-time alert delivery via Telegram with interactive commands, rate limiting, user verification, and audit logging
-- **Watchlist**: Quick price tracking and management
-- **Data Import**: CSV/Excel transaction import
-- **Docker-ready**: Local development with PostgreSQL/TimescaleDB + Redis
+---
 
 ## Quick Start
 
@@ -111,7 +52,7 @@ TradeNext is a Next.js 16 application providing stock market data visualization 
 # Install dependencies
 npm install
 
-# Start local database
+# Start local database (Docker)
 npm run db:up
 
 # Run migrations
@@ -120,131 +61,116 @@ npx prisma migrate dev
 # Seed database
 npx prisma db seed
 
-# Start development server
+# Start dev server
 npm run dev
 ```
 
-Visit http://localhost:3000
+Visit **http://localhost:3000**.
 
 ## Login Credentials
 
-| User | Email | Password |
+| Role | Email | Password |
 |------|-------|----------|
 | Demo | demo@tradenext6.app | demo123 |
 | Admin | admin@tradenext6.app | admin123 |
 
-Admin credentials can be configured via environment variables:
-```bash
-ADMIN_EMAIL=admin@tradenext6.app
-ADMIN_PASSWORD=admin123
-```
+> These are **public sandbox credentials** for trying the live site (also configured via
+> `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `DEMO_PASSWORD` env vars). Never use them for real accounts.
+> New users sign up via the **Join Request** flow — an admin approves, and the applicant receives the
+> default password configured in the `DEFAULT_PASSWORD` env var (never hardcoded in the repo).
 
 ## Tech Stack
 
 | Category | Technology |
 |----------|------------|
-| Framework | Next.js 16 |
-| Language | TypeScript 5.9 |
+| Framework | Next.js 16 (App Router, Node.js runtime for Prisma/auth) |
+| Language | TypeScript 5.9 (strict) |
 | Styling | Tailwind CSS 4.x |
-| Database | Prisma 7 + PostgreSQL/TimescaleDB |
-| Testing | Jest 30 + Testing Library |
-| Auth | NextAuth.js |
+| Database | Prisma 7 + PostgreSQL / TimescaleDB |
+| Auth | NextAuth.js (httpOnly cookies, RBAC) |
+| Testing | Jest 30 + Testing Library + Playwright (e2e) |
+| Logging | pino structured logs → `logs/` dir + Netlify Blob store |
+| Deployment | Netlify (serverless) |
 
 ## Commands
 
 ```bash
 # Development
-npm run dev              # Start dev server
-npm run dev:local        # Full local dev with cross-platform support
+npm run dev              # Dev server (port 3000)
+npm run local            # Full local dev (cross-platform)
 
 # Building
-npm run build            # Run migrations + Next.js build
-npm run quickbuild       # Next.js build only (skip migrations)
+npm run build            # Migrations + Next.js build
+npm run quickbuild       # Next.js build only
 
 # Testing
-npm run test             # Run all tests
+npm run test             # Jest unit/component tests
 npm run test:watch       # Watch mode
-npm run test:coverage    # Coverage report
+npm run test:e2e         # Playwright full suite (Chromium/Firefox/WebKit + Mobile)
+npm run test:e2e:ui      # Playwright UI mode
+npx playwright show-report   # Open last Playwright HTML report
 
 # Database
-npm run db:up            # Start local DB (docker)
-npm run db:down         # Stop local DB
-npx prisma studio        # Open Prisma Studio
+npm run db:up / npm run db:down   # Docker Postgres/TimescaleDB
+npx prisma studio                 # DB browser
 
-# Linting
-npm run lint             # Run ESLint
+# Lint / typecheck
+npm run lint             # ESLint
+npx tsc --noEmit         # Typecheck production files
 
-# Development Checks
-# These scripts are in scripts/dev-checks/
-node scripts/dev-checks/check-db.js      # Check database connection and users
-node scripts/dev-checks/check-schema.js  # Verify database schema
-node scripts/dev-checks/check-deals.js   # Check deals data (Block, Bulk, Short Selling)
-node scripts/dev-checks/test-auth.js     # Test authentication (demo user)
-
-## OpenCode Integration
-
-This project is configured for AI-assisted development with OpenCode.
-
-### Architecture Documentation
-
-- **ARCHITECTURE.md** — Technical architecture (system overview, schema, services)
-- **docs/architecture.html** — Interactive architecture doc with Mermaid diagrams (backtest data chain, sequence/ER/sync-flow diagrams, troubleshooting, agentic operating model, improvements)
-
-### Setup
-
-```bash
-# Install OpenCode
-npm install -g opencode
-
-# Launch web UI (recommended)
-opencode --web
+# Dev checks (scripts/dev-checks/)
+node scripts/dev-checks/check-db.js
+node scripts/dev-checks/check-schema.js
+node scripts/dev-checks/test-auth.js
 ```
 
-### MCP Servers
+## Testing
 
-The project includes pre-configured MCP servers in `opencode.json`:
+- **Unit/component** (Jest, `lib/__tests__/`, 533 passing): services (screener engine, technical
+  analysis, backtest, recommendations, chartink unified runner, cron ledger, IPO report/issue size,
+  NSE events, tax, logger paths, …).
+- **E2E** (`e2e/`, 89 tests, 5 Playwright projects): login, nav, home, screener + advanced screener,
+  recommendations, portfolio, watchlist, alerts, profile, responsive. CI: `.github/workflows/playwright.yml`
+  (TimescaleDB service, migrate + seed, HTML report artifact 30 days).
+- Details + troubleshooting playbook: `.agents/docs/playwright-e2e.md`.
 
-- **Context7** - Documentation lookup
-- **GitHub Search** - Code search
-- **Prisma Local** - Database migrations, generate, studio
-- **Prisma Remote** - Prisma Postgres management
-- **Playwright** - UI testing
+---
 
-### Prisma Skills
+## MCP API (Machine Communication Protocol)
 
-For AI agents, install Prisma Skills:
-
-```bash
-npx skills add prisma/skills
-```
-
-This provides accurate Prisma 7 knowledge for:
-- CLI commands
-- Client API (CRUD, transactions)
-- Upgrade guides
-- Database setup
-
-## Project Structure
+Unified endpoint for external NSE data:
 
 ```
-/
-├── app/                    # Next.js App Router pages
-│   ├── api/                # API routes
-│   │   └── admin/          # Admin-only endpoints
-│   └── [route]/            # Dynamic routes
-├── lib/                    # Business logic
-│   ├── services/           # Service layer
-│   ├── nse/               # NSE API utilities
-│   └── __tests__/         # Unit tests
-├── prisma/                # Database schema + seed
-├── scripts/               # Build/ingestion scripts
-│   └── dev-checks/       # Development verification scripts
-└── .agents/              # AI agent configuration
+POST /api/mcp        # JSON body: { "function": "getStockQuote", "params": {...} }
+GET  /api/mcp?function=getStockQuote&symbol=RELIANCE
 ```
+
+- **28 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
+  corporate info, marquee, deals, announcements, insider trading, events, heatmap, symbols, trends,
+  IPO analysis / IPO issue detail / NSE events, F&O option chain / F&O expiries + discovery.
+- Optional auth via `x-api-key` header (`MCP_API_KEY` env). Caching: quotes 60s, market 2m, corp actions 5m.
+- Discovery: `listFunctions`, `help`, `describe`, `schema` · Full Swagger reference: **/api/openapi**.
+
+## AI & Agent Discovery
+
+TradeNext publishes machine-readable discovery files for LLMs, AI agents, and crawlers:
+
+| File | Purpose |
+|------|---------|
+| **`/llms.txt`** | Plain-text index of what the site is, its public pages, public APIs (MCP, recommendations, screener), data sources, and boundaries — for LLMs/agents to understand the app (llmstxt.org pattern). |
+| **`/robots.txt`** | Crawler rules: allows search engines + LLM crawlers (GPTBot, ClaudeBot, PerplexityBot, …), explicitly allows `/llms.txt`, blocks `/api/`, `/admin/`, `/users/`, and internal/tooling paths. |
+| **`/sitemap.xml`** | Public pages only — never includes admin, API, user, or repo-internal files. |
+| **`/api/openapi`** | Swagger UI for the full API surface. |
+
+**Production boundary:** the deploy publish dir is `.next` (app output + `public/`). Repo-internal
+documentation (`.agents/`, `*.md`, logs) is **never** published to the live site, and `robots.txt`
+blocks those paths defensively.
+
+---
 
 ## Environment Variables
 
-See `.env.example` for required variables:
+See `.env.example` for the full list (never commit real secrets — `.env` is gitignored):
 
 ```bash
 # Database
@@ -253,48 +179,58 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tradenext
 # Auth
 AUTH_SECRET=your-secret-key
 
-# Admin (optional - defaults provided)
+# Sandbox credentials (optional — defaults provided)
 ADMIN_EMAIL=admin@tradenext6.app
 ADMIN_PASSWORD=admin123
+DEMO_PASSWORD=demo123
 
-# Telegram Bot (for real-time alert delivery) — set these in your .env file, never commit them
-# TELEGRAM_SECRET=    Get bot token from @BotFather on Telegram
-# TELEGRAM_CHATID=    Your Telegram chat ID (get from @tradenext6Bot with /start)
+# Server-only: default password for newly approved join-request users
+# (env var only — never hardcode the value in code or docs)
+DEFAULT_PASSWORD=
+
+# Telegram Bot (server-only — never commit)
+# TELEGRAM_SECRET=   Get bot token from @BotFather
+# TELEGRAM_CHATID=   Your chat ID from @tradenext6Bot with /start
 
 # Server
 PORT=3000
 ```
 
+## Project Structure
+
+```
+/
+├── app/                    # Next.js App Router pages + API routes
+│   ├── api/                #   API routes (mcp, screener, recommendations, admin/…)
+│   ├── admin/              #   Admin console pages
+│   ├── [route]/            #   Dynamic routes
+│   └── llms.txt/           #   /llms.txt LLM/agent index
+├── lib/                    # Business logic
+│   ├── services/           #   Service layer (recommendations, screener, tax, alerts, …)
+│   ├── nse/                #   NSE API utilities
+│   └── __tests__/          #   Unit tests
+├── prisma/                 # Database schema + migrations + seed
+├── scripts/                # Build/ingestion/dev-check scripts
+├── e2e/                    # Playwright e2e suite
+├── netlify/                # Netlify functions (cron, background)
+└── .agents/                # AI agent configuration + docs (repo-only, not published)
+```
+
+## AI-Assisted Development
+
+TradeNext is configured for OpenCode:
+
+```bash
+npm install -g opencode
+opencode --web            # Launch web UI (recommended)
+```
+
+- **MCP servers** (`opencode.json`): Context7 (docs), GitHub Search, Prisma Local/Remote, Playwright.
+- **Skills & agents**: `.opencode/skills/` + `.agents/agents/` (docs-updater, bug-finder, ux-enhancer,
+  wiki-creator, playwright-e2e, nse-integration) — matrix in `.agents/AGENT-SKILL-MATRIX.md`.
+- **Docs**: `ARCHITECTURE.md` + `docs/architecture.html` (interactive Mermaid diagrams), `AGENTS.md`
+  (dev guide + compact version history), `.agents/docs/` (subsystem deep-dives).
+
 ## License
 
 MIT
-
-## Testing
-
-### Playwright CLI Testing
-
-TradeNext uses Playwright CLI for UI/UX testing during development. See the [Agent Testing Guide](./.agents/skills/playwright-cli/AGENT-TESTING-GUIDE.md) for detailed instructions.
-
-```bash
-# Install Playwright CLI
-npm install -g playwright-cli
-
-# Start dev server
-npm run dev
-
-# Run tests
-playwright-cli open http://localhost:3000
-```
-
-### Test Credentials
-| Role | Email | Password |
-|------|-------|----------|
-| Demo | demo@tradenext6.app | demo123 |
-| Admin | admin@tradenext6.app | admin123 |
-
-### Standard Test Workflow
-1. Start dev server (`npm run dev`)
-2. Open browser with Playwright CLI
-3. Test login, navigation, forms, responsive behavior
-4. Check console for errors
-5. Close browser and stop server

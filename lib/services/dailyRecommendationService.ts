@@ -9,12 +9,15 @@
  * @version 3.3.0
  */
 
-import { runDailyScreeners, type ScreenerResult } from "./chartinkService";
+import { runChartinkUnifiedScreeners } from "./chartinkUnifiedScreenerService";
+import type { ScreenerResult } from "./chartinkService";
 import {
   analyzeStocks,
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
+import { loadConfig } from "./ai/config";
+import { getRecommendationContext } from "./ai/recommendation-context";
 import { getAICircuitBreaker, CircuitBreakerError } from "./ai/circuit-breaker";
 import { getRecommendationMetrics } from "./ai/performance-monitor";
 import { recordPrediction } from "./ai/prediction-tracker";
@@ -162,15 +165,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       metadata: { runId: run.id, triggerSource: triggeredBy },
     });
 
-    // 3. Run all screeners
-    const screenerResults = await runDailyScreeners({ forceRefresh: true });
+    // 3. Run all screeners (Chartink 117 registry primary → TradingView fallback)
+    const screenerResults = await runChartinkUnifiedScreeners({ forceRefresh: true });
 
     // 4. Compute screener stats (from the FULL result set, before capping)
     const successfulScreenerNames = new Set(
       screenerResults.flatMap((s) => s.screenerNames),
     );
     const totalRawHits = screenerResults.reduce(
-      (sum, s) => sum + s.screenerCount,
+      (sum, s) => sum + (s.screenerCount || 0),
       0,
     );
 
@@ -301,6 +304,25 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       });
     }
 
+    // Enrich each stock's AI input with fundamental context (corp actions,
+    // announcements, quarterly results) — batched once per run, best-effort:
+    // a context failure drops the context, never the pipeline.
+    const stockContextMap = await getRecommendationContext(
+      aiInput.map((s) => s.symbol),
+    );
+    for (const entry of aiInput) {
+      const ctx = stockContextMap[entry.symbol];
+      if (ctx) entry.context = ctx;
+    }
+    const enrichedCount = Object.keys(stockContextMap).length;
+    if (enrichedCount > 0) {
+      logger.info({
+        msg: "AI context enriched",
+        enriched: enrichedCount,
+        total: aiInput.length,
+      });
+    }
+
     // Audit: AI agent trigger
     await createAuditLog({
       action: "AI_AGENT_TRIGGER",
@@ -317,9 +339,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const circuitBreaker = getAICircuitBreaker();
     let aiResults: StockAnalysisResult[] = [];
 
+    // Resolve the effective AI config (DB `ai_config` Secret > env) so the admin's
+    // saved model selection actually reaches the recommendation pipeline. Without
+    // this, the pipeline fell back to the env-only default model and every run
+    // defaulted to HOLD when that model 404'd on OpenRouter.
+    const aiConfig = await loadConfig();
+
     try {
       const aiStart = Date.now();
-      aiResults = await circuitBreaker.call(() => analyzeStocks(aiInput));
+      aiResults = await circuitBreaker.call(() => analyzeStocks(aiInput, aiConfig));
       const aiMs = Date.now() - aiStart;
 
       // Record AI performance metrics
@@ -538,42 +566,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     // Invalidate cache so next API request gets fresh data
     invalidateRecommendationsCache();
 
-    // Broadcast to Telegram subscribers
+    // Broadcast to Telegram subscribers.
+    // Suggestions = actionable picks only (BUY/SELL). HOLDs are never listed
+    // as suggestions — an all-HOLD day sends a short notice instead (see
+    // buildRecommendationBroadcast in recommendationBroadcast.ts).
     try {
       const { broadcastToSubscribers } = await import("./telegramBotService");
+      const { buildRecommendationBroadcast } = await import("./recommendationBroadcast");
 
-      const recIcons: Record<string, string> = { BUY: "🟢", SELL: "🔴", HOLD: "⚪" };
-
-      // Always send a broadcast (even if all picks are HOLD) so subscribers
-      // get a daily update. Prefer non-HOLD picks, but fall back to HOLDs so
-      // the message is never empty (previously an all-HOLD day sent nothing).
-      const nonHold = aiResults.filter(
-        (r) => r.aiRecommendation.recommendation !== "HOLD",
-      );
-      const topStocks =
-        nonHold.length > 0 ? nonHold.slice(0, 8) : aiResults.slice(0, 8);
-
-      const lines = topStocks.map((r) => {
-        const icon = recIcons[r.aiRecommendation.recommendation] || "⚪";
-        const conf = `${r.aiRecommendation.confidence}%`;
-        const price = r.price ? `₹${r.price.toFixed(2)}` : "";
-        const target = r.aiRecommendation.targetPrice ? `Tgt ₹${r.aiRecommendation.targetPrice.toFixed(2)}` : "";
-        const sl = r.aiRecommendation.stopLoss ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}` : "";
-        const details = [price, target, sl, conf].filter(Boolean).join(" | ");
-        return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
-      });
-
-      let tgMessage = `📈 *Daily Recommendations — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}*\n\n`;
-      tgMessage += lines.join("\n\n");
-
-      const buyCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "BUY").length;
-      const sellCount = aiResults.filter((r) => r.aiRecommendation.recommendation === "SELL").length;
-      tgMessage += `\n\n_Breakdown: 🟢 ${buyCount} BUY · 🔴 ${sellCount} SELL · ⚪ ${aiResults.length - buyCount - sellCount} HOLD_`;
-      tgMessage += `\n\n_View all ${aiResults.length} recommendations on TradeNext → /recommendations_`;
-
-      if (tgMessage.length > 4000) {
-        tgMessage = tgMessage.slice(0, 3990) + "\n\n*(truncated)*";
-      }
+      const tgMessage = buildRecommendationBroadcast(aiResults);
 
       const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
       logger.info({ msg: "Telegram broadcast for recommendations", sent });
@@ -754,11 +755,23 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
     let newStatus: string | null = null;
 
-    // Check target/SL conditions in priority order (target wins on tie)
-    if (currentPrice >= tracker.targetPrice) {
+    // Check target/SL conditions in priority order (target wins on tie).
+    // Direction-aware since v3.6.3: for SELL recommendations the levels are
+    // inverted (target below entry, stop above), so the price crossing check
+    // must flip too. BUY/HOLD: price >= target → achieved; price <= stop → hit.
+    // SELL: price <= target → achieved; price >= stop → hit.
+    const isSell = tracker.aiRecommendation === "SELL";
+    const targetReached = isSell
+      ? currentPrice <= tracker.targetPrice
+      : currentPrice >= tracker.targetPrice;
+    const stopReached = isSell
+      ? currentPrice >= tracker.stopLoss
+      : currentPrice <= tracker.stopLoss;
+
+    if (targetReached) {
       newStatus = "target_achieved";
       targetAchieved++;
-    } else if (currentPrice <= tracker.stopLoss) {
+    } else if (stopReached) {
       newStatus = "stop_loss_hit";
       stopLossHit++;
     }

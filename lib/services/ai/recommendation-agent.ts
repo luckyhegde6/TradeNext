@@ -8,6 +8,8 @@
 import { directPrompt } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
 import { trackAiCall } from "./ai-monitoring";
+import { formatStockContext, type StockContext } from "./recommendation-context";
+import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
 import logger from "@/lib/logger";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -30,6 +32,8 @@ export interface StockAnalysisInput {
   volume: number;
   screenerNames: string[]; // which screeners flagged this stock
   marketCap?: number; // ₹ market cap (used for ranking, included in prompt)
+  /** Fundamental context (corp actions, announcements, results) — optional, batched once per run. */
+  context?: StockContext;
 }
 
 export interface StockAnalysisResult extends StockAnalysisInput {
@@ -231,15 +235,16 @@ async function analyzeBatch(
  */
 function buildAnalysisPrompt(stocks: StockAnalysisInput[]): string {
   const stockLines = stocks
-    .map(
-      (s, i) =>
-        `${i + 1}. ${s.symbol} — Price: ₹${s.price}, Change: ${s.change >= 0 ? "+" : ""}${s.change} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%), Volume: ${formatVolume(s.volume)}, Screeners: ${s.screenerNames.join(", ")}${s.marketCap ? `, Market Cap: ₹${formatMarketCap(s.marketCap)}` : ""}`
-    )
+    .map((s, i) => {
+      const base = `${i + 1}. ${s.symbol} — Price: ₹${s.price}, Change: ${s.change >= 0 ? "+" : ""}${s.change} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%), Volume: ${formatVolume(s.volume)}, Screeners: ${s.screenerNames.join(", ")}${s.marketCap ? `, Market Cap: ₹${formatMarketCap(s.marketCap)}` : ""}`;
+      const context = s.context ? formatStockContext(s.symbol, s.context) : "";
+      return context ? `${base}\n   Context:\n${indent(context, 3)}` : base;
+    })
     .join("\n");
 
   return `${SYSTEM_PROMPT}
 
-Analyze these NSE stocks and return a JSON array with one recommendation per stock:
+Analyze these NSE stocks and return a JSON array with one recommendation per stock. When fundamental context (corporate actions, announcements, quarterly results) is provided for a stock, weigh it alongside the technical price/momentum data and mention it in your reasoning when relevant.
 
 ${stockLines}
 
@@ -305,10 +310,27 @@ function normalizeRecommendation(raw: Record<string, unknown>, stock: StockAnaly
   const validRec = rec === "BUY" || rec === "SELL" ? rec : "HOLD";
 
   const confidence = clamp(toNumber(raw.confidence), 0, 100);
-  // Fall back to price-based defaults when the model returns 0 (per prompt: "Set to 0 if not
-  // determinable"). Prevents ₹0.00 targets/stops from reaching trackers and the Performance tab.
-  const targetPrice = toNumber(raw.targetPrice) || Math.round(stock.price * DEFAULT_TARGET_MULTIPLIER * 100) / 100;
-  const stopLoss = toNumber(raw.stopLoss) || Math.round(stock.price * DEFAULT_STOP_LOSS_MULTIPLIER * 100) / 100;
+  // Validate + correct target/SL direction-aware (BUY: target>price>stop;
+  // SELL: target<price<stop; HOLD: tight band). Falls back to price-based
+  // defaults when the model returns 0/contradictory/out-of-bounds levels —
+  // prevents ₹0.00 targets AND inverted SELL levels from reaching trackers.
+  const evaluation = evaluateRecommendationLevels({
+    direction: validRec,
+    price: stock.price,
+    targetPrice: toNumber(raw.targetPrice),
+    stopLoss: toNumber(raw.stopLoss),
+  });
+  const targetPrice = evaluation.targetPrice;
+  const stopLoss = evaluation.stopLoss;
+
+  if (!evaluation.valid && evaluation.corrections.length > 0) {
+    logger.warn({
+      msg: "Recommendation levels corrected by evaluator",
+      symbol: stock.symbol,
+      direction: validRec,
+      corrections: evaluation.corrections,
+    });
+  }
 
   const horizon = toUpper(raw.timeHorizon);
   const validHorizon: "short" | "medium" | "long" =
@@ -358,6 +380,15 @@ function extractJSONArray(text: string): unknown | null {
 }
 
 // ─── Utility helpers ─────────────────────────────────────────────────────
+
+/** Indent every line of a multi-line string by `spaces` (for nested context blocks). */
+function indent(text: string, spaces: number): string {
+  const pad = " ".repeat(spaces);
+  return text
+    .split("\n")
+    .map((line) => (line.trim() ? `${pad}${line}` : line))
+    .join("\n");
+}
 
 function toNumber(val: unknown): number {
   if (typeof val === "number") return val;

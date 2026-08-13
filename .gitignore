@@ -60,6 +60,9 @@ worker_logs/
 #server logs
 server_logs/
 
+# App server logs (logs/ directory under the app folder)
+logs/
+
 # E2E walkthrough screenshots (generated during testing)
 /e2e-screenshots/
 /screenshots/

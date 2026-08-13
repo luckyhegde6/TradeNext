@@ -94,6 +94,23 @@ export async function getUpcomingDividends(
 }
 
 /**
+ * Get dividend summary for ALL upcoming dividends (today → next 12 months),
+ * computed from the upcoming list rather than a month-scoped calendar view.
+ *
+ * The month-scoped `getDividendCalendar().summary` (via `computeSummary`'s
+ * `exDate >= now` filter) zeroes out once the viewed month's ex-dates pass —
+ * e.g. viewing August after Aug 9 shows 0/₹0/₹0/— even though September
+ * dividends exist. The "Upcoming Dividends / Est. Income / Avg Yield" cards
+ * on the Recommendations + dividends pages should reflect upcoming data, so
+ * they use this function.
+ */
+export async function getUpcomingDividendSummary(userId?: number): Promise<DividendSummary> {
+  const dividends = await getUpcomingDividends(500, userId);
+  const userHoldings = userId ? await getUserSymbolHolding(userId) : new Map<string, number>();
+  return computeSummary(dividends, userHoldings);
+}
+
+/**
  * Get monthly income projection for the next 12 months.
  */
 export async function getMonthlyIncomeProjection(

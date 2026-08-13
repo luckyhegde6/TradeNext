@@ -4,11 +4,27 @@ import logger from "@/lib/logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 
 /**
- * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0).
+ * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0)
+ * plus the Daily Market Sync (v3.5.8) and the AI Connection Test (v3.7.1).
  *
- * Ensures the two SYSTEM-managed recommendation jobs exist and are active:
- *   - Daily Recommendations          `30 4 * * 1-5`   = 10:00 AM IST (Mon-Fri)
- *   - Recommendation Performance     `30 10 * * 1-5`  = 04:00 PM IST (Mon-Fri)
+ * Ensures the four SYSTEM-managed jobs exist and are active:
+ *   - Daily Recommendations          `30 4 * * 1-5`    = 10:00 AM IST (Mon-Fri)
+ *   - Recommendation Performance     `30 10 * * 1-5`   = 04:00 PM IST (Mon-Fri)
+ *   - Daily Market Sync              `1 1 * * 1-5`     = 06:31 AM IST (Mon-Fri)
+ *   - AI Connection Test             step 30 every min (08:30–15:30 IST, Mon-Fri)
+ *     (Mon-Fri, every 30 min) — probes the configured AI model + fallback
+ *     routes BEFORE the 10:00 AM IST recommendations run so a dead model is
+ *     caught early instead of producing an all-HOLD run.
+ *
+ * The Market Sync job exists for the ledger + admin visibility: on Netlify the
+ * actual morning sync runs via the scheduled function cron-market-sync → the
+ * `market-sync` action of netlify/functions/run-cron-background.ts, which
+ * records the run against MARKET_SYNC_CRON_NAME (same as the two
+ * recommendation jobs). The AI Connection Test likewise runs via the
+ * scheduled function cron-ai-connection-test → the `ai-connection-test`
+ * action, recorded against AI_CONNECTION_TEST_CRON_NAME. Neither flows
+ * through the worker scheduler loop (the worker switch also handles
+ * `ai_connection_test` for local/admin-triggered runs).
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
  * picks up due jobs via `nextRun` and spawns tasks through `spawnCronTask`,
@@ -20,12 +36,90 @@ import { calculateNextRun } from "@/lib/cron-parser";
  */
 export const RECOMMENDATION_CRON_NAME = "Daily Recommendations (System)";
 export const RECOMMENDATION_PERFORMANCE_CRON_NAME = "Recommendation Performance Check (System)";
+export const MARKET_SYNC_CRON_NAME = "Daily Market Sync (System)";
+export const AI_CONNECTION_TEST_CRON_NAME = "AI Connection Test (System)";
 export const RECOMMENDATION_CRON_EXPR = "30 4 * * 1-5"; // 10:00 AM IST Mon-Fri
 export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM IST Mon-Fri
+export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
+export const AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"; // 08:30–15:30 IST Mon-Fri
 
 export interface EnsureRecommendationCronsResult {
   ensured: number;
   jobs: Array<{ name: string; taskType: string; cronExpression: string }>;
+}
+
+export interface RecordCronRunResult {
+  found: boolean;
+  lastRun?: Date | null;
+  runCount?: number;
+  successCount?: number;
+  failureCount?: number;
+  nextRun?: Date | null;
+}
+
+/**
+ * Record an execution of a SYSTEM-managed recommendation cron job.
+ *
+ * WHY THIS EXISTS:
+ * On Netlify (serverless) the actual scheduled runs execute directly via
+ * netlify/functions/run-cron-background.ts → runDailyRecommendations() /
+ * checkRecommendationPerformance() — they never pass through
+ * spawnCronTask() or the resident worker-engine scheduler loop, so the
+ * CronJob ledger (lastRun / runCount / successCount / failureCount /
+ * nextRun) stayed at defaults and the Admin → Utils → Cron page showed
+ * "no recent runs". successCount/failureCount previously had NO writer.
+ *
+ * This is the single ledger-writer for the real execution paths:
+ *   - netlify/functions/run-cron-background.ts (scheduled runs, success+failure)
+ *   - app/api/admin/workers/route.ts PATCH runNow/retry (manual runs for
+ *     tasks WITHOUT a cronJobId — cronJobId-linked tasks are already counted
+ *     at spawn time by spawnCronTask, so we skip them to avoid double-count)
+ *
+ * Job is located by stable name (idempotent with ensureRecommendationCrons).
+ * Safe no-op (found:false) when the job does not exist — never throws.
+ */
+export async function recordCronRun(jobName: string, success: boolean): Promise<RecordCronRunResult> {
+  try {
+    const job = await prisma.cronJob.findFirst({ where: { name: jobName } });
+    if (!job) {
+      logger.warn({ msg: "recordCronRun: cron job not found (no-op)", jobName });
+      return { found: false };
+    }
+
+    const nextRun = calculateNextRun(job.cronExpression);
+    const updated = await prisma.cronJob.update({
+      where: { id: job.id },
+      data: {
+        lastRun: new Date(),
+        runCount: { increment: 1 },
+        successCount: success ? { increment: 1 } : undefined,
+        failureCount: success ? undefined : { increment: 1 },
+        nextRun,
+      },
+    });
+
+    logger.info({
+      msg: "Recorded cron job run",
+      jobName,
+      success,
+      runCount: updated.runCount,
+      successCount: updated.successCount,
+      failureCount: updated.failureCount,
+      nextRun: updated.nextRun,
+    });
+
+    return {
+      found: true,
+      lastRun: updated.lastRun,
+      runCount: updated.runCount,
+      successCount: updated.successCount,
+      failureCount: updated.failureCount,
+      nextRun: updated.nextRun,
+    };
+  } catch (error) {
+    logger.error({ msg: "Failed to record cron job run (non-fatal)", jobName, error });
+    return { found: false };
+  }
 }
 
 export async function ensureRecommendationCrons(): Promise<EnsureRecommendationCronsResult> {
@@ -41,6 +135,18 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       description: "System-managed recommendation performance check + archival (04:00 PM IST, Mon-Fri)",
       taskType: "recommendation_performance",
       cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR,
+    },
+    {
+      name: MARKET_SYNC_CRON_NAME,
+      description: "System-managed daily NSE market sync — corporate actions + stock list (06:31 AM IST, Mon-Fri)",
+      taskType: "market_data",
+      cronExpression: MARKET_SYNC_CRON_EXPR,
+    },
+    {
+      name: AI_CONNECTION_TEST_CRON_NAME,
+      description: "System-managed AI provider connection test — probes the configured model + fallback routes (every 30 min, 08:30–15:30 IST, Mon-Fri)",
+      taskType: "ai_connection_test",
+      cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
     },
   ];
 

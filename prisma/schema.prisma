@@ -13,37 +13,37 @@ datasource db {
 }
 
 model User {
-  id    Int     @id @default(autoincrement())
-  email String  @unique
-  name  String?
-  mobile String?
+  id       Int     @id @default(autoincrement())
+  email    String  @unique
+  name     String?
+  mobile   String?
   password String?
   role     String  @default("user")
-  
-  // Verification fields
-  isVerified             Boolean   @default(false)
-  verificationCode       String?
-  verificationExpiry     DateTime?
-  verificationResendCount Int       @default(0)
-  
-  // Account status
-  isBlocked              Boolean   @default(false)
-  
-  // Telegram subscription for alert delivery
-  telegramChatId         String?
-  telegramVerified       Boolean   @default(false)
-  
-  // Session management - increment to invalidate all sessions
-  tokenVersion           Int       @default(1)
-  
-  // Current session ID - unique per login, validates JWT tokens
-  currentSessionId       String?   @default(uuid())
 
-  posts Post[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  portfolios Portfolio[] 
-  sessions UserSession[]
+  // Verification fields
+  isVerified              Boolean   @default(false)
+  verificationCode        String?
+  verificationExpiry      DateTime?
+  verificationResendCount Int       @default(0)
+
+  // Account status
+  isBlocked Boolean @default(false)
+
+  // Telegram subscription for alert delivery
+  telegramChatId   String?
+  telegramVerified Boolean @default(false)
+
+  // Session management - increment to invalidate all sessions
+  tokenVersion Int @default(1)
+
+  // Current session ID - unique per login, validates JWT tokens
+  currentSessionId String? @default(uuid())
+
+  posts             Post[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  portfolios        Portfolio[]
+  sessions          UserSession[]
   rebalancerConfigs RebalancerConfig[]
   foPositions       FOPosition[]
   aiAnalyses        AIAnalysis[]
@@ -61,6 +61,19 @@ model JoinRequest {
   updatedAt DateTime @updatedAt
 
   @@map("join_requests")
+}
+
+model PasswordResetRequest {
+  id        String   @id @default(cuid())
+  email     String
+  reason    String?
+  status    String   @default("pending") // pending | approved | rejected
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([email])
+  @@map("password_reset_requests")
 }
 
 model Post {
@@ -82,8 +95,8 @@ model Portfolio {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
-  transactions Transaction[]
+  user             User              @relation(fields: [userId], references: [id])
+  transactions     Transaction[]
   fundTransactions FundTransaction[]
 }
 
@@ -92,10 +105,10 @@ model Transaction {
   portfolioId String
   tradeDate   DateTime
   ticker      String
-  side        String   // BUY | SELL
-  quantity    Decimal  @db.Decimal(30,6)
-  price       Decimal  @db.Decimal(30,6)
-  fees        Decimal? @db.Decimal(30,6)
+  side        String // BUY | SELL
+  quantity    Decimal  @db.Decimal(30, 6)
+  price       Decimal  @db.Decimal(30, 6)
+  fees        Decimal? @db.Decimal(30, 6)
   notes       String?
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id])
@@ -104,8 +117,8 @@ model Transaction {
 model FundTransaction {
   id          String   @id @default(uuid())
   portfolioId String
-  type        String   // DEPOSIT | WITHDRAWAL
-  amount      Decimal  @db.Decimal(30,6)
+  type        String // DEPOSIT | WITHDRAWAL
+  amount      Decimal  @db.Decimal(30, 6)
   date        DateTime @default(now())
   notes       String?
 
@@ -115,66 +128,66 @@ model FundTransaction {
 model DailyPrice {
   ticker    String
   tradeDate DateTime
-  open      Decimal? @db.Decimal(30,6)
-  high      Decimal? @db.Decimal(30,6)
-  low       Decimal? @db.Decimal(30,6)
-  close     Decimal? @db.Decimal(30,6)
+  open      Decimal? @db.Decimal(30, 6)
+  high      Decimal? @db.Decimal(30, 6)
+  low       Decimal? @db.Decimal(30, 6)
+  close     Decimal? @db.Decimal(30, 6)
   volume    BigInt?
-  vwap      Decimal? @db.Decimal(30,6)
+  vwap      Decimal? @db.Decimal(30, 6)
 
   @@id([ticker, tradeDate])
   @@map("daily_prices")
 }
 
 model CorporateAction {
-  id              Int      @id @default(autoincrement())
-  symbol          String
-  companyName     String
-  series          String?  // EQ, GS, etc.
-  subject         String?  // Original purpose text
-  actionType      String   // DIVIDEND, SPLIT, BONUS, RIGHTS, BUYBACK, INTEREST
-  exDate          DateTime?
-  recordDate      DateTime?
-  effectiveDate   DateTime?
-  faceValue       String?  // Original face value
-  oldFV           String?  // Old face value for splits (e.g., "10")
-  newFV           String?  // New face value for splits (e.g., "2")
-  ratio           String?  // e.g., "1:1" for bonus, "5:14" for rights
-  dividendPerShare Decimal? @db.Decimal(30,6)
-  dividendYield   Decimal? @db.Decimal(30,6)
-  isin            String?
+  id                   Int       @id @default(autoincrement())
+  symbol               String
+  companyName          String
+  series               String? // EQ, GS, etc.
+  subject              String? // Original purpose text
+  actionType           String // DIVIDEND, SPLIT, BONUS, RIGHTS, BUYBACK, INTEREST
+  exDate               DateTime?
+  recordDate           DateTime?
+  effectiveDate        DateTime?
+  faceValue            String? // Original face value
+  oldFV                String? // Old face value for splits (e.g., "10")
+  newFV                String? // New face value for splits (e.g., "2")
+  ratio                String? // e.g., "1:1" for bonus, "5:14" for rights
+  dividendPerShare     Decimal?  @db.Decimal(30, 6)
+  dividendYield        Decimal?  @db.Decimal(30, 6)
+  isin                 String?
   bookClosureStartDate DateTime?
   bookClosureEndDate   DateTime?
-  announcementDate DateTime? // Date of announcement
-  source          String   @default("admin") // "admin" or "nse"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  announcementDate     DateTime? // Date of announcement
+  source               String    @default("admin") // "admin" or "nse"
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
+  @@unique([symbol, actionType, exDate])
   @@index([symbol])
   @@index([exDate])
   @@index([actionType])
   @@index([source])
-  @@unique([symbol, actionType, exDate])
   @@map("corporate_actions")
 }
 
 model InsiderTrading {
-  id              Int      @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   symbol          String
   companyName     String
   acqName         String
   transactionType String
-  securities      Decimal  @db.Decimal(30,2)
-  price           Decimal? @db.Decimal(30,2)
-  value           Decimal? @db.Decimal(30,2)
+  securities      Decimal   @db.Decimal(30, 2)
+  price           Decimal?  @db.Decimal(30, 2)
+  value           Decimal?  @db.Decimal(30, 2)
   secAcqPromoter  String?
   secType         String?
-  afterSec        Decimal? @db.Decimal(30,2)
-  mode             String?
+  afterSec        Decimal?  @db.Decimal(30, 2)
+  mode            String?
   remarks         String?
   broadcastDate   DateTime?
   createdAt       DateTime  @default(now())
-  
+
   @@index([symbol])
   @@index([broadcastDate])
   @@map("insider_trading")
@@ -184,11 +197,11 @@ model IndexClose {
   id        String   @id @default(uuid())
   indexName String
   asOf      DateTime
-  open      Decimal? @db.Decimal(30,6)
-  high      Decimal? @db.Decimal(30,6)
-  low       Decimal? @db.Decimal(30,6)
-  close     Decimal? @db.Decimal(30,6)
-  vwap      Decimal? @db.Decimal(30,6)
+  open      Decimal? @db.Decimal(30, 6)
+  high      Decimal? @db.Decimal(30, 6)
+  low       Decimal? @db.Decimal(30, 6)
+  close     Decimal? @db.Decimal(30, 6)
+  vwap      Decimal? @db.Decimal(30, 6)
   volume    BigInt?
 
   @@index([indexName, asOf])
@@ -196,11 +209,11 @@ model IndexClose {
 }
 
 model IndexWeight {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   indexName String
   ticker    String
   security  String?
-  weight    Decimal? @db.Decimal(10,4)
+  weight    Decimal? @db.Decimal(10, 4)
   asOf      DateTime
 
   @@index([indexName, ticker, asOf])
@@ -208,41 +221,42 @@ model IndexWeight {
 }
 
 model Fundamental {
-  ticker              String
-  asOf                DateTime
-  periodType          String
-  revenue             Decimal? @db.Decimal(30,6)
-  netIncome           Decimal? @db.Decimal(30,6)
-  totalAssets         Decimal? @db.Decimal(30,6)
-  totalLiabilities    Decimal? @db.Decimal(30,6)
-  cash                Decimal? @db.Decimal(30,6)
-  shareholdersEquity  Decimal? @db.Decimal(30,6)
-  eps                 Decimal? @db.Decimal(30,6)
-  peRatio             Decimal? @db.Decimal(30,6)
-  roe                 Decimal? @db.Decimal(30,6)
-  roic                Decimal? @db.Decimal(30,6)
-  rawJson             Json?
+  ticker             String
+  asOf               DateTime
+  periodType         String
+  revenue            Decimal? @db.Decimal(30, 6)
+  netIncome          Decimal? @db.Decimal(30, 6)
+  totalAssets        Decimal? @db.Decimal(30, 6)
+  totalLiabilities   Decimal? @db.Decimal(30, 6)
+  cash               Decimal? @db.Decimal(30, 6)
+  shareholdersEquity Decimal? @db.Decimal(30, 6)
+  eps                Decimal? @db.Decimal(30, 6)
+  peRatio            Decimal? @db.Decimal(30, 6)
+  roe                Decimal? @db.Decimal(30, 6)
+  roic               Decimal? @db.Decimal(30, 6)
+  rawJson            Json?
 
   @@id([ticker, asOf, periodType])
   @@map("fundamentals")
 }
 
 model Index {
-  id       String  @id @default(uuid())
-  name     String  @unique
-  display  String?
+  id        String   @id @default(uuid())
+  name      String   @unique
+  display   String?
   createdAt DateTime @default(now())
 }
 
 model IndexPoint {
-  id String @id @default(uuid())
+  id        String   @id @default(uuid())
   indexName String
-  time DateTime
-  open Decimal? @db.Decimal(30,6)
-  high Decimal? @db.Decimal(30,6)
-  low Decimal? @db.Decimal(30,6)
-  close Decimal? @db.Decimal(30,6)
-  volume BigInt?
+  time      DateTime
+  open      Decimal? @db.Decimal(30, 6)
+  high      Decimal? @db.Decimal(30, 6)
+  low       Decimal? @db.Decimal(30, 6)
+  close     Decimal? @db.Decimal(30, 6)
+  volume    BigInt?
+
   @@index([indexName, time])
 }
 
@@ -260,80 +274,80 @@ model CorporateAnnouncement {
 }
 
 model IndexQuote {
-  id              String   @id @default(cuid())
-  indexName       String   @unique
-  lastPrice       String
-  change          String
-  pChange         String
-  open            String?
-  high            String?
-  low             String?
-  previousClose   String?
-  yearHigh        String?
-  yearLow         String?
-  peRatio         String?
-  pbRatio         String?
-  dividendYield   String?
-  marketStatus    String?
-  advances        Int?
-  declines        Int?
-  unchanged       Int?
+  id                String   @id @default(cuid())
+  indexName         String   @unique
+  lastPrice         String
+  change            String
+  pChange           String
+  open              String?
+  high              String?
+  low               String?
+  previousClose     String?
+  yearHigh          String?
+  yearLow           String?
+  peRatio           String?
+  pbRatio           String?
+  dividendYield     String?
+  marketStatus      String?
+  advances          Int?
+  declines          Int?
+  unchanged         Int?
   totalTradedVolume String?
   totalTradedValue  String?
-  updatedAt       DateTime @updatedAt
-  timestamp       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  timestamp         DateTime @default(now())
 }
 
 model IndexHeatmapItem {
-  id              String   @id @default(cuid())
-  indexName       String
-  symbol          String
-  lastPrice       Decimal  @db.Decimal(30,6)
-  change          Decimal  @db.Decimal(30,6)
-  pChange         Decimal  @db.Decimal(30,6)
-  volume          BigInt?
-  value           Decimal? @db.Decimal(30,6)
-  high            Decimal? @db.Decimal(30,6)
-  low             Decimal? @db.Decimal(30,6)
-  yearHigh        Decimal? @db.Decimal(30,6)
-  yearLow         Decimal? @db.Decimal(30,6)
-  updatedAt       DateTime @updatedAt
+  id        String   @id @default(cuid())
+  indexName String
+  symbol    String
+  lastPrice Decimal  @db.Decimal(30, 6)
+  change    Decimal  @db.Decimal(30, 6)
+  pChange   Decimal  @db.Decimal(30, 6)
+  volume    BigInt?
+  value     Decimal? @db.Decimal(30, 6)
+  high      Decimal? @db.Decimal(30, 6)
+  low       Decimal? @db.Decimal(30, 6)
+  yearHigh  Decimal? @db.Decimal(30, 6)
+  yearLow   Decimal? @db.Decimal(30, 6)
+  updatedAt DateTime @updatedAt
 
   @@unique([indexName, symbol])
   @@index([indexName])
 }
 
 model MarketSnapshot {
-  id        String   @id @default(uuid())
-  type      String   // gainers | losers | advance | deals
-  payload   Json
+  id         String   @id @default(uuid())
+  type       String // gainers | losers | advance | deals
+  payload    Json
   capturedAt DateTime @default(now())
 
   @@index([type, capturedAt])
 }
 
 model Alert {
-  id        String   @id @default(uuid())
-  userId    Int?
-  type      String   // volume_spike | price_jump | price_above | price_below
-  symbol    String?
-  condition Json
-  triggered Boolean  @default(false)
+  id          String    @id @default(uuid())
+  userId      Int?
+  type        String // volume_spike | price_jump | price_above | price_below
+  symbol      String?
+  condition   Json
+  triggered   Boolean   @default(false)
   triggeredAt DateTime?
-  seen      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  seen        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
 }
 
 model AIInsight {
-  id          String    @id @default(uuid())
-  snapshotId   String    // Reference to the source data (taskId, reportId, scanId)
-  summary     String
-  symbol      String?   // Associated stock symbol (if any)
-  source      String?   // "agent_market" | "agent_pattern" | "agent_document" | "agent_sentiment" | "system"
-  agentType   String?   // "market_analyst" | "pattern_scout" | "document_analyst" | "sentiment"
-  confidence  Decimal?  @db.Decimal(5,4) // 0.0 to 1.0 confidence score
-  metadata    Json?     // Additional structured data (extracted metrics, patterns, etc.)
-  createdAt   DateTime  @default(now())
+  id         String   @id @default(uuid())
+  snapshotId String // Reference to the source data (taskId, reportId, scanId)
+  summary    String
+  symbol     String? // Associated stock symbol (if any)
+  source     String? // "agent_market" | "agent_pattern" | "agent_document" | "agent_sentiment" | "system"
+  agentType  String? // "market_analyst" | "pattern_scout" | "document_analyst" | "sentiment"
+  confidence Decimal? @db.Decimal(5, 4) // 0.0 to 1.0 confidence score
+  metadata   Json? // Additional structured data (extracted metrics, patterns, etc.)
+  createdAt  DateTime @default(now())
 
   @@index([symbol])
   @@index([source])
@@ -355,19 +369,19 @@ model FinancialScore {
   id              String   @id @default(uuid())
   symbol          String
   fScore          Int      @default(0)
-  roa             Decimal? @db.Decimal(10,4)
-  roaChange       Decimal? @db.Decimal(10,4)
-  cfo             Decimal? @db.Decimal(10,4)
-  cfoVsNi         Decimal? @db.Decimal(10,4)
-  currentRatio    Decimal? @db.Decimal(10,4)
-  currentRatioChg Decimal? @db.Decimal(10,4)
-  leverage        Decimal? @db.Decimal(10,4)
-  leverageChange  Decimal? @db.Decimal(10,4)
-  sharesChange    Decimal? @db.Decimal(10,4)
-  grossMargin     Decimal? @db.Decimal(10,4)
-  marginChange    Decimal? @db.Decimal(10,4)
-  assetTurnover   Decimal? @db.Decimal(10,4)
-  turnoverChange  Decimal? @db.Decimal(10,4)
+  roa             Decimal? @db.Decimal(10, 4)
+  roaChange       Decimal? @db.Decimal(10, 4)
+  cfo             Decimal? @db.Decimal(10, 4)
+  cfoVsNi         Decimal? @db.Decimal(10, 4)
+  currentRatio    Decimal? @db.Decimal(10, 4)
+  currentRatioChg Decimal? @db.Decimal(10, 4)
+  leverage        Decimal? @db.Decimal(10, 4)
+  leverageChange  Decimal? @db.Decimal(10, 4)
+  sharesChange    Decimal? @db.Decimal(10, 4)
+  grossMargin     Decimal? @db.Decimal(10, 4)
+  marginChange    Decimal? @db.Decimal(10, 4)
+  assetTurnover   Decimal? @db.Decimal(10, 4)
+  turnoverChange  Decimal? @db.Decimal(10, 4)
   periodType      String   @default("annual")
   asOf            DateTime @default(now())
   createdAt       DateTime @default(now())
@@ -378,25 +392,25 @@ model FinancialScore {
 }
 
 model StockRecommendation {
-  id              String   @id @default(uuid())
-  symbol          String
-  entryRange      String?
-  shortTerm       String?
-  longTerm        String?
-  intraday        String?
-  recommendation  String   // ACCUMULATE | BUY | HOLD | SELL | NEUTRAL
-  analystRating   String?
-  profitRangeMin  Decimal? @db.Decimal(30,2)
-  profitRangeMax  Decimal? @db.Decimal(30,2)
-  targetPrice     Decimal? @db.Decimal(30,2)
-  analysis        String?
-  imageUrl        String?
-  isActive        Boolean  @default(true)
-  createdBy       Int?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  symbol         String
+  entryRange     String?
+  shortTerm      String?
+  longTerm       String?
+  intraday       String?
+  recommendation String // ACCUMULATE | BUY | HOLD | SELL | NEUTRAL
+  analystRating  String?
+  profitRangeMin Decimal? @db.Decimal(30, 2)
+  profitRangeMax Decimal? @db.Decimal(30, 2)
+  targetPrice    Decimal? @db.Decimal(30, 2)
+  analysis       String?
+  imageUrl       String?
+  isActive       Boolean  @default(true)
+  createdBy      Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  subscriptions   RecommendationSubscription[]
+  subscriptions RecommendationSubscription[]
 
   @@index([symbol])
   @@index([isActive])
@@ -404,18 +418,18 @@ model StockRecommendation {
 }
 
 model UserAlert {
-  id              String   @id @default(uuid())
-  userId          Int
-  symbol          String?
-  alertType       String   // price_above | price_below | volume_spike | custom
-  title           String
-  message         String?
-  targetPrice     Decimal? @db.Decimal(30,2)
-  currentPrice    Decimal? @db.Decimal(30,2)
-  status          String   @default("active") // active | triggered | dismissed
-  triggeredAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           String    @id @default(uuid())
+  userId       Int
+  symbol       String?
+  alertType    String // price_above | price_below | volume_spike | custom
+  title        String
+  message      String?
+  targetPrice  Decimal?  @db.Decimal(30, 2)
+  currentPrice Decimal?  @db.Decimal(30, 2)
+  status       String    @default("active") // active | triggered | dismissed
+  triggeredAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -424,12 +438,12 @@ model UserAlert {
 }
 
 model RecommendationSubscription {
-  id                String   @id @default(uuid())
-  userId            Int
-  recommendationId  String
+  id               String   @id @default(uuid())
+  userId           Int
+  recommendationId String
   createdAt        DateTime @default(now())
 
-  recommendation    StockRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  recommendation StockRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, recommendationId])
   @@index([userId])
@@ -438,13 +452,13 @@ model RecommendationSubscription {
 }
 
 model Watchlist {
-  id          String   @id @default(uuid())
-  userId      Int
-  name        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    Int
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  items       WatchlistItem[]
+  items WatchlistItem[]
 
   @@index([userId])
   @@map("watchlists")
@@ -456,7 +470,7 @@ model WatchlistItem {
   symbol      String
   addedAt     DateTime @default(now())
 
-  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  watchlist Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
 
   @@unique([watchlistId, symbol])
   @@index([watchlistId])
@@ -465,41 +479,41 @@ model WatchlistItem {
 }
 
 model AuditLog {
-  id              String   @id @default(uuid())
-  userId          Int?
-  userEmail       String?
-  action          String   // API_CALL | USER_ACTION | PORTFOLIO_ACTION | NSE_CALL | LOGIN | LOGOUT
-  resource        String?
-  resourceId      String?
-  method          String?
-  path            String?
-  requestBody     Json?
-  responseStatus  Int?
-  responseTime    Int?     // milliseconds
-  ipAddress       String?
-  userAgent       String?
-  metadata        Json?
-  nseEndpoint     String?
-  errorMessage    String?
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         Int?
+  userEmail      String?
+  action         String // API_CALL | USER_ACTION | PORTFOLIO_ACTION | NSE_CALL | LOGIN | LOGOUT
+  resource       String?
+  resourceId     String?
+  method         String?
+  path           String?
+  requestBody    Json?
+  responseStatus Int?
+  responseTime   Int? // milliseconds
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json?
+  nseEndpoint    String?
+  errorMessage   String?
+  createdAt      DateTime @default(now())
 
   @@index([userId])
   @@index([action])
   @@index([createdAt])
   @@index([resource])
-   @@map("audit_logs")
+  @@map("audit_logs")
 }
 
 model RateLimit {
-  id              String   @id @default(uuid())
-  userId          Int
-  endpoint        String
-  requestCount    Int      @default(0)
-  windowStart     DateTime @default(now())
-  isFlagged       Boolean  @default(false)
-  lastRequestAt   DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(uuid())
+  userId        Int
+  endpoint      String
+  requestCount  Int      @default(0)
+  windowStart   DateTime @default(now())
+  isFlagged     Boolean  @default(false)
+  lastRequestAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([userId, endpoint])
   @@index([userId])
@@ -508,18 +522,18 @@ model RateLimit {
 }
 
 model AdminAnnouncement {
-  id              Int      @id @default(autoincrement())
-  title           String
-  message         String
-  type            String   // info | warning | error | success
-  target          String   // all | user | admin
-  isActive        Boolean  @default(true)
-  startsAt        DateTime?
-  endsAt          DateTime?
-  link            String?
-  createdBy       Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id        Int       @id @default(autoincrement())
+  title     String
+  message   String
+  type      String // info | warning | error | success
+  target    String // all | user | admin
+  isActive  Boolean   @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  link      String?
+  createdBy Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([isActive, startsAt, endsAt])
   @@index([target])
@@ -527,20 +541,20 @@ model AdminAnnouncement {
 }
 
 model Notification {
-  id              String    @id @default(uuid())
-  userId          Int
-  type            String    // alert_triggered | recommendation | system | watchlist | contact_message
-  title           String
-  message         String
-  link            String?
-  isRead          Boolean   @default(false)
-  isAddressed     Boolean   @default(false)
-  addressedAt     DateTime?
-  addressedBy     Int?
-  channelId       String?   // Reference to AlertChannel if delivered via channel
-  deliveryStatus  String?   // delivered | failed | pending — tracks channel delivery
-  acknowledgedAt  DateTime? // When user acknowledged the notification
-  createdAt       DateTime  @default(now())
+  id             String    @id @default(uuid())
+  userId         Int
+  type           String // alert_triggered | recommendation | system | watchlist | contact_message
+  title          String
+  message        String
+  link           String?
+  isRead         Boolean   @default(false)
+  isAddressed    Boolean   @default(false)
+  addressedAt    DateTime?
+  addressedBy    Int?
+  channelId      String? // Reference to AlertChannel if delivered via channel
+  deliveryStatus String? // delivered | failed | pending — tracks channel delivery
+  acknowledgedAt DateTime? // When user acknowledged the notification
+  createdAt      DateTime  @default(now())
 
   @@index([userId])
   @@index([isRead])
@@ -550,33 +564,33 @@ model Notification {
 }
 
 model Symbol {
-  id          Int      @id @default(autoincrement())
-  symbol      String   @unique
+  id          Int       @id @default(autoincrement())
+  symbol      String    @unique
   companyName String
   series      String?
   industry    String?
-  isActive    Boolean  @default(true)
-  lastPrice   Decimal? @db.Decimal(30,6)
+  isActive    Boolean   @default(true)
+  lastPrice   Decimal?  @db.Decimal(30, 6)
   lastUpdated DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  @@map("symbols")
   @@index([symbol])
   @@index([companyName])
+  @@map("symbols")
 }
 
 model BlockDeal {
-  id              Int      @id @default(autoincrement())
-  date            DateTime
-  symbol          String
-  securityName    String
-  clientName      String
-  buySell         String
-  quantityTraded  Int
-  tradePrice      Float
-  remarks         String?
-  importedAt      DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  date           DateTime
+  symbol         String
+  securityName   String
+  clientName     String
+  buySell        String
+  quantityTraded Int
+  tradePrice     Float
+  remarks        String?
+  importedAt     DateTime @default(now())
 
   @@index([date])
   @@index([symbol])
@@ -584,16 +598,16 @@ model BlockDeal {
 }
 
 model BulkDeal {
-  id              Int      @id @default(autoincrement())
-  date            DateTime
-  symbol          String
-  securityName    String
-  clientName      String
-  buySell         String
-  quantityTraded  Int
-  tradePrice      Float
-  remarks         String?
-  importedAt      DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  date           DateTime
+  symbol         String
+  securityName   String
+  clientName     String
+  buySell        String
+  quantityTraded Int
+  tradePrice     Float
+  remarks        String?
+  importedAt     DateTime @default(now())
 
   @@index([date])
   @@index([symbol])
@@ -601,12 +615,12 @@ model BulkDeal {
 }
 
 model ShortSelling {
-  id              Int      @id @default(autoincrement())
-  date            DateTime
-  symbol          String
-  securityName    String
-  quantity        Int
-  importedAt      DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  date         DateTime
+  symbol       String
+  securityName String
+  quantity     Int
+  importedAt   DateTime @default(now())
 
   @@index([date])
   @@index([symbol])
@@ -618,21 +632,21 @@ model ShortSelling {
 // ============================================
 
 model CronJob {
-  id            String    @id @default(uuid())
-  name          String
-  description   String?
-  taskType     String    // stock_sync | corp_actions | alert_check | screener | recommendations
+  id             String    @id @default(uuid())
+  name           String
+  description    String?
+  taskType       String // stock_sync | corp_actions | alert_check | screener | recommendations
   cronExpression String
-  isActive      Boolean   @default(true)
-  lastRun       DateTime?
-  nextRun       DateTime?
-  runCount      Int       @default(0)
-  successCount  Int       @default(0)
-  failureCount  Int       @default(0)
-  config        Json?     // Additional config for the task
-  createdBy     Int?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  isActive       Boolean   @default(true)
+  lastRun        DateTime?
+  nextRun        DateTime?
+  runCount       Int       @default(0)
+  successCount   Int       @default(0)
+  failureCount   Int       @default(0)
+  config         Json? // Additional config for the task
+  createdBy      Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([taskType])
   @@index([isActive])
@@ -640,28 +654,28 @@ model CronJob {
 }
 
 model WorkerTask {
-  id            String    @id @default(uuid())
-  name          String
-  taskType      String    // alert_check | screener | recommendations | data_sync | cleanup | csv_processing | password_reset | notification_broadcast | announcement_mgmt | maintenance | market_data
-  taskCategory  String    @default("regular") // cron | async | regular
-  status        String    @default("pending") // pending | running | completed | failed | cancelled
-  priority      Int       @default(5) // 1-10, higher = more urgent
-  payload       Json?     // Task-specific data
-  result        Json?     // Result of the task execution
-  error         String?   // Error message if failed
-  startedAt     DateTime?
-  completedAt   DateTime?
-  retryCount    Int       @default(0)
+  id           String    @id @default(uuid())
+  name         String
+  taskType     String // alert_check | screener | recommendations | data_sync | cleanup | csv_processing | password_reset | notification_broadcast | announcement_mgmt | maintenance | market_data
+  taskCategory String    @default("regular") // cron | async | regular
+  status       String    @default("pending") // pending | running | completed | failed | cancelled
+  priority     Int       @default(5) // 1-10, higher = more urgent
+  payload      Json? // Task-specific data
+  result       Json? // Result of the task execution
+  error        String? // Error message if failed
+  startedAt    DateTime?
+  completedAt  DateTime?
+  retryCount   Int       @default(0)
   maxRetries   Int       @default(3)
-  createdBy     Int?
-  assignedTo    String?   // Worker node identifier
-  cronJobId     String?   // Reference to CronJob if created from cron
-  parentTaskId  String?   // For sub-tasks or re-runs tracing back to original
-  triggeredBy   String?   // "cron" | "upload" | "admin" | "system"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdBy    Int?
+  assignedTo   String? // Worker node identifier
+  cronJobId    String? // Reference to CronJob if created from cron
+  parentTaskId String? // For sub-tasks or re-runs tracing back to original
+  triggeredBy  String? // "cron" | "upload" | "admin" | "system"
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  events        TaskEvent[]
+  events TaskEvent[]
 
   @@index([status])
   @@index([taskType])
@@ -673,18 +687,18 @@ model WorkerTask {
 }
 
 model WorkerStatus {
-  id              String    @id @default(uuid())
-  workerId        String    @unique // Unique worker identifier
-  workerName      String?
-  status          String    @default("idle") // idle | busy | offline
-  currentTaskId   String?
-  tasksCompleted  Int       @default(0)
-  tasksFailed     Int       @default(0)
-  lastHeartbeat  DateTime  @default(now())
-  cpuUsage        Float?
+  id             String   @id @default(uuid())
+  workerId       String   @unique // Unique worker identifier
+  workerName     String?
+  status         String   @default("idle") // idle | busy | offline
+  currentTaskId  String?
+  tasksCompleted Int      @default(0)
+  tasksFailed    Int      @default(0)
+  lastHeartbeat  DateTime @default(now())
+  cpuUsage       Float?
   memoryUsage    Float?
-  createdAt      DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@map("worker_status")
 }
@@ -694,14 +708,14 @@ model WorkerStatus {
 // ============================================
 
 model TaskEvent {
-  id          String   @id @default(uuid())
-  taskId      String
-  eventType   String   // task_created | task_started | task_completed | task_failed | alert_triggered | csv_row_processed | notification_sent
-  message     String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  taskId    String
+  eventType String // task_created | task_started | task_completed | task_failed | alert_triggered | csv_row_processed | notification_sent
+  message   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
 
-  task        WorkerTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task WorkerTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([eventType])
@@ -714,27 +728,27 @@ model TaskEvent {
 // ============================================
 
 model StockSnapshot {
-  id              String    @id @default(uuid())
-  symbol          String
-  companyName     String?
-  lastPrice       Decimal?  @db.Decimal(30,6)
-  change          Decimal?  @db.Decimal(30,6)
-  pChange         Decimal?  @db.Decimal(30,6)
-  open            Decimal?  @db.Decimal(30,6)
-  high            Decimal?  @db.Decimal(30,6)
-  low             Decimal?  @db.Decimal(30,6)
-  previousClose   Decimal?  @db.Decimal(30,6)
-  volume          BigInt?
-  value           Decimal?  @db.Decimal(30,6)
-  yearHigh        Decimal?  @db.Decimal(30,6)
-  yearLow         Decimal?  @db.Decimal(30,6)
-  pe              Decimal?  @db.Decimal(30,6)
-  pb              Decimal?  @db.Decimal(30,6)
-  dividendYield   Decimal?  @db.Decimal(30,6)
-  sector          String?
-  industry        String?
-  marketCap       Decimal?  @db.Decimal(30,6)
-  capturedAt      DateTime  @default(now())
+  id            String   @id @default(uuid())
+  symbol        String
+  companyName   String?
+  lastPrice     Decimal? @db.Decimal(30, 6)
+  change        Decimal? @db.Decimal(30, 6)
+  pChange       Decimal? @db.Decimal(30, 6)
+  open          Decimal? @db.Decimal(30, 6)
+  high          Decimal? @db.Decimal(30, 6)
+  low           Decimal? @db.Decimal(30, 6)
+  previousClose Decimal? @db.Decimal(30, 6)
+  volume        BigInt?
+  value         Decimal? @db.Decimal(30, 6)
+  yearHigh      Decimal? @db.Decimal(30, 6)
+  yearLow       Decimal? @db.Decimal(30, 6)
+  pe            Decimal? @db.Decimal(30, 6)
+  pb            Decimal? @db.Decimal(30, 6)
+  dividendYield Decimal? @db.Decimal(30, 6)
+  sector        String?
+  industry      String?
+  marketCap     Decimal? @db.Decimal(30, 6)
+  capturedAt    DateTime @default(now())
 
   @@unique([symbol, capturedAt])
   @@index([symbol])
@@ -751,9 +765,9 @@ model ScreenerConfig {
   id              String    @id @default(uuid())
   name            String
   description     String?
-  filters         Json      // Filter criteria
+  filters         Json // Filter criteria
   isDefault       Boolean   @default(false)
-  isPublic       Boolean   @default(true)
+  isPublic        Boolean   @default(true)
   userId          Int?
   lastRun         DateTime?
   lastResultCount Int?
@@ -766,28 +780,28 @@ model ScreenerConfig {
 
 // ⚠️ DEPRECATED in v2.0.0 — replaced by ScanResult + ScanResultItem
 model ScreenerResult {
-  id              String    @id @default(uuid())
+  id              String   @id @default(uuid())
   configId        String
   symbol          String
   companyName     String?
-  lastPrice       Decimal?  @db.Decimal(30,6)
-  change          Decimal?  @db.Decimal(30,6)
-  pChange         Decimal?  @db.Decimal(30,6)
+  lastPrice       Decimal? @db.Decimal(30, 6)
+  change          Decimal? @db.Decimal(30, 6)
+  pChange         Decimal? @db.Decimal(30, 6)
   volume          BigInt?
   avgVolume       BigInt?
-  marketCap       Decimal?  @db.Decimal(30,6)
-  peRatio         Decimal?  @db.Decimal(30,6)
-  pbRatio         Decimal?  @db.Decimal(30,6)
-  roe             Decimal?  @db.Decimal(10,4)
-  debtToEquity    Decimal?  @db.Decimal(10,4)
-  eps             Decimal?  @db.Decimal(30,6)
-  bookValue       Decimal?  @db.Decimal(30,6)
-  dividendYield   Decimal?  @db.Decimal(30,6)
+  marketCap       Decimal? @db.Decimal(30, 6)
+  peRatio         Decimal? @db.Decimal(30, 6)
+  pbRatio         Decimal? @db.Decimal(30, 6)
+  roe             Decimal? @db.Decimal(10, 4)
+  debtToEquity    Decimal? @db.Decimal(10, 4)
+  eps             Decimal? @db.Decimal(30, 6)
+  bookValue       Decimal? @db.Decimal(30, 6)
+  dividendYield   Decimal? @db.Decimal(30, 6)
   sector          String?
   industry        String?
   technicalRating String?
   analystRating   String?
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime @default(now())
 
   @@index([configId])
   @@index([symbol])
@@ -798,10 +812,10 @@ model ScreenerResult {
 model DailyScreenerSync {
   id          String   @id @default(uuid())
   syncDate    DateTime @unique // Normalized to midnight or use a Date string
-  data        Json     // Full TradingView scan status
+  data        Json // Full TradingView scan status
   recordCount Int      @default(0)
   status      String   @default("completed") // completed | failed
-  error       String?  // Error message if failed
+  error       String? // Error message if failed
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -815,19 +829,19 @@ model DailyScreenerSync {
 
 model ScanConfig {
   id          String    @id @default(uuid())
-  userId      Int       // Owner of the config
+  userId      Int // Owner of the config
   name        String
   description String?
-  filters     Json      // FilterGroup condition tree
-  columns     Json?     // Custom column selection for results
-  schedule    String?   // Cron expression for auto-run (optional)
+  filters     Json // FilterGroup condition tree
+  columns     Json? // Custom column selection for results
+  schedule    String? // Cron expression for auto-run (optional)
   isPublic    Boolean   @default(false)
   lastRunAt   DateTime?
   runCount    Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  results     ScanResult[]
+  results ScanResult[]
 
   @@index([userId])
   @@index([isPublic])
@@ -835,34 +849,34 @@ model ScanConfig {
 }
 
 model ScanResult {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   configId    String
-  runAt       DateTime  @default(now())
+  runAt       DateTime @default(now())
   matchCount  Int
-  totalCount  Int       @default(0)
-  executionMs Int?      // How long the scan took
-  status      String    @default("completed") // running | completed | failed
+  totalCount  Int      @default(0)
+  executionMs Int? // How long the scan took
+  status      String   @default("completed") // running | completed | failed
   error       String?
 
-  config      ScanConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-  items       ScanResultItem[]
+  config ScanConfig       @relation(fields: [configId], references: [id], onDelete: Cascade)
+  items  ScanResultItem[]
 
   @@index([configId, runAt])
   @@map("scan_results")
 }
 
 model ScanResultItem {
-  id        String     @id @default(uuid())
-  resultId  String
-  symbol    String
-  name      String?
-  price     Decimal?   @db.Decimal(30,6)
-  change    Decimal?   @db.Decimal(30,6)
-  pChange   Decimal?   @db.Decimal(30,6)
-  volume    BigInt?
-  data      Json?      // Full snapshot of all fields at scan time (key-value pairs)
+  id       String   @id @default(uuid())
+  resultId String
+  symbol   String
+  name     String?
+  price    Decimal? @db.Decimal(30, 6)
+  change   Decimal? @db.Decimal(30, 6)
+  pChange  Decimal? @db.Decimal(30, 6)
+  volume   BigInt?
+  data     Json? // Full snapshot of all fields at scan time (key-value pairs)
 
-  result    ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  result ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
 
   @@index([resultId])
   @@index([symbol])
@@ -870,26 +884,26 @@ model ScanResultItem {
 }
 
 model BacktestRun {
-  id              String        @id @default(uuid())
-  userId          Int
-  name            String
-  strategyId      String?       // Optional: link to a TradingStrategy (Phase 3)
-  configId        String?       // Optional: link to a ScanConfig
-  entryFilter     Json          // Entry condition tree
-  exitFilter      Json?         // Exit condition tree (optional, manual exit)
-  startDate       DateTime
-  endDate         DateTime
-  initialCapital  Decimal?      @db.Decimal(30,2) @default(1000000)
-  totalTrades     Int           @default(0)
-  winRate         Decimal?      @db.Decimal(10,4)
-  totalPnl        Decimal?      @db.Decimal(30,2)
-  maxDrawdown     Decimal?      @db.Decimal(10,4)
-  sharpeRatio     Decimal?      @db.Decimal(10,4)
-  status          String        @default("pending") // pending | running | completed | failed
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String   @id @default(uuid())
+  userId         Int
+  name           String
+  strategyId     String? // Optional: link to a TradingStrategy (Phase 3)
+  configId       String? // Optional: link to a ScanConfig
+  entryFilter    Json // Entry condition tree
+  exitFilter     Json? // Exit condition tree (optional, manual exit)
+  startDate      DateTime
+  endDate        DateTime
+  initialCapital Decimal? @default(1000000) @db.Decimal(30, 2)
+  totalTrades    Int      @default(0)
+  winRate        Decimal? @db.Decimal(10, 4)
+  totalPnl       Decimal? @db.Decimal(30, 2)
+  maxDrawdown    Decimal? @db.Decimal(10, 4)
+  sharpeRatio    Decimal? @db.Decimal(10, 4)
+  status         String   @default("pending") // pending | running | completed | failed
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  trades          BacktestTrade[]
+  trades BacktestTrade[]
 
   @@index([userId])
   @@index([status])
@@ -902,15 +916,15 @@ model BacktestTrade {
   symbol      String
   entryDate   DateTime
   exitDate    DateTime?
-  entryPrice  Decimal?  @db.Decimal(30,2)
-  exitPrice   Decimal?  @db.Decimal(30,2)
+  entryPrice  Decimal?  @db.Decimal(30, 2)
+  exitPrice   Decimal?  @db.Decimal(30, 2)
   quantity    Int?
-  pnl         Decimal?  @db.Decimal(30,2)
-  pnlPercent  Decimal?  @db.Decimal(10,4)
-  entryReason String?   // What triggered the entry
-  exitReason  String?   // What triggered the exit
+  pnl         Decimal?  @db.Decimal(30, 2)
+  pnlPercent  Decimal?  @db.Decimal(10, 4)
+  entryReason String? // What triggered the entry
+  exitReason  String? // What triggered the exit
 
-  run         BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId])
   @@index([symbol])
@@ -925,10 +939,10 @@ model BacktestTrade {
 model BacktestHistory {
   id        String   @id @default(uuid())
   symbol    String
-  fromDate  String   // DD-MM-YYYY inclusive
-  toDate    String   // DD-MM-YYYY inclusive
+  fromDate  String // DD-MM-YYYY inclusive
+  toDate    String // DD-MM-YYYY inclusive
   series    String   @default("EQ")
-  ohlcv     Json     // OHLCV[] bars: [{timestamp, open, high, low, close, volume}]
+  ohlcv     Json // OHLCV[] bars: [{timestamp, open, high, low, close, volume}]
   barCount  Int      @default(0)
   fetchedAt DateTime @default(now())
 
@@ -942,16 +956,16 @@ model BacktestHistory {
 model MarketCache {
   id              String    @id @default(uuid())
   cacheKey        String    @unique // Unique key for the cached data (e.g., "corporate_actions", "announcements_NIFTY50")
-  dataType        String    // Type of data: "corporate_actions", "announcements", "insider_trading", "deals", "gainers", "losers", "most_active", etc.
-  indexName       String?   // Optional index filter (e.g., "NIFTY 50", "NIFTY BANK")
-  data            Json      // The actual cached data
+  dataType        String // Type of data: "corporate_actions", "announcements", "insider_trading", "deals", "gainers", "losers", "most_active", etc.
+  indexName       String? // Optional index filter (e.g., "NIFTY 50", "NIFTY BANK")
+  data            Json // The actual cached data
   recordCount     Int       @default(0) // Number of records cached
   nseLastModified DateTime? // Last modified timestamp from NSE response
   lastSyncedAt    DateTime  @default(now()) // When we last synced from NSE
   nextSyncAt      DateTime? // When the next sync is due (based on market hours)
   marketStatus    String    @default("closed") // "open" | "closed" | "pre_market"
   syncStatus      String    @default("idle") // "idle" | "syncing" | "error"
-  syncError       String?   // Error message if sync failed
+  syncError       String? // Error message if sync failed
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -964,24 +978,24 @@ model MarketCache {
 
 // API Request Log - tracks all API requests for monitoring and security
 model APIRequestLog {
-  id              String    @id @default(uuid())
-  requestId       String    @unique // Unique request ID for tracing
-  userId          Int?      // User ID if authenticated
-  userEmail       String?  // User email if authenticated
-  ipAddress       String?   // Client IP address
-  userAgent       String?   // Client user agent
-  method          String    // HTTP method (GET, POST, etc.)
-  path            String    // API path
-  queryParams     String?   // Query parameters (sanitized)
-  statusCode      Int?      // Response status code
-  responseTime    Int?      // Response time in ms
-  errorMessage    String?   // Error message if failed
-  isNSE           Boolean   @default(false) // Whether this is an NSE API call
-  nseEndpoint     String?   // NSE endpoint if isNSE = true
-  isRateLimited   Boolean   @default(false) // Whether request was rate limited
-  isAnomaly       Boolean   @default(false) // Whether this request was flagged as anomalous
-  anomalyType     String?   // Type of anomaly detected
-  createdAt       DateTime  @default(now())
+  id            String   @id @default(uuid())
+  requestId     String   @unique // Unique request ID for tracing
+  userId        Int? // User ID if authenticated
+  userEmail     String? // User email if authenticated
+  ipAddress     String? // Client IP address
+  userAgent     String? // Client user agent
+  method        String // HTTP method (GET, POST, etc.)
+  path          String // API path
+  queryParams   String? // Query parameters (sanitized)
+  statusCode    Int? // Response status code
+  responseTime  Int? // Response time in ms
+  errorMessage  String? // Error message if failed
+  isNSE         Boolean  @default(false) // Whether this is an NSE API call
+  nseEndpoint   String? // NSE endpoint if isNSE = true
+  isRateLimited Boolean  @default(false) // Whether request was rate limited
+  isAnomaly     Boolean  @default(false) // Whether this request was flagged as anomalous
+  anomalyType   String? // Type of anomaly detected
+  createdAt     DateTime @default(now())
 
   @@index([userId])
   @@index([ipAddress])
@@ -995,18 +1009,18 @@ model APIRequestLog {
 
 // Rate Limit Config - configurable rate limits per endpoint/user
 model RateLimitConfig {
-  id              String    @id @default(uuid())
-  identifier      String    @unique // IP address, user ID, or endpoint pattern
-  identifierType   String    // "ip" | "user" | "endpoint"
-  endpoint        String?   // Specific endpoint or pattern (e.g., "/api/nse/*")
-  limit           Int       @default(100) // Max requests allowed
-  windowSeconds   Int       @default(60) // Time window in seconds
-  currentCount    Int       @default(0) // Current request count
-  resetAt         DateTime? // When the counter resets
-  isBlocked       Boolean   @default(false) // Whether this identifier is blocked
-  blockReason     String?   // Reason for blocking
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id             String    @id @default(uuid())
+  identifier     String    @unique // IP address, user ID, or endpoint pattern
+  identifierType String // "ip" | "user" | "endpoint"
+  endpoint       String? // Specific endpoint or pattern (e.g., "/api/nse/*")
+  limit          Int       @default(100) // Max requests allowed
+  windowSeconds  Int       @default(60) // Time window in seconds
+  currentCount   Int       @default(0) // Current request count
+  resetAt        DateTime? // When the counter resets
+  isBlocked      Boolean   @default(false) // Whether this identifier is blocked
+  blockReason    String? // Reason for blocking
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([identifier])
   @@index([identifierType])
@@ -1015,16 +1029,16 @@ model RateLimitConfig {
 
 // Server Log - database-backed logging for serverless environments
 model ServerLog {
-  id          String    @id @default(uuid())
-  level       String    // "info" | "warn" | "error" | "debug"
-  message     String    // Main log message
-  source      String?   // Source of log: "worker" | "api" | "sync" | "system" | "nse"
-  taskId      String?   // Associated task ID (for worker logs)
-  metadata    Json?     // Additional structured data
-  ipAddress   String?   // Client IP if applicable
-  userAgent   String?   // User agent if applicable
-  requestId   String?   // Request ID for tracing
-  createdAt   DateTime  @default(now())
+  id        String   @id @default(uuid())
+  level     String // "info" | "warn" | "error" | "debug"
+  message   String // Main log message
+  source    String? // Source of log: "worker" | "api" | "sync" | "system" | "nse"
+  taskId    String? // Associated task ID (for worker logs)
+  metadata  Json? // Additional structured data
+  ipAddress String? // Client IP if applicable
+  userAgent String? // User agent if applicable
+  requestId String? // Request ID for tracing
+  createdAt DateTime @default(now())
 
   @@index([level])
   @@index([source])
@@ -1035,19 +1049,19 @@ model ServerLog {
 
 // Anomaly Alert - stores detected anomalies and security threats
 model AnomalyAlert {
-  id              String    @id @default(uuid())
-  alertType       String    // "high_request_volume" | "suspicious_pattern" | "rate_limit_exceeded" | "unusual_api" | "security_threat"
-  severity        String    // "low" | "medium" | "high" | "critical"
-  title           String
-  description     String
-  identifier      String?   // IP or user that triggered the anomaly
-  identifierType  String?
-  endpoint        String?   // Endpoint that was targeted
-  metadata        Json?     // Additional data about the anomaly
-  isResolved      Boolean   @default(false)
-  resolvedAt       DateTime?
-  resolvedBy       Int?      // Admin user ID who resolved it
-  createdAt       DateTime  @default(now())
+  id             String    @id @default(uuid())
+  alertType      String // "high_request_volume" | "suspicious_pattern" | "rate_limit_exceeded" | "unusual_api" | "security_threat"
+  severity       String // "low" | "medium" | "high" | "critical"
+  title          String
+  description    String
+  identifier     String? // IP or user that triggered the anomaly
+  identifierType String?
+  endpoint       String? // Endpoint that was targeted
+  metadata       Json? // Additional data about the anomaly
+  isResolved     Boolean   @default(false)
+  resolvedAt     DateTime?
+  resolvedBy     Int? // Admin user ID who resolved it
+  createdAt      DateTime  @default(now())
 
   @@index([alertType])
   @@index([severity])
@@ -1065,15 +1079,15 @@ model AnomalyAlert {
 // ============================================
 
 model RebalancerConfig {
-  id              String   @id @default(uuid())
-  userId          Int
-  name            String   @default("Default")
-  categories      Json     // Array of { name, targetPercent, type }
-  driftThreshold  Decimal  @default(5.0) @db.Decimal(5,2)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  userId         Int
+  name           String   @default("Default")
+  categories     Json // Array of { name, targetPercent, type }
+  driftThreshold Decimal  @default(5.0) @db.Decimal(5, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("rebalancer_configs")
@@ -1084,26 +1098,26 @@ model RebalancerConfig {
 // ============================================
 
 model FOPosition {
-  id          String    @id @default(uuid())
-  userId      Int
-  symbol      String    // Underlying (e.g., "NIFTY", "BANKNIFTY", "RELIANCE")
-  type        String    // FUTURES | CALL | PUT
-  direction   String    // LONG | SHORT
-  quantity    Int
-  entryPrice  Decimal   @db.Decimal(30,6)
-  currentPrice Decimal? @db.Decimal(30,6)
-  premium     Decimal?  @db.Decimal(30,6) // Premium paid/received (options only)
-  strike      Decimal?  @db.Decimal(30,6) // Strike price (options only)
-  expiry      DateTime? // Contract expiry date
-  status      String    @default("OPEN") // OPEN | CLOSED
-  closePrice  Decimal?  @db.Decimal(30,6)
-  closeDate   DateTime?
-  pnl         Decimal?  @db.Decimal(30,6)
-  notes       String?
+  id           String    @id @default(uuid())
+  userId       Int
+  symbol       String // Underlying (e.g., "NIFTY", "BANKNIFTY", "RELIANCE")
+  type         String // FUTURES | CALL | PUT
+  direction    String // LONG | SHORT
+  quantity     Int
+  entryPrice   Decimal   @db.Decimal(30, 6)
+  currentPrice Decimal?  @db.Decimal(30, 6)
+  premium      Decimal?  @db.Decimal(30, 6) // Premium paid/received (options only)
+  strike       Decimal?  @db.Decimal(30, 6) // Strike price (options only)
+  expiry       DateTime? // Contract expiry date
+  status       String    @default("OPEN") // OPEN | CLOSED
+  closePrice   Decimal?  @db.Decimal(30, 6)
+  closeDate    DateTime?
+  pnl          Decimal?  @db.Decimal(30, 6)
+  notes        String?
 
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([symbol])
@@ -1113,19 +1127,19 @@ model FOPosition {
 }
 
 model UserSession {
-  id              String    @id @default(uuid())
-  userId          Int
-  sessionToken    String    @unique // Encrypted session token
-  ipAddress       String?   // IP address of the session
-  userAgent       String?   // Browser/User agent
-  deviceInfo      String?   // Device information (browser, OS)
-  location        String?   // Approximate location
-  isActive        Boolean   @default(true)
-  expiresAt       DateTime  // When this session expires
-  lastActiveAt    DateTime  @default(now()) // Last activity timestamp
-  createdAt       DateTime  @default(now())
+  id           String   @id @default(uuid())
+  userId       Int
+  sessionToken String   @unique // Encrypted session token
+  ipAddress    String? // IP address of the session
+  userAgent    String? // Browser/User agent
+  deviceInfo   String? // Device information (browser, OS)
+  location     String? // Approximate location
+  isActive     Boolean  @default(true)
+  expiresAt    DateTime // When this session expires
+  lastActiveAt DateTime @default(now()) // Last activity timestamp
+  createdAt    DateTime @default(now())
 
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([isActive])
@@ -1139,16 +1153,16 @@ model UserSession {
 
 // Delivery channel configuration (email, webhook, telegram, push)
 model AlertChannel {
-  id          String   @id @default(uuid())
-  userId      Int      @default(0)  // 0 = system-wide (admin), >0 = user-owned
-  type        String   // email | webhook | telegram | push
-  name        String
-  config      Json     // Type-specific config (smtp, url, bot_token, etc.)
-  isActive    Boolean  @default(true)
-  verified    Boolean  @default(false)
+  id           String    @id @default(uuid())
+  userId       Int       @default(0) // 0 = system-wide (admin), >0 = user-owned
+  type         String // email | webhook | telegram | push
+  name         String
+  config       Json // Type-specific config (smtp, url, bot_token, etc.)
+  isActive     Boolean   @default(true)
+  verified     Boolean   @default(false)
   lastTestedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([userId])
   @@index([type])
@@ -1161,18 +1175,18 @@ model AlertRule {
   userId          Int
   name            String
   description     String?
-  condition       Json      // FilterGroup tree — reuses screener condition tree
-  channels        String[]  // References to AlertChannel IDs
-  schedule        Json?     // Active hours, days, cooldown minutes
-  escalation      Json?     // Escalation rules (delay, channels to escalate to)
-  action          Json?     // One-click action config (buy/sell/paper_trade)
+  condition       Json // FilterGroup tree — reuses screener condition tree
+  channels        String[] // References to AlertChannel IDs
+  schedule        Json? // Active hours, days, cooldown minutes
+  escalation      Json? // Escalation rules (delay, channels to escalate to)
+  action          Json? // One-click action config (buy/sell/paper_trade)
   isActive        Boolean   @default(true)
   lastTriggeredAt DateTime?
   triggerCount    Int       @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  events          AlertEvent[]
+  events AlertEvent[]
 
   @@index([userId])
   @@index([isActive])
@@ -1181,18 +1195,18 @@ model AlertRule {
 
 // Alert trigger event history
 model AlertEvent {
-  id              String    @id @default(uuid())
-  ruleId          String
-  channelId       String?   // Reference to AlertChannel ID
-  channelType     String    // email | webhook | telegram | push | in_app
-  status          String    // delivered | failed | pending
-  error           String?
-  metadata        Json?     // Trigger details (symbol, price, values at trigger time)
-  deliveredAt     DateTime?
-  attemptedAt     DateTime  @default(now())
-  acknowledgedAt  DateTime?
+  id             String    @id @default(uuid())
+  ruleId         String
+  channelId      String? // Reference to AlertChannel ID
+  channelType    String // email | webhook | telegram | push | in_app
+  status         String // delivered | failed | pending
+  error          String?
+  metadata       Json? // Trigger details (symbol, price, values at trigger time)
+  deliveredAt    DateTime?
+  attemptedAt    DateTime  @default(now())
+  acknowledgedAt DateTime?
 
-  rule            AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  rule AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@index([ruleId, attemptedAt])
   @@index([channelType])
@@ -1203,11 +1217,11 @@ model AlertEvent {
 // Encrypted secrets for delivery channel credentials
 model Secret {
   id        String   @id @default(uuid())
-  name      String   @unique   // Unique key: "smtp_gmail", "telegram_bot", "slack_webhook"
-  type      String   // smtp_password | api_key | bot_token | webhook_secret
-  value     String   // Encrypted value (AES-256-GCM)
-  hint      String?  // Visible hint (e.g., "user@***.com" or "token ending with XXXX")
-  metadata  Json?    // Additional metadata (expiry, rotation, last used)
+  name      String   @unique // Unique key: "smtp_gmail", "telegram_bot", "slack_webhook"
+  type      String // smtp_password | api_key | bot_token | webhook_secret
+  value     String // Encrypted value (AES-256-GCM)
+  hint      String? // Visible hint (e.g., "user@***.com" or "token ending with XXXX")
+  metadata  Json? // Additional metadata (expiry, rotation, last used)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1220,14 +1234,14 @@ model Secret {
 // Delivery attempt log for observability
 model DeliveryLog {
   id          String   @id @default(uuid())
-  eventId     String   // Reference to AlertEvent
-  channelId   String?  // Reference to AlertChannel
-  channelType String   // email | webhook | telegram | push
-  attempt     Int      @default(1)   // Which attempt number
-  status      String   // success | failed | pending
-  statusCode  Int?     // HTTP status code or SMTP response code
-  response    String?  // Response body or error message
-  durationMs  Int?     // How long the delivery took
+  eventId     String // Reference to AlertEvent
+  channelId   String? // Reference to AlertChannel
+  channelType String // email | webhook | telegram | push
+  attempt     Int      @default(1) // Which attempt number
+  status      String // success | failed | pending
+  statusCode  Int? // HTTP status code or SMTP response code
+  response    String? // Response body or error message
+  durationMs  Int? // How long the delivery took
   attemptedAt DateTime @default(now())
 
   @@index([eventId])
@@ -1241,22 +1255,22 @@ model DeliveryLog {
 
 // Stores all AI analysis results for persistence and correlation
 model AIAnalysis {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   userId        Int
-  analysisType  String   // screener | dividend | portfolio | market | alert | custom
-  query         String   // The original query/prompt
-  result        String   // The AI response (markdown)
-  model         String   // Model used (e.g., openrouter/free)
-  tokensUsed    Int      @default(0)
-  executionTime Int      @default(0) // ms
-  success       Boolean  @default(true)
+  analysisType  String // screener | dividend | portfolio | market | alert | custom
+  query         String // The original query/prompt
+  result        String // The AI response (markdown)
+  model         String // Model used (e.g., openrouter/free)
+  tokensUsed    Int     @default(0)
+  executionTime Int     @default(0) // ms
+  success       Boolean @default(true)
   errorMessage  String?
-  metadata      Json?    // Additional data (correlation keys, stock symbols, etc.)
+  metadata      Json? // Additional data (correlation keys, stock symbols, etc.)
 
-  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation  AIConversation?   @relation(fields: [conversationId], references: [id])
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   AIConversation? @relation(fields: [conversationId], references: [id])
   conversationId String?
-  createdAt     DateTime @default(now())
+  createdAt      DateTime        @default(now())
 
   @@index([userId])
   @@index([analysisType])
@@ -1267,19 +1281,19 @@ model AIAnalysis {
 
 // Stores conversation context for multi-turn interactions
 model AIConversation {
-  id            String   @id @default(uuid())
-  userId        Int
-  analysisType  String   // screener | dividend | portfolio | market | alert
-  title         String?  // Auto-generated or user-provided title
-  messages      Json     // Array of { role, content, tokens, timestamp }
-  tokenCount    Int      @default(0) // Total tokens across all messages
-  messageCount  Int      @default(0)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       Int
+  analysisType String // screener | dividend | portfolio | market | alert
+  title        String? // Auto-generated or user-provided title
+  messages     Json // Array of { role, content, tokens, timestamp }
+  tokenCount   Int      @default(0) // Total tokens across all messages
+  messageCount Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  analyses      AIAnalysis[]
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses AIAnalysis[]
 
   @@index([userId])
   @@index([updatedAt])
@@ -1309,25 +1323,25 @@ model AIRateLimit {
 
 // Long-lived tracker for a stock recommendation — one per symbol
 model RecommendationTracker {
-  id              String   @id @default(uuid())
-  symbol          String
-  status          String   @default("active") // active | target_achieved | stop_loss_hit | expired
-  entryPrice      Float
-  currentPrice    Float?
-  targetPrice     Float
-  stopLoss        Float
-  timeHorizon     String   // short | medium | long
-  confidence      Float
-  aiRecommendation String  // BUY | HOLD | SELL
-  reasoning       String?
-  riskFactors     Json?
+  id                  String    @id @default(uuid())
+  symbol              String
+  status              String    @default("active") // active | target_achieved | stop_loss_hit | expired
+  entryPrice          Float
+  currentPrice        Float?
+  targetPrice         Float
+  stopLoss            Float
+  timeHorizon         String // short | medium | long
+  confidence          Float
+  aiRecommendation    String // BUY | HOLD | SELL
+  reasoning           String?
+  riskFactors         Json?
   screenerAttribution Json? // Array of screener names that found this stock
-  lastCheckedAt   DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lastCheckedAt       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  dailyStocks     DailyRecommendationStock[]
-  statusHistory   RecommendationStatusHistory[]
+  dailyStocks   DailyRecommendationStock[]
+  statusHistory RecommendationStatusHistory[]
 
   @@unique([symbol, createdAt])
   @@index([symbol])
@@ -1338,23 +1352,23 @@ model RecommendationTracker {
 
 // Per-run record — one per daily execution
 model DailyRecommendationRun {
-  id              String   @id @default(uuid())
-  runDate         DateTime @default(now())
-  status          String   @default("running") // running | completed | failed
-  triggeredBy     String   @default("system") // system (cron) | admin (manual Run Now)
-  totalScreeners  Int      @default(0)
-  successfulScreeners Int  @default(0)
-  totalStocks     Int      @default(0)
-  uniqueStocks    Int      @default(0)
-  aiProcessed     Int      @default(0)
-  aiFailed        Int      @default(0)
-  executionTimeMs Int?
-  errorMessage    String?
-  metadata        Json?    // Screener run details, timing, etc.
-  createdAt       DateTime @default(now())
-  completedAt     DateTime?
+  id                  String    @id @default(uuid())
+  runDate             DateTime  @default(now())
+  status              String    @default("running") // running | completed | failed
+  triggeredBy         String    @default("system") // system (cron) | admin (manual Run Now)
+  totalScreeners      Int       @default(0)
+  successfulScreeners Int       @default(0)
+  totalStocks         Int       @default(0)
+  uniqueStocks        Int       @default(0)
+  aiProcessed         Int       @default(0)
+  aiFailed            Int       @default(0)
+  executionTimeMs     Int?
+  errorMessage        String?
+  metadata            Json? // Screener run details, timing, etc.
+  createdAt           DateTime  @default(now())
+  completedAt         DateTime?
 
-  stocks          DailyRecommendationStock[]
+  stocks DailyRecommendationStock[]
 
   @@index([runDate])
   @@index([status])
@@ -1364,35 +1378,35 @@ model DailyRecommendationRun {
 
 // Per-stock entry within a daily run
 model DailyRecommendationStock {
-  id              String   @id @default(uuid())
-  runId           String
-  trackerId       String? // Nullable since v3.5.0 — tracker is hard-deleted on archival (SetNull)
-  symbol          String
-  price           Float
-  change          Float?
-  changePercent   Float?
-  volume          BigInt?
+  id                  String  @id @default(uuid())
+  runId               String
+  trackerId           String? // Nullable since v3.5.0 — tracker is hard-deleted on archival (SetNull)
+  symbol              String
+  price               Float
+  change              Float?
+  changePercent       Float?
+  volume              BigInt?
   // Screener attribution
   screenerAttribution Json? // Array of screener names
-  screenerCount   Int      @default(0)
+  screenerCount       Int     @default(0)
   // AI analysis
-  aiRecommendation String? // BUY | HOLD | SELL
-  confidence      Float?
-  targetPrice     Float?
-  stopLoss        Float?
-  timeHorizon     String?  // short | medium | long
-  reasoning       String?
-  riskFactors     Json?
+  aiRecommendation    String? // BUY | HOLD | SELL
+  confidence          Float?
+  targetPrice         Float?
+  stopLoss            Float?
+  timeHorizon         String? // short | medium | long
+  reasoning           String?
+  riskFactors         Json?
   // Execution metadata
-  aiTokensUsed    Int      @default(0)
-  aiExecutionMs   Int      @default(0)
-  aiSuccess       Boolean  @default(false)
-  aiError         String?
+  aiTokensUsed        Int     @default(0)
+  aiExecutionMs       Int     @default(0)
+  aiSuccess           Boolean @default(false)
+  aiError             String?
 
-  run             DailyRecommendationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  tracker         RecommendationTracker?  @relation(fields: [trackerId], references: [id], onDelete: SetNull)
+  run     DailyRecommendationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  tracker RecommendationTracker? @relation(fields: [trackerId], references: [id], onDelete: SetNull)
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([runId, symbol])
   @@index([runId])
@@ -1404,15 +1418,15 @@ model DailyRecommendationStock {
 
 // Audit trail for recommendation status changes
 model RecommendationStatusHistory {
-  id              String   @id @default(uuid())
-  trackerId       String
-  previousStatus  String?
-  newStatus       String
-  triggerSource   String   // cron_check | manual | api
-  metadata        Json?    // Price at time of check, etc.
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  trackerId      String
+  previousStatus String?
+  newStatus      String
+  triggerSource  String // cron_check | manual | api
+  metadata       Json? // Price at time of check, etc.
+  createdAt      DateTime @default(now())
 
-  tracker         RecommendationTracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  tracker RecommendationTracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
 
   @@index([trackerId])
   @@index([newStatus])
@@ -1424,27 +1438,27 @@ model RecommendationStatusHistory {
 // When a tracker reaches 360 days, it is snapshotted here and hard-deleted
 // from RecommendationTracker (daily_recommendation_stocks survive via SetNull).
 model RecommendationArchive {
-  id              String   @id @default(uuid())
-  symbol          String
-  trackerId       String   // Original RecommendationTracker id (for reference)
-  lastRunId       String?  // Most recent DailyRecommendationRun id
-  runDate         DateTime // Recommendation posted date (run date)
-  entryPrice      Float
-  currentPrice    Float?   // Final price at archival
-  targetPrice     Float?
-  stopLoss        Float?
-  category        String?  // btst | short | swing | medium | long (timeHorizon)
-  aiRecommendation String? // BUY | HOLD | SELL
-  confidence      Float?
-  reasoning       String?
-  riskFactors     Json?
+  id                  String   @id @default(uuid())
+  symbol              String
+  trackerId           String // Original RecommendationTracker id (for reference)
+  lastRunId           String? // Most recent DailyRecommendationRun id
+  runDate             DateTime // Recommendation posted date (run date)
+  entryPrice          Float
+  currentPrice        Float? // Final price at archival
+  targetPrice         Float?
+  stopLoss            Float?
+  category            String? // btst | short | swing | medium | long (timeHorizon)
+  aiRecommendation    String? // BUY | HOLD | SELL
+  confidence          Float?
+  reasoning           String?
+  riskFactors         Json?
   screenerAttribution Json?
-  finalStatus     String   // tracking | target_achieved | stop_loss_hit
-  returnPercent   Float?   // (currentPrice - entryPrice) / entryPrice * 100
-  daysTracked     Int
-  statusHistory   Json?    // Frozen RecommendationStatusHistory trail
-  archivedReason  String   // age_360d
-  archivedAt      DateTime @default(now())
+  finalStatus         String // tracking | target_achieved | stop_loss_hit
+  returnPercent       Float? // (currentPrice - entryPrice) / entryPrice * 100
+  daysTracked         Int
+  statusHistory       Json? // Frozen RecommendationStatusHistory trail
+  archivedReason      String // age_360d
+  archivedAt          DateTime @default(now())
 
   @@index([symbol])
   @@index([finalStatus])
@@ -1455,13 +1469,13 @@ model RecommendationArchive {
 
 // User subscription for recommendation alerts via Telegram
 model RecommendationAlertSubscription {
-  id              String   @id @default(uuid())
-  userId          Int
-  chatId          String
-  isActive        Boolean  @default(true)
-  notifyOn        String   @default("all") // all | buy_only | sell_only | status_changes
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    Int
+  chatId    String
+  isActive  Boolean  @default(true)
+  notifyOn  String   @default("all") // all | buy_only | sell_only | status_changes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId])
   @@unique([chatId])
@@ -1477,28 +1491,28 @@ model RecommendationAlertSubscription {
 
 // Tracks AI prediction accuracy for self-improvement
 model AgentPerformanceLog {
-  id              String   @id @default(uuid())
-  agentType       String   // recommendation | screener | alert | chat
-  symbol          String?
-  prediction      String   // BUY | HOLD | SELL
-  confidence      Float
-  entryPrice      Float
-  targetPrice     Float?
-  stopLoss        Float?
+  id            String    @id @default(uuid())
+  agentType     String // recommendation | screener | alert | chat
+  symbol        String?
+  prediction    String // BUY | HOLD | SELL
+  confidence    Float
+  entryPrice    Float
+  targetPrice   Float?
+  stopLoss      Float?
   // Outcome tracking (filled later)
-  currentPrice    Float?
-  outcome         String?  // win | loss | breakeven | pending
-  returnPercent   Float?
-  checkedAt       DateTime?
-  checkInterval   String?  // 1w | 1m | 3m
+  currentPrice  Float?
+  outcome       String? // win | loss | breakeven | pending
+  returnPercent Float?
+  checkedAt     DateTime?
+  checkInterval String? // 1w | 1m | 3m
   // Prompt version for A/B tracking
-  promptVersion   String?
-  modelUsed       String?
+  promptVersion String?
+  modelUsed     String?
   // Metadata
-  runId           String?  // Link to DailyRecommendationRun
-  metadata        Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  runId         String? // Link to DailyRecommendationRun
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([agentType])
   @@index([symbol])
@@ -1510,17 +1524,17 @@ model AgentPerformanceLog {
 
 // Tracks screener execution for monitoring
 model ScreenerRunLog {
-  id              String   @id @default(uuid())
-  screenerId      String   // Chartink screener ID or TradingView template ID
+  id              String    @id @default(uuid())
+  screenerId      String // Chartink screener ID or TradingView template ID
   screenerName    String
-  source          String   // chartink | tradingview
-  status          String   @default("pending") // pending | running | completed | failed
-  stockCount      Int      @default(0)
+  source          String // chartink | tradingview
+  status          String    @default("pending") // pending | running | completed | failed
+  stockCount      Int       @default(0)
   executionTimeMs Int?
   errorMessage    String?
-  fallbackUsed    Boolean  @default(false)
+  fallbackUsed    Boolean   @default(false)
   metadata        Json?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
   completedAt     DateTime?
 
   @@index([screenerId])
@@ -1532,14 +1546,14 @@ model ScreenerRunLog {
 
 // System health metrics for monitoring
 model SystemHealthLog {
-  id              String   @id @default(uuid())
-  metricType      String   // ai_response_time | screener_duration | delivery_rate | db_query_time | uptime
-  metricName      String
-  value           Float
-  unit            String   // ms | percent | count | seconds
-  source          String   // recommendation_agent | chartink | telegram | system
-  metadata        Json?
-  createdAt       DateTime @default(now())
+  id         String   @id @default(uuid())
+  metricType String // ai_response_time | screener_duration | delivery_rate | db_query_time | uptime
+  metricName String
+  value      Float
+  unit       String // ms | percent | count | seconds
+  source     String // recommendation_agent | chartink | telegram | system
+  metadata   Json?
+  createdAt  DateTime @default(now())
 
   @@index([metricType])
   @@index([source])
@@ -1553,16 +1567,16 @@ model SystemHealthLog {
 
 // Unified event stream for all system events
 model UnifiedEvent {
-  id              String   @id @default(uuid())
-  eventType       String   // telegram | ai_agent | screener | system_health | audit
-  eventSubtype    String   // subscribe, trigger, run_start, health_check, etc.
-  source          String   // telegram_bot | recommendation_agent | chartink | system
-  userId          Int?
-  symbol          String?
-  severity        String   @default("info") // info | warning | critical
-  message         String
-  metadata        Json?
-  createdAt       DateTime @default(now())
+  id           String   @id @default(uuid())
+  eventType    String // telegram | ai_agent | screener | system_health | audit
+  eventSubtype String // subscribe, trigger, run_start, health_check, etc.
+  source       String // telegram_bot | recommendation_agent | chartink | system
+  userId       Int?
+  symbol       String?
+  severity     String   @default("info") // info | warning | critical
+  message      String
+  metadata     Json?
+  createdAt    DateTime @default(now())
 
   @@index([eventType])
   @@index([eventSubtype])
@@ -1571,4 +1585,79 @@ model UnifiedEvent {
   @@index([severity])
   @@index([createdAt])
   @@map("unified_events")
+}
+
+// ============================================
+// Chartink Template Screeners (v3.5.5)
+// Config mirrored from lib/services/chartink-scans/*.json; captured tables
+// stored per full run with a 72h TTL (expiresAt). The next full run cleans
+// the results table and re-inserts the whole screener data.
+// ============================================
+
+model ChartinkScreener {
+  id              String    @id // JSON id, e.g. "fundamental.profit-jump-by-200"
+  name            String
+  url             String // Chartink scanner page, e.g. https://chartink.com/scanner/...
+  categoryId      String // fundamental | top-loved | candlestick | ...
+  categoryName    String // Human category name (dropdown label)
+  scanClause      String? // DSL sent to /screener/process and /backtest/process
+  debugClause     String? // groupcount(...) breakdown (optional)
+  columnClause    String? // output columns (optional)
+  backtestMaxRows Int?      @default(160) // max_rows for /backtest/process
+  scanlinkId      String? // "scanlink:<id>" captured from a screener response
+  backtestUrl     String? // Captured backtest page link when available
+  enabled         Boolean   @default(true)
+  lastRunAt       DateTime? // last successful full-run capture
+  nextRunAt       DateTime? // lastRunAt + TTL (72h) — when data is stale
+  resultCount     Int       @default(0) // rows in the latest run for this screener
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  results ChartinkScreenerResult[]
+
+  @@index([categoryId])
+  @@index([enabled])
+  @@map("chartink_screeners")
+}
+
+model ChartinkScreenerRun {
+  id           String    @id @default(uuid())
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  status       String    @default("running") // running | completed | failed
+  error        String?
+  screenersRun Int       @default(0) // screeners successfully captured in this run
+  rowsInserted Int       @default(0) // total rows captured
+  ttlHours     Int       @default(72) // TTL applied to captured rows
+
+  results ChartinkScreenerResult[]
+
+  @@index([startedAt])
+  @@index([status])
+  @@map("chartink_screener_runs")
+}
+
+model ChartinkScreenerResult {
+  id            String   @id @default(uuid())
+  runId         String
+  screenerId    String
+  symbol        String // NSE code (upper-case)
+  name          String? // company name
+  bsecode       String? // BSE code
+  close         Decimal? @db.Decimal(30, 6) // ₹ latest close
+  changePercent Decimal? @db.Decimal(12, 4) // % vs prev close (signed)
+  conditionFlag Int? // 1 = up, 2 = down (conditional filter color)
+  volume        Decimal? @db.Decimal(30, 6) // captured volume
+  raw           Json? // original Chartink row (all captured columns)
+  capturedAt    DateTime @default(now()) // when this row was captured
+  expiresAt     DateTime // TTL: capturedAt + run.ttlHours (72h)
+
+  run      ChartinkScreenerRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  screener ChartinkScreener    @relation(fields: [screenerId], references: [id], onDelete: Cascade)
+
+  @@index([screenerId])
+  @@index([symbol])
+  @@index([expiresAt])
+  @@index([runId])
+  @@map("chartink_screener_results")
 }

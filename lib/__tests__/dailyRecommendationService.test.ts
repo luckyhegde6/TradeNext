@@ -76,9 +76,9 @@ jest.mock("@/lib/cache", () => ({
 }));
 
 const mockRunDailyScreeners = jest.fn() as any;
-jest.mock("@/lib/services/chartinkService", () => ({
+jest.mock("@/lib/services/chartinkUnifiedScreenerService", () => ({
   __esModule: true,
-  runDailyScreeners: (...args: any[]) => mockRunDailyScreeners(args[0]),
+  runChartinkUnifiedScreeners: (...args: any[]) => mockRunDailyScreeners(args[0]),
 }));
 
 const mockAnalyzeStocks = jest.fn() as any;

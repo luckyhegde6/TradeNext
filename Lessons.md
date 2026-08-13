@@ -734,28 +734,27 @@ This returns immediately with the PID, and the dev server runs independently.
 taskkill /PID <PID> /F
 ```
 
-### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0)
+### 25. Client-Server Separation — Extracting Types from Service Files (v3.2.0, recurred v3.6.4)
 **Issue**: Build fails with `Module not found: Can't resolve 'dns'` or `pg` when client components import from service files that import Prisma.
 
-**Root Cause**: Next.js client bundle attempts to resolve all imports from a client component, including Node.js built-in modules and database drivers used by services. Even though client components only use types, the bundler follows the entire import chain.
+**Root Cause**: Next.js client bundle attempts to resolve ALL VALUE imports from a client component, including Node.js built-in modules and database drivers used by services. `import type { … }` is erased at compile and is safe; a VALUE import of even one pure function from a service file pulls the service's entire top-level import graph into the browser bundle.
 
-**Solution**: Extract type definitions and constants into a separate `rebalancerTypes.ts` file that has ZERO server-side imports:
+**Solution**: Extract the shared pure helpers/types/constants into a separate file that has ZERO server-side imports (both `rebalancerTypes.ts` and `ipoIssueSize.ts` follow this pattern):
 ```typescript
-// lib/services/rebalancerTypes.ts — Client-safe types
-export interface AllocationCategory { ... }
-export interface RebalancerAction { ... }
-export const DEFAULT_SECTOR_TARGETS = [ ... ];
+// lib/services/ipoIssueSize.ts — Client-safe pure helpers (zero imports)
+export function formatIssueSize(...) { ... }
 
-// lib/services/rebalancerService.ts — Server-only logic (imports Prisma)
-import { PrismaClient } from '@prisma/client';
-import { AllocationCategory } from './rebalancerTypes';
+// lib/services/nseIpoService.ts — Server-only logic (imports prisma chain)
+import { formatIssueSize } from "@/lib/services/ipoIssueSize";
+export { formatIssueSize } from "@/lib/services/ipoIssueSize"; // re-export keeps server callers/tests unchanged
 ```
 
 **Key Rules**:
-1. Client components ONLY import from the `*Types.ts` file
+1. Client components ONLY value-import from the `*Types.ts`/pure helper file; `import type { … }` from service files is fine (erased at compile)
 2. Server API routes import from the main service file
-3. NEVER import Prisma, database adapters, or Node.js modules in files that client components import
+3. NEVER import Prisma, database adapters, or Node.js modules in files that client components value-import
 4. Check all client component imports of a service file when introducing a new one
+5. Symptom signature: `Module not found: Can't resolve 'dns'` + import trace ending in a `.tsx` Client Component — grep that component's value imports immediately
 
 ## Lessons from Daily Recommendations Implementation (v3.3.0)
 
@@ -1045,9 +1044,76 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: When e2e flakiness appears on a live-data app, fix the root cause in config/specs (viewport, input strategy, serialization, timeouts). Do NOT loosen assertions, add `waitForTimeout` sleeps, or bump retries to hide a real regression. Keep `retries`/`workers` as documented load knobs, not failure-hiders. `tsc` typechecks `e2e/*.ts` — keep specs type-clean.
 
+### 56. Serverless Cron Ledger — Scheduled Functions Must Write the `CronJob` Ledger Themselves
+**Issue**: Admin → Utils → Cron showed no runs at all on prod: both system jobs `lastRun: null, runCount: 0, successCount: 0, failureCount: 0` with a stale `nextRun` — even though the daily recommendation cron ran (some) scheduled executions via Netlify functions.
+
+**Root Cause**: `CronJob` ledger fields (`lastRun`/`runCount`/`successCount`/`failureCount`/`nextRun`) were only written by `spawnCronTask()` and the resident worker-engine scheduler loop — code paths that **never run on serverless** (no persistent process to poll the schedule). The real scheduled path (`netlify/functions/cron-recommendations` / `cron-performance` → `run-cron-background.ts`) called the domain service directly and never touched the ledger. Worse: `successCount`/`failureCount` had **no writer anywhere in the codebase**.
+
+**Solution**: Add a single `recordCronRun(jobName, success)` in `recommendationCronService.ts` (name-based `CronJob` lookup → `lastRun: now`, `runCount +1`, `successCount|failureCount +1`, `nextRun` advanced via the shared `calculateNextRun`; log-and-return on missing job, never throw). Call it in the scheduled-function success **and** error branches, and in the admin PATCH runNow/retry path (`recordManualRunLedger`, which skips `cronJobId`-linked tasks `spawnCronTask` already records to avoid double-counting). 5 unit tests cover success/failure/missing-job/prisma-find-error/prisma-update-error.
+
+**Rule**: On serverless, a cron ledger is only ever updated at the exact call sites that execute the job — the scheduled function, the admin runNow/retry handler, and any manual trigger. Grep for every execution path of a job before assuming the ledger is being written; the resident-scheduler path is a local-only illusion on Netlify. Also: every ledger column needs a writer — `grep successCount` should never return only the schema and the read side.
+
+### 57. AI Config Must Flow Through the Pipeline — Never Rely on Env-Only Defaults at the Call Site
+**Issue**: Daily recommendation runs produced all-HOLD recommendations on prod even after the DB `ai_config` Secret was correctly set via the admin API. Root cause: `dailyRecommendationService` called `analyzeStocks(aiInput)` with **no config argument**, so the pipeline used the env-only default and the DB-stored Secret (model/API key) never reached the LLM provider.
+
+**Solution**: A shared async `loadConfig()` (`lib/services/ai/config.ts`) — DB `ai_config` Secret merged over env, returning `model/apiKey/temperature/maxTokens/enabled` — used by both the admin test route and the daily pipeline that now passes `aiConfig` into `analyzeStocks`. Also refresh `DEFAULT_MODEL`/`AVAILABLE_MODELS` against the live provider catalog: two of the three "free" model IDs didn't exist (`tencent/hy3:free`, `qwen/qwen3-next-80b-a3b-instruct:free` → HTTP 404), which meant even a correctly-passed config hit a nonexistent model.
+
+**Rule**: When an admin-managed config Secret is load-bearing for a background pipeline, grep the call site chain (service → agent → provider) and verify the config actually reaches the provider call — an env-only default silently bypasses the DB Secret. And verify model IDs against the live catalog (`GET /api/v1/models`), never trust hardcoded free-model IDs from memory; a 404 model produces a clean all-HOLD fallback that looks like a strategy result, not a failure.
+
+### 58. Auth Gates — The Password Compare Must Be the FINAL Gate; Never Early-Throw on Status Flags
+**Issue**: Approved join-request users (and any user with `isVerified: false`) could never log in — the browser/API returned "Email not verified" for the correct password, and returned "Incorrect email or password" for the wrong one. The account was effectively bricked with no self-service path (no resend-verification flow existed for this user class).
+
+**Root Cause**: `lib/auth.ts` authorize() evaluated the `!isVerified` branch and threw `"Email not verified"` **BEFORE** running the bcrypt password comparison. Any pre-password throw reorders the gate: users who can't satisfy the early condition are locked out regardless of credentials, and the branch is dead code for normal signup-verified users so nothing noticed.
+
+**Solution**: Remove the pre-password status-gate; bcrypt compare is the single authoritative gate (`user.isBlocked` check kept BEFORE the compare so blocked users still fail uniformly). Approve-route users got a FIXED known default password (`********`, bcrypt cost 12) surfaced in the admin confirm dialog + success alert + API response — a random hex temp password nobody could see created the same lockout symptom a year later.
+
+**Rule**: When multiple conditions gate a login (verified/blocked/password), the password compare MUST be last and authoritative — status flags that are meant to be non-fatal (unverified) must not throw before identity is established. If a flag is not self-service-recoverable for all user classes, it must not be an auth gate at all. And every credential the system issues must be surfaced to the admin flow that creates it; grep the creation path for fields the UI never displays.
+
+### 59. Log Viewer Symmetry — Write Path and Read Path Must Construct the Same Key (Dir, Date Format, Blob Store)
+**Issue**: The admin monitoring page's Server Logs tab was always empty on prod (and returned nothing locally) even though the app logged constantly — logs existed but were invisible by design.
+
+**Root Cause**: Three independent asymmetries that each produce "empty logs": (a) write dir `server_logs/` vs new read/UI expectations → renamed to `logs/`; (b) `readLogsByDate` computed `logs/<YYYY>/<YYYYMM>/<date>.log` while the writer wrote `logs/<YYYY-MM>/<date>.log` → date-derived path NEVER matched → always `[]`; (c) on Netlify the general logger wrote to per-instance ephemeral `/tmp` and NEVER to the `server-logs` Blob store that `getLogFiles()` lists, and `readBlobLog`/`deleteBlobLog` hardcoded the OTHER store (`worker-logs`) so even blob paths resolved to the wrong store.
+
+**Solution**: One source of truth per axis — `logs/<YYYY-MM>/<YYYY-MM-DD>.log` (both sides), store name derived from the key (`*.log` → `server-logs`), `listBlobLogs` strips `.log` so blob dates match local file dates in the UI, and the general logger mirrors every line to the date-keyed `server-logs` Blob store (fire-and-forget). 7 new `@jest-environment node` tests pin the paths (jsdom makes `isServer` false so the fs branch no-ops; guard window mocks in `jest.setup.js`).
+
+**Rule**: Anywhere a resource is WRITTEN at path X and READ via path Y (files, blobs, cache keys), write a test asserting the exact string the writer emits equals the exact string the reader parses — grep both the format AND the store/dir name on both sides. Check via Playwright on a real server that the viewer lists reads, not just that the writer logs. Rename symmetrically; a one-sided rename is the classic silent bug.
+
+### 60. Credentials Are Env-Var-Only — Never a Literal in Code or Docs; Enforce It With Git Hooks
+**Issue**: The join-approval default password lived as a hardcoded literal in `app/api/admin/join-requests/[id]/approve/route.ts` and, worse, its actual value was written into committed docs (AGENTS.md, changelogs, session files). A commit of the docs would have shipped a real account credential into git history forever; Netlify's secrets scan is a build-time backstop but the repo itself was the leak.
+
+**Root Cause**: Convenience — a constant was easier than wiring an env var, and docs repeated the value "to be helpful". Neither code nor docs distinguished "public sandbox demo creds" (documented, exempt) from "real per-environment credentials" (must be env-only).
+
+**Solution**: (a) `process.env.DEFAULT_PASSWORD` in the approve route with NO code fallback + a 500 `logger.error` guard when the env var is missing (a missing env var fails loudly at runtime, never silently in a commit); `.env` (gitignored) carries the real value; `.env.example` documents only the NAME with "never hardcode the value in code or docs". (b) All literal occurrences in committed docs redacted to backtick-quoted `********`. (c) Enforced by hooks: `.githooks/commit-msg` blocks credential literals in commit messages; `.githooks/pre-commit` check #6 blocks staging the real `.env` and #7 blocks credential literals anywhere in the staged diff plus `password[:=] "…"` assignments in staged `.md` files. (d) UI now references the env-var NAME in the confirm dialog and shows the server-returned value in the success alert.
+
+**Rule**: Classify credentials first: public sandbox demo creds (documented demo logins) may stay in the README/AGENTS tables + seed + e2e env fallbacks; EVERYTHING else is env-var-only — no literal in code, no literal in docs, no literal in commit messages. Reference env var NAMES in docs. When enforcement matters, ship it in git hooks (they run on every commit, unlike memory or prompts). Before any commit: `git diff | grep -iE 'password|secret|token|api[_-]?key'` and grep the working tree for known literal values. A credential that reaches git history is leaked — redaction later only removes the current copy.
+
+### 61. Never Write `*/` Inside a JSDoc/Block Comment — It Terminates the Comment
+**Issue**: `recommendationCronService.ts` suddenly showed dozens of LSP parse errors ("expression expected", "declaration or statement expected") across unrelated functions — looked like the file was corrupted mid-edit.
+
+**Root Cause**: The new cron constant's documentation comment contained the literal text `*/30` (the cron step for "every 30 minutes"). `*/` is the block-comment terminator, so the comment closed early and the rest of the comment text became code → cascading parse errors through the whole file. The `.ts` file itself was fine.
+
+**Solution**: Reworded the comment to avoid the sequence (`step 30 every min — `). The cron expression string `"*/30 3-10 * * 1-5"` is unaffected — it lives in a string literal, not a comment.
+
+**Rule**: Never place the two characters `*/` inside a `/* */` (or `/** */`) comment — not even inside an example cron expression or regex. If you must mention such text, split it (`* /30`, `\*\/30`) or put it in a string literal. This applies to every comment style that terminates on `*/`.
+
+---
+
+### 62. Closures Must Not Reference `const` Declared Later (TDZ)
+**Issue**: `runAiConnectionTest` threw `ReferenceError: Cannot access 'report' before initialization` — a runtime crash in a brand-new service.
+
+**Root Cause**: An inner `track()` helper (declared and CALLED before `report` was assigned) closed over the outer `report` const. The helper ran during probing, before `const report = {...}` executed → Temporal Dead Zone access.
+
+**Solution**: The helper no longer needs `report` — it stamps its own `new Date().toISOString()` per attempt instead of referencing the later-declared const.
+
+**Rule**: A function that executes before a `const` declaration in the same scope must not reference that binding — even if the code "looks" like it will be in scope by call time. Keep helpers self-contained (pass values as arguments, or use `let` declared earlier), and watch for `AbortSignal.timeout`/Promise callbacks that fire during an async gap.
+
 ---
 
 ## Update Log
+- 2026-08-13: Added Lessons 61-62 (never write `*/` inside a block/JSDoc comment — it terminates the comment early and shatters file parsing, reword `*/30` as `step 30 every min`; closures must not reference `const` declared later — TDZ, stamp per-attempt timestamps instead); added v3.7.1 BUY/SELL-only broadcast + AI connection-test cron + CI e2e fix entry
+- 2026-08-11: Added Lesson 60 (credentials env-var-only — no literals in code/docs/commit messages; `DEFAULT_PASSWORD` env + `.githooks/commit-msg` + pre-commit #6/#7; redact literals to `********`; public sandbox demo creds exempt); added v3.5.7 credential-hygiene + llms.txt/robots discovery entry
+- 2026-08-11: Added Lessons 58-59 (auth gate ordering — password compare must be the final gate, never early-throw on status flags, surface system-issued credentials in the admin flow; log viewer symmetry — write path and read path must construct the same dir/date/blob-store key); added v3.5.7 auth join→approve→login + server logs `logs/` dir entry
+- 2026-08-11: Added Lessons 56-57 (serverless cron ledger must be written by the scheduled-function/admin call sites — `recordCronRun`; AI config must flow to `analyzeStocks` via shared `loadConfig` — env-only defaults + nonexistent free-model IDs caused prod all-HOLD runs)
 - 2026-08-08: Added Lesson 55 (Playwright e2e flakiness on live-data apps: Firefox xl-nav viewport 1440×900, WebKit controlled number-input keystrokes, single-threaded dev-server nav starvation → serial + noWaitAfter + retries, live NSE values never asserted); added v3.5.3 e2e suite entry
 - 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)
 - 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)

@@ -1,3 +1,5 @@
+import type { AuditAction } from "@/lib/audit";
+
 describe('Audit Logging Types', () => {
   describe('Audit Action Types', () => {
     test('should support all audit action types', () => {
@@ -14,6 +16,21 @@ describe('Audit Logging Types', () => {
       validActions.forEach(action => {
         expect(validActions).toContain(action);
       });
+    });
+
+    test('should include join-request and password-reset audit actions (v3.6.0)', () => {
+      // Type-only import — erased at runtime, but tsc enforces that every
+      // action below is a valid member of the AuditAction union.
+      const actions: AuditAction[] = [
+        'JOIN_REQUEST_CREATED',
+        'JOIN_REQUEST_APPROVED',
+        'JOIN_REQUEST_REJECTED',
+        'PASSWORD_RESET_REQUESTED',
+        'PASSWORD_RESET_APPROVED',
+        'PASSWORD_RESET_REJECTED',
+      ];
+      expect(actions.length).toBe(6);
+      actions.forEach((a) => expect(typeof a).toBe('string'));
     });
   });
 

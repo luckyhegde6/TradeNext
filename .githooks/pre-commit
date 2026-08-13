@@ -63,6 +63,28 @@ if [ -n "$ENV_STAGED" ]; then
     exit 1
 fi
 
+# 7. Literal credentials in code/docs (BLOCKING — v3.5.7 rule)
+#    The join default password must come from the DEFAULT_PASSWORD env var,
+#    never hardcoded in the repo. Docs/commit messages reference env var
+#    NAMES only. (Public demo creds live in seed/e2e/check-remote-db — allowlisted.)
+#    NOTE: .githooks/* is exempted below — the hook files themselves must
+#    contain the block-list literal to enforce it (one place, by design).
+JOIN_DEFAULT_HITS=$(git diff --cached -G'12345678' -- ':!.githooks/*' 2>/dev/null | grep -c '12345678' 2>/dev/null)
+test -z "$JOIN_DEFAULT_HITS" && JOIN_DEFAULT_HITS=0
+if [ "$JOIN_DEFAULT_HITS" -gt 0 ] 2>/dev/null; then
+    echo "  CRITICAL: Join default password literal detected in staged changes."
+    echo "  Read it from DEFAULT_PASSWORD env var; redact all docs and commit messages."
+    exit 1
+fi
+
+DOC_PW_HITS=$(git diff --cached -G'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' -- '*.md' 2>/dev/null | grep -c -E 'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' 2>/dev/null)
+test -z "$DOC_PW_HITS" && DOC_PW_HITS=0
+if [ "$DOC_PW_HITS" -gt 0 ] 2>/dev/null; then
+    echo "  CRITICAL: Literal password assignment detected in staged *.md files."
+    echo "  Reference env var NAMES in docs; never paste actual password values."
+    exit 1
+fi
+
 echo "  Pre-commit checks passed"
 echo ""
 exit 0

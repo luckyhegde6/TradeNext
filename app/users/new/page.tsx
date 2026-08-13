@@ -1,13 +1,7 @@
-import NewUserForm from "./NewUserForm";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default function NewUser() {
-  return (
-    <main className="min-h-screen py-12 px-4 sm:px-6 lg:px-8 bg-background transition-colors duration-200">
-      <div className="max-w-7xl mx-auto">
-        <NewUserForm />
-      </div>
-    </main>
-  );
+// Legacy self-signup page — DISABLED (v3.6.0).
+// All new users go through the admin-moderated join-request flow at /auth/join.
+export default function NewUserPage() {
+  redirect("/auth/join");
 }

@@ -276,7 +276,7 @@ async function runScreenerWithFallback(
  * Merge a list of per-screener runs into de-duplicated {@link ScreenerResult}
  * entries, tracking which screeners flagged each stock.
  */
-function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
+export function deduplicateResults(runs: ScreenerRun[]): ScreenerResult[] {
   const map = new Map<
     string,
     {
