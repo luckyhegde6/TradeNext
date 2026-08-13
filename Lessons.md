@@ -543,7 +543,7 @@ const faceValue = item['FACE VALUE'] || item.faceValue || item.fv || item.faceVa
 ---
 
 ## Last Updated
-2026-07-16 08:25
+2026-08-13 22:15 (v3.9.0 — Lesson 67 added)
 
 ## Advanced Screener Lessons (v1.16.0)
 
@@ -1145,9 +1145,19 @@ export async function checkRecommendationPerformance() {
 
 **Rule**: Whenever you change a default that is ALSO persisted in a DB/config store, the persisted value wins over the code default by design — changing the constant alone changes nothing for existing rows. Either migrate-on-read (merge + persist new defaults), or call out the manual re-save step explicitly in the changelog/docs and verify with a DB query that no stale row pins the old value.
 
+### 67. Cache Keys Must Encode EVERY Distinguishing Scope — One Fixed Key Served Wrong Payloads Across Runs
+**Issue**: The v3.5.6 unified Chartink/TV runner cached ALL screener results under ONE fixed key (`chartink-unified:screener-results`) — a daily-recs run (7 templates) and a swing run (34 templates, different category) hit the SAME cache entry, so whichever ran first served its template universe to the other. The swing service compounded it by caching the final payload under one key regardless of `analyze` — an `analyze=false` warm-up call then served a NO-AI payload to the `analyze=true` UI.
+
+**Root Cause**: Cache keys described WHAT the endpoint is, not WHICH QUERY produced the data. Any cache shared by parameterized scopes must bake every distinguishing input into the key or the first writer wins for everyone.
+
+**Solution**: NEW `unifiedCacheKey(options)` encodes templateIds (sorted) / categoryId / exclusions into the read+write key; the swing service uses `${key}:ai|noai` so AI and non-AI payloads are distinct cache entries. Regression test asserts the same template set hits the same key and different sets get different keys.
+
+**Rule**: (1) Any cached function that takes options must include those options in the cache key — sort arrays first so order doesn't split keys; (2) payload-shape flags (AI vs no-AI, enriched vs raw) belong in the key, never in a shared entry; (3) when a regression test exercises a cache fix, verify it actually WRITES the cache (use real IDs that resolve to real data) — a test with fake/empty inputs silently no-ops and proves nothing.
+
 ---
 
 ## Update Log
+- 2026-08-13: Added Lesson 67 (cache keys must encode every distinguishing scope — sorted templateIds/category/exclusions in `unifiedCacheKey`, `${key}:ai|noai` for AI vs no-AI payloads, and regression tests must actually write the cache — fake IDs produce empty runs and prove nothing); added v3.9.0 Swing Trading Signals tab + scope-aware cache-key fixes + NSE candlestick chart buttons entry
 - 2026-08-13: Added Lessons 64-66 (config-dependent branches are LIVE in Jest because Next.js loads `.env` — default-mock the pre-flight gate in `beforeEach`; `jest.mock` specifier must be VERBATIM from the source import — `@/` alias vs relative path resolves to different module instances; DB-stored `ai_config` metadata overrides env/code defaults — re-save via admin UI or migrate-on-read to pick up new defaults like maxTokens 8192); added v3.8.0 AI pre-flight gate + cron dedup + stale-task reaping + maxTokens default entry
 - 2026-08-13: Added Lesson 63 (Netlify secrets scan flags EVERY repo file incl. extensionless `.githooks` — omit-list config files; keep example tokens/chat-IDs/codes clearly fake, never plain-six-digit-style, so future env values can't substring-collide; grep scanned extensions after env changes); added v3.7.2 secrets-scan fix + live-site staleness finding entry; v3.7.3 masked the incidental literals this lesson itself had printed
 - 2026-08-13: Added Lessons 61-62 (never write `*/` inside a block/JSDoc comment — it terminates the comment early and shatters file parsing, reword `*/30` as `step 30 every min`; closures must not reference `const` declared later — TDZ, stamp per-attempt timestamps instead); added v3.7.1 BUY/SELL-only broadcast + AI connection-test cron + CI e2e fix entry
