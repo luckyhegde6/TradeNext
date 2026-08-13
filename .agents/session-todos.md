@@ -10,7 +10,7 @@
 
 ## Current Session (2026-08-14) — v3.10.0: Historical-price sync into `daily_prices` (Swing indicators "—" fix) + `backtest_history` prod-gap FIX (lazy DDL)
 
-**Working tree**: branch `feat/historical-price-sync` — committed `b312de7` (feat) + `4d49e13` (docs [skip ci]), **pushed, PR #91 open**. Local `--apply` EXECUTED (user-approved): 266 symbols, 17,198 bars, 0 errors, 658s → DB 17,411 rows / 286 symbols. Backtest fix committed (uncommitted now: +7 guard tests). Full suite **660 pass / 11 skipped** (was 653); `npx tsc --noEmit` 71 = exact baseline. **No deploy** (user-managed); prod `--apply` NOT needed (market-sync step 4 auto-backfills).
+**Working tree**: `main` — v3.10.0 committed `b312de7` (feat) + `4d49e13`/`8148116`/`7021710` (docs+fix), **PR #91 MERGED (`1de835c`) + DEPLOYED + LIVE-VERIFIED** (swing API 200, site healthy, missing-table 500 eliminated). Local `--apply` EXECUTED (user-approved): 266 symbols, 17,198 bars, 0 errors, 658s → DB 17,411 rows / 286 symbols. Backtest fix committed (`8148116`, +7 guard tests). Full suite **660 pass / 11 skipped** (was 653); `npx tsc --noEmit` 71 = exact baseline. **Prod `daily_prices` backfill manually triggered** via `historical-price-sync` action (user-approved 2026-08-14); else auto via market-sync step 4 Mon-Fri 06:31 IST. NSE `apiClient` 403/500 from Netlify = NSE-side blocking (not a regression).
 
 ### Completed
 - [x] NEW `lib/services/historicalPriceSyncService.ts` + tests (15) + CLI `scripts/backfill-daily-prices.ts` — committed `b312de7`
@@ -21,13 +21,14 @@
 - [x] Docs for the fix: plan doc flipped RESOLVED, BUGS.md #11 → fix built, AGENTS.md/CHANGELOG/versions-v3/TODO/Primer/agent-memory updated, Lessons #71 pending
 
 ### Pending (this session)
-- [ ] Commit the backtest fix + docs on `feat/historical-price-sync` (PR #91 auto-updates) — pre-commit tsc clean, never `--no-verify`
-- [ ] Report to user + ask: merge PR #91 → main, then deploy?
+- [x] Backtest fix + docs committed (`8148116` + `7021710`), pushed, PR #91 merged (`1de835c`) — pre-commit tsc clean, never `--no-verify`
+- [x] Deployed to Netlify (auto on merge) + live-verified (swing API 200, site healthy, backtest 500 eliminated)
+- [ ] Verify prod backfill result: swing indicators non-null + MCP `getHistoricalData` 200 (after the ~11-min sync completes) → main, then deploy?
 
 ### Pending (carried forward — other branches / later sessions)
-- [ ] Post-deploy verification: first market-sync run backfills daily_prices → Swing indicators render; MCP `getHistoricalData` no longer 500 (temp table self-heals)
+- [ ] Post-deploy verification (IN PROGRESS): prod backfill manual trigger running; verify swing indicators render + MCP `getHistoricalData` 200 → Swing indicators render; MCP `getHistoricalData` no longer 500 (temp table self-heals)
 - [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
 - [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (PR #88 open; pre-commit tsc must pass — never `--no-verify`), live-verify analytics side-nav
-- [ ] **Deploy to Netlify (user-approved) → market-sync run backfills daily_prices → verify Swing indicators render on prod**
+- [x] **Deploy to Netlify (auto on PR merge) — DONE; verify Swing indicators render after backfill** → market-sync run backfills daily_prices → verify Swing indicators render on prod**
 - [ ] Re-seed demo holdings on prod
 - [ ] Prod: AI Connection Test cron first runs (verify audit entries + AI Monitoring `connection_test` rows after deploy)
