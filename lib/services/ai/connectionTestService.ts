@@ -30,7 +30,9 @@ export const AI_FALLBACK_MODELS = ["openrouter/free", "openrouter/auto"] as cons
 export const CONNECTION_TEST_ACTION = "connection_test";
 
 const TEST_PROMPT = "Reply with exactly one word: OK";
-const TEST_TIMEOUT_MS = 20_000;
+// 60s: the free-tier models (e.g. nvidia/nemotron-3-ultra-550b-a55b:free) can
+// take 30-60s+ to start generating under load; 20s produced false failures.
+const TEST_TIMEOUT_MS = 60_000;
 
 export interface AiModelTestResult {
   model: string;
@@ -120,8 +122,15 @@ export async function testOpenRouterModel(
  * Run the full connection test: configured model first, then the fallback
  * routes in order (stopping at the first working one). Every attempt is
  * tracked via trackAiCall; an overall failure notifies admins.
+ *
+ * @param timeoutMs Per-probe timeout (defaults to TEST_TIMEOUT_MS). The daily
+ *   recommendations pre-flight passes a longer budget (120s) because the free
+ *   nvidia model can take 90s+ to start generating — a 60s health-check cap
+ *   would false-fail the gate.
  */
-export async function runAiConnectionTest(): Promise<AiConnectionTestReport> {
+export async function runAiConnectionTest(
+  timeoutMs: number = TEST_TIMEOUT_MS,
+): Promise<AiConnectionTestReport> {
   const testedAt = new Date().toISOString();
   const config = await loadConfig();
 
@@ -177,7 +186,7 @@ export async function runAiConnectionTest(): Promise<AiConnectionTestReport> {
   };
 
   const configuredModel = config.model;
-  const primary = await testOpenRouterModel(configuredModel, config);
+  const primary = await testOpenRouterModel(configuredModel, config, timeoutMs);
   await track(configuredModel, primary);
 
   if (primary.ok) {
@@ -198,7 +207,7 @@ export async function runAiConnectionTest(): Promise<AiConnectionTestReport> {
   // Primary failed — probe fallback routes in order until one answers.
   const fallbacks: AiModelTestResult[] = [];
   for (const model of AI_FALLBACK_MODELS) {
-    const r = await testOpenRouterModel(model, config);
+    const r = await testOpenRouterModel(model, config, timeoutMs);
     fallbacks.push(r);
     await track(model, r);
     if (r.ok) break;

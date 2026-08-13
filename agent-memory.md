@@ -578,6 +578,21 @@ echo "" >> agent-memory.md
 
 ---
 
+## 2026-08-13 (v3.8.0) — AI pre-flight gate + cron spawn dedup + stale-task reaping + cron-ledger dedupe + 8192 maxTokens default
+
+- **AI pre-flight gate (user-requested — fail fast instead of burning the 14-min background cap)**: `lib/services/dailyRecommendationService.ts` — when `aiInput.length > 0` AND `hasValidConfig(aiConfig)`, `runAiConnectionTest(preflightTimeoutMs = 120_000)` runs FIRST. `ok` → configured model; `fallback` → THIS run uses `preflight.recommendedModel` (logger.warn shows configuredModel vs model); `failed` → `skipAi = true` → all stocks all-HOLD via shared `holdFallback(reason, errorMsg)` with `aiSuccess:false` (no per-batch retries on a dead model; connection-test failures already audit + `notifyAdmins` per v3.7.1).
+- **Cron system-job dedupe**: `recommendationCronService.ts` — `CronJob.name` has NO unique constraint → two Netlify instances racing findFirst-then-create left duplicate system rows. Post-pass in `ensureRecommendationCrons`: order system rows `createdAt: asc`, keep EARLIEST per name, `deleteMany` the rest (scoped to the 4 system names; user crons untouched; test-verified).
+- **Worker stale-task reaping**: `worker-engine.ts` — NEW exported `reapStaleWorkerTasks(staleMs = STALE_MS = 16*60_000)`: reaps `WorkerTask` `running` (`startedAt ≤ cutoff`) + `DailyRecommendationRun` `running` (keyed on `createdAt` — no startedAt) → `failed` + error message; `maybeReap` throttled ≤1/min from poll loop + startup; `checkScheduledJobs` now EXPORTED for tests.
+- **Cron spawn dedup**: `DEDUP_WINDOW_MS = 90*60_000` — due job with a pending/running task for the same `cronJobId` in the window skips re-spawning but STILL advances `nextRun`.
+- **AI config defaults**: `config.ts` maxTokens default → **8192** (`DEFAULT_MODEL` unchanged `nvidia/nemotron-3-ultra-550b-a55b:free`); caveat: DB `ai_config` metadata OVERRIDES env (DB wins) until re-saved via admin UI.
+- **Connection-test plumbing**: NEW `getPromptTimeoutMs()` in `llm-provider.ts` (`DEFAULT_PROMPT_TIMEOUT_MS = 120_000`, env `AI_PROMPT_TIMEOUT_MS`) — old 30s cap aborted mid-generation and the batch layer mistook the abort for a successful-but-unparseable answer; recommendation-agent clamps each attempt to the remaining batch budget.
+- **Tests**: NEW `lib/__tests__/worker-engine.test.ts` (7); `dailyRecommendationService.test.ts` +3 pre-flight (ok/fallback/failed; default-ok mock in beforeEach — real module pulls in Prisma/network); `recommendationCronService.test.ts` +1 dedupe; `recommendation-agent.test.ts` mock + batch-isolation regex fix. Full suite **597 passed / 11 skipped / 0 failures** (was 582). `npx tsc --noEmit` clean on touched files.
+- **Script**: NEW `scripts/cleanup-stale-worker-tasks.ts` — one-off ops tool (dry-run default, `--apply` to write): reaps stale WorkerTask/DailyRecommendationRun rows + de-dupes CronJob rows by name (keep earliest).
+- **Files**: lib/services/dailyRecommendationService.ts, lib/services/recommendationCronService.ts, lib/services/worker/worker-engine.ts, lib/services/ai/config.ts, lib/services/ai/llm-provider.ts, lib/services/ai/recommendation-agent.ts, lib/__tests__/worker-engine.test.ts (new), lib/__tests__/dailyRecommendationService.test.ts, lib/__tests__/recommendationCronService.test.ts, lib/__tests__/recommendation-agent.test.ts, scripts/cleanup-stale-worker-tasks.ts (new), AGENTS.md, .agents/CHANGELOG.md, .agents/changelog/versions-v3.md, TODO.md, Primer.md, agent-memory.md, Lessons.md (#64–66)
+- **Status**: docs updated; NOT committed (pending user approval, consistent with v3.5.4→v3.7.3 holds); NO deploy.
+
+---
+
 ## 2026-08-13 (v3.7.3) — Credential-literal masking follow-up — Lessons.md + hook block-lists assembled at runtime, pushed directly to main (post-merge Netlify scan fix)
 
 ## 2026-08-13 (v3.7.2) — Netlify secrets-scan build-failure fix + live-site health/staleness finding + v3.6.3 levels backfill executed

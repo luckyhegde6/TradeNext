@@ -16,7 +16,8 @@ import {
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
-import { loadConfig } from "./ai/config";
+import { loadConfig, hasValidConfig } from "./ai/config";
+import { runAiConnectionTest } from "./ai/connectionTestService";
 import { getRecommendationContext } from "./ai/recommendation-context";
 import { getAICircuitBreaker, CircuitBreakerError } from "./ai/circuit-breaker";
 import { getRecommendationMetrics } from "./ai/performance-monitor";
@@ -345,46 +346,40 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     // defaulted to HOLD when that model 404'd on OpenRouter.
     const aiConfig = await loadConfig();
 
-    try {
-      const aiStart = Date.now();
-      aiResults = await circuitBreaker.call(() => analyzeStocks(aiInput, aiConfig));
-      const aiMs = Date.now() - aiStart;
-
-      // Record AI performance metrics
-      const metrics = getRecommendationMetrics();
-      for (const result of aiResults) {
-        metrics.record({
-          success: result.success,
-          responseTimeMs: result.executionMs,
-          tokensUsed: result.tokensUsed,
+    // ── AI pre-flight gate (v3.8.0) ───────────────────────────────────────
+    // Probe the configured model BEFORE spending 5 min × N batches on a
+    // dead/saturated model. runAiConnectionTest already audits + notifies
+    // admins on total failure; here we turn that into fast action:
+    //   ok       → run normally with the configured model
+    //   fallback → run THIS run on the recommended fallback model
+    //   failed   → skip AI entirely (all-HOLD), fail fast — never spend the
+    //              14-minute background cap timing out batch after batch.
+    const preflightTimeoutMs = 120_000; // nvidia free tier can take 90s+ to start
+    let effectiveModel = aiConfig.model;
+    let skipAi = false;
+    if (aiInput.length > 0 && hasValidConfig(aiConfig)) {
+      const preflight = await runAiConnectionTest(preflightTimeoutMs);
+      if (preflight.status === "ok") {
+        logger.info({ msg: "AI pre-flight passed", model: effectiveModel });
+      } else if (preflight.status === "fallback" && preflight.recommendedModel) {
+        effectiveModel = preflight.recommendedModel;
+        logger.warn({
+          msg: "AI pre-flight: configured model failed — using fallback for this run",
+          configuredModel: aiConfig.model,
+          model: effectiveModel,
+        });
+      } else {
+        skipAi = true;
+        logger.error({
+          msg: "AI pre-flight FAILED on all models — skipping AI (fail fast)",
+          configuredModel: aiConfig.model,
         });
       }
+    }
 
-      logger.info({
-        msg: "AI analysis completed",
-        total: aiResults.length,
-        succeeded: aiResults.filter((r) => r.success).length,
-        aiMs,
-      });
-    } catch (e) {
-      const isCircuitOpen = e instanceof CircuitBreakerError;
-      logger.warn({
-        msg: isCircuitOpen
-          ? "AI analysis blocked by circuit breaker"
-          : "AI analysis failed, using defaults",
-        error: e instanceof Error ? e.message : String(e),
-      });
-
-      // Record failure in performance monitor
-      const metrics = getRecommendationMetrics();
-      metrics.record({
-        success: false,
-        responseTimeMs: Date.now() - startTime,
-        tokensUsed: 0,
-      });
-
-      // Fall back to default HOLD recommendations
-      aiResults = aiInput.map((s) => ({
+    // Shared all-HOLD mapping for the catch path and the pre-flight skip.
+    const holdFallback = (reason: string, errorMsg: string): StockAnalysisResult[] =>
+      aiInput.map((s) => ({
         ...s,
         aiRecommendation: {
           recommendation: "HOLD" as const,
@@ -392,20 +387,78 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
           targetPrice: s.price * DEFAULT_TARGET_MULTIPLIER,
           stopLoss: s.price * DEFAULT_STOP_LOSS_MULTIPLIER,
           timeHorizon: "medium" as const,
-          reasoning: isCircuitOpen
-            ? "AI circuit breaker open — defaulting to HOLD"
-            : "AI analysis failed — defaulting to HOLD",
+          reasoning: reason,
           riskFactors: ["AI analysis unavailable"],
         },
         tokensUsed: 0,
         executionMs: 0,
         success: false,
-        error: isCircuitOpen
-          ? "Circuit breaker open"
-          : e instanceof Error
-            ? e.message
-            : String(e),
+        error: errorMsg,
       }));
+
+    if (skipAi) {
+      // Fail fast — zero AI calls. runAiConnectionTest already audited and
+      // notified admins on the total failure.
+      aiResults = holdFallback(
+        "AI pre-flight failed on all models — defaulting to HOLD",
+        "AI pre-flight failed on all models",
+      );
+    } else {
+      try {
+        const aiStart = Date.now();
+        const effectiveConfig =
+          effectiveModel === aiConfig.model
+            ? aiConfig
+            : { ...aiConfig, model: effectiveModel };
+        aiResults = await circuitBreaker.call(() =>
+          analyzeStocks(aiInput, effectiveConfig),
+        );
+        const aiMs = Date.now() - aiStart;
+
+        // Record AI performance metrics
+        const metrics = getRecommendationMetrics();
+        for (const result of aiResults) {
+          metrics.record({
+            success: result.success,
+            responseTimeMs: result.executionMs,
+            tokensUsed: result.tokensUsed,
+          });
+        }
+
+        logger.info({
+          msg: "AI analysis completed",
+          total: aiResults.length,
+          succeeded: aiResults.filter((r) => r.success).length,
+          aiMs,
+        });
+      } catch (e) {
+        const isCircuitOpen = e instanceof CircuitBreakerError;
+        logger.warn({
+          msg: isCircuitOpen
+            ? "AI analysis blocked by circuit breaker"
+            : "AI analysis failed, using defaults",
+          error: e instanceof Error ? e.message : String(e),
+        });
+
+        // Record failure in performance monitor
+        const metrics = getRecommendationMetrics();
+        metrics.record({
+          success: false,
+          responseTimeMs: Date.now() - startTime,
+          tokensUsed: 0,
+        });
+
+        aiResults = holdFallback(
+          isCircuitOpen
+            ? "AI circuit breaker open — defaulting to HOLD"
+            : "AI analysis failed — defaulting to HOLD",
+          isCircuitOpen
+            ? "Circuit breaker open"
+            : e instanceof Error
+              ? e.message
+              : String(e),
+        );
+      }
     }
 
     // 8 & 9 & 10. Batch update stock entries, trackers, and record predictions

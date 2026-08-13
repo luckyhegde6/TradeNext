@@ -27,6 +27,7 @@ jest.mock("@/lib/services/ai/llm-provider", () => ({
   directPrompt: jest.fn(),
   getClient: jest.fn(),
   resetClient: jest.fn(),
+  getPromptTimeoutMs: jest.fn(() => 120_000),
 }));
 
 jest.mock("@/lib/services/ai/ai-monitoring", () => ({
@@ -208,14 +209,19 @@ describe("recommendation-agent", () => {
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
     });
 
-    test("falls back to default when response is unparseable", async () => {
+    test("fails a batch when the response is unparseable (no silent all-HOLD)", async () => {
       const stock = makeStock();
       mockDirectPrompt.mockResolvedValue("I cannot provide analysis for these stocks.");
 
       const results = await analyzeStocks([stock], VALID_AI_CONFIG);
-      expect(results[0].success).toBe(true); // parse didn't throw
+      // v3.8.0: unusable responses are retried (2 attempts), NOT silently
+      // accepted as HOLD-success. The batch is marked failed so monitoring
+      // and admins see the truth.
+      expect(results[0].success).toBe(false);
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
       expect(results[0].aiRecommendation.confidence).toBe(50);
+      expect(results[0].error).toContain("Unusable AI response");
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
     });
 
     test("matches recommendations by symbol when order differs", async () => {
@@ -414,6 +420,62 @@ describe("recommendation-agent", () => {
     });
   });
 
+  // ── Response verification & retry (v3.8.0) ────────────────────────────
+
+  describe("Response verification & retry", () => {
+    test("retries on an empty response and succeeds on the second attempt", async () => {
+      const stock = makeStock();
+      mockDirectPrompt
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce(makeAIResponse([stock]));
+
+      const results = await analyzeStocks([stock], VALID_AI_CONFIG);
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
+      expect(results[0].success).toBe(true);
+      expect(results[0].aiRecommendation.recommendation).toBe("BUY");
+    });
+
+    test("retries on the provider-error marker string", async () => {
+      const stock = makeStock();
+      mockDirectPrompt
+        .mockResolvedValueOnce("AI request failed. Please try again later.")
+        .mockResolvedValueOnce(makeAIResponse([stock]));
+
+      const results = await analyzeStocks([stock], VALID_AI_CONFIG);
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
+      expect(results[0].success).toBe(true);
+    });
+
+    test("retries when JSON is truncated (missing a stock) and succeeds", async () => {
+      const stocks = [
+        makeStock({ symbol: "RELIANCE" }),
+        makeStock({ symbol: "TCS", price: 3800 }),
+      ];
+      // Truncated like the old 2048-token cut: only RELIANCE made it out.
+      const truncated = JSON.stringify([
+        { symbol: "RELIANCE", recommendation: "BUY", confidence: 75, targetPrice: 2700, stopLoss: 2400, timeHorizon: "medium", reasoning: "Strong.", riskFactors: [] },
+      ]);
+      mockDirectPrompt
+        .mockResolvedValueOnce(truncated)
+        .mockResolvedValueOnce(makeAIResponse(stocks));
+
+      const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
+      expect(results).toHaveLength(2);
+      expect(results.every((r) => r.success)).toBe(true);
+    });
+
+    test("clamps the per-request timeout to the per-batch 5-minute budget", async () => {
+      const stock = makeStock();
+      mockDirectPrompt.mockResolvedValue(makeAIResponse([stock]));
+
+      await analyzeStocks([stock], VALID_AI_CONFIG);
+      const timeoutMs = mockDirectPrompt.mock.calls[0][2] as number;
+      expect(timeoutMs).toBeGreaterThan(0);
+      expect(timeoutMs).toBeLessThanOrEqual(120_000); // getPromptTimeoutMs default
+    });
+  });
+
   // ── Batch failure isolation ──────────────────────────────────────────
 
   describe("Batch failure isolation", () => {
@@ -422,11 +484,17 @@ describe("recommendation-agent", () => {
         makeStock({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
 
-      // First batch fails (both retry attempts), second succeeds
-      mockDirectPrompt
-        .mockRejectedValueOnce(new Error("Batch 1 failed"))
-        .mockRejectedValueOnce(new Error("Batch 1 failed"))
-        .mockResolvedValueOnce(makeAIResponse(stocks.slice(5, 10)));
+      // Implementation-based mock keeps behavior deterministic under the
+      // CONCURRENCY=3 worker pool (a sequential queue would race): batch 1
+      // (STOCK1-5) always fails both attempts; batch 2 (STOCK6-10) succeeds.
+      // NOTE: regex \bSTOCK1\b — a plain includes("STOCK1") also matches
+      // "STOCK10", which would wrongly reject batch 2.
+      mockDirectPrompt.mockImplementation((prompt: string) => {
+        if (/\bSTOCK1\b/.test(prompt)) {
+          return Promise.reject(new Error("Batch 1 failed"));
+        }
+        return Promise.resolve(makeAIResponse(stocks.slice(5, 10)));
+      });
 
       const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
       expect(results).toHaveLength(10);

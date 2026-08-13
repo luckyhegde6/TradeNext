@@ -130,7 +130,10 @@ export function getDefaultConfig(): AIConfig {
     model: process.env.AI_MODEL || DEFAULT_MODEL,
     apiKey: process.env.OPENROUTERKEY || process.env.OPENROUTER_API_KEY || "",
     temperature: 0.3,
-    maxTokens: 2048,
+    // 8192 output tokens: a 5-stock analysis batch + JSON reasoning easily
+    // exceeds 2048 (observed truncated JSON → HOLD defaults). The nvidia
+    // default model has a 1M context window, so this is safe.
+    maxTokens: 8192,
     enabled: true,
   };
 }

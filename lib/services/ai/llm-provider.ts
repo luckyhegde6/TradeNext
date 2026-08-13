@@ -13,6 +13,21 @@ import logger from "@/lib/logger";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
+/**
+ * Hard per-request timeout for directPrompt. The free-tier models
+ * (e.g. nvidia/nemotron-3-ultra-550b-a55b:free) routinely take 30-90s per
+ * batch under load — a 30s cap caused every attempt to abort mid-generation
+ * ("AI request failed. Please try again later."), which the batch layer then
+ * mistook for a successful-but-unparseable answer. Default 120s, overridable
+ * via AI_PROMPT_TIMEOUT_MS.
+ */
+const DEFAULT_PROMPT_TIMEOUT_MS = 120_000;
+
+export function getPromptTimeoutMs(): number {
+  const v = Number(process.env.AI_PROMPT_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_PROMPT_TIMEOUT_MS;
+}
+
 let cachedClient: OpenRouter | null = null;
 let cachedConfigHash = "";
 
@@ -63,10 +78,16 @@ export const resetLLM = resetClient;
 /**
  * Simple direct fetch to OpenRouter (bypasses Agent SDK for quick calls).
  * Useful for simple completions without tool calling or agent setup.
+ *
+ * @param timeoutMs Optional per-call timeout override (defaults to
+ *   getPromptTimeoutMs()). Callers with a hard batch deadline (e.g. the
+ *   recommendation agent's 5-minute cap) pass the remaining budget so a
+ *   single attempt can never overrun it.
  */
 export async function directPrompt(
   prompt: string,
-  config?: AIConfig
+  config?: AIConfig,
+  timeoutMs?: number
 ): Promise<string> {
   const cfg = config || getDefaultConfig();
 
@@ -89,7 +110,9 @@ export async function directPrompt(
         temperature: cfg.temperature,
         max_tokens: cfg.maxTokens,
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(
+        Math.max(1_000, timeoutMs ?? getPromptTimeoutMs()),
+      ),
     });
 
     if (!response.ok) {
