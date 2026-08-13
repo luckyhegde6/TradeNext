@@ -5,11 +5,21 @@
 > 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-13 (v3.7.1 BUY/SELL-only Telegram broadcast + AI connection-test cron w/ fallback probing + audit/status + CI e2e fix; 22 new tests, suite 582 pass; **commit pending user**, no deploy; still carries v3.5.4→v3.7.0 holds)
+2026-08-13 (v3.7.2 Netlify secrets-scan build-failure fix — `.githooks` omit path + app hygiene; live-verify finding: tradenext6.netlify.app healthy but runs an OLD build — v3.6.3 sidebar + v3.7.x NOT deployed, deploy on hold; v3.6.3 levels backfill executed 792/513/2; still carries v3.5.4→v3.7.1 holds)
 
 ---
 
 ## Current Project Status
+
+### v3.7.2 — Netlify Secrets-Scan Build-Failure Fix + Live-Site Health/Staleness Finding (Aug 13 2026) — ✅ CODE + TESTS VERIFIED, DOCS PASS DONE, COMMIT PENDING
+**Branch**: `fix/netlify-secrets-scan` (fresh from main — old local copy deleted/merged; commit **pending user approval** — **no deploy**, deploy on hold per user).
+**Symptom (user-reported)**: Netlify build failed — "Secrets scanning found secrets in build."
+**Root cause 1**: Netlify's scanner flags EVERY repo file; `.githooks/` (extensionless) still contained demo-credential literals from the v3.5.7 masking work and was NOT in `SECRETS_SCAN_OMIT_PATHS` (AGENTS.md/README.md/seed were). Fix: `netlify.toml` `SECRETS_SCAN_OMIT_PATHS` += `.githooks`.
+**Root cause 2 (app hygiene)**: grep sweep found placeholder-looking numeric secrets in scanned paths — `lib/alerts/delivery/telegram.ts` example botToken/chatId, `TelegramSubscription.tsx` placeholder chatId, `app/api/user/telegram/verify/route.ts` JSDoc example code, `lib/__tests__/nse-api.test.ts` fixture timestamps. Any future env value containing that numeric substring would trip the scan. Fix: all replaced with clearly-fake values (`87654321:AAfake0token1for2docs3only` / `-1008765432100` / `876543210` / `654321`).
+**Verification**: `npx jest lib/__tests__/nse-api.test.ts` → 8/8 PASS; grep-verified zero credential-shaped numeric literals in `*.{ts,tsx,js,json,toml,yaml,yml,prisma}`; remaining demo-cred matches only in omit-listed paths; `git diff --stat` = 5 files +7/−7; full suite unchanged **582 pass / 11 skipped**; tsc clean on touched files.
+**Live-site verify (user clarification — live site, not localhost)**: https://tradenext6.netlify.app — `/markets/analytics` + `/recommendations` healthy, live NSE breadth (1,493 Adv / 1,851 Dec / 131 Unch / 3,475), Corp Events table, pagination, **0 console errors**, mobile 375px no overflow. **BUT the site runs an OLD build** — no v3.6.3 SECTIONS sidebar, no v3.7.x features → **deploy on hold per user + blocked by the secrets-scan failure this branch fixes**.
+**v3.6.3 backfill executed**: `npx tsx --env-file=.env scripts/backfill-recommendation-levels.ts` → **792 scanned / 513 updated / 2 corrected** (GMRAIRPORT SELL + LICI HOLD); ITC no longer shows inverted levels.
+- **Status**: docs updated (AGENTS.md v3.7.2 row, CHANGELOG index + versions-v3.md, TODO rows + v3.6.3 backfill note, Primer, agent-memory, Lessons.md #63, session flow/decisions); NOT committed; NO deploy.
 
 ### v3.7.1 — BUY/SELL-Only Telegram Broadcast + AI Connection-Test Cron + CI E2E Fix (Aug 13 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING
 **Branch**: `fix/ai-config-cron-ledger` (carries v3.5.4→v3.7.0 holds; commit **pending user approval** — no deploy).

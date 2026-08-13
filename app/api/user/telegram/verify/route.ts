@@ -4,7 +4,7 @@
  * POST /api/user/telegram/verify
  *   Body: { action: "send" }
  *     → Generates a 6-digit code (crypto.randomBytes) and sends it to the user's Telegram
- *   Body: { action: "confirm", code: "123456" }
+ *   Body: { action: "confirm", code: "654321" }
  *     → Confirms the code and marks the Telegram subscription as verified
  *
  * Security:
