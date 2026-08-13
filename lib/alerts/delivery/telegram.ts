@@ -3,8 +3,8 @@
  *
  * Configure via AlertChannel.config JSON:
  * {
- *   "botToken": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
- *   "chatId": "-1001234567890",
+ *   "botToken": "87654321:AAfake0token1for2docs3only",
+ *   "chatId": "-1008765432100",
  *   "parseMode": "Markdown" | "HTML"
  * }
  */

@@ -89,7 +89,7 @@ describe("securityWiseBarsToOHLCV", () => {
 
   it("maps only the OHLCV fields", () => {
     const bar = {
-      timestamp: 123456,
+      timestamp: 654321,
       open: 1,
       high: 2,
       low: 0.5,
@@ -104,7 +104,7 @@ describe("securityWiseBarsToOHLCV", () => {
 
     const result = securityWiseBarsToOHLCV([bar]);
     expect(result[0]).toEqual({
-      timestamp: 123456,
+      timestamp: 654321,
       open: 1,
       high: 2,
       low: 0.5,

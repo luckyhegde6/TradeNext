@@ -578,6 +578,17 @@ echo "" >> agent-memory.md
 
 ---
 
+## 2026-08-13 (v3.7.2) — Netlify secrets-scan build-failure fix + live-site health/staleness finding + v3.6.3 levels backfill executed
+
+- **Netlify secrets-scan build failure (user-reported)**: Netlify "Secrets scanning found secrets in build." Root causes: (1) `.githooks/` (extensionless) still held demo-credential literals from v3.5.7 masking and was NOT in `netlify.toml` `SECRETS_SCAN_OMIT_PATHS` (AGENTS.md/README.md/seed already were) → added `.githooks`; (2) grep sweep found placeholder-looking numeric secrets in scanned app/test files — `lib/alerts/delivery/telegram.ts` example botToken/chatId, `TelegramSubscription.tsx` placeholder chatId, `app/api/user/telegram/verify/route.ts` JSDoc example code, `lib/__tests__/nse-api.test.ts` fixture timestamps → all replaced with clearly-fake values (`87654321:AAfake0token1for2docs3only`, `-1008765432100`, `876543210`, `654321`).
+- **Verification**: `npx jest lib/__tests__/nse-api.test.ts` → 8/8 PASS; grep-verified zero credential-shaped numeric literals in `*.{ts,tsx,js,json,toml,yaml,yml,prisma}` (remaining demo-cred matches only in omit-listed paths); `git diff --stat` = 5 files +7/−7; full suite **582 pass / 11 skipped / 0 failures** unchanged; tsc clean on touched files.
+- **Live-site verify (user clarified: LIVE site, not localhost)**: https://tradenext6.netlify.app — `/markets/analytics` (breadcrumbs, live NSE breadth 1,493 Adv / 1,851 Dec / 131 Unch / 3,475, Corp Events table 13-Aug-2026, pagination, tab switching) + `/recommendations` (Today's Picks/History, "6 Sell" cards) — **0 console errors both, mobile 375px no overflow** — **BUT the site runs an OLD build: no v3.6.3 SECTIONS sidebar, no v3.7.x features** → deploy on hold per user + blocked by this fix branch.
+- **v3.6.3 levels backfill executed**: `npx tsx --env-file=.env scripts/backfill-recommendation-levels.ts` → **792 scanned / 513 updated / 2 corrected** (GMRAIRPORT SELL + LICI HOLD); ITC no longer shows inverted levels.
+- **User action**: Netlify `DEFAULT_PASSWORD` rotated to a new value (no longer shares a substring with app placeholders; repo now scans clean anyway). Optional: rotate further to a value with no numeric substring at all.
+- **Status**: docs updated; NOT committed (pending user); NO deploy (deploy on hold). Branch `fix/netlify-secrets-scan`.
+
+---
+
 ## 2026-08-13 (v3.7.1) — BUY/SELL-only Telegram broadcast + AI connection-test cron + CI e2e fix
 
 - **Broadcast (user-requested: no HOLD suggestions in Telegram)**: NEW pure `lib/services/recommendationBroadcast.ts` (`buildRecommendationBroadcast(stocks, dateLabel?)`, `MAX_BROADCAST_PICKS = 8`) — BUY/SELL only; all-HOLD day → short notice; footer `🟢 N BUY · 🔴 N SELL · ⚪ N HOLD not shown`; 4000-char truncation (slice = 4000 − marker length). Wired into `lib/services/dailyRecommendationService.ts` broadcast block. 9 tests.

@@ -69,7 +69,9 @@ fi
 #    NAMES only. (Public demo creds live in seed/e2e/check-remote-db — allowlisted.)
 #    NOTE: .githooks/* is exempted below — the hook files themselves must
 #    contain the block-list literal to enforce it (one place, by design).
-JOIN_DEFAULT_HITS=$(git diff --cached -G'12345678' -- ':!.githooks/*' 2>/dev/null | grep -c '12345678' 2>/dev/null)
+#    NOTE: only count ADDED lines (grep '^+') — removals of literals (the
+#    hygiene fix itself) must never be blocked by their own deleted lines.
+JOIN_DEFAULT_HITS=$(git diff --cached -G'12345678' -- ':!.githooks/*' 2>/dev/null | grep '^+' | grep -c '12345678' 2>/dev/null)
 test -z "$JOIN_DEFAULT_HITS" && JOIN_DEFAULT_HITS=0
 if [ "$JOIN_DEFAULT_HITS" -gt 0 ] 2>/dev/null; then
     echo "  CRITICAL: Join default password literal detected in staged changes."
@@ -77,7 +79,7 @@ if [ "$JOIN_DEFAULT_HITS" -gt 0 ] 2>/dev/null; then
     exit 1
 fi
 
-DOC_PW_HITS=$(git diff --cached -G'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' -- '*.md' 2>/dev/null | grep -c -E 'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' 2>/dev/null)
+DOC_PW_HITS=$(git diff --cached -G'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' -- '*.md' 2>/dev/null | grep '^+' | grep -c -E 'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' 2>/dev/null)
 test -z "$DOC_PW_HITS" && DOC_PW_HITS=0
 if [ "$DOC_PW_HITS" -gt 0 ] 2>/dev/null; then
     echo "  CRITICAL: Literal password assignment detected in staged *.md files."

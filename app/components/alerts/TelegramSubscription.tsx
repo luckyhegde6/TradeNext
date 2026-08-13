@@ -237,7 +237,7 @@ export default function TelegramSubscription() {
               </p>
               <input
                 type="text"
-                placeholder="Paste your Chat ID here (e.g., 123456789)"
+                placeholder="Paste your Chat ID here (e.g., 876543210)"
                 className="w-full p-2 border border-border rounded bg-background"
                 value={chatIdInput}
                 onChange={e => setChatIdInput(e.target.value)}
