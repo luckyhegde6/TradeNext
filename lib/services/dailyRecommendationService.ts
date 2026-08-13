@@ -166,8 +166,13 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       metadata: { runId: run.id, triggerSource: triggeredBy },
     });
 
-    // 3. Run all screeners (Chartink 117 registry primary → TradingView fallback)
-    const screenerResults = await runChartinkUnifiedScreeners({ forceRefresh: true });
+    // 3. Run all screeners (Chartink 117 registry primary → TradingView fallback).
+    //    Swing-tab scans are a separate category — excluded so they don't change
+    //    Today's Picks composition (the Swing tab runs them via its own route).
+    const screenerResults = await runChartinkUnifiedScreeners({
+      forceRefresh: true,
+      excludeCategoryIds: ["swing"],
+    });
 
     // 4. Compute screener stats (from the FULL result set, before capping)
     const successfulScreenerNames = new Set(

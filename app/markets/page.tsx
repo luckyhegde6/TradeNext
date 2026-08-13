@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
+import { ChartBarIcon } from "@heroicons/react/24/outline";
 import { INDICES, MAJOR_INDICES } from "@/lib/constants";
 import MarketAnalyticsTabs from "@/app/components/MarketAnalyticsTabs";
 
@@ -57,13 +58,12 @@ const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
                 </div>
                 <div className="mt-4 text-sm text-blue-600 font-medium flex items-center gap-1 group">
                     {/* Nested <a> inside the <Link> is invalid HTML (hydration
-                        warning in CI) — render a span that opens the NSE chart
+                        warning in CI) — render a button that opens the NSE chart
                         and stops propagation so the outer card link doesn't fire. */}
-                    <span
-                        role="link"
-                        tabIndex={0}
-                        aria-label={`View ${name} on NSE Charting`}
-                        className="inline-flex items-center gap-1 cursor-pointer"
+                    <button
+                        aria-label={`View ${name} candlestick chart on NSE`}
+                        title="Candlestick chart on NSE"
+                        className="inline-flex items-center gap-1 cursor-pointer hover:text-blue-800"
                         onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -77,9 +77,10 @@ const IndexCard = ({ indexKey, name }: { indexKey: string; name: string }) => {
                             }
                         }}
                     >
-                        View Chart & Details
+                        <ChartBarIcon className="w-5 h-5" />
+                        Chart
                         <span className="group-hover:translate-x-1 transition-transform">→</span>
-                    </span>
+                    </button>
                 </div>
             </div>
         </Link>

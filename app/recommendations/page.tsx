@@ -8,6 +8,7 @@ import PerformanceTab from "@/app/components/recommendations/PerformanceTab";
 import SubscribeTab from "@/app/components/recommendations/SubscribeTab";
 import IposTab from "@/app/components/recommendations/IposTab";
 import IdeasTab from "@/app/components/recommendations/IdeasTab";
+import SwingTab from "@/app/components/recommendations/SwingTab";
 import DividendMonthView from "@/app/components/dividends/DividendMonthView";
 import DividendSummaryCards from "@/app/components/dividends/DividendSummaryCards";
 import DividendListView from "@/app/components/dividends/DividendListView";
@@ -19,7 +20,7 @@ import type {
   MonthlyIncome,
 } from "@/lib/services/dividendCalendarService";
 
-type Tab = "picks" | "history" | "performance" | "dividends" | "ipos" | "ideas" | "subscribe";
+type Tab = "picks" | "swing" | "history" | "performance" | "dividends" | "ipos" | "ideas" | "subscribe";
 type DividendViewTab = "calendar" | "list" | "income";
 
 interface Stock {
@@ -156,6 +157,7 @@ export default function RecommendationsPage() {
 
   const tabs: { id: Tab; label: string; icon: string; authRequired?: boolean }[] = [
     { id: "picks", label: "Today's Picks", icon: "🎯" },
+    { id: "swing", label: "Swing", icon: "🌊" },
     { id: "history", label: "History", icon: "📜" },
     { id: "performance", label: "Performance", icon: "📈" },
     { id: "dividends", label: "Dividends", icon: "💰" },
@@ -246,6 +248,10 @@ export default function RecommendationsPage() {
               runDate={runInfo?.runDate || null}
               loading={loading}
             />
+          )}
+
+          {activeTab === "swing" && (
+            <SwingTab />
           )}
 
           {activeTab === "history" && (
