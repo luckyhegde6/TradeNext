@@ -193,6 +193,16 @@ export function countSegregation(stocks: SwingStock[]): Record<SignalFamily, num
   return counts;
 }
 
+/**
+ * Honest analysis status after a batch: "done" only when at least ONE stock
+ * carries AI targets. A batch that failed for every stock (per-stock
+ * analysisError, no throw) must report "failed" — the tab header renders
+ * "AI targets ready" from "done", which would be a lie over an all-failed run.
+ */
+export function analysisStatusAfterBatch(stocks: SwingStock[]): SwingResponse["analysisStatus"] {
+  return stocks.some((s) => s.analysis) ? "done" : "failed";
+}
+
 // ---------------------------------------------------------------------------
 // Indicators (pure + DB fetch)
 // ---------------------------------------------------------------------------
@@ -343,7 +353,7 @@ export async function getSwingRecommendations(
           s.analysisError = a?.error ?? "Analysis failed";
         }
       }
-      analysisStatus = "done";
+      analysisStatus = analysisStatusAfterBatch(enriched);
     } catch (e) {
       logger.error({
         msg: "Swing AI analysis failed — falling back to screener-only feed",

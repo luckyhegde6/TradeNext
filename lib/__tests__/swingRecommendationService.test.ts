@@ -17,6 +17,7 @@ import {
   rankSwingStocks,
   computeIndicatorsFromSeries,
   countSegregation,
+  analysisStatusAfterBatch,
   SWING_TOP_N,
 } from "@/lib/services/swingRecommendationService";
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
@@ -268,5 +269,42 @@ describe("countSegregation", () => {
     expect(counts.breakout).toBe(1);
     expect(counts.reversal).toBe(1);
     expect(counts.momentum).toBe(0);
+  });
+});
+
+// ─── analysisStatusAfterBatch ────────────────────────────────────────────
+
+describe("analysisStatusAfterBatch", () => {
+  it("reports 'done' when at least one stock carries AI targets", () => {
+    const stocks = [
+      makeSwingStock("A", { analysis: null, analysisError: "Unusable AI response (p)" }),
+      makeSwingStock("B", {
+        analysis: {
+          action: "LONG",
+          confidence: 85,
+          entryPrice: 100,
+          targetPrice: 110,
+          stopLoss: 95,
+          timeHorizon: "short",
+          logic: "trend continuation",
+          momentumScore: 80,
+          riskFactors: ["volatility"],
+        },
+        analysisError: null,
+      }),
+    ];
+    expect(analysisStatusAfterBatch(stocks)).toBe("done");
+  });
+
+  it("reports 'failed' when every analysis failed (regression: live prod header lied)", () => {
+    const stocks = [
+      makeSwingStock("A", { analysis: null, analysisError: "Unusable AI response (p)" }),
+      makeSwingStock("B", { analysis: null, analysisError: "Unusable AI response (p)" }),
+    ];
+    expect(analysisStatusAfterBatch(stocks)).toBe("failed");
+  });
+
+  it("reports 'failed' on an empty batch (no analyses attempted)", () => {
+    expect(analysisStatusAfterBatch([])).toBe("failed");
   });
 });
