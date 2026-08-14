@@ -58,6 +58,7 @@ jest.mock("@/lib/services/ai/config", () => ({
 jest.mock("@/lib/services/ai/llm-provider", () => ({
   __esModule: true,
   directPrompt: jest.fn(),
+  getPromptTimeoutMs: jest.fn(() => 120_000),
 }));
 
 jest.mock("@/lib/services/nseIpoService", () => ({

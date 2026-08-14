@@ -442,10 +442,12 @@ function FragmentRow({
           <span className="text-gray-600">—</span>
         );
       case "entryPrice":
-        return <span className="tabular-nums">₹{item.entryPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>;
+        // v3.10.1: explicit light color — the app is dark-themed and the
+        // default table text was too dim for these money columns.
+        return <span className="text-gray-200 tabular-nums">₹{item.entryPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>;
       case "currentPrice":
         return item.currentPrice != null
-          ? <span className="tabular-nums">₹{item.currentPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+          ? <span className="text-gray-200 tabular-nums">₹{item.currentPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
           : <span className="text-gray-600">—</span>;
       case "targetPrice":
         return item.targetPrice != null

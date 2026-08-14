@@ -22,6 +22,13 @@ const ACTION_META = {
   OBSERVE: { label: "◍ OBSERVE", classes: "bg-amber-500/20 text-amber-300 border-amber-500/40" },
 } as const;
 
+/** AI holding-tenor pill (analysis.timeHorizon). */
+const TENURE_META = {
+  short: { label: "Short term", classes: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
+  medium: { label: "Medium term", classes: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  long: { label: "Long term", classes: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+} as const;
+
 const SOURCE_LABEL: Record<string, string> = {
   chartink_db: "Captured scan",
   chartink_live: "Live Chartink",
@@ -190,8 +197,12 @@ export default function SwingCard({ stock }: { stock: SwingStock }) {
             </div>
           </div>
 
-          <div className="text-[10px] text-gray-500 mb-1">
-            Horizon: <span className="text-gray-400 capitalize">{analysis.timeHorizon}</span>
+          <div className="mb-1">
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${TENURE_META[analysis.timeHorizon].classes}`}
+            >
+              {TENURE_META[analysis.timeHorizon].label}
+            </span>
           </div>
 
           <button

@@ -240,6 +240,10 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     // pagination correct (page 1 = true top returners) we fetch ALL matching
     // trackers (bounded, next-day-promoted, cached 15 min) then sort + slice.
     orderBy.createdAt = order;
+  } else if (sort === "daysTracked") {
+    // daysTracked is computed from createdAt (floor((now - createdAt)/day)+1),
+    // so it is strictly monotonic with createdAt — order by the stored field.
+    orderBy.createdAt = order;
   } else {
     orderBy[sort] = order;
   }

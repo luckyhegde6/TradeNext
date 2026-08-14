@@ -224,6 +224,18 @@ describe("recommendationPerformanceService", () => {
       expect(res.items.map((i) => i.symbol)).toEqual(["CCC", "AAA", "BBB"]);
     });
 
+    it("orders by createdAt when sorting on the computed daysTracked field (regression: passed raw daysTracked to Prisma → 500)", async () => {
+      prisma.recommendationTracker.findMany.mockResolvedValue([makeTracker()]);
+      prisma.recommendationTracker.count.mockResolvedValue(1);
+
+      await getPerformanceList({ sort: "daysTracked", order: "desc" });
+
+      // Never pass the computed field to Prisma — order by the stored createdAt
+      const callArgs = prisma.recommendationTracker.findMany.mock.calls[0][0];
+      expect(callArgs.orderBy).toEqual({ createdAt: "desc" });
+      expect(Object.keys(callArgs.orderBy)).not.toContain("daysTracked");
+    });
+
     it("caches the response and serves subsequent calls from cache", async () => {
       prisma.recommendationTracker.findMany.mockResolvedValue([makeTracker()]);
       prisma.recommendationTracker.count.mockResolvedValue(1);

@@ -573,19 +573,28 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toHaveLength(2);
     });
 
-    test("filters at source to BUY/SELL only (no HOLD in query)", async () => {
-      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
+    test("returns the latest run even when all stocks are HOLD (honest latest date)", async () => {
+      const mockRun = {
+        id: "run-hold",
+        status: "completed",
+        runDate: new Date(),
+        stocks: [
+          { symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "HOLD", tracker: { id: "t1" } },
+          { symbol: "TCS", screenerCount: 2, aiRecommendation: "HOLD", tracker: { id: "t2" } },
+        ],
+      };
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(mockRun);
 
-      await getLatestRecommendations();
+      const result = await getLatestRecommendations();
+      expect(result.run).toEqual(mockRun);
+      expect(result.stocks).toHaveLength(2);
 
-      // Both the run-level where and the nested stocks include must filter to BUY/SELL
-      const callArgs = mockPrisma.dailyRecommendationRun.findFirst.mock.calls;
-      for (const call of callArgs) {
-        const where = call[0]?.where;
-        const include = call[0]?.include;
-        expect(where.stocks.some).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
-        expect(include.stocks.where).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
-      }
+      // v3.10.1 honest latest-run: NO BUY/SELL verdict filter — an all-HOLD
+      // run must surface today's date instead of a stale actionable run.
+      const where = mockPrisma.dailyRecommendationRun.findFirst.mock.calls[0][0]?.where;
+      expect(where.status).toEqual({ in: ["completed", "failed"] });
+      expect(where.uniqueStocks).toEqual({ gt: 0 });
+      expect(where.stocks).toBeUndefined();
     });
 
     test("returns empty when no runs exist", async () => {
@@ -596,19 +605,13 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toEqual([]);
     });
 
-    test("falls back to any run with actionable stocks if no completed run", async () => {
-      // First call (completed/failed) returns null
-      mockPrisma.dailyRecommendationRun.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({
-          id: "run-2",
-          status: "running",
-          stocks: [{ symbol: "TCS", screenerCount: 2, aiRecommendation: "BUY", tracker: { id: "t2" } }],
-        });
+    test("uses a single query (no BUY/SELL fallback round-trip)", async () => {
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
 
-      const result = await getLatestRecommendations();
-      expect(result.run).toBeDefined();
-      expect(result.stocks).toHaveLength(1);
+      await getLatestRecommendations();
+      // v3.10.1: one findFirst — the old two-query (actionable → fallback)
+      // design is gone.
+      expect(mockPrisma.dailyRecommendationRun.findFirst).toHaveBeenCalledTimes(1);
     });
   });
 

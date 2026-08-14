@@ -18,6 +18,9 @@ import {
   computeIndicatorsFromSeries,
   countSegregation,
   analysisStatusAfterBatch,
+  swingTrackerDraft,
+  persistSwingTrackers,
+  type SwingTrackerDb,
   SWING_TOP_N,
 } from "@/lib/services/swingRecommendationService";
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
@@ -306,5 +309,111 @@ describe("analysisStatusAfterBatch", () => {
 
   it("reports 'failed' on an empty batch (no analyses attempted)", () => {
     expect(analysisStatusAfterBatch([])).toBe("failed");
+  });
+});
+
+// ─── swingTrackerDraft (v3.10.1 persistence) ─────────────────────────────
+
+const analyzedStock = (symbol: string, action: "LONG" | "SHORT" | "OBSERVE") =>
+  makeSwingStock(symbol, {
+    price: 500,
+    screenerNames: ["Scanner A", "Scanner B"],
+    families: ["trend", "breakout"],
+    source: "chartink_live",
+    analysis: {
+      action,
+      confidence: 80,
+      entryPrice: 500,
+      targetPrice: 560,
+      stopLoss: 460,
+      timeHorizon: "short",
+      logic: "trend continuation with volume",
+      momentumScore: 75,
+      riskFactors: ["volatility"],
+    },
+    analysisError: null,
+  });
+
+describe("swingTrackerDraft", () => {
+  it("maps LONG → BUY with the AI target/stop/confidence and screener attribution", () => {
+    const draft = swingTrackerDraft(analyzedStock("RELIANCE", "LONG"));
+    expect(draft).not.toBeNull();
+    expect(draft!.symbol).toBe("RELIANCE");
+    expect(draft!.aiRecommendation).toBe("BUY");
+    expect(draft!.timeHorizon).toBe("swing");
+    expect(draft!.status).toBe("active");
+    expect(draft!.entryPrice).toBe(500);
+    expect(draft!.currentPrice).toBe(500);
+    expect(draft!.targetPrice).toBe(560);
+    expect(draft!.stopLoss).toBe(460);
+    expect(draft!.confidence).toBe(80);
+    expect(draft!.reasoning).toBe("trend continuation with volume");
+    expect(draft!.riskFactors).toEqual(["volatility"]);
+    expect(draft!.screenerAttribution).toEqual({
+      screenerNames: ["Scanner A", "Scanner B"],
+      families: ["trend", "breakout"],
+      source: "chartink_live",
+    });
+  });
+
+  it("maps SHORT → SELL and OBSERVE → HOLD", () => {
+    expect(swingTrackerDraft(analyzedStock("TCS", "SHORT"))!.aiRecommendation).toBe("SELL");
+    expect(swingTrackerDraft(analyzedStock("INFY", "OBSERVE"))!.aiRecommendation).toBe("HOLD");
+  });
+
+  it("returns null when the stock has no analysis", () => {
+    expect(swingTrackerDraft(makeSwingStock("A"))).toBeNull();
+  });
+});
+
+describe("persistSwingTrackers", () => {
+  const makeDb = () => {
+    const createMany = jest.fn().mockResolvedValue({ count: 1 });
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const db: SwingTrackerDb & { calls: string[] } = {
+      calls: [],
+      recommendationTracker: {
+        findMany: jest.fn().mockImplementation(async ({ where }) => {
+          return where.symbol.in.includes("EXISTING") ? [{ symbol: "EXISTING" }] : [];
+        }),
+        createMany,
+        updateMany,
+      },
+    };
+    return db;
+  };
+
+  it("creates new swing trackers and refreshes existing ones", async () => {
+    const db = makeDb();
+    const res = await persistSwingTrackers(
+      [analyzedStock("NEW", "LONG"), analyzedStock("EXISTING", "SHORT")],
+      db,
+    );
+
+    expect(db.recommendationTracker.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ timeHorizon: "swing", status: "active" }),
+      }),
+    );
+    // Only NEW is created
+    expect(db.recommendationTracker.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ symbol: "NEW", aiRecommendation: "BUY", timeHorizon: "swing" })],
+      skipDuplicates: true,
+    });
+    // EXISTING gets a price/lastCheckedAt refresh (targets untouched)
+    expect(db.recommendationTracker.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ symbol: "EXISTING", timeHorizon: "swing", status: "active" }),
+        data: expect.objectContaining({ currentPrice: 500, lastCheckedAt: expect.any(Date) }),
+      }),
+    );
+    expect(res).toEqual({ created: 1, updated: 1 });
+  });
+
+  it("does nothing when no stock carries AI analysis", async () => {
+    const db = makeDb();
+    const res = await persistSwingTrackers([makeSwingStock("A")], db);
+    expect(res).toEqual({ created: 0, updated: 0 });
+    expect(db.recommendationTracker.findMany).not.toHaveBeenCalled();
   });
 });

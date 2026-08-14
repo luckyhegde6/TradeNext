@@ -23,8 +23,12 @@ import { notifyAdmins } from "@/lib/services/notificationService";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-/** Fallback routes probed in order when the configured model fails. */
-export const AI_FALLBACK_MODELS = ["openrouter/free", "openrouter/auto"] as const;
+/**
+ * Fallback routes probed in order when the configured model fails.
+ * Defined in the shared pure module (used by the AI agents' fallback chain too).
+ */
+import { AI_FALLBACK_MODELS } from "./modelChain";
+export { AI_FALLBACK_MODELS } from "./modelChain";
 
 /** Action tag recorded via trackAiCall for every probe attempt. */
 export const CONNECTION_TEST_ACTION = "connection_test";

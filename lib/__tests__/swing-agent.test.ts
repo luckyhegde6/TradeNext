@@ -258,7 +258,7 @@ describe("analyzeSwingStocks", () => {
 
     const results = await analyzeSwingStocks(stocks, VALID_AI_CONFIG);
 
-    expect(mockedDirectPrompt).toHaveBeenCalledTimes(2); // RETRY_MAX
+    expect(mockedDirectPrompt).toHaveBeenCalledTimes(4); // RETRY_MAX + 2 fallback models (v3.10.1)
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.success)).toBe(false);
     expect(results.every((r) => r.analysis!.action === "OBSERVE")).toBe(true);

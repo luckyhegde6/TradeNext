@@ -980,8 +980,11 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
  * Get the latest recommendations for the UI (Today's Picks tab).
  *
  * Returns the most recent completed/failed run with stocks, sorted by screenerCount
- * (stronger signal = more screeners agree). Falls back to any run with stocks > 0
- * if no completed run exists.
+ * (stronger signal = more screeners agree). HOLD stocks are INCLUDED — the
+ * latest run is surfaced as-is (honest "Last updated" date). Filtering to
+ * actionable BUY/SELL picks is a presentation concern (UI pills, broadcast),
+ * not a query concern: an all-HOLD run (AI flaky/100% HOLD since Jul 19 on
+ * prod) must show today's date + HOLD rows instead of a stale 2-week-old list.
  *
  * BigInt fields (volume) are converted to Number for JSON serialization.
  *
@@ -998,46 +1001,22 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
     return cached;
   }
 
-  // Today's Picks shows actionable recommendations only (BUY/SELL).
-  // HOLD (and null) stocks are filtered out at the source so the public API,
-  // UI, and Telegram /recommendations all surface only BUY/SELL picks.
-  // Runs with zero actionable stocks are skipped entirely (empty state).
-  const actionable = { aiRecommendation: { in: ["BUY", "SELL"] } };
-
-  // 1. Try latest completed run that has actionable stocks
-  let latestRun = await prisma.dailyRecommendationRun.findFirst({
+  // Honest latest-run selection: ONE query — latest completed/failed run with
+  // stocks, NO verdict filter. All stocks (incl. HOLD) are returned so the
+  // "Last updated" date always reflects the newest run (v3.10.1).
+  const latestRun = await prisma.dailyRecommendationRun.findFirst({
     where: {
       status: { in: ["completed", "failed"] },
       uniqueStocks: { gt: 0 },
-      stocks: { some: actionable },
     },
     orderBy: { runDate: "desc" },
     include: {
       stocks: {
-        where: actionable,
         orderBy: { screenerCount: "desc" },
         include: { tracker: true },
       },
     },
   });
-
-  // 2. Fallback: any run that has actionable stocks
-  if (!latestRun || !latestRun.stocks || latestRun.stocks.length === 0) {
-    latestRun = await prisma.dailyRecommendationRun.findFirst({
-      where: {
-        uniqueStocks: { gt: 0 },
-        stocks: { some: actionable },
-      },
-      orderBy: { runDate: "desc" },
-      include: {
-        stocks: {
-          where: actionable,
-          orderBy: { screenerCount: "desc" },
-          include: { tracker: true },
-        },
-      },
-    });
-  }
 
   // Convert BigInt fields to Number for JSON serialization
   const serializedStocks = (latestRun?.stocks ?? []).map((s) => ({
