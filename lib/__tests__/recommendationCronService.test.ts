@@ -193,7 +193,7 @@ describe("ensureRecommendationCrons", () => {
     );
   });
 
-  it("is a no-op (no create/update) when all four jobs exist unchanged", async () => {
+  it("recomputes nextRun (no create) when all four jobs exist unchanged", async () => {
     const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean }> = {
       [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true },
       [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true },
@@ -203,11 +203,24 @@ describe("ensureRecommendationCrons", () => {
     prisma.cronJob.findFirst.mockImplementation(
       async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
     );
+    // clearAllMocks() does NOT clear implementations — recordCronRun tests
+    // earlier in this file set update to reject with "db down", which would
+    // poison this test. Set an explicit resolved implementation.
+    prisma.cronJob.update.mockResolvedValue({});
 
     const result = await ensureRecommendationCrons();
 
+    // v3.10.1: nextRun is ALWAYS recomputed with UTC semantics so rows
+    // anchored by the old local-timezone parser self-correct. No create.
     expect(prisma.cronJob.create).not.toHaveBeenCalled();
-    expect(prisma.cronJob.update).not.toHaveBeenCalled();
+    expect(prisma.cronJob.update).toHaveBeenCalledTimes(4);
+    for (const call of prisma.cronJob.update.mock.calls) {
+      const { data, where } = call[0] as { data: Record<string, unknown>; where: { id: string } };
+      expect(where.id).toMatch(/^r[1-4]$/);
+      // Only nextRun changes when the definition hasn't drifted.
+      expect(Object.keys(data)).toEqual(["nextRun"]);
+      expect(data.nextRun).toBeInstanceOf(Date);
+    }
     expect(result.ensured).toBe(4);
   });
 

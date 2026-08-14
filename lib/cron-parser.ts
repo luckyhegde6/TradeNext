@@ -5,6 +5,13 @@
 //   * lists (1,2,3), ranges (1-5), steps (*/15), wildcards (*)
 //   * weekday names (MON-FRI, SUN..SAT) and ranges
 //   * weekday ranges (e.g. "0 16 * * 1-5" = Mon-Fri at 16:00)
+//
+// TIMEZONE SEMANTICS (v3.10.1):
+// Expressions are evaluated in **UTC** on every host. Netlify system crons
+// store UTC-convention expressions (e.g. "30 4 * * 1-5" = 04:30 UTC =
+// 10:00 AM IST); previously the parser used the host's LOCAL timezone, so a
+// local IST dev machine fired 5.5h early (04:30 IST instead of 10:00 IST).
+// UTC matching makes the returned instant host-independent.
 // See lib/__tests__/cronParser.test.ts for coverage.
 
 const DAY_NAMES: Record<string, number> = {
@@ -68,6 +75,9 @@ function parseField(field: string, min: number, max: number, names?: Record<stri
 
 /**
  * Compute the next run time for a 5-field cron expression strictly after `from`.
+ * The expression is evaluated in UTC (IST = UTC + 5:30), so results are
+ * independent of the host's local timezone — the same expression fires at the
+ * same absolute instant on Netlify (UTC) and local dev machines (IST).
  * Falls back to now + 60s for invalid expressions (never throws).
  */
 export function calculateNextRun(cronExpression: string, from: Date = new Date()): Date {
@@ -85,24 +95,27 @@ export function calculateNextRun(cronExpression: string, from: Date = new Date()
 
   const start = new Date(from);
   start.setSeconds(0, 0);
-  const candidate = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+  // UTC base: iterate day-by-day from the UTC day of `from`. Date.UTC rolls
+  // day-of-month over month/year boundaries automatically.
+  const baseYear = start.getUTCFullYear();
+  const baseMonth = start.getUTCMonth();
+  const baseDate = start.getUTCDate();
 
   // Search forward up to 400 days (covers yearly + leap day cases).
   for (let day = 0; day < 400; day++) {
-    const date = new Date(candidate);
-    date.setDate(candidate.getDate() + day);
+    const date = new Date(Date.UTC(baseYear, baseMonth, baseDate + day));
 
-    if (!months.values.includes(date.getMonth() + 1)) continue;
+    if (!months.values.includes(date.getUTCMonth() + 1)) continue;
 
     // Standard cron semantics: when BOTH dom and dow are restricted they are OR'd.
-    const domMatch = doms.isWildcard || doms.values.includes(date.getDate());
-    const dowMatch = dows.isWildcard || dows.values.includes(date.getDay());
+    const domMatch = doms.isWildcard || doms.values.includes(date.getUTCDate());
+    const dowMatch = dows.isWildcard || dows.values.includes(date.getUTCDay());
     const dayMatches = !doms.isWildcard && !dows.isWildcard ? domMatch || dowMatch : domMatch && dowMatch;
     if (!dayMatches) continue;
 
     for (const h of hours.values) {
       for (const m of minutes.values) {
-        const t = new Date(date.getFullYear(), date.getMonth(), date.getDate(), h, m, 0, 0);
+        const t = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), h, m, 0, 0));
         if (t.getTime() > from.getTime()) return t;
       }
     }

@@ -162,26 +162,34 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       const nextRun = calculateNextRun(def.cronExpression);
 
       if (existing) {
-        // Self-heal: keep the job active + fix schedule if drifted
+        // Self-heal: keep the job active + fix schedule if drifted. nextRun
+        // is ALWAYS recomputed (v3.10.1 UTC semantics) so rows anchored by the
+        // old local-timezone parser (e.g. an IST dev machine computing
+        // "30 4 * * 1-5" as 04:30 IST = 23:00 UTC) self-correct on the next
+        // worker/Netlify startup. ensureRecommendationCrons runs once per
+        // start, never inside the 5s poll loop, so re-anchoring to the next
+        // future occurrence is safe (strictly-future; no immediate fire).
         const changed =
           existing.isActive !== true ||
           existing.taskType !== def.taskType ||
           existing.cronExpression !== def.cronExpression;
 
+        const data: Parameters<typeof prisma.cronJob.update>[0]["data"] = { nextRun };
         if (changed) {
-          await prisma.cronJob.update({
-            where: { id: existing.id },
-            data: {
-              taskType: def.taskType,
-              cronExpression: def.cronExpression,
-              description: def.description,
-              isActive: true,
-              nextRun,
-              config: { systemManaged: true, timezone: "Asia/Kolkata" },
-            },
-          });
-          logger.info({ msg: "Self-healed recommendation cron job", name: def.name, nextRun });
+          data.taskType = def.taskType;
+          data.cronExpression = def.cronExpression;
+          data.description = def.description;
+          data.isActive = true;
+          data.config = { systemManaged: true, timezone: "Asia/Kolkata" };
         }
+
+        await prisma.cronJob.update({ where: { id: existing.id }, data });
+        logger.info({
+          msg: changed ? "Self-healed recommendation cron job" : "Recomputed recommendation cron job nextRun",
+          name: def.name,
+          nextRun,
+          changed,
+        });
       } else {
         await prisma.cronJob.create({
           data: {
