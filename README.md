@@ -1,13 +1,23 @@
 # TradeNext — Smart NSE Analytics & Portfolio Manager
 
 [![Netlify Status](https://api.netlify.com/api/v1/badges/78401e5d-b137-4b6d-94bb-ad1ec8de6b05/deploy-status)](https://app.netlify.com/projects/tradenext6/deploys)
-[![Playwright Tests](https://github.com/your-org/tradenext/actions/workflows/playwright.yml/badge.svg)](https://github.com/your-org/tradenext/actions/workflows/playwright.yml)
+[![Quality Gate](https://github.com/luckyhegde6/TradeNext/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/quality-gate.yml)
+[![Playwright Tests](https://github.com/luckyhegde6/TradeNext/actions/workflows/playwright.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/playwright.yml)
+[![Security Scan](https://github.com/luckyhegde6/TradeNext/actions/workflows/security.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/security.yml)
+
+[![Next.js](https://img.shields.io/badge/Next.js-16.3.1-black?logo=next.js&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Prisma](https://img.shields.io/badge/Prisma-7.9.1-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io)
+[![PostgreSQL/TimescaleDB](https://img.shields.io/badge/PostgreSQL%20·%20TimescaleDB-316192?logo=postgresql&logoColor=white)](https://www.timescale.com)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.2.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Jest](https://img.shields.io/badge/Jest-30.2.0-C21325?logo=jest&logoColor=white)](https://jestjs.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > Live demo: **https://tradenext6.netlify.app** · Telegram bot: **@tradenext6Bot**
 
 TradeNext is a Next.js 16 application for **NSE (India) market data, portfolio management, capital-gains tax,
-F&O analytics, dividends, rebalancing, alerts, and AI-driven daily recommendations** — backed by
-PostgreSQL/TimescaleDB and deployed on Netlify.
+F&O analytics, dividends, rebalancing, alerts, swing signals, and AI-driven daily recommendations** — backed by
+PostgreSQL/TimescaleDB and deployed on Netlify as a persistent server with an in-process cron daemon.
 
 ---
 
@@ -37,6 +47,8 @@ PostgreSQL/TimescaleDB and deployed on Netlify.
 | Stock Screener | ✅ Working | 2,000+ stocks, multiple filters, backtest, templates |
 | Advanced Screener | ✅ Working | Chartink·117 / TradingView·98 templates, unified runner, per-template runs |
 | Recommendations | ✅ Working | Today's Picks, History, Performance tracking, Dividends, Subscribe |
+| Swing Trading Signals | ✅ Working | 34 swing screeners · family segregation (momentum/breakout/trend/…) · AI LONG/SHORT/OBSERVE with targets |
+| F&O Analytics | ✅ Working | Positions dashboard, option chain (NSE v3), expiries, Greeks, P&L summary |
 | IPOs | ✅ Working | Issue Size (shares per lot + ₹ per lot), AI IPO analysis as JSON report (GMP/peers/risk/strategy) |
 | NSE Events Feed | ✅ Working | Dashboard widget below Corporate Announcements (PAST/UPCOMING pills, thumbnails) |
 | Alerts | ✅ Working | Multi-tab: Simple, Rules, Channels, Events, Telegram Bot |
@@ -89,8 +101,8 @@ Visit **http://localhost:3000**.
 | Database | Prisma 7 + PostgreSQL / TimescaleDB |
 | Auth | NextAuth.js (httpOnly cookies, RBAC) |
 | Testing | Jest 30 + Testing Library + Playwright (e2e) |
-| Logging | pino structured logs → `logs/` dir + Netlify Blob store |
-| Deployment | Netlify |
+| Logging | pino structured logs → `logs/` dir |
+| Deployment | Netlify (persistent server + in-process node-cron daemon) |
 
 ## Commands
 
@@ -126,9 +138,9 @@ node scripts/dev-checks/test-auth.js
 
 ## Testing
 
-- **Unit/component** (Jest, `lib/__tests__/`, 533 passing): services (screener engine, technical
-  analysis, backtest, recommendations, chartink unified runner, cron ledger, IPO report/issue size,
-  NSE events, tax, logger paths, …).
+- **Unit/component** (Jest, `lib/__tests__/`, 709 passing / 4 skipped): services (screener engine, technical
+  analysis, backtest, recommendations, chartink unified runner, cron ledger + in-process daemon, IPO report/issue
+  size, NSE events, swing agent, tax, logger paths, …). The 4 skips are intentional client-cache IndexedDB tests.
 - **E2E** (`e2e/`, 89 tests, 5 Playwright projects): login, nav, home, screener + advanced screener,
   recommendations, portfolio, watchlist, alerts, profile, responsive. CI: `.github/workflows/playwright.yml`
   (TimescaleDB service, migrate + seed, HTML report artifact 30 days).
@@ -145,7 +157,7 @@ POST /api/mcp        # JSON body: { "function": "getStockQuote", "params": {...}
 GET  /api/mcp?function=getStockQuote&symbol=RELIANCE
 ```
 
-- **28 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
+- **31 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
   corporate info, marquee, deals, announcements, insider trading, events, heatmap, symbols, trends,
   IPO analysis / IPO issue detail / NSE events, F&O option chain / F&O expiries + discovery.
 - Optional auth via `x-api-key` header (`MCP_API_KEY` env). Caching: quotes 60s, market 2m, corp actions 5m.
@@ -200,6 +212,7 @@ PORT=3000
 
 ```
 /
+├── instrumentation.ts       # In-process node-cron daemon (system cron jobs)
 ├── app/                    # Next.js App Router pages + API routes
 │   ├── api/                #   API routes (mcp, screener, recommendations, admin/…)
 │   ├── admin/              #   Admin console pages
@@ -212,7 +225,6 @@ PORT=3000
 ├── prisma/                 # Database schema + migrations + seed
 ├── scripts/                # Build/ingestion/dev-check scripts
 ├── e2e/                    # Playwright e2e suite
-├── netlify/                # Netlify functions (cron, background)
 └── .agents/                # AI agent configuration + docs (repo-only, not published)
 ```
 
