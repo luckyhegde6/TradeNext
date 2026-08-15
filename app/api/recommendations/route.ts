@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   
   try {
     logger.info({ msg: "Fetching latest recommendations", requestId });
-    const { run, stocks } = await getLatestRecommendations();
+    const { run, stocks, latestRun } = await getLatestRecommendations();
 
     logger.info({
       msg: "Recommendations fetched",
@@ -28,6 +28,19 @@ export async function GET(req: NextRequest) {
           uniqueStocks: run.uniqueStocks,
           aiProcessed: run.aiProcessed,
           executionTimeMs: run.executionTimeMs,
+        }
+      : null;
+
+    // Newest run row (may be a v3.11.1 AI-unavailable failure with zero picks —
+    // in that case `run` above is the last good run and the UI shows a notice).
+    const serializedLatestRun = latestRun
+      ? {
+          id: latestRun.id,
+          runDate:
+            latestRun.runDate instanceof Date
+              ? latestRun.runDate.toISOString()
+              : String(latestRun.runDate),
+          status: latestRun.status,
         }
       : null;
 
@@ -57,6 +70,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       run: serializedRun,
+      latestRun: serializedLatestRun,
       stocks: serializedStocks,
       timestamp: new Date().toISOString(),
     });
