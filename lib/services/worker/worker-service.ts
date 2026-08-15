@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { getIndexStocks, syncStocksToDatabase } from "@/lib/index-service";
 import { logTaskEvent } from "@/lib/services/worker/task-orchestrator";
-import { recordCronRun, RECOMMENDATION_CRON_NAME, RECOMMENDATION_PERFORMANCE_CRON_NAME } from "@/lib/services/recommendationCronService";
+import { recordCronRun, SYSTEM_JOB_NAME_BY_TASK_TYPE } from "@/lib/services/recommendationCronService";
 
 /**
  * Worker Service - Handles execution of various worker tasks
@@ -130,14 +130,14 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
  * the success/failure outcome is recorded here (skipSpawnCounted). Manual
  * admin runs (no cronJobId) are counted by recordManualRunLedger on the
  * workers route — skip them to avoid double counting. Non-fatal.
+ *
+ * SYSTEM_JOB_NAME_BY_TASK_TYPE (recommendationCronService) maps every system
+ * task type so successCount / failureCount are kept honest for all four
+ * system jobs (previously only recommendations + recommendation_performance
+ * were recorded; market_data and ai_connection_test stayed 0 forever).
  */
 async function recordSystemRunOutcome(taskId: string, taskType: string, success: boolean): Promise<void> {
-  const jobName =
-    taskType === "recommendations"
-      ? RECOMMENDATION_CRON_NAME
-      : taskType === "recommendation_performance"
-        ? RECOMMENDATION_PERFORMANCE_CRON_NAME
-        : null;
+  const jobName = SYSTEM_JOB_NAME_BY_TASK_TYPE[taskType] ?? null;
   if (!jobName) return;
   try {
     const task = await prisma.workerTask.findUnique({

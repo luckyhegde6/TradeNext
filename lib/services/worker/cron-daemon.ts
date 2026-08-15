@@ -25,7 +25,9 @@ import { spawnDueCronJob } from "./worker-engine";
 const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
 const RESYNC_INTERVAL_MS = 60_000; // pick up admin edits within a minute
 const HEARTBEAT_INTERVAL_MS = 60_000;
-const DAEMON_ID = `cron-daemon-${os.hostname()}-${process.pid}`;
+/** A heartbeat older than this is treated as "daemon down" (2x heartbeat cadence). */
+export const DAEMON_HEARTBEAT_WINDOW_MS = 2 * HEARTBEAT_INTERVAL_MS;
+export const DAEMON_ID = `cron-daemon-${os.hostname()}-${process.pid}`;
 
 interface RegisteredTask {
   task: ReturnType<typeof cron.schedule>;
@@ -192,6 +194,16 @@ export function getCronDaemonStatus(): {
   lastHeartbeatAt: Date | null;
 } {
   return { running, registeredJobs: tasks.size, daemonId: DAEMON_ID, lastHeartbeatAt };
+}
+
+/** Pure: is a heartbeat timestamp fresh enough to consider the daemon running? */
+export function isDaemonHeartbeatFresh(
+  lastHeartbeat: Date | null,
+  now: number = Date.now(),
+  windowMs: number = DAEMON_HEARTBEAT_WINDOW_MS,
+): boolean {
+  if (!lastHeartbeat) return false;
+  return now - lastHeartbeat.getTime() <= windowMs;
 }
 
 /** Test hook: ids of currently registered cron jobs. */

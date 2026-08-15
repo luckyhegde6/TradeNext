@@ -119,6 +119,17 @@ export default function SwingTab() {
         </button>
       </div>
 
+      {/* ── AI failure reason (honest, human-readable) ─────────────────── */}
+      {data.analysisStatus === "failed" && data.analysisError && (
+        <p
+          className="text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2"
+          title={data.analysisError}
+        >
+          ⚠️ AI targets failed — {data.analysisError.slice(0, 160)}
+          {data.analysisError.length > 160 ? "…" : ""}
+        </p>
+      )}
+
       {/* ── Family segregation chips ──────────────────────────────── */}
       <div className="flex flex-wrap gap-1.5">
         <button

@@ -1214,6 +1214,13 @@ expect(mockWorkerTaskCreate).toHaveBeenCalledTimes(1);
 If the chain involves dynamic import or `setImmediate`/timers, use `setTimeout(resolve, 0)` (macrotask) rather than `await Promise.resolve()` (microtask-only — insufficient when a dynamic import is in the path).
 **Rule**: (1) When a system under test schedules work fire-and-forget, always identify the async hops (dynamic import, timers, DB) and flush with `setTimeout(0)` before asserting side effects. (2) Prefer asserting the OBSERVABLE side effect (workerTask create, cronJob update) over the intermediate promise. (3) If the flush is flaky in CI, extract the chain to an exported async function and unit-test that directly — keep the fire-and-forget wrapper as a one-liner.
 
+### 74. PowerShell 5.1 UTF-8 BOM Breaks Node `--env-file` (Silently Skips the First Key) + Env-Var Daemon Kill-Switches Disable Silently
+**Issue**: After removing a line from `.env` with PS 5.1 `Set-Content -Encoding utf8`, `npx tsx --env-file=.env` probes suddenly showed REMOTE (Prisma Accelerate) data while the Next.js app itself looked fine and local. Also: a restart of the dev server produced NO daemon heartbeat/log although an OLDER server (that predated the env var) had run the daemon fine.
+**Root Cause 1 (BOM)**: PS 5.1 `-Encoding utf8` writes a **UTF-8 BOM (EF BB BF)**. Next.js's env loader tolerates the BOM, but Node's `--env-file` skips the FIRST key when a BOM precedes it. `.env` line 1 was `ENVIRONMENT=local` → every probe fell through to `DATABASE_REMOTE` / `ACCELERATE_URL` and hit the Netlify-era DB. Any probe result that "looks remote" while the app says `environment=local, isLocal=true`: check `fs.readFileSync(p)[0..2]` for `EF BB BF`.
+**Root Cause 2 (kill-switch)**: `CRON_DAEMON_DISABLED=1` had been added to `.env` (so the Netlify serverless deploy keeps the daemon off) — local dev loads `.env` too, so EVERY restart silently disabled the daemon. The old server that "worked" predated the var. Grep `.env*` for the disable flag BEFORE debugging code when a daemon/service doesn't start after a restart.
+**Fix**: Rewrite env files BOM-free via node: `node -e "const fs=require('fs');let s=fs.readFileSync(p,'utf8');if(s.charCodeAt(0)===0xFEFF)s=s.slice(1);fs.writeFileSync(p,s,'utf8')"`. Same trap applies to `netlify.toml`, JSON configs, and any file consumed by a Node CLI — never PS 5.1 `Set-Content -Encoding utf8` on config files. Keep kill-switch vars OUT of gitignored `.env` (set them only where needed: Netlify site env vars, not local).
+**Rule**: (1) Verify env-file integrity with a byte check after any PowerShell edit. (2) When a subsystem "doesn't start after restart" but worked on an older server, grep `.env*` for its kill-switch before touching code.
+
 ---
 
 ## Update Log

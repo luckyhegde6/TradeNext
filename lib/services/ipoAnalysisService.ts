@@ -698,6 +698,20 @@ export async function getIpoAnalysis(
         return out;
       }
     }
+
+    // No stale row — surface the real error + audit the failure so admin
+    // monitoring shows why IPO analysis keeps failing (provider, model,
+    // timeout, …).
+    const failMessage = err instanceof Error ? err.message : String(err);
+    createAuditLog({
+      action: "IPO_ANALYSIS_FAILED",
+      resource: "ipo_analysis",
+      resourceId: upper,
+      path: `/api/recommendations/ipos/${upper}/analysis`,
+      responseStatus: 502,
+      errorMessage: failMessage,
+      metadata: { symbol: upper, model: config?.model ?? "unknown" },
+    }).catch(() => undefined);
     throw err;
   }
 

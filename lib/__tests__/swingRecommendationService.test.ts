@@ -7,6 +7,33 @@
  * (fetchRecentCloses) and AI orchestration (getSwingRecommendations) are thin
  * wrappers over tested pieces + established services.
  */
+
+// ─── Mocks (before imports — SWC hoists jest.mock) ──────────────────────
+// Only needed by the getSwingRecommendations audit-logging tests at the end;
+// the pure-function tests never touch these modules.
+
+jest.mock("@/lib/services/chartinkUnifiedScreenerService", () => ({
+  runChartinkUnifiedScreeners: jest.fn(),
+}));
+
+jest.mock("@/lib/services/ai/swing-agent", () => ({
+  analyzeSwingStocks: jest.fn(),
+}));
+
+jest.mock("@/lib/services/ai/config", () => ({
+  loadConfig: jest.fn(),
+}));
+
+jest.mock("@/lib/prisma", () => ({
+  __esModule: true,
+  default: { $queryRaw: jest.fn() },
+}));
+
+jest.mock("@/lib/audit", () => ({
+  __esModule: true,
+  createAuditLog: jest.fn().mockResolvedValue(undefined),
+}));
+
 import {
   templateFamilies,
   swingFamiliesForTemplates,
@@ -415,5 +442,83 @@ describe("persistSwingTrackers", () => {
     const res = await persistSwingTrackers([makeSwingStock("A")], db);
     expect(res).toEqual({ created: 0, updated: 0 });
     expect(db.recommendationTracker.findMany).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Orchestration audit logging (v3.11.0) ───────────────────────────────
+// getSwingRecommendations is a thin orchestrator; these tests pin its audit
+// contract: run start/complete always, analysis events only when AI runs,
+// and a human-readable analysisError surfaced when AI fails for every stock.
+
+describe("getSwingRecommendations audit logging", () => {
+  const { createAuditLog } = jest.requireMock("@/lib/audit") as {
+    createAuditLog: jest.Mock;
+  };
+  const { runChartinkUnifiedScreeners } = jest.requireMock(
+    "@/lib/services/chartinkUnifiedScreenerService",
+  ) as { runChartinkUnifiedScreeners: jest.Mock };
+  const { analyzeSwingStocks } = jest.requireMock("@/lib/services/ai/swing-agent") as {
+    analyzeSwingStocks: jest.Mock;
+  };
+  const prisma = jest.requireMock("@/lib/prisma").default as { $queryRaw: jest.Mock };
+
+  const fakeUnified = {
+    symbol: "RELIANCE",
+    name: "Reliance Industries",
+    price: 2500,
+    change: 12.5,
+    changePercent: 0.5,
+    volume: 1_000_000,
+    screenerNames: ["Swing Breakout"],
+    screenerCount: 1,
+    marketCap: 1e12,
+    templateIds: ["swing.breakout"],
+    source: "chartink_db",
+  } as unknown as UnifiedScreenerResult;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.$queryRaw.mockResolvedValue([]);
+    runChartinkUnifiedScreeners.mockResolvedValue([fakeUnified]);
+  });
+
+  it("audits run start + complete when analysis is skipped", async () => {
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const response = await getSwingRecommendations({ analyze: false, forceRefresh: true });
+
+    expect(response.analysisStatus).toBe("skipped");
+    const actions = createAuditLog.mock.calls.map((c) => c[0].action);
+    expect(actions).toContain("SWING_RUN_START");
+    expect(actions).toContain("SWING_RUN_COMPLETE");
+    expect(actions).not.toContain("SWING_ANALYSIS_START");
+  });
+
+  it("audits analysis failure with a readable error when AI fails for every stock", async () => {
+    analyzeSwingStocks.mockResolvedValue([
+      {
+        symbol: "RELIANCE",
+        price: 2500,
+        changePercent: 0.5,
+        volume: 1_000_000,
+        screenerNames: ["Swing Breakout"],
+        families: ["breakout"],
+        success: false,
+        error:
+          "Swing AI analysis failed — the model's response was not valid JSON (2 attempt(s) across 2 model(s))",
+      },
+    ]);
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
+
+    expect(response.analysisStatus).toBe("failed");
+    expect(response.analysisError).toContain("not valid JSON");
+    const actions = createAuditLog.mock.calls.map((c) => c[0].action);
+    expect(actions).toContain("SWING_ANALYSIS_START");
+    expect(actions).toContain("SWING_ANALYSIS_FAILED");
+    expect(actions).toContain("SWING_RUN_COMPLETE");
   });
 });

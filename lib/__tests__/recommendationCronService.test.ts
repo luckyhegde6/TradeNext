@@ -13,7 +13,7 @@
  * for `jest.mock()` hoisting to work correctly.
  */
 
-// ─── Mocks (MUST be before any imports — SWC hoists jest.mock) ─────────
+// â”€â”€â”€ Mocks (MUST be before any imports â€” SWC hoists jest.mock) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 jest.mock("@/lib/logger", () => {
   const mock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
@@ -33,7 +33,7 @@ jest.mock("@/lib/prisma", () => {
   return { __esModule: true, default: mock };
 });
 
-// ─── Imports ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Imports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import {
   recordCronRun,
@@ -46,6 +46,7 @@ import {
   MARKET_SYNC_CRON_EXPR,
   AI_CONNECTION_TEST_CRON_NAME,
   AI_CONNECTION_TEST_CRON_EXPR,
+  SYSTEM_JOB_NAME_BY_TASK_TYPE,
 } from "@/lib/services/recommendationCronService";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -150,7 +151,7 @@ describe("recordCronRun", () => {
         successCount: { increment: 1 },
       }),
     });
-    // The spawn-timed path already counted the run — outcome recording must not.
+    // The spawn-timed path already counted the run â€” outcome recording must not.
     const updateArg = prisma.cronJob.update.mock.calls[0][0] as { data: Record<string, unknown> };
     expect(updateArg.data).not.toHaveProperty("runCount");
     expect(updateArg.data).not.toHaveProperty("nextRun");
@@ -166,7 +167,7 @@ describe("recordCronRun", () => {
     expect(result).toEqual({ found: false });
   });
 
-  it("never throws when prisma fails — returns found:false", async () => {
+  it("never throws when prisma fails â€” returns found:false", async () => {
     prisma.cronJob.findFirst.mockRejectedValue(new Error("db down"));
 
     const result = await recordCronRun(RECOMMENDATION_CRON_NAME, true);
@@ -174,7 +175,7 @@ describe("recordCronRun", () => {
     expect(result).toEqual({ found: false });
   });
 
-  it("never throws when update fails — returns found:false", async () => {
+  it("never throws when update fails â€” returns found:false", async () => {
     prisma.cronJob.findFirst.mockResolvedValue(JOB);
     prisma.cronJob.update.mockRejectedValue(new Error("update failed"));
 
@@ -187,7 +188,7 @@ describe("recordCronRun", () => {
 describe("ensureRecommendationCrons", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // No duplicates by default — the v3.8.0 dedupe post-pass is a no-op.
+    // No duplicates by default â€” the v3.8.0 dedupe post-pass is a no-op.
     prisma.cronJob.findMany.mockResolvedValue([]);
     prisma.cronJob.deleteMany.mockResolvedValue({ count: 0 });
   });
@@ -230,7 +231,7 @@ describe("ensureRecommendationCrons", () => {
     prisma.cronJob.findFirst.mockImplementation(
       async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
     );
-    // clearAllMocks() does NOT clear implementations — recordCronRun tests
+    // clearAllMocks() does NOT clear implementations â€” recordCronRun tests
     // earlier in this file set update to reject with "db down", which would
     // poison this test. Set an explicit resolved implementation.
     prisma.cronJob.update.mockResolvedValue({});
@@ -278,7 +279,7 @@ describe("ensureRecommendationCrons", () => {
 
   it("deletes duplicate system jobs keeping the earliest row (v3.8.0)", async () => {
     prisma.cronJob.findFirst.mockResolvedValue(null); // all four would be created fresh
-    // …but the DB already holds duplicates from a past findFirst-then-create race
+    // â€¦but the DB already holds duplicates from a past findFirst-then-create race
     prisma.cronJob.findMany.mockResolvedValue([
       { id: "r1", name: RECOMMENDATION_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
       { id: "r1-dup", name: RECOMMENDATION_CRON_NAME, createdAt: new Date("2026-08-10T00:00:00Z") },
@@ -295,5 +296,21 @@ describe("ensureRecommendationCrons", () => {
       where: { id: { in: ["r1-dup"] } },
     });
     expect(result.ensured).toBe(4);
+  });
+});
+
+describe("SYSTEM_JOB_NAME_BY_TASK_TYPE", () => {
+  it("maps all four system task types to their job names", () => {
+    expect(SYSTEM_JOB_NAME_BY_TASK_TYPE).toEqual({
+      recommendations: RECOMMENDATION_CRON_NAME,
+      recommendation_performance: RECOMMENDATION_PERFORMANCE_CRON_NAME,
+      market_data: MARKET_SYNC_CRON_NAME,
+      ai_connection_test: AI_CONNECTION_TEST_CRON_NAME,
+    });
+  });
+
+  it("unknown task types map to undefined (outcome writer no-ops)", () => {
+    expect(SYSTEM_JOB_NAME_BY_TASK_TYPE["alert_check"]).toBeUndefined();
+    expect(SYSTEM_JOB_NAME_BY_TASK_TYPE["screener"]).toBeUndefined();
   });
 });

@@ -43,6 +43,18 @@ export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM
 export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
 export const AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"; // 08:30–15:30 IST Mon-Fri
 
+/**
+ * Maps every SYSTEM cron task type to its CronJob name so worker outcome
+ * recording (recordSystemRunOutcome) can update successCount / failureCount
+ * for all four system jobs, not just the recommendation pair.
+ */
+export const SYSTEM_JOB_NAME_BY_TASK_TYPE: Record<string, string> = {
+  recommendations: RECOMMENDATION_CRON_NAME,
+  recommendation_performance: RECOMMENDATION_PERFORMANCE_CRON_NAME,
+  market_data: MARKET_SYNC_CRON_NAME,
+  ai_connection_test: AI_CONNECTION_TEST_CRON_NAME,
+};
+
 export interface EnsureRecommendationCronsResult {
   ensured: number;
   jobs: Array<{ name: string; taskType: string; cronExpression: string }>;

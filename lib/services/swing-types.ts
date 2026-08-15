@@ -85,5 +85,7 @@ export interface SwingResponse {
   /** Family → count of stocks in the top-N feed flagged with it. */
   segregation: Record<SignalFamily, number>;
   analysisStatus: "done" | "skipped" | "failed";
+  /** Human-readable reason when the AI analysis failed (analysisStatus === "failed"). */
+  analysisError?: string | null;
   stocks: SwingStock[];
 }

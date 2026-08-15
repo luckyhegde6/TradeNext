@@ -5,11 +5,17 @@
 // old Netlify scheduled functions: cron schedules now live in the DB and are
 // managed through the admin Cron tab.
 //
+// EDGE-SAFETY: instrumentation.ts is bundled for BOTH Node and Edge runtimes,
+// so it MUST keep ZERO top-level imports — a static `import` of lib/logger
+// pulls in lib/trace -> crypto and breaks the Edge Instrumentation compile
+// ("Node.js module is loaded which is not supported in the Edge Runtime").
+// All node-only modules are imported DYNAMICALLY inside register() behind the
+// NEXT_RUNTIME guard; the Edge variant is then just this file with nothing in
+// it, and register() returns before any dynamic import runs.
+//
 // Opt-out: set CRON_DAEMON_DISABLED=1 (e.g. if the app is still deployed on
 // Netlify serverless, where every isolate dies after a request — a daemon per
 // cold start would just waste cycles).
-
-import logger from "@/lib/logger";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -17,9 +23,10 @@ export async function register() {
   if (process.env.CRON_DAEMON_DISABLED === "1") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }] = await Promise.all([
+    const [{ startCronDaemon }, { startWorker }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
+      import("@/lib/logger"),
     ]);
 
     // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
@@ -28,7 +35,9 @@ export async function register() {
     logger.info({ msg: "Cron daemon + worker started via instrumentation" });
   } catch (error) {
     // Never crash server startup — crons can still be started manually from
-    // the admin Workers/Cron pages.
-    logger.error({ msg: "Failed to auto-start cron daemon via instrumentation", error });
+    // the admin Workers/Cron pages. console fallback in case logger's own
+    // dynamic import is the thing that failed.
+    // eslint-disable-next-line no-console
+    console.error("[instrumentation] failed to auto-start cron daemon", error);
   }
 }

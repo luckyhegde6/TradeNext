@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { createAuditLog } from "@/lib/audit";
 import { getIpoAnalysis } from "@/lib/services/ipoAnalysisService";
 import logger from "@/lib/logger";
 
@@ -19,6 +20,14 @@ export async function GET(
   try {
     const session = await auth();
     if (!session?.user?.id) {
+      createAuditLog({
+        action: "IPO_ANALYSIS_UNAUTHORIZED",
+        resource: "ipo_analysis",
+        resourceId: symbol.toUpperCase(),
+        path: `/api/recommendations/ipos/${symbol}/analysis`,
+        responseStatus: 401,
+        metadata: { symbol: symbol.toUpperCase() },
+      }).catch(() => undefined);
       return NextResponse.json(
         { success: false, error: "Sign in to run AI IPO analysis" },
         { status: 401 }

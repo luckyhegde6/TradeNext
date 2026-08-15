@@ -14,6 +14,7 @@
 
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
+import { createAuditLog } from "@/lib/audit";
 import {
   getChartinkTemplates,
   getChartinkTemplate,
@@ -445,8 +446,29 @@ export async function getSwingRecommendations(
 
   const templateIds = getSwingTemplateIds();
   logger.info({ msg: "Swing run starting", templates: templateIds.length, analyze });
+  createAuditLog({
+    action: "SWING_RUN_START",
+    resource: "swing",
+    resourceId: `${SWING_CACHE_KEY}:${analyze ? "ai" : "noai"}`,
+    path: "/api/recommendations/swing",
+    metadata: { templates: templateIds.length, analyze },
+  }).catch(() => undefined);
 
-  const unified = await runChartinkUnifiedScreeners({ templateIds, forceRefresh });
+  let unified: UnifiedScreenerResult[];
+  try {
+    unified = await runChartinkUnifiedScreeners({ templateIds, forceRefresh });
+  } catch (e) {
+    const runError = e instanceof Error ? e.message : String(e);
+    logger.error({ msg: "Swing screener run failed", error: runError });
+    createAuditLog({
+      action: "SWING_RUN_FAILED",
+      resource: "swing",
+      path: "/api/recommendations/swing",
+      errorMessage: runError,
+      metadata: { templates: templateIds.length, analyze },
+    }).catch(() => undefined);
+    throw e;
+  }
   const nameById = new Map(
     templateIds.map((id) => [id, getChartinkTemplate(id)?.name ?? id]),
   );
@@ -471,7 +493,15 @@ export async function getSwingRecommendations(
 
   // AI target analysis — optional; failure never kills the feed.
   let analysisStatus: SwingResponse["analysisStatus"] = "skipped";
+  let analysisError: string | null | undefined;
   if (analyze && enriched.length > 0) {
+    createAuditLog({
+      action: "SWING_ANALYSIS_START",
+      resource: "swing_analysis",
+      path: "/api/recommendations/swing",
+      metadata: { stocks: enriched.length },
+    }).catch(() => undefined);
+
     try {
       const config = await loadConfig();
       const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
@@ -485,12 +515,40 @@ export async function getSwingRecommendations(
         }
       }
       analysisStatus = analysisStatusAfterBatch(enriched);
+      const succeeded = enriched.filter((s) => s.analysis).length;
+
+      if (analysisStatus === "failed") {
+        analysisError =
+          enriched.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
+        createAuditLog({
+          action: "SWING_ANALYSIS_FAILED",
+          resource: "swing_analysis",
+          path: "/api/recommendations/swing",
+          errorMessage: analysisError,
+          metadata: { stocks: enriched.length, succeeded, failed: enriched.length - succeeded },
+        }).catch(() => undefined);
+      } else {
+        createAuditLog({
+          action: "SWING_ANALYSIS_COMPLETE",
+          resource: "swing_analysis",
+          path: "/api/recommendations/swing",
+          metadata: { stocks: enriched.length, succeeded },
+        }).catch(() => undefined);
+      }
     } catch (e) {
+      analysisError = e instanceof Error ? e.message : String(e);
       logger.error({
         msg: "Swing AI analysis failed — falling back to screener-only feed",
-        error: e instanceof Error ? e.message : String(e),
+        error: analysisError,
       });
       analysisStatus = "failed";
+      createAuditLog({
+        action: "SWING_ANALYSIS_FAILED",
+        resource: "swing_analysis",
+        path: "/api/recommendations/swing",
+        errorMessage: analysisError,
+        metadata: { stocks: enriched.length },
+      }).catch(() => undefined);
     }
 
     // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
@@ -518,8 +576,23 @@ export async function getSwingRecommendations(
     topN: enriched.length,
     segregation: countSegregation(enriched),
     analysisStatus,
+    analysisError,
     stocks: enriched,
   };
+
+  createAuditLog({
+    action: "SWING_RUN_COMPLETE",
+    resource: "swing",
+    path: "/api/recommendations/swing",
+    metadata: {
+      templates: templateIds.length,
+      analyze,
+      totalRaw: deduped.length,
+      topN: enriched.length,
+      analysisStatus,
+      error: analysisError ?? undefined,
+    },
+  }).catch(() => undefined);
 
   staticCache.set(cacheKey, response, SWING_CACHE_TTL);
   return response;

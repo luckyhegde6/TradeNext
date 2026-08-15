@@ -50,6 +50,7 @@ import {
   buildSwingAnalysisPrompt,
   parseSwingResponse,
   normalizeSwingAnalysis,
+  friendlySwingFailure,
   type SwingAnalysisInput,
 } from "@/lib/services/ai/swing-agent";
 
@@ -290,5 +291,30 @@ describe("analyzeSwingStocks", () => {
     expect(results.map((r) => r.symbol)).toEqual(stocks.map((s) => s.symbol));
     expect(results.every((r) => r.success)).toBe(true);
     expect(mockedDirectPrompt).toHaveBeenCalledTimes(2); // 7 stocks / batch of 5
+  });
+});
+
+// ─── friendlySwingFailure (v3.11.0) — human-readable AI-failure reasons ──
+
+describe("friendlySwingFailure", () => {
+  it("maps unusable-response reasons to readable phrases", () => {
+    expect(friendlySwingFailure("Unusable AI response (unparseable JSON)")).toBe(
+      "the model's response was not valid JSON",
+    );
+    expect(friendlySwingFailure("Unusable AI response (empty response)")).toBe(
+      "the model returned an empty response",
+    );
+    expect(friendlySwingFailure("Unusable AI response (provider error)")).toBe(
+      "the AI provider returned an error",
+    );
+    expect(friendlySwingFailure("Unusable AI response (empty content)")).toBe(
+      "the model returned no content",
+    );
+    expect(friendlySwingFailure("Batch exceeded 300s timeout")).toBe("the analysis timed out");
+  });
+
+  it("passes unknown errors through unchanged", () => {
+    expect(friendlySwingFailure("connection reset")).toBe("connection reset");
+    expect(friendlySwingFailure(undefined)).toBe("unknown error");
   });
 });

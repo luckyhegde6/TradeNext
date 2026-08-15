@@ -86,6 +86,13 @@ export type AuditAction =
   | 'IPO_ANALYSIS_SERVED_STALE'
   | 'IPO_ANALYSIS_FAILED'
   | 'IPO_ANALYSIS_UNAUTHORIZED'
+  // Swing Trading Events (v3.11.0 audit wiring)
+  | 'SWING_RUN_START'
+  | 'SWING_RUN_COMPLETE'
+  | 'SWING_RUN_FAILED'
+  | 'SWING_ANALYSIS_START'
+  | 'SWING_ANALYSIS_COMPLETE'
+  | 'SWING_ANALYSIS_FAILED'
   // NSE Events / Notifications
   | 'EVENTS_FETCH'
   | 'EVENTS_FETCH_FAILED';

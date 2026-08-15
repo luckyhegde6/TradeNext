@@ -274,8 +274,23 @@ async function analyzeSwingBatch(
   });
 
   throw new Error(
-    `Swing batch failed after ${attemptsMade} attempts (${chain.length} models): ${lastError || "unknown"}`,
+    `Swing AI analysis failed — ${friendlySwingFailure(lastError)} (${attemptsMade} attempt(s) across ${chain.length} model(s))`,
   );
+}
+
+/**
+ * Map a raw batch failure onto a human-readable phrase (surfaced on the swing
+ * cards' "AI targets unavailable" message and in the audit log). Exported for
+ * tests; unknown errors pass through unchanged.
+ */
+export function friendlySwingFailure(lastError?: string): string {
+  const e = lastError ?? "unknown error";
+  if (e.startsWith("Unusable AI response (empty response)")) return "the model returned an empty response";
+  if (e.startsWith("Unusable AI response (provider error)")) return "the AI provider returned an error";
+  if (e.startsWith("Unusable AI response (empty content)")) return "the model returned no content";
+  if (e.startsWith("Unusable AI response (unparseable JSON)")) return "the model's response was not valid JSON";
+  if (e.startsWith("Batch exceeded")) return "the analysis timed out";
+  return e;
 }
 
 function describeUnusable(response: string): string {
