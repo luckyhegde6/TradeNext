@@ -57,3 +57,21 @@ test on the exact page being verified. Surgical, no behavior change for other so
 **Decision**: commit to `fix/cron-tz-swing-perf` only; do NOT push/merge/deploy (user manages prod; Netlify
 CRON_SECRET state still unknown — recs cron hasn't fired since Aug 13 05:10 UTC, must be checked by user
 post-deploy to validate the fallback fix).
+
+## D7 — `recommendationsCache` must be a `globalThis` singleton, not a module-scope const (v3.11.2)
+
+**Decision**: share ONLY `recommendationsCache` via `globalThis` (`__recommendationsCache`, the `lib/prisma.ts`
+pattern); leave main/hot/static/historical caches at module scope. The other caches are NOT invalidated
+cross-module (the worker's market sync writes the DB `market_cache` table, and read paths re-validate DB
+freshness), so sharing them would be speculative — keep the diff surgical.
+**Why**: Next.js dev (Turbopack) loads `instrumentation.ts` (worker/cron daemon) and API routes as SEPARATE
+module graphs — `lib/cache.ts` was evaluated twice, so the worker's `invalidateRecommendationsCache()` flushed
+ITS NodeCache copy while the route kept serving the 23h-stale `latest` entry ("Last updated: 14/8/2026" right
+after the v3.11.1 fix re-ran recs). Invalidation is object identity — it only works when both sides resolve the
+same instance.
+**Test strategy**: `jest.resetModules()` + re-`require` simulates two module graphs; assert identity
+(`toBe`), cross-instance visibility, and the worker→route regression (`flushAll` in load B empties load A's
+view). This catches any future regression where someone moves the cache back to module scope.
+**Not chosen**: (a) sharing ALL caches (unjustified — no cross-module invalidation semantics; each shared
+instance also resists dev hot-reload garbage collection, so only share what must be shared); (b) moving the
+cache into the DB (overkill — the NodeCache + 23h TTL is correct; only the instance identity was wrong).

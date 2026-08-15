@@ -1,6 +1,57 @@
-# Session Flow — 2026-08-14 (v3.10.1) → continued 2026-08-15 (v3.11.0)
+# Session Flow — 2026-08-14 (v3.10.1) → continued 2026-08-15 (v3.11.0 → v3.11.1 → v3.11.2)
 
-Branch: `fix/cron-tz-swing-perf` | Commit: `0e39902` (cron TZ, prior) + `b35eca4` (v3.10.1 batch, committed unpushed) + v3.11.0 daemon work (commits pending user) + docs [skip ci]
+Branch: `fix/cron-tz-swing-perf` | Commit: `0e39902` (cron TZ, prior) + `b35eca4` (v3.10.1 batch, committed unpushed) + v3.11.0 daemon work + v3.11.1 no-fake-HOLD + v3.11.2 cache singleton (commits pending user)
+
+## v3.11.2 execution path (2026-08-15, same branch/session)
+
+```
+1. User: "What did we do so far?" → prior summary → next step was the v3.11.1 cache-invalidation follow-up
+   (recsCache dual-instance bug found during the v3.11.1 live-verify: "Last updated: 14/8/2026" persisted).
+
+2. Root-cause investigation (grep + read, no code):
+   - lib/cache.ts exports recommendationsCache (23h TTL) + main/hot/static/historical caches.
+   - grep: only dailyRecommendationService.ts + recommendationPerformanceService.ts import recommendationsCache —
+     BOTH are used by the worker (instrumentation.ts graph) AND the API routes (route graph).
+   - CONCLUSION: Next.js dev (Turbopack) loads instrumentation.ts and API routes as SEPARATE module graphs, so
+     lib/cache.ts was evaluated TWICE → two independent NodeCache instances. Worker's invalidateRecommendationsCache()
+     (flushAll) hit ITS copy; the route kept serving the stale 23h 'latest' entry.
+
+3. Fix (lib/cache.ts, surgical — ONE cache):
+   - recommendationsCache → globalThis singleton: globalForCache.__recommendationsCache ?? (assign new NodeCache).
+     Mirrors lib/prisma.ts. Comment documents the module-graph reasoning.
+   - Other caches (main/hot/static/historical) UNCHANGED — short TTLs, no cross-module invalidation semantics
+     (worker's market sync writes DB market_cache, read paths re-validate DB freshness — no dual-instance bug).
+
+4. NEW lib/__tests__/cacheSingleton.test.ts (4 tests):
+   - freshCacheModule(): jest.resetModules() + require("@/lib/cache") → simulates TWO module graphs.
+   - afterEach: delete globalThis.__recommendationsCache (no cross-test leakage).
+   - T1 identity: two loads → same instance (toBe).
+   - T2 cross-instance visibility: set in load A, get in load B.
+   - T3 worker→route regression: route caches 'latest' → worker flushAll → route get undefined + keys() empty.
+   - T4 shared keys(): writes from both instances visible in both.
+
+5. Verification: suite 700 pass / 11 skip (was 696; +4 new); tsc --noEmit 71 = exact baseline (0 new).
+   No UI change → no Playwright re-run (consistent with checklist — server-side cache only).
+
+6. Docs bundle (done): AGENTS.md v3.11.2 row; .agents/CHANGELOG.md index; versions-v3.md v3.11.2 entry;
+   TODO.md row; Lessons #76 (per-module-instance caches → globalThis singleton pattern); Primer Last Updated +
+   v3.11.2 status; agent-memory entry; HANDOFF state; session-todos; this flow.md + decisions.md D7.
+
+7. Commits PENDING user (code + docs); NO push/deploy — same branch hold as v3.11.0/v3.11.1.
+```
+
+## Code touched (v3.11.2)
+
+- lib/cache.ts (recommendationsCache → globalThis singleton; comment) — ONLY cache changed
+- lib/__tests__/cacheSingleton.test.ts (NEW, 4 tests)
+- Docs: AGENTS.md, .agents/CHANGELOG.md, .agents/changelog/versions-v3.md, TODO.md, Lessons.md (#76),
+  Primer.md, agent-memory.md, HANDOFF.md, .agents/session-todos.md, this file, decisions.md (D7)
+
+## Verification (v3.11.2)
+
+- Suite 700 pass / 11 skip (54 suites + 1 pre-existing skip; was 696)
+- tsc --noEmit 71 = exact baseline (pre-existing test-noise only)
+- cacheSingleton.test.ts: 4/4 (identity, cross-instance visibility, worker→route flushAll invalidation, shared keys)
 
 ## v3.11.0 execution path (2026-08-15, same branch/session)
 

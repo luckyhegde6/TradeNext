@@ -8,9 +8,9 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-14 → 08-15) — v3.11.0 (node-cron daemon, committed `6c4ef41` unpushed) + v3.11.1 (no-fake-HOLD AI-failure fix)
+## Current Session (2026-08-14 → 08-15) — v3.11.0 (node-cron daemon, committed `6c4ef41` unpushed) + v3.11.1 (no-fake-HOLD AI-failure fix) + v3.11.2 (recs-cache module-graph singleton)
 
-**Working tree**: branch `fix/cron-tz-swing-perf` — v3.11.0 follow-up committed `6c4ef41` (unpushed); v3.11.1 AI-failure fix committed `b2d9423` (unpushed; hook passed — tsc clean). Full suite **696 pass / 11 skipped**; `npx tsc --noEmit` 71 = exact baseline (0 new). **NO push/deploy** (serverless must keep `CRON_DAEMON_DISABLED=1`; `netlify.toml` no longer ships a functions dir; remove Netlify cron UI entries after deploy).
+**Working tree**: branch `fix/cron-tz-swing-perf` — v3.11.0 follow-up committed `6c4ef41` (unpushed); v3.11.1 AI-failure fix committed `b2d9423` (unpushed; hook passed — tsc clean); v3.11.2 cache-singleton fix + docs NOT yet committed (pending user). Full suite **700 pass / 11 skipped**; `npx tsc --noEmit` 71 = exact baseline (0 new). **NO push/deploy** (serverless must keep `CRON_DAEMON_DISABLED=1`; `netlify.toml` no longer ships a functions dir; remove Netlify cron UI entries after deploy).
 
 ### Completed
 - [x] v3.11.0 follow-up commit `6c4ef41` (20 files, +440/−28; pre-commit hook passed, tsc clean, suite 694 pass/11 skip) — no push
@@ -20,8 +20,11 @@
 - [x] Live-verified :3000 (Playwright): API `latestRun` same-id → no banner; intercepted newer failed `latestRun` → banner renders; normal state clean, 0 console errors
 - [x] Docs: AGENTS.md v3.11.1 row, CHANGELOG index + versions-v3.md v3.11.1 entry, TODO.md row, Lessons #74 (update-log) + #75 (fallback-data-never-persisted), Primer (Last Updated + status), agent-memory entry, session-todos
 - [x] Commit v3.11.1 code + docs → `b2d9423` (user-approved; pre-commit hook passed, tsc clean; no push)
+- [x] **v3.11.2 cache fix**: `lib/cache.ts` `recommendationsCache` → `globalThis` singleton (`__recommendationsCache`, mirrors `lib/prisma.ts`) — Next.js dev loads `instrumentation.ts` + API routes as SEPARATE module graphs so the worker's flush never reached the route's copy; other caches unchanged. NEW `lib/__tests__/cacheSingleton.test.ts` (4 tests — `jest.resetModules()` identity + cross-instance visibility + worker→route `flushAll` invalidation + shared `keys()`). **Suite 700 pass**; tsc 71 exact baseline (0 new); no UI change → no Playwright re-run
+- [x] Docs v3.11.2: AGENTS.md row, CHANGELOG index + versions-v3.md entry, TODO.md row, Lessons #76 (per-module-instance caches), Primer, agent-memory, HANDOFF, session flow/decisions
 
 ### Pending (this session)
+- [ ] Commit v3.11.2 code + docs (pending user approval) → `b2d9423`-style follow-up; NO push/deploy
 - [ ] Restart dev server (PID predates current run) → smoke-test instrumentation auto-start + `/api/admin/cron/daemon` liveness + admin Cron tab chip (Playwright per checklist)
 
 ### Pending (carried forward — other branches / later sessions)
