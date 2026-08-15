@@ -8,27 +8,28 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-14) — v3.10.0: Historical-price sync into `daily_prices` (Swing indicators "—" fix) + `backtest_history` prod-gap FIX (lazy DDL)
+## Current Session (2026-08-14 → 08-15) — v3.11.0: In-process node-cron cron daemon (replaces Netlify scheduled functions) + `daysTracked` 500 fix + carried v3.10.1 batch
 
-**Working tree**: `main` — v3.10.0 committed `b312de7` (feat) + `4d49e13`/`8148116`/`7021710` (docs+fix), **PR #91 MERGED (`1de835c`) + DEPLOYED + LIVE-VERIFIED** (swing API 200, site healthy, missing-table 500 eliminated). Local `--apply` EXECUTED (user-approved): 266 symbols, 17,198 bars, 0 errors, 658s → DB 17,411 rows / 286 symbols. Backtest fix committed (`8148116`, +7 guard tests). Full suite **660 pass / 11 skipped** (was 653); `npx tsc --noEmit` 71 = exact baseline. **Prod `daily_prices` backfill manually triggered** via `historical-price-sync` action (user-approved 2026-08-14); else auto via market-sync step 4 Mon-Fri 06:31 IST. NSE `apiClient` 403/500 from Netlify = NSE-side blocking (not a regression).
+**Working tree**: branch `fix/cron-tz-swing-perf` — v3.10.1 batch committed `b35eca4` (unpushed); v3.11.0 daemon code + docs COMPLETE. Full suite **686 pass / 11 skipped** (was 673+11; +12 cron-daemon +1 skipSpawnCounted); `npx tsc --noEmit` 71 = exact baseline (0 new). **Commits pending user; NO push/deploy** (serverless must keep `CRON_DAEMON_DISABLED=1`; `netlify.toml` no longer ships a functions dir; remove Netlify cron UI entries after deploy).
 
 ### Completed
-- [x] NEW `lib/services/historicalPriceSyncService.ts` + tests (15) + CLI `scripts/backfill-daily-prices.ts` — committed `b312de7`
-- [x] Wiring: worker `historical_price_sync` case + `run-cron-background` action + market-sync step 4 — committed `b312de7`
-- [x] Local dry-run verified (TCS 5d → 4 EQ bars, 0 written)
-- [x] **Local `--apply` backfill executed (user-approved)**: 300-symbol scope, 266 fetched, 17,198 bars, 0 errors, 658s; DB verified 17,411 rows / 286 symbols
-- [x] `backtest_history` prod-gap FIX (user override): `ensureBacktestHistoryTable` lazy CREATE TABLE IF NOT EXISTS + 3 indexes, memoized, failure-retried, chain degrades to daily_prices/NSE; `resetBacktestHistoryGuard`; +7 tests; suite **660 pass**; tsc 71 baseline
-- [x] Docs for the fix: plan doc flipped RESOLVED, BUGS.md #11 → fix built, AGENTS.md/CHANGELOG/versions-v3/TODO/Primer/agent-memory updated, Lessons #71 pending
+- [x] NEW `lib/services/worker/cron-daemon.ts` + root `instrumentation.ts` auto-start (guarded nodejs runtime, not build, `CRON_DAEMON_DISABLED=1` opt-out): `startCronDaemon()` idempotent (self-heal ensure → syncCronJobs → 60s resync + heartbeat), `syncCronJobs()` register/drop/re-register (expr-change, invalid skip, deactivated drop, per-job timezone default Asia/Kolkata), `fireJob` re-fetches row → shared `spawnDueCronJob`, heartbeat `workerStatus` upsert `cron-daemon-<host>-<pid>`
+- [x] `worker-engine.ts`: `spawnDueCronJob` extracted/exported (90-min dedup, indexName defaults, nextRun advance, triggeredBy system); `checkScheduledJobs` loops it — daemon + legacy poll share one path
+- [x] Admin: zod enum gap FIX (`recommendation_performance`/`ai_connection_test`/`historical_price_sync`), NEW `GET /api/admin/cron/daemon` liveness endpoint, Cron tab TASK_TYPES +3 + daemon status chip (60s refresh), workers engine route auto-start/stop drives the daemon
+- [x] **Netlify cron deleted**: 5 scheduled functions + `netlify/functions/` + `[functions]` block
+- [x] Ledger outcome wiring: `recordCronRun(jobName, success, { skipSpawnCounted })` (outcome-only — no double count) + NEW `recordSystemRunOutcome` in `worker-service.ts` `executeTask` (cronJobId-linked only; manual runs stay on `recordManualRunLedger`); non-fatal
+- [x] **`daysTracked` sort 500 FIX** (live-found, pre-existing v3.5.0): → `orderBy.createdAt` + regression test
+- [x] Carried v3.10.1 (`b35eca4`): honest latest-run, shared `modelChain.ts` fallback chain, swing tracker persistence (`@@unique([symbol, createdAt])`), SwingCard tenure pills, PerformanceTab dark-theme fix
+- [x] Tests: NEW `cron-daemon.test.ts` (12 — closure-capture node-cron mock, fireJob → real `spawnDueCronJob` via setTimeout(0) flush) + 1 skipSpawnCounted; suite **686 pass**; tsc 71 exact baseline
+- [x] Docs: AGENTS.md v3.11.0 row (consolidates v3.10.1), CHANGELOG index + versions-v3.md, TODO.md row, Lessons #72/#73, Primer (Last Updated + status + Session 18), agent-memory, session flow
 
 ### Pending (this session)
-- [x] Backtest fix + docs committed (`8148116` + `7021710`), pushed, PR #91 merged (`1de835c`) — pre-commit tsc clean, never `--no-verify`
-- [x] Deployed to Netlify (auto on merge) + live-verified (swing API 200, site healthy, backtest 500 eliminated)
-- [ ] Verify prod backfill result: swing indicators non-null + MCP `getHistoricalData` 200 (after the ~11-min sync completes) → main, then deploy?
+- [ ] Commit v3.11.0 code + docs `[skip ci]` (user approval; never `--no-verify`)
+- [ ] Restart dev server (PID 17564 predates daemon) → smoke-test instrumentation auto-start + `/api/admin/cron/daemon` liveness + admin Cron tab chip (Playwright per checklist)
 
 ### Pending (carried forward — other branches / later sessions)
-- [ ] Post-deploy verification (IN PROGRESS): prod backfill manual trigger running; verify swing indicators render + MCP `getHistoricalData` 200 → Swing indicators render; MCP `getHistoricalData` no longer 500 (temp table self-heals)
+- [ ] Post-deploy (v3.10.0): verify swing indicators render + MCP `getHistoricalData` 200 (prod backfill manual trigger + market-sync step 4 auto-backfill)
 - [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
 - [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (PR #88 open; pre-commit tsc must pass — never `--no-verify`), live-verify analytics side-nav
-- [x] **Deploy to Netlify (auto on PR merge) — DONE; verify Swing indicators render after backfill** → market-sync run backfills daily_prices → verify Swing indicators render on prod**
 - [ ] Re-seed demo holdings on prod
-- [ ] Prod: AI Connection Test cron first runs (verify audit entries + AI Monitoring `connection_test` rows after deploy)
+- [ ] Prod: AI Connection Test cron first runs (verify audit entries + AI Monitoring `connection_test` rows after deploy) + Netlify cron UI entries removal

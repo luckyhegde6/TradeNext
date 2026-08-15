@@ -1188,7 +1188,36 @@ export async function checkRecommendationPerformance() {
 
 ---
 
+### 72. `jest.mock` Factories Can't Dereference Module-Scope Mock Vars — SWC Doesn't Hoist `const` Above Imports
+**Issue**: While building `cron-daemon.test.ts`, the node-cron mock initially captured module-scope vars directly: `const mockSchedule = jest.fn(); jest.mock("node-cron", () => ({ schedule: mockSchedule, ... }))`. The mock never applied / threw "Cannot access 'mockSchedule' before initialization" (TDZ).
+**Root Cause**: SWC/Babel does NOT hoist module-scope `const` declarations above the `import` statements. `jest.mock(...)` calls are themselves hoisted to the top of the module and their FACTORY functions run during import-graph evaluation — before any module-scope `let/const` below has been initialized. So a factory body that references `mockSchedule` reads it in the temporal dead zone.
+**Solution**: The factory must only CAPTURE `mock`-prefixed names inside closures invoked LATER (at call time), never dereference them at factory-build time:
+```typescript
+const mockSchedule = jest.fn();
+jest.mock("node-cron", () => ({
+  schedule: (...args: unknown[]) => mockSchedule(...args), // capture in closure
+  validate: (...args: unknown[]) => mockValidate(...args),
+}));
+```
+This is the same pattern `dailyRecommendationService.test.ts` documents in its header comment (lines 10–11). Also: never read `mockX.mock.calls` from inside the factory — the assertions live in test bodies only.
+**Rule**: (1) In any jest mock factory, ALL module-scope mock variables must appear only inside closures (`(...args) => mockVar(...args)`), never as direct references in the factory body. (2) Use `mock`-prefix names for everything a factory captures so the convention is greppable. (3) If a mock "silently doesn't apply", suspect TDZ/hoisting before suspecting the path specifier (Lesson 65) — the failure signature differs: TDZ throws on require, path mismatch silently runs real code.
+
+### 73. Fire-and-Forget Async Callbacks Need a Microtask Flush in Tests — `void fireJob(...)` Never Awaitable
+**Issue**: In `cron-daemon.test.ts`, the node-cron handler is registered as `void fireJob(job.id)` — deliberately fire-and-forget (the daemon must never block the scheduler tick). Calling the mocked callback `mockScheduled[0].fn()` and then immediately asserting left the job half-run: `fireJob` awaited a dynamic import + DB read + spawn chain, and the assertion ran before the promise chain settled.
+**Root Cause**: The scheduler callback starts an async chain and returns nothing (`void`). Jest has nothing to await; the assertions race the pending microtasks. The chain passes through a dynamic `await import("./task-orchestrator")`, which adds at least one extra macrotask hop.
+**Solution**: After triggering the callback, flush with a real event-loop turn:
+```typescript
+mockScheduled[0].fn();
+await new Promise((resolve) => setTimeout(resolve, 0));
+expect(mockWorkerTaskCreate).toHaveBeenCalledTimes(1);
+```
+If the chain involves dynamic import or `setImmediate`/timers, use `setTimeout(resolve, 0)` (macrotask) rather than `await Promise.resolve()` (microtask-only — insufficient when a dynamic import is in the path).
+**Rule**: (1) When a system under test schedules work fire-and-forget, always identify the async hops (dynamic import, timers, DB) and flush with `setTimeout(0)` before asserting side effects. (2) Prefer asserting the OBSERVABLE side effect (workerTask create, cronJob update) over the intermediate promise. (3) If the flush is flaky in CI, extract the chain to an exported async function and unit-test that directly — keep the fire-and-forget wrapper as a one-liner.
+
+---
+
 ## Update Log
+- 2026-08-15: Added Lessons 72-73 (jest.mock factory bodies run during import-graph evaluation — SWC doesn't hoist `const` above imports, so factories must only CAPTURE `mock`-prefixed vars inside closures, never dereference them (TDZ); fire-and-forget async scheduler callbacks — `void fireJob(...)` — need a `setTimeout(0)` macrotask flush in tests when a dynamic import is in the chain); added v3.11.0 in-process node-cron daemon (Netlify scheduled functions deleted) + ledger outcome wiring (`skipSpawnCounted`) + `daysTracked` sort fix entry
 - 2026-08-14: Added Lessons 69-71 (tsx scripts finish but shell reports "timeout" from a lingering node handle — judge by output content, redirect order `> file 2>&1` on cmd; Jest mock hygiene — `resetAllMocks` vs `clearAllMocks`, anchor `$1` regex so it can't match `$11`, `typeof` guard for `maxDurationMs: 0`, spread-arg count for `$executeRawUnsafe`; "apply the missing migration" requires the migration to EXIST — grep `prisma/migrations` first, `db push`-created tables never reach prod, fix via lazy idempotent DDL that degrades instead of 500); added v3.10.0 historical-price sync into `daily_prices` + `backtest_history` prod-gap FIX entry (local `--apply` executed: 266 symbols / 17,198 bars / 0 errors; PR #91)
 - 2026-08-14: Added Lessons 69-70 (tsx scripts finish but shell reports "timeout" from a lingering node handle — judge by output content, redirect order `> file 2>&1` on cmd; Jest mock hygiene — `resetAllMocks` vs `clearAllMocks`, anchor `$1` regex so it can't match `$11`, `typeof` guard for `maxDurationMs: 0`, spread-arg count for `$executeRawUnsafe`); added v3.10.0 historical-price sync into `daily_prices` + `backtest_history` prod-gap plan entry
 - 2026-08-14: Added Lesson 68 (status flags must be DERIVED from actual results — the live prod Swing header lied "AI targets ready" over an all-failed AI batch because `analysisStatus = "done"` was set unconditionally after a swallow-fail call whose catch path is unreachable by design; derive from `analysisStatusAfterBatch(stocks)`); added v3.9.1 swing analysisStatus honesty fix + live verification + prod data-gap findings entry
