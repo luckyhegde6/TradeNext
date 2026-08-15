@@ -10,7 +10,7 @@
 
 ## Current Session (2026-08-14 → 08-15) — v3.11.0 (node-cron daemon, committed `6c4ef41` unpushed) + v3.11.1 (no-fake-HOLD AI-failure fix)
 
-**Working tree**: branch `fix/cron-tz-swing-perf` — v3.11.0 follow-up committed `6c4ef41` (unpushed; edge-safe instrumentation, DB-backed daemon liveness, all-system-job outcome counters, swing/IPO audit tags, friendly AI-failure errors); v3.11.1 AI-failure fix (partial persistence + `latestRun` notice) CODE + TESTS + LIVE-VERIFIED, docs updated, **commit pending user**. Full suite **696 pass / 11 skipped** (was 694); `npx tsc --noEmit` 71 = exact baseline (0 new). **NO push/deploy** (serverless must keep `CRON_DAEMON_DISABLED=1`; `netlify.toml` no longer ships a functions dir; remove Netlify cron UI entries after deploy).
+**Working tree**: branch `fix/cron-tz-swing-perf` — v3.11.0 follow-up committed `6c4ef41` (unpushed); v3.11.1 AI-failure fix committed `b2d9423` (unpushed; hook passed — tsc clean). Full suite **696 pass / 11 skipped**; `npx tsc --noEmit` 71 = exact baseline (0 new). **NO push/deploy** (serverless must keep `CRON_DAEMON_DISABLED=1`; `netlify.toml` no longer ships a functions dir; remove Netlify cron UI entries after deploy).
 
 ### Completed
 - [x] v3.11.0 follow-up commit `6c4ef41` (20 files, +440/−28; pre-commit hook passed, tsc clean, suite 694 pass/11 skip) — no push
@@ -19,9 +19,9 @@
 - [x] Tests: pre-flight-FAILED + all-AI-fail rewritten (deleteMany, failed run, `stocks: []`), NEW partial-failure + newest-run-surfacing tests, single-query → two-query shape; **suite 696 pass**; tsc 71 exact baseline
 - [x] Live-verified :3000 (Playwright): API `latestRun` same-id → no banner; intercepted newer failed `latestRun` → banner renders; normal state clean, 0 console errors
 - [x] Docs: AGENTS.md v3.11.1 row, CHANGELOG index + versions-v3.md v3.11.1 entry, TODO.md row, Lessons #74 (update-log) + #75 (fallback-data-never-persisted), Primer (Last Updated + status), agent-memory entry, session-todos
+- [x] Commit v3.11.1 code + docs → `b2d9423` (user-approved; pre-commit hook passed, tsc clean; no push)
 
 ### Pending (this session)
-- [ ] Commit v3.11.1 code + docs (user approval; never `--no-verify`)
 - [ ] Restart dev server (PID predates current run) → smoke-test instrumentation auto-start + `/api/admin/cron/daemon` liveness + admin Cron tab chip (Playwright per checklist)
 
 ### Pending (carried forward — other branches / later sessions)
