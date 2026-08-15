@@ -58,9 +58,7 @@ test on the exact page being verified. Surgical, no behavior change for other so
 CRON_SECRET state still unknown — recs cron hasn't fired since Aug 13 05:10 UTC, must be checked by user
 post-deploy to validate the fallback fix).
 
-## D7 — `recommendationsCache` must be a `globalThis` singleton, not a module-scope const (v3.11.2)
-
-**Decision**: share ONLY `recommendationsCache` via `globalThis` (`__recommendationsCache`, the `lib/prisma.ts`
+## D7 — `recommendationsCache` must be a `globalThis` singleton, not a module-scope const (v3.11.2)**Decision**: share ONLY `recommendationsCache` via `globalThis` (`__recommendationsCache`, the `lib/prisma.ts`
 pattern); leave main/hot/static/historical caches at module scope. The other caches are NOT invalidated
 cross-module (the worker's market sync writes the DB `market_cache` table, and read paths re-validate DB
 freshness), so sharing them would be speculative — keep the diff surgical.
@@ -75,3 +73,31 @@ view). This catches any future regression where someone moves the cache back to 
 **Not chosen**: (a) sharing ALL caches (unjustified — no cross-module invalidation semantics; each shared
 instance also resists dev hot-reload garbage collection, so only share what must be shared); (b) moving the
 cache into the DB (overkill — the NodeCache + 23h TTL is correct; only the instance identity was wrong).
+
+## D8 — Full serverless purge: Netlify is a persistent server, no opt-out, no Blob store (v3.11.3)
+
+**Decision**: remove every "serverless" branch, opt-out, and Blob-store dependency that the v3.11.0 in-process
+node-cron daemon made obsolete: (1) DELETE the `CRON_DAEMON_DISABLED=1` guard + comments from
+`instrumentation.ts` + `cron-daemon.ts` — Netlify runs the app as a persistent Next.js server so the daemon
+must self-start there (⚠️ BREAKING vs the v3.11.0 doc: the flag must NOT be set anymore); (2) DELETE
+`lib/netlify-logger.ts` + drop `@netlify/blobs` from `package.json`/lock; strip ALL Blob/serverless branches
+from `lib/logger.ts` + `worker-logger.ts` (file logs = single truth); (3) drop `serverless:` fields + the amber
+"file-system logs ephemeral" banner from monitoring route/page; (4) rewrite ~25 stale "serverless" comments.
+**Why**: the v3.11.0 daemon only runs inside a persistent process — with Netlify now serving the app as a
+persistent server, every conditional serverless path is dead weight and actively misleading (the opt-out could
+silently disable the daemon in prod, and the Blob mirror duplicated logging with a store that no longer needs
+to exist). One codepath = predictable behavior.
+**Kept**: `NEXT_RUNTIME === "nodejs"` + `NEXT_PHASE !== "phase-production-build"` in `instrumentation.ts`
+(build/Edge safety, not serverless — the app genuinely must not start the daemon during a production build or
+on an Edge runtime); `netlify.toml` + `@netlify/plugin-nextjs` (deploy config still valid); prisma/schema.prisma
+line-4 "serverless" boilerplate (Prisma's own template text, not an app claim); "server-logs" monitoring tab
+type names (legit file-log feature, unrelated to the Blob store).
+**DataFetcher un-skip**: `DataFetcher.test.tsx` was `describe.skip`'d for a REMOVED API (`children`/`apiCall`
+props + undefined `mockUseApi`/`mockApiCall` globals). Rewrote it for the current `apiUrl` + `render`
+render-prop API with `@/lib/hooks/useApi` mocked (DataFetcher 7 + PaginatedDataFetcher 1 + RealtimeDataFetcher 1
+= 9 tests, 9/9 pass). Caught a real render-prop mismatch (raw data passed as the render arg, not `{data}`).
+**Not chosen**: (a) keeping the opt-out "just in case" (it would silently disable the daemon on Netlify — the
+exact failure mode the daemon replaced); (b) keeping `@netlify/blobs` for "future logs" (the Blob store was the
+serverless workaround; a persistent server writes normal files); (c) fixing the repo-wide jest-dom
+`toBeInTheDocument` typing gap (pre-existing across ALL test files, runtime-fine via jest.setup.js — out of
+scope for a purge commit).

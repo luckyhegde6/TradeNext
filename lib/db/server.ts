@@ -5,7 +5,7 @@ dotenv.config();
 
 export const poolQuery = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 5, // Reduce max connections for serverless
+    max: 5, // Conservative pool — avoid exhausting the DB connection limit
     min: 0,
     idleTimeoutMillis: 15000, // Close idle connections after 15s
     connectionTimeoutMillis: 5000, // Connection timeout

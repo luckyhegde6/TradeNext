@@ -7,7 +7,7 @@
  * TIMEZONE SEMANTICS (v3.10.1): the parser evaluates expressions in **UTC**
  * on every host (IST = UTC + 5:30), so the returned instant is
  * host-independent — "30 4 * * 1-5" always means 04:30 UTC = 10:00 AM IST,
- * whether the process runs on a UTC serverless host or an IST dev machine.
+ * whether the process runs on a UTC host or an IST dev machine.
  * Expected dates are therefore constructed with Date.UTC components.
  */
 

@@ -234,3 +234,53 @@ dark-theme Entry/Current visibility, docs + Playwright verify + commit to fix br
 - tsc --noEmit 71 = exact baseline (pre-existing test-noise only)
 - Playwright: Swing tab + Performance tab render, 0 console errors; swing trackers persisted (created=20)
 - daysTracked 500 fixed + regression test green
+
+---
+
+## Batch 4 — v3.11.3 Full serverless purge (Netlify = persistent server, Blob logging removed)
+
+1. Daemon opt-out REMOVED
+   - `instrumentation.ts`: removed `CRON_DAEMON_DISABLED` guard + opt-out comment (kept
+     `NEXT_RUNTIME === "nodejs"` + `NEXT_PHASE !== "phase-production-build"` — build/Edge safety).
+   - `lib/services/worker/cron-daemon.ts`: removed opt-out comment.
+   - ⚠️ BREAKING vs v3.11.0 doc: Netlify must NOT set `CRON_DAEMON_DISABLED=1` anymore.
+
+2. Blob logging REMOVED
+   - `git rm lib/netlify-logger.ts`; `package.json` dropped `@netlify/blobs` → `npm install` removed 41 packages.
+   - `lib/logger.ts`: stripped `getNetlifyLogger`, `/tmp` serverless branch in `getLogsDir`, serverless
+     warn-skip, Blob listing in `getLogFiles`, `blob:` branches in `readLogFile`/`deleteLogFile`, Blob
+     fallback in `readLogsByDate`, Netlify mirror in `writeToFile`.
+   - `worker-logger.ts` (~250 lines): stripped Blob imports, `isServerless()`, Blob branches in
+     `writeLog`/`readLog`/`getAllLogFiles`/`deleteLog`/`cleanupLogs`; fixed dangling brace at EOF.
+
+3. Monitoring/UI
+   - `app/api/admin/monitoring/route.ts`: removed `isServerless` + comment + `serverless:` response fields (both shapes).
+   - `app/admin/utils/monitoring/page.tsx`: removed `serverlessLogs` state/fetch + amber ephemeral banner.
+   - `app/admin/utils/ai-monitoring/page.tsx`: title copy.
+   - `app/llms.txt/route.ts`: "Deployed on Netlify (serverless)" → "Deployed on Netlify" (+ tech line).
+
+4. Comment sweep (~25 files): ai-monitoring ×6, connectionTestService ×2, recommendation-agent,
+   backtestDataService ×2, chartinkScreenerService, db-logger, recommendationPerformanceService, syncedDataService,
+   worker-engine, cronParser.test, db/server, market-cache, nse-client, admin ai/monitoring routes,
+   api/ai/{alerts,query,screener}, alerts/evaluate, piotroski, user/telegram/verify, cleanup-stale-worker-tasks,
+   prisma/schema.prisma (line 1030), docs/architecture.html ×6.
+
+5. Verification
+   - `git grep`: 0 functional serverless/blob references in code (prisma/schema.prisma:4 Prisma boilerplate kept;
+     "server-logs" monitoring tab names kept — legit feature).
+   - `npx tsc --noEmit`: 46 errors — DOWN from the 71 baseline, 0 new.
+   - Full suite: 55/55 suites, **709 pass / 4 skip** (was 700/11).
+
+6. DataFetcher.test.tsx un-skip + rewrite (the "1 error" the user asked to fix)
+   - describe.skip'd suite for a REMOVED API (children/apiCall props, undefined mockUseApi/mockApiCall globals,
+     asserted "Loading..." vs actual "Loading data...") → REWRITTEN for current `apiUrl` + `render` render-prop
+     API with `@/lib/hooks/useApi` mocked (DataFetcher 7 + PaginatedDataFetcher 1 + RealtimeDataFetcher 1).
+   - First attempt failed 2/9: render prop receives RAW data as arg, TestChild destructured `{ data }` → undefined →
+     empty div. Fixed: `TestChild = (data: unknown) => ...` → 9/9 pass.
+   - Remaining LSP errors = pre-existing jest-dom typing gap (same in LoadingSpinner.test.tsx etc., runtime-fine).
+
+7. Docs v3.11.3: AGENTS.md row + header, CHANGELOG index + versions-v3.md entry, TODO.md row, Primer (Last
+   Updated + status), agent-memory entry, HANDOFF, session-todos, session decisions D8.
+
+8. Status: commit pending user; NO push/deploy.
+

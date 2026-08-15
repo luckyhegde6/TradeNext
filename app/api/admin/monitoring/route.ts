@@ -27,12 +27,6 @@ export async function GET(req: Request) {
     const date = searchParams.get("date");
     const filePath = searchParams.get("filePath");
 
-    // Serverless platforms have no durable writable FS — /tmp is ephemeral and
-    // log files listed/read here come from the Netlify Blob mirror (see
-    // lib/logger.ts getLogFiles/readLogFile). Expose that so the monitoring UI
-    // can show a serverless-aware notice pointing to the durable DB Logs tab.
-    const isServerless = !!(process.env.NETLIFY || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-
     switch (type) {
       case "alerts": {
         const alerts = await getAnomalyAlerts(50, false);
@@ -195,7 +189,7 @@ export async function GET(req: Request) {
       }
 
       case "db-logs": {
-        // DB-backed server logs (works on serverless — no writable FS needed)
+        // DB-backed server logs (queryable without reading the FS)
         const { getDbLogs } = await import("@/lib/services/db-logger");
         const level = searchParams.get("level") || undefined;
         const source = searchParams.get("source") || undefined;
@@ -217,7 +211,7 @@ export async function GET(req: Request) {
         if (searchParams.get("action") === "list") {
           const files = await getLogFiles();
           logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
-          return NextResponse.json({ files, serverless: isServerless });
+          return NextResponse.json({ files });
         }
 
         // Get log file content
@@ -231,7 +225,7 @@ export async function GET(req: Request) {
         // Default: return list of files
         const files = await getLogFiles();
         logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
-        return NextResponse.json({ files, serverless: isServerless });
+        return NextResponse.json({ files });
       }
 
       case "recent-requests": {

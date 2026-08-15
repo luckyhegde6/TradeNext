@@ -1,17 +1,11 @@
 // lib/services/worker/worker-logger.ts
-// Worker logger with graceful fallback to DB logging on serverless platforms
+// Worker logger — file logging with DB logging fallback.
 
-import { writeBlobLog, readBlobLog, deleteBlobLog } from "@/lib/netlify-logger";
 import { logToDb, cleanupOldLogs } from "@/lib/services/db-logger";
 import logger from "@/lib/logger";
 
 // Track if file logging is available
 let fileLoggingAvailable = true;
-
-// Check if we're on a serverless platform
-const isServerless = () => {
-  return !!(process.env.NETLIFY || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-};
 
 /**
  * Sanitize task ID for safe filesystem usage
@@ -39,13 +33,13 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
   const timestamp = new Date().toISOString();
   const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}${data ? ` ${JSON.stringify(data)}` : ""}`;
 
-  // Try file logging first (only if not serverless)
-  if (!isServerless() && fileLoggingAvailable) {
+  // Try file logging first
+  if (fileLoggingAvailable) {
     try {
       // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
       const safeTaskId = sanitizeTaskIdForPath(taskId);
       if (!safeTaskId) {
-        // Invalid taskId - skip file logging, fall through to blob/DB
+        // Invalid taskId - skip file logging, fall through to DB
         throw new Error("Invalid taskId");
       }
       
@@ -71,21 +65,7 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
     } catch (error) {
       // File logging failed, disable it
       fileLoggingAvailable = false;
-      // Don't log error to console on serverless to avoid spam
-      if (!isServerless()) {
-        console.warn("[WorkerLogger] File logging disabled:", error);
-      }
-    }
-  }
-
-  // Try Netlify Blobs if on Netlify
-  if (process.env.NETLIFY) {
-    try {
-      await writeBlobLog(taskId, logEntry);
-      return;
-    } catch (error) {
-      // Blob logging failed, continue to DB fallback
-      console.warn("[WorkerLogger] Blob logging failed:", error);
+      console.warn("[WorkerLogger] File logging disabled:", error);
     }
   }
 
@@ -115,39 +95,27 @@ export async function writeLog(taskId: string, level: string, message: string, d
  * Read log for a task
  */
 export async function readLog(taskId: string): Promise<string> {
-  // Try Netlify Blobs first
-  if (process.env.NETLIFY) {
-    try {
-      const blobContent = await readBlobLog(taskId);
-      if (blobContent) return blobContent;
-    } catch (error) {
-      // Continue to fallback
-    }
-  }
+  // Try file log
+  try {
+    // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
+    const safeTaskId = sanitizeTaskIdForPath(taskId);
+    if (safeTaskId) {
+      const fs = require("fs");
+      const path = require("path");
+      const logsDir = path.join(process.cwd(), ".next", "server_logs");
+      // Use only the validated safeTaskId - no user input in path construction
+      const logFileName = safeTaskId + ".log";
+      const logFile = path.join(logsDir, logFileName);
 
-  // Try file (only if not serverless)
-  if (!isServerless()) {
-    try {
-      // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
-      const safeTaskId = sanitizeTaskIdForPath(taskId);
-      if (safeTaskId) {
-        const fs = require("fs");
-        const path = require("path");
-        const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        // Use only the validated safeTaskId - no user input in path construction
-        const logFileName = safeTaskId + ".log";
-        const logFile = path.join(logsDir, logFileName);
-        
-        // Security: Verify path is within logsDir to prevent traversal
-        if (logFile.startsWith(logsDir + path.sep)) {
-          if (fs.existsSync(logFile)) {
-            return fs.readFileSync(logFile, "utf-8");
-          }
+      // Security: Verify path is within logsDir to prevent traversal
+      if (logFile.startsWith(logsDir + path.sep)) {
+        if (fs.existsSync(logFile)) {
+          return fs.readFileSync(logFile, "utf-8");
         }
       }
-    } catch (error) {
-      // Continue to DB
     }
+  } catch (error) {
+    // Continue to DB
   }
 
   // DB fallback - get from server logs
@@ -170,11 +138,6 @@ export async function readLog(taskId: string): Promise<string> {
  * Get list of all log files
  */
 export function getAllLogFiles(): { taskId: string; path: string; size: number; created: Date }[] {
-  // On serverless, return empty - logs are in DB/Blobs
-  if (isServerless()) {
-    return [];
-  }
-
   try {
     const fs = require("fs");
     const path = require("path");
@@ -213,38 +176,26 @@ export function getAllLogFiles(): { taskId: string; path: string; size: number; 
 export async function deleteLog(taskId: string): Promise<boolean> {
   let deleted = false;
 
-  // Delete from Netlify Blobs
-  if (process.env.NETLIFY) {
-    try {
-      await deleteBlobLog(taskId);
-      deleted = true;
-    } catch (error) {
-      // Continue
-    }
-  }
+  // Delete local file
+  try {
+    // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
+    const safeTaskId = sanitizeTaskIdForPath(taskId);
+    if (safeTaskId) {
+      const fs = require("fs");
+      const path = require("path");
+      const logsDir = path.join(process.cwd(), ".next", "server_logs");
+      // Use only the validated safeTaskId - no user input in path construction
+      const logFileName = safeTaskId + ".log";
+      const logFile = path.join(logsDir, logFileName);
 
-  // Delete local file (only if not serverless)
-  if (!isServerless()) {
-    try {
-      // Only use sanitized taskId - already validated by sanitizeTaskIdForPath
-      const safeTaskId = sanitizeTaskIdForPath(taskId);
-      if (safeTaskId) {
-        const fs = require("fs");
-        const path = require("path");
-        const logsDir = path.join(process.cwd(), ".next", "server_logs");
-        // Use only the validated safeTaskId - no user input in path construction
-        const logFileName = safeTaskId + ".log";
-        const logFile = path.join(logsDir, logFileName);
-        
-        // Security: Verify path is within logsDir to prevent traversal
-        if (logFile.startsWith(logsDir + path.sep) && fs.existsSync(logFile)) {
-          fs.unlinkSync(logFile);
-          deleted = true;
-        }
+      // Security: Verify path is within logsDir to prevent traversal
+      if (logFile.startsWith(logsDir + path.sep) && fs.existsSync(logFile)) {
+        fs.unlinkSync(logFile);
+        deleted = true;
       }
-    } catch (error) {
-      // Continue
     }
+  } catch (error) {
+    // Continue
   }
 
   return deleted;
@@ -270,10 +221,9 @@ export async function cleanupLogs(retentionDays = 7): Promise<number> {
   // Cleanup DB logs
   const deletedFromDb = await cleanupOldLogs(retentionDays);
   
-  // On local/server, also cleanup file logs
+  // Cleanup file logs
   let deletedFromFiles = 0;
-  if (!isServerless()) {
-    try {
+  try {
       const fs = require("fs");
       const path = require("path");
       const logsDir = path.join(process.cwd(), ".next", "server_logs");
@@ -294,7 +244,6 @@ export async function cleanupLogs(retentionDays = 7): Promise<number> {
     } catch (error) {
       logger.warn({ msg: "Failed to cleanup file logs", error });
     }
-  }
 
   return deletedFromDb + deletedFromFiles;
 }

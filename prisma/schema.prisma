@@ -1027,7 +1027,7 @@ model RateLimitConfig {
   @@map("rate_limit_configs")
 }
 
-// Server Log - database-backed logging for serverless environments
+// Server Log - database-backed logging
 model ServerLog {
   id        String   @id @default(uuid())
   level     String // "info" | "warn" | "error" | "debug"

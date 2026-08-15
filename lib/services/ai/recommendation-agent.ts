@@ -290,7 +290,7 @@ async function analyzeBatch(
         };
       });
 
-      // Track AI call for monitoring (await so it persists on serverless)
+      // Track AI call for monitoring (await so it persists)
       await trackAiCall({
         timestamp: new Date().toISOString(),
         action: "recommendation_batch",

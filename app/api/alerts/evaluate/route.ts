@@ -11,7 +11,7 @@ export const runtime = "nodejs";
  * Body: { ruleIds?: string[] } (optional — if omitted, evaluates all active rules for user)
  *
  * This can be called:
- * - On page load (as a fallback for serverless environments)
+ * - On page load (as a fallback)
  * - By a cron job / background worker
  * - Manually by the user
  */

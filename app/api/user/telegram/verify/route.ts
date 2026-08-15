@@ -8,7 +8,7 @@
  *     → Confirms the code and marks the Telegram subscription as verified
  *
  * Security:
- *   - Verification codes stored in DB (survives serverless cold starts)
+ *   - Verification codes stored in DB (survives restarts)
  *   - Code generated with crypto.randomBytes (CSPRNG)
  *   - Rate limited: max 3 send attempts per 10 minutes per user
  *   - Max 5 confirm attempts per code before requiring a new code

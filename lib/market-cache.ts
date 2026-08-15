@@ -97,7 +97,7 @@ export function needsCacheRefresh(
  * Fetch policy (widened scope — used by ALL non-backtest NSE fetches):
  *   1. In-memory cache (NodeCache) first   — 0 DB ops on hit
  *   2. MarketCache DB table                 — 1 DB read, persistent across
- *      serverless cold starts
+ *      process restarts
  *   3. NSE live                             — 1 NSE call, then DB upsert
  *      (keeps the persistent cache in sync) + memory populate
  */

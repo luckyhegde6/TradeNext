@@ -12,9 +12,6 @@
 //     spawnDueCronJob (dedup guard + nextRun advance), so the in-process daemon
 //     and the legacy 60s poll scheduler behave identically.
 //   - Heartbeat written to worker_status as `cron-daemon-<host>-<pid>`.
-//
-// Opt-out: set CRON_DAEMON_DISABLED=1 (e.g. Netlify serverless, where every
-// isolate dies after a request and would otherwise spawn a daemon per cold start).
 
 import cron from "node-cron";
 import prisma from "@/lib/prisma";

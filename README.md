@@ -7,7 +7,7 @@
 
 TradeNext is a Next.js 16 application for **NSE (India) market data, portfolio management, capital-gains tax,
 F&O analytics, dividends, rebalancing, alerts, and AI-driven daily recommendations** — backed by
-PostgreSQL/TimescaleDB and deployed serverless on Netlify.
+PostgreSQL/TimescaleDB and deployed on Netlify.
 
 ---
 
@@ -90,7 +90,7 @@ Visit **http://localhost:3000**.
 | Auth | NextAuth.js (httpOnly cookies, RBAC) |
 | Testing | Jest 30 + Testing Library + Playwright (e2e) |
 | Logging | pino structured logs → `logs/` dir + Netlify Blob store |
-| Deployment | Netlify (serverless) |
+| Deployment | Netlify |
 
 ## Commands
 

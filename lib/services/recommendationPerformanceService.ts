@@ -308,7 +308,7 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
  *
  * Idempotent: skips trackers already archived (defensive check on trackerId).
  * Uses runInChunks (bounded concurrency) — NEVER an interactive $transaction
- * (5s serverless timeout on Prisma Accelerate).
+ * (5s interactive-transaction timeout).
  */
 export async function archiveRecommendations(): Promise<ArchiveResult> {
   const startTime = Date.now();

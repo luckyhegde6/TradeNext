@@ -11,7 +11,7 @@
  *    errors into strings, which a health probe must not do). We check the HTTP
  *    status and require a parseable `choices[0].message.content`.
  *  - Results are durable via `trackAiCall` (ServerLog.source="ai", action
- *    "connection_test") so they survive serverless cold starts and appear in
+ *    "connection_test") so they survive process restarts and appear in
  *    the AI Monitoring page.
  *  - Overall failure notifies admins (in-app + best-effort Telegram).
  */
@@ -265,7 +265,7 @@ export async function runAiConnectionTest(
 
 /**
  * Last connection-test records, read from DB-persisted AI call entries
- * (ServerLog.source="ai", action="connection_test"). Survives serverless.
+ * (ServerLog.source="ai", action="connection_test"). Survives restarts.
  */
 export async function getLastAiConnectionTests(limit = 10): Promise<AiCallEntry[]> {
   try {

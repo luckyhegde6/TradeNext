@@ -207,7 +207,7 @@ async function pollAndExecute() {
 
 /**
  * Reap stale in-flight tasks: WorkerTasks stuck in "running" for longer than
- * `staleMs` (they are dead — worker crashed or the serverless function was
+ * `staleMs` (they are dead — worker crashed or the process was restarted
  * killed at the Netlify 15-min cap) and DailyRecommendationRuns stuck in
  * "running" (keyed on createdAt — that model has no startedAt).
  * Exported for tests and the cleanup tooling.

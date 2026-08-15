@@ -12,7 +12,7 @@ const LLMS_TXT = `# TradeNext
 ## What this is
 TradeNext is a Next.js 16 + TypeScript + Prisma 7 (PostgreSQL/TimescaleDB) application that tracks NSE India
 market data, manages portfolios, computes capital-gains tax, runs stock screeners, generates AI-driven daily
-recommendations, and delivers alerts via Telegram. Deployed on Netlify (serverless). The app fetches NSE data
+recommendations, and delivers alerts via Telegram. Deployed on Netlify. The app fetches NSE data
 server-side (never from the browser) through a caching proxy.
 
 ## Public pages
@@ -55,7 +55,7 @@ server-side (never from the browser) through a caching proxy.
 
 ## Tech stack
 Next.js 16 (App Router) · TypeScript 5.9 (strict) · Tailwind CSS 4 · Prisma 7 + PostgreSQL/TimescaleDB ·
-NextAuth.js · Jest 30 + Playwright e2e · pino structured logging · Netlify serverless + Blob store
+NextAuth.js · Jest 30 + Playwright e2e · pino structured logging · Netlify + PostgreSQL
 
 ## Boundaries (IMPORTANT for agents & crawlers)
 - /admin/* and /api/admin/* are role-gated private areas — do not index, link, or reference.

@@ -12,15 +12,10 @@
 // All node-only modules are imported DYNAMICALLY inside register() behind the
 // NEXT_RUNTIME guard; the Edge variant is then just this file with nothing in
 // it, and register() returns before any dynamic import runs.
-//
-// Opt-out: set CRON_DAEMON_DISABLED=1 (e.g. if the app is still deployed on
-// Netlify serverless, where every isolate dies after a request — a daemon per
-// cold start would just waste cycles).
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
-  if (process.env.CRON_DAEMON_DISABLED === "1") return;
 
   try {
     const [{ startCronDaemon }, { startWorker }, { default: logger }] = await Promise.all([
