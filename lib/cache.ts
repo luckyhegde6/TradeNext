@@ -29,13 +29,25 @@ const staticCache = new NodeCache({
 });
 
 // Cache for daily recommendations (23hr TTL — runs once daily at 10 AM IST)
-const recommendationsCache = new NodeCache({
-  stdTTL: 82800,      // 23 hours in seconds (23 * 60 * 60)
-  checkperiod: 3600,  // Check every hour
-  maxKeys: 10,        // Very small — only latest + history
-  useClones: false,
-  deleteOnExpire: true,
-});
+// NOTE: shared via globalThis so EVERY module instance resolves the SAME
+// NodeCache. Next.js dev (Turbopack) loads instrumentation.ts (worker/cron
+// daemon) and API routes as SEPARATE module graphs — a module-scope instance
+// would be created twice, and the worker's invalidateRecommendationsCache()
+// would flush its own copy while the API route kept serving a stale 23h run.
+// Mirrors the lib/prisma.ts globalThis singleton pattern.
+const globalForCache = globalThis as unknown as {
+  __recommendationsCache?: NodeCache;
+};
+
+const recommendationsCache =
+  globalForCache.__recommendationsCache ??
+  (globalForCache.__recommendationsCache = new NodeCache({
+    stdTTL: 82800,      // 23 hours in seconds (23 * 60 * 60)
+    checkperiod: 3600,  // Check every hour
+    maxKeys: 10,        // Very small — only latest + history
+    useClones: false,
+    deleteOnExpire: true,
+  }));
 
 // Cache for backtest historical OHLCV data (24h TTL — daily bars only change
 // at market close; NSE refetch on stale keeps ad-hoc backtests fresh without
