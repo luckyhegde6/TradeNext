@@ -71,8 +71,8 @@ function getBuffer(): AiCallEntry[] {
  * The call is pushed to the in-memory ring buffer (fast reads) AND persisted
  * to the database. The returned promise resolves once the DB row is written —
  * callers in request handlers MUST `await` it (e.g. in a `finally` block) so
- * the serverless function does not freeze before the write lands. Fire-and-
- * forget callers (background workers) may ignore the promise.
+ * the write lands before the handler returns. Fire-and-forget callers
+ * (background workers) may ignore the promise.
  */
 export function trackAiCall(entry: AiCallEntry): Promise<void> {
   const buffer = getBuffer();
@@ -95,8 +95,8 @@ export function trackAiCall(entry: AiCallEntry): Promise<void> {
     error: entry.error,
   });
 
-  // Persist to DB (awaited by request handlers so the write survives
-  // serverless instance freeze; safe to ignore in worker contexts).
+  // Persist to DB (awaited by request handlers so the write survives handler
+  // completion; safe to ignore in worker contexts).
   return persistAiCallToDb(entry);
 }
 
@@ -163,8 +163,8 @@ export function getAiStats(timeframeMinutes = 60): AiStats {
  * Persist an AI call to the database log for long-term storage.
  *
  * ServerLog.source = "ai" is the durable record. Because the in-memory ring
- * buffer dies with the serverless instance, this DB row is what makes AI
- * monitoring survive page refreshes / cold starts.
+ * buffer dies with the process, this DB row is what makes AI monitoring
+ * survive page refreshes / restarts.
  */
 export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
   try {
@@ -199,7 +199,7 @@ export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
 /**
  * Read AI call records that were persisted to the database.
  *
- * This is the source of truth that survives serverless instance restarts.
+ * This is the source of truth that survives process restarts.
  * Only non-null metadata is mapped back into an {@link AiCallEntry}.
  */
 export async function getPersistedAiCalls(
@@ -255,7 +255,7 @@ export async function getPersistedAiCalls(
  *
  * Both sources are combined (memory entries first, then DB records older
  * than the buffer so history is never hidden). The in-memory buffer alone is
- * not authoritative — DB logs survive serverless restarts, so always reading
+ * not authoritative — DB logs survive restarts, so always reading
  * both prevents the admin page from appearing to "lose" persisted calls.
  */
 export async function getAiCallsMerged(
@@ -295,7 +295,7 @@ export async function getAiCallsMerged(
  *
  * Stats are computed over the union of the in-memory buffer and DB-persisted
  * logs (within the timeframe) so the dashboard reflects the full history, not
- * just whatever the current serverless instance happened to buffer.
+ * just whatever the current process happened to buffer.
  */
 export async function getAiStatsMerged(
   timeframeMinutes = 60,

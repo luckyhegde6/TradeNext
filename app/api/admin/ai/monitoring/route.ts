@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  *   timeframe: number (minutes, default: 60, for "stats" type)
  *
  * Reads merge the in-memory ring buffer with DB-persisted ServerLog records
- * (source="ai"). If the current serverless instance is cold (no memory
+ * (source="ai"). If the current process is cold (no memory
  * buffer), data is served from the database so logs survive refreshes.
  *
  * DELETE /api/admin/ai/monitoring — Clear AI call buffer

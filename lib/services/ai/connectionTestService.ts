@@ -11,7 +11,7 @@
  *    errors into strings, which a health probe must not do). We check the HTTP
  *    status and require a parseable `choices[0].message.content`.
  *  - Results are durable via `trackAiCall` (ServerLog.source="ai", action
- *    "connection_test") so they survive serverless cold starts and appear in
+ *    "connection_test") so they survive process restarts and appear in
  *    the AI Monitoring page.
  *  - Overall failure notifies admins (in-app + best-effort Telegram).
  */
@@ -23,8 +23,12 @@ import { notifyAdmins } from "@/lib/services/notificationService";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-/** Fallback routes probed in order when the configured model fails. */
-export const AI_FALLBACK_MODELS = ["openrouter/free", "openrouter/auto"] as const;
+/**
+ * Fallback routes probed in order when the configured model fails.
+ * Defined in the shared pure module (used by the AI agents' fallback chain too).
+ */
+import { AI_FALLBACK_MODELS } from "./modelChain";
+export { AI_FALLBACK_MODELS } from "./modelChain";
 
 /** Action tag recorded via trackAiCall for every probe attempt. */
 export const CONNECTION_TEST_ACTION = "connection_test";
@@ -261,7 +265,7 @@ export async function runAiConnectionTest(
 
 /**
  * Last connection-test records, read from DB-persisted AI call entries
- * (ServerLog.source="ai", action="connection_test"). Survives serverless.
+ * (ServerLog.source="ai", action="connection_test"). Survives restarts.
  */
 export async function getLastAiConnectionTests(limit = 10): Promise<AiCallEntry[]> {
   try {

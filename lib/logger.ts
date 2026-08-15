@@ -17,15 +17,6 @@ if (isServer) {
   }
 }
 
-// Netlify Blobs support
-const getNetlifyLogger = () => {
-  try {
-    return require('@/lib/netlify-logger');
-  } catch (e) {
-    return null;
-  }
-};
-
 // Log levels
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
@@ -46,18 +37,8 @@ interface LogEntry {
   args?: any[];
 }
 
-// Server logs directory - use /tmp on serverless platforms
+// Server logs directory
 const getLogsDir = (): string => {
-  // Check if we're on a serverless platform (Netlify/Vercel)
-  const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY === '1';
-  const isVercel = !!process.env.VERCEL;
-  const isServerless = isNetlify || isVercel;
-
-  if (isServerless) {
-    // Use /tmp which is writable on serverless
-    return '/tmp/tradenext_logs';
-  }
-
   const cwd = process.cwd();
   return isServer ? pathModule.join(cwd, 'logs') : '';
 };
@@ -80,12 +61,7 @@ function ensureLogsDir() {
   } catch (error) {
     // Directory creation failed - disable file logging
     logsDirAvailable = false;
-
-    // Only warn if we're NOT on a serverless platform (where we expect this to fail)
-    const isServerless = !!process.env.NETLIFY || !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
-    if (!isServerless) {
-      console.warn('[Logger] File logging disabled - could not create logs directory');
-    }
+    console.warn('[Logger] File logging disabled - could not create logs directory');
   }
 }
 
@@ -115,18 +91,7 @@ function getTodayLogPath(): string {
 export async function getLogFiles(): Promise<{ date: string; path: string; size: number }[]> {
   const files: { date: string; path: string; size: number }[] = [];
 
-  // Try Netlify Blobs first if on Netlify
-  if (process.env.NETLIFY) {
-    try {
-      const { listBlobLogs } = require('@/lib/netlify-logger');
-      const blobFiles = await listBlobLogs('server-logs');
-      files.push(...blobFiles);
-    } catch (error) {
-      console.error("Failed to list logs from Netlify Blobs:", error);
-    }
-  }
-
-  // Also include local logs (if any)
+  // Include local logs (if any)
   if (isServer && fs && pathModule) {
     ensureLogsDir();
     const logsDir = getLogsDir();
@@ -160,23 +125,6 @@ export async function getLogFiles(): Promise<{ date: string; path: string; size:
 
 // Read log file content
 export async function readLogFile(filePath: string, limit: number = 1000): Promise<string[]> {
-  // If filePath matches a Netlify Blob pattern (e.g., starts with "blob:")
-  if (filePath.startsWith('blob:')) {
-    try {
-      const { readBlobLog } = require('@/lib/netlify-logger');
-      const blobKey = filePath.replace('blob:', '');
-      // Server-log mirror lives in the "server-logs" store (date-keyed).
-      // Worker logs read via readBlobLog without store arg → "worker-logs".
-      const content = await readBlobLog(blobKey, blobKey.endsWith('.log') ? 'server-logs' : undefined);
-      if (content) {
-        const lines = content.split('\n').filter((line: string) => line.trim());
-        return lines.slice(-limit);
-      }
-    } catch (error) {
-      console.error("Failed to read log from Netlify Blobs:", error);
-    }
-  }
-
   if (!isServer || !fs) return [];
   try {
     if (!fs.existsSync(filePath)) return [];
@@ -195,14 +143,7 @@ export async function readLogsByDate(date: string, limit: number = 1000): Promis
   const yearMonth = date.substring(0, 7); // YYYY-MM
   const filePath = pathModule.join(logsDir, yearMonth, `${date}.log`);
 
-  // On Netlify, we might want to check Blobs if local file doesn't exist
-  // But the monitoring API uses filePath directly for Blobs now (prefixed with blob:)
-
   if (!fs.existsSync(filePath)) {
-    // If not found locally and on Netlify, try checking for blob:YYYY-MM-DD
-    if (process.env.NETLIFY) {
-      return await readLogFile(`blob:${date}.log`, limit);
-    }
     return [];
   }
 
@@ -211,20 +152,6 @@ export async function readLogsByDate(date: string, limit: number = 1000): Promis
 
 // Delete log file
 export async function deleteLogFile(filePath: string): Promise<boolean> {
-  // If filePath matches a Netlify Blob pattern
-  if (filePath.startsWith('blob:')) {
-    try {
-      const { deleteBlobLog } = require('@/lib/netlify-logger');
-      const blobKey = filePath.replace('blob:', '');
-      // Server-log mirror lives in the "server-logs" store (date-keyed).
-      await deleteBlobLog(blobKey, blobKey.endsWith('.log') ? 'server-logs' : undefined);
-      return true;
-    } catch (error) {
-      console.error("Failed to delete log from Netlify Blobs:", error);
-      return false;
-    }
-  }
-
   if (!isServer || !fs) return false;
   try {
     if (fs.existsSync(filePath)) {
@@ -302,14 +229,6 @@ function writeToFile(entry: string, level: LogLevel = 'info') {
     const filePath = getTodayLogPath();
     if (filePath && logsDirAvailable) {
       fs.appendFileSync(filePath, entry + '\n', 'utf-8');
-    }
-
-    // On Netlify, /tmp is per-instance and ephemeral — mirror the line to the
-    // "server-logs" Netlify Blob store (date-keyed) so the admin monitoring
-    // page can list/read server logs across lambda instances. Fire-and-forget.
-    if (process.env.NETLIFY) {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      getNetlifyLogger()?.appendServerLogLine(`${today}.log`, entry + '\n').catch(() => {});
     }
   } catch (error) {
     // File writing failed - we already logged to console above

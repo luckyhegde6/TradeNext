@@ -8,7 +8,7 @@ import crypto from "crypto";
 // Determine if we're in production (Netlify)
 const isProduction = process.env.NODE_ENV === "production";
 
-// Increase timeout in production (slower serverless functions)
+// Increase timeout in production (slower upstream API)
 const REQUEST_TIMEOUT = isProduction ? 25000 : 10000; // 25s for prod, 10s for dev
 const FETCH_TIMEOUT = isProduction ? 20000 : 8000; // 20s for prod, 8s for dev
 const MAX_RETRIES = isProduction ? 3 : 1; // More retries in prod

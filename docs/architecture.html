@@ -137,7 +137,7 @@
   <p>TradeNext is a Next.js 16 + TypeScript + Prisma 7 + PostgreSQL (TimescaleDB) app serving NSE (India) market data. All NSE traffic flows through a <strong>server-side proxy only</strong> — the browser never calls NSE directly. Three cache tiers sit in front of the database and the NSE API:</p>
   <ul>
     <li><span class="badge b-blue">Layer 1</span> <strong>In-memory NodeCache</strong> (<code>lib/market-cache.ts</code> — <code>mc:</code> keys, 300s/3600s TTL) and <code>historicalCache</code> (24h) for backtest bars.</li>
-    <li><span class="badge b-blue">Layer 2</span> <strong>MarketCache DB</strong> (<code>market_cache</code> table) — serverless-safe persistent store.</li>
+    <li><span class="badge b-blue">Layer 2</span> <strong>MarketCache DB</strong> (<code>market_cache</code> table) — persistent store.</li>
     <li><span class="badge b-blue">Layer 3</span> <strong>Main tables</strong> — <code>daily_prices</code> (read-only for backtests), <code>backtest_history</code> (temp, age-pruned).</li>
     <li><span class="badge b-red">Source</span> <strong>NSE API</strong> (<code>lib/nse-client.ts</code> — cookies, retry, backoff).</li>
   </ul>
@@ -384,7 +384,7 @@ flowchart TD
   <h3>5.3 Worker / cron integration</h3>
   <ul>
     <li><span class="badge b-blue">Recs engine</span> 10:00 AM IST generation, 3:30 PM IST performance tracking (UTC 04:30 / 10:00).</li>
-    <li><span class="badge b-blue">Tasks &amp; workers</span> <code>lib/services/worker/worker-service.ts</code> — queue, priority, retries, <code>runInChunks()</code> bounded-concurrency for large batches (serverless txn 5s limit).</li>
+    <li><span class="badge b-blue">Tasks &amp; workers</span> <code>lib/services/worker/worker-service.ts</code> — queue, priority, retries, <code>runInChunks()</code> bounded-concurrency for large batches (txn 5s limit).</li>
     <li>Prune job (temp table) should run alongside existing worker maintenance (see <code>.agents/docs/tasks-cron-workers.md</code>).</li>
   </ul>
 </section>
@@ -395,7 +395,7 @@ flowchart TD
     <tr><th>Cache</th><th>Location</th><th>TTL</th><th>Key</th><th>Purpose</th></tr>
     <tr><td><code>historicalCache</code></td><td><code>lib/cache.ts</code></td><td>24h</td><td>symbol + range</td><td>Backtest bars in memory.</td></tr>
     <tr><td><code>mc:</code> NodeCache</td><td><code>lib/market-cache.ts</code></td><td>300s / 3600s</td><td><code>mc:&lt;type&gt;:&lt;key&gt;</code></td><td>Front layer over MarketCache DB for quotes/market/other NSE data.</td></tr>
-    <tr><td><code>market_cache</code> DB</td><td>PostgreSQL</td><td>per-config</td><td>cacheKey</td><td>Serverless-safe persistence (memory dies between warm starts).</td></tr>
+    <tr><td><code>market_cache</code> DB</td><td>PostgreSQL</td><td>per-config</td><td>cacheKey</td><td>Persistent store (memory is a fast front, not source of truth).</td></tr>
     <tr><td><code>enhancedCache</code></td><td><code>lib/enhanced-cache.ts</code></td><td>per-route</td><td>nseCache.*</td><td>Legacy centralized cache (quotes 60s, market 2m, corp 5m, company info 1h).</td></tr>
   </table>
   <div class="callout green">
@@ -444,7 +444,7 @@ flowchart TD
     </tr>
     <tr>
       <td>NSE fetch fails / returns empty</td>
-      <td>Rate limit, cookie expiry, serverless egress</td>
+      <td>Rate limit, cookie expiry, network egress</td>
       <td>Retry + backoff handled in <code>nse-client</code>; service falls back to stale temp rows</td>
     </tr>
     <tr>
@@ -454,11 +454,11 @@ flowchart TD
     </tr>
     <tr>
       <td>Data stale (recommendations "Last updated 17 days")</td>
-      <td>Cron txn timeout on serverless (5s limit)</td>
+      <td>Interactive txn timeout (5s limit)</td>
       <td>Use <code>runInChunks()</code>; verify run after deploy</td>
     </tr>
     <tr>
-      <td>Serverless memory churn / cold cache</td>
+      <td>Cache memory churn / cold cache</td>
       <td>Memory dies between warm starts</td>
       <td>Rely on <code>market_cache</code> DB tier; memory is a fast front, not source of truth</td>
     </tr>
@@ -494,7 +494,7 @@ flowchart LR
 <section id="improvements">
   <h2>10. Future Improvements</h2>
   <ul>
-    <li><span class="badge b-violet">Idea</span> <strong>Redis tier</strong> for <code>historicalCache</code> so bars survive serverless warm-start churn (currently memory-only).</li>
+    <li><span class="badge b-violet">Idea</span> <strong>Redis tier</strong> for <code>historicalCache</code> so bars survive process restarts (currently memory-only).</li>
     <li><span class="badge b-violet">Idea</span> <strong>Pre-seed temp table</strong> for the top-N symbols on a schedule, so backtests rarely hit NSE live.</li>
     <li><span class="badge b-violet">Idea</span> <strong>Bar-count-aware pruning</strong> — prune by rows AND symbol-age to bound table size.</li>
     <li><span class="badge b-violet">Idea</span> <strong>Multi-symbol batch fetch</strong> for MCP/backtest bulk workflows (respect NSE rate limits).</li>

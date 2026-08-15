@@ -54,6 +54,15 @@ interface RunInfo {
   executionTimeMs: number;
 }
 
+// Newest run row — when its id differs from the shown run (a newer AI-
+// unavailable run with zero picks, v3.11.1), the UI shows a notice while
+// still displaying the last good run's picks.
+interface LatestRunInfo {
+  id: string;
+  runDate: string;
+  status: string;
+}
+
 export default function RecommendationsPage() {
   const { data: session } = useSession();
   const isLoggedIn = !!session?.user;
@@ -61,6 +70,7 @@ export default function RecommendationsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("picks");
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [runInfo, setRunInfo] = useState<RunInfo | null>(null);
+const [latestRunInfo, setLatestRunInfo] = useState<LatestRunInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +98,7 @@ export default function RecommendationsPage() {
       if (data.success) {
         setStocks(data.stocks || []);
         setRunInfo(data.run);
+        setLatestRunInfo(data.latestRun || null);
       } else {
         setError("Failed to load recommendations");
       }
@@ -247,6 +258,10 @@ export default function RecommendationsPage() {
               stocks={stocks}
               runDate={runInfo?.runDate || null}
               loading={loading}
+              aiUnavailable={
+                !!latestRunInfo && !!runInfo && latestRunInfo.id !== runInfo.id
+              }
+              aiUnavailableDate={latestRunInfo?.runDate ?? null}
             />
           )}
 

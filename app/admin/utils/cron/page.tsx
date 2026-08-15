@@ -27,7 +27,19 @@ const TASK_TYPES = [
   { value: "screener", label: "Screener", description: "Run stock screener" },
   { value: "recommendations", label: "Recommendations", description: "Generate recommendations" },
   { value: "market_data", label: "Market Data", description: "Sync market data" },
+  // v3.11.0: system task types — now admin-manageable (node-cron daemon)
+  { value: "recommendation_performance", label: "Recommendation Performance", description: "Check recommendation performance" },
+  { value: "ai_connection_test", label: "AI Connection Test", description: "Probe AI model connectivity" },
+  { value: "historical_price_sync", label: "Historical Price Sync", description: "Backfill daily_prices bars" },
 ];
+
+interface DaemonStatus {
+  running: boolean;
+  registeredJobs: number;
+  daemonId: string;
+  lastHeartbeatAt: string | null;
+  lastHeartbeatAgeMs: number | null;
+}
 
 const CRON_PRESETS = [
   { label: "Every 5 minutes", value: "*/5 * * * *" },
@@ -48,6 +60,7 @@ export default function CronConfigPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState<CronJob | null>(null);
   const [saving, setSaving] = useState(false);
+  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -61,8 +74,20 @@ export default function CronConfigPage() {
   useEffect(() => {
     if (status === "authenticated") {
       fetchCronJobs();
+      fetchDaemonStatus();
     }
   }, [status]);
+
+  const fetchDaemonStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/cron/daemon");
+      if (res.ok) {
+        setDaemonStatus(await res.json());
+      }
+    } catch (error) {
+      console.error("Failed to fetch daemon status:", error);
+    }
+  };
 
   const fetchCronJobs = async () => {
     try {
@@ -184,6 +209,13 @@ export default function CronConfigPage() {
     return preset?.label || expression;
   };
 
+  // Keep the daemon liveness chip fresh (heartbeat is written every 60s).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    const t = setInterval(fetchDaemonStatus, 60_000);
+    return () => clearInterval(t);
+  }, [status]);
+
   if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -220,6 +252,25 @@ export default function CronConfigPage() {
             <p className="text-gray-600 dark:text-gray-400 mt-1">
               Manage scheduled tasks and automated jobs
             </p>
+            {/* v3.11.0: daemon liveness chip — the in-process node-cron scheduler */}
+            <div className="flex items-center gap-2 mt-3">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full ${daemonStatus?.running ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"}`}>
+                <span className={`w-2 h-2 rounded-full ${daemonStatus?.running ? "bg-green-500 animate-pulse" : "bg-red-500"}`}></span>
+                Scheduler {daemonStatus === null ? "…" : daemonStatus.running ? "Live" : "Stopped"}
+              </span>
+              {daemonStatus?.running && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {daemonStatus.registeredJobs} job(s) · {daemonStatus.daemonId}
+                  {daemonStatus.lastHeartbeatAgeMs !== null &&
+                    ` · heartbeat ${Math.round(daemonStatus.lastHeartbeatAgeMs / 1000)}s ago`}
+                </span>
+              )}
+              {daemonStatus !== null && !daemonStatus.running && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Runs in-process — see Workers page to start it
+                </span>
+              )}
+            </div>
           </div>
           <button
             onClick={() => { resetForm(); setShowModal(true); }}

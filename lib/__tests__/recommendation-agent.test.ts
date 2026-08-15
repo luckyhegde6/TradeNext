@@ -214,14 +214,35 @@ describe("recommendation-agent", () => {
       mockDirectPrompt.mockResolvedValue("I cannot provide analysis for these stocks.");
 
       const results = await analyzeStocks([stock], VALID_AI_CONFIG);
-      // v3.8.0: unusable responses are retried (2 attempts), NOT silently
-      // accepted as HOLD-success. The batch is marked failed so monitoring
-      // and admins see the truth.
+      // v3.8.0: unusable responses are retried, NOT silently accepted as
+      // HOLD-success. v3.10.1 adds the model fallback chain: primary gets
+      // 2 attempts, then each fallback model ("openrouter/free",
+      // "openrouter/auto") gets one — 4 calls total. The batch is marked
+      // failed so monitoring and admins see the truth.
       expect(results[0].success).toBe(false);
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
       expect(results[0].aiRecommendation.confidence).toBe(50);
       expect(results[0].error).toContain("Unusable AI response");
-      expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(4);
+    });
+
+    test("falls back to the shared fallback models when the primary fails", async () => {
+      const stock = makeStock();
+      mockDirectPrompt.mockImplementation(async (_prompt: string, config?: any) => {
+        // Primary ("test-model") keeps failing; the first fallback works.
+        if (config?.model === "test-model") return "I cannot analyze this.";
+        return JSON.stringify([
+          { symbol: "RELIANCE", recommendation: "BUY", confidence: 80, targetPrice: 2700, stopLoss: 2400, timeHorizon: "medium", reasoning: "Fallback model worked.", riskFactors: [] },
+        ]);
+      });
+
+      const results = await analyzeStocks([stock], VALID_AI_CONFIG);
+      expect(results[0].success).toBe(true);
+      expect(results[0].aiRecommendation.recommendation).toBe("BUY");
+      // 2 primary attempts (both unusable) + 1 "openrouter/free" attempt.
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(3);
+      const lastCall = mockDirectPrompt.mock.calls[2];
+      expect(lastCall[1]?.model).toBe("openrouter/free");
     });
 
     test("matches recommendations by symbol when order differs", async () => {

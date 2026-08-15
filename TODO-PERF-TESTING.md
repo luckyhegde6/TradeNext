@@ -44,7 +44,7 @@
 - [ ] `runDailyRecommendations`: total wall time, screener phase vs AI phase (bounded concurrency, 5-stock batches)
 - [ ] `checkRecommendationPerformance` (4PM IST): check 1000+ trackers within serverless function limits (timeout, mem)
 - [ ] `runChartinkUnifiedScreeners`: DB capture + 72h TTL prune timing
-- [ ] Market-sync cron (`cron-market-sync` 1:01 AM IST weekdays): stock list + corp actions + screener capture duration
+- [ ] Market-sync cron (system job `Daily Market Sync`, 06:31 AM IST weekdays via in-process node-cron daemon): stock list + corp actions + screener capture duration
 - [ ] Memory ceiling: any cron pulling `take: 5000` trackers/symbols must stream/chunk
 - [ ] Confirm each cron job idempotent + ledgered (`recordCronRun`) so overlaps can't double-apply
 

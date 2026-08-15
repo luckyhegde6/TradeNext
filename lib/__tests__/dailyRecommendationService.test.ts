@@ -339,7 +339,7 @@ describe("dailyRecommendationService", () => {
       }
     });
 
-    test("pre-flight FAILED → skips AI entirely (all-HOLD), fails fast", async () => {
+    test("pre-flight FAILED → run marked failed, no picks persisted (last good run kept)", async () => {
       process.env.OPENROUTERKEY = "test-key";
       try {
         mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
@@ -357,10 +357,21 @@ describe("dailyRecommendationService", () => {
         expect(mockAnalyzeStocks).not.toHaveBeenCalled();
         expect(result.aiProcessed).toBe(0);
         expect(result.aiFailed).toBe(1);
-        // HOLD defaults written with success:false
-        const stockUpdate = mockPrisma.dailyRecommendationStock.update.mock.calls[0];
-        expect(stockUpdate[0].data.aiRecommendation).toBe("HOLD");
-        expect(stockUpdate[0].data.aiSuccess).toBe(false);
+        expect(result.uniqueStocks).toBe(0);
+        expect(result.stocks).toEqual([]);
+        // v3.11.1: NO synthetic HOLD rows — entries are DELETED, never updated
+        expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
+        expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith(
+          { where: { runId: "run-123" } },
+        );
+        // Run marked failed with uniqueStocks 0 so getLatestRecommendations
+        // (uniqueStocks > 0) falls back to the last good run
+        const failedUpdate = mockPrisma.dailyRecommendationRun.update.mock.calls.find(
+          (call: any) => call[0]?.data?.status === "failed",
+        );
+        expect(failedUpdate).toBeDefined();
+        expect(failedUpdate![0].data.uniqueStocks).toBe(0);
+        expect(failedUpdate![0].data.aiFailed).toBe(1);
       } finally {
         delete process.env.OPENROUTERKEY;
       }
@@ -498,7 +509,7 @@ describe("dailyRecommendationService", () => {
       expect(mockPrisma.dailyRecommendationStock.create).not.toHaveBeenCalled();
     });
 
-    test("handles AI analysis failure gracefully with HOLD defaults", async () => {
+    test("marks run failed without picks when ALL AI results fail", async () => {
       mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
       // AI returns failed results
       mockAnalyzeStocks.mockResolvedValue([
@@ -522,6 +533,58 @@ describe("dailyRecommendationService", () => {
       const result = await runDailyRecommendations();
       expect(result.aiFailed).toBe(1);
       expect(result.aiProcessed).toBe(0);
+      expect(result.uniqueStocks).toBe(0);
+      // v3.11.1: no HOLD-default persistence — entries deleted instead
+      expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith(
+        { where: { runId: "run-123" } },
+      );
+    });
+
+    test("partial AI failure — persists only successful verdicts, deletes failed entries", async () => {
+      mockRunDailyScreeners.mockResolvedValue([
+        makeScreenerResult({ symbol: "RELIANCE", price: 2500 }),
+        makeScreenerResult({ symbol: "TCS", price: 3800 }),
+      ]);
+      mockAnalyzeStocks.mockResolvedValue([
+        makeAIResult({ symbol: "RELIANCE", price: 2500 }), // success
+        makeAIResult({
+          symbol: "TCS",
+          price: 3800,
+          success: false,
+          error: "AI timeout",
+          aiRecommendation: {
+            recommendation: "HOLD",
+            confidence: 50,
+            targetPrice: 4180,
+            stopLoss: 3610,
+            timeHorizon: "medium",
+            reasoning: "AI analysis unavailable",
+            riskFactors: ["AI analysis unavailable"],
+          },
+          tokensUsed: 0,
+          executionMs: 0,
+        }),
+      ]);
+      // Two entries pre-fetched for the AI-update step
+      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([
+        { id: "stock-1", symbol: "RELIANCE", runId: "run-123" },
+        { id: "stock-2", symbol: "TCS", runId: "run-123" },
+      ]);
+
+      const result = await runDailyRecommendations();
+
+      expect(result.aiProcessed).toBe(1);
+      expect(result.aiFailed).toBe(1);
+      expect(result.uniqueStocks).toBe(1);
+      // TCS (failed) entry deleted — RELIANCE (success) entry updated
+      expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith({
+        where: { runId: "run-123", symbol: { notIn: ["RELIANCE"] } },
+      });
+      const tcsUpdate = mockPrisma.dailyRecommendationStock.update.mock.calls.find(
+        (call: any) => call[0]?.where?.id === "stock-2",
+      );
+      expect(tcsUpdate).toBeUndefined();
     });
 
     test("caps AI analysis at MAX_AI_STOCKS (50)", async () => {
@@ -573,19 +636,55 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toHaveLength(2);
     });
 
-    test("filters at source to BUY/SELL only (no HOLD in query)", async () => {
-      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
+    test("returns the latest run even when all stocks are HOLD (honest latest date)", async () => {
+      const mockRun = {
+        id: "run-hold",
+        status: "completed",
+        runDate: new Date(),
+        stocks: [
+          { symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "HOLD", tracker: { id: "t1" } },
+          { symbol: "TCS", screenerCount: 2, aiRecommendation: "HOLD", tracker: { id: "t2" } },
+        ],
+      };
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(mockRun);
 
-      await getLatestRecommendations();
+      const result = await getLatestRecommendations();
+      expect(result.run).toEqual(mockRun);
+      expect(result.stocks).toHaveLength(2);
 
-      // Both the run-level where and the nested stocks include must filter to BUY/SELL
-      const callArgs = mockPrisma.dailyRecommendationRun.findFirst.mock.calls;
-      for (const call of callArgs) {
-        const where = call[0]?.where;
-        const include = call[0]?.include;
-        expect(where.stocks.some).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
-        expect(include.stocks.where).toEqual({ aiRecommendation: { in: ["BUY", "SELL"] } });
-      }
+      // v3.10.1 honest latest-run: NO BUY/SELL verdict filter — an all-HOLD
+      // run must surface today's date instead of a stale actionable run.
+      const where = mockPrisma.dailyRecommendationRun.findFirst.mock.calls[0][0]?.where;
+      expect(where.status).toEqual({ in: ["completed", "failed"] });
+      expect(where.uniqueStocks).toEqual({ gt: 0 });
+      expect(where.stocks).toBeUndefined();
+    });
+
+    test("surfaces the newest zero-pick failed run while keeping the last good run", async () => {
+      const goodRun = {
+        id: "run-good",
+        status: "completed",
+        runDate: new Date("2026-08-13T00:00:00Z"),
+        stocks: [
+          { symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "BUY", tracker: { id: "t1" } },
+        ],
+      };
+      const failedRun = {
+        id: "run-failed",
+        status: "failed",
+        runDate: new Date("2026-08-14T00:00:00Z"),
+      };
+      // v3.11.1: second query = newest run row (even with zero picks), so the
+      // client can show "AI unavailable on <date> — showing picks from <date>".
+      mockPrisma.dailyRecommendationRun.findFirst
+        .mockResolvedValueOnce(goodRun)
+        .mockResolvedValueOnce(failedRun);
+
+      const result = await getLatestRecommendations();
+      expect(result.run?.id).toBe("run-good");
+      expect(result.stocks).toHaveLength(1);
+      expect(result.latestRun?.id).toBe("run-failed");
+      expect(result.latestRun?.status).toBe("failed");
     });
 
     test("returns empty when no runs exist", async () => {
@@ -596,19 +695,17 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toEqual([]);
     });
 
-    test("falls back to any run with actionable stocks if no completed run", async () => {
-      // First call (completed/failed) returns null
-      mockPrisma.dailyRecommendationRun.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({
-          id: "run-2",
-          status: "running",
-          stocks: [{ symbol: "TCS", screenerCount: 2, aiRecommendation: "BUY", tracker: { id: "t2" } }],
-        });
+    test("latest selection: one stocks query + one lightweight newest-run row", async () => {
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
 
-      const result = await getLatestRecommendations();
-      expect(result.run).toBeDefined();
-      expect(result.stocks).toHaveLength(1);
+      await getLatestRecommendations();
+      // v3.10.1: no BUY/SELL verdict-filter fallback round-trip. v3.11.1 adds
+      // ONE lightweight newest-run row (id/runDate/status only) for the
+      // AI-unavailable notice — the old two-query (actionable → fallback)
+      // design is gone.
+      expect(mockPrisma.dailyRecommendationRun.findFirst).toHaveBeenCalledTimes(2);
+      const newestCall = mockPrisma.dailyRecommendationRun.findFirst.mock.calls[1][0];
+      expect(newestCall?.select).toEqual({ id: true, runDate: true, status: true });
     });
   });
 

@@ -14,6 +14,7 @@
 
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
+import { createAuditLog } from "@/lib/audit";
 import {
   getChartinkTemplates,
   getChartinkTemplate,
@@ -204,6 +205,137 @@ export function analysisStatusAfterBatch(stocks: SwingStock[]): SwingResponse["a
 }
 
 // ---------------------------------------------------------------------------
+// Performance-tab persistence (v3.10.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Swing trackers live in RecommendationTracker with timeHorizon "swing" — the
+ * Performance tab's Swing filter maps `category="swing"` to `timeHorizon`, and
+ * the daily perf-check cron iterates active trackers automatically.
+ */
+const SWING_TIME_HORIZON = "swing" as const;
+
+/** RecommendationTracker-shaped draft for one AI-analyzed swing pick. PURE. */
+export interface SwingTrackerDraft {
+  symbol: string;
+  status: "active";
+  entryPrice: number;
+  currentPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  timeHorizon: typeof SWING_TIME_HORIZON;
+  confidence: number;
+  aiRecommendation: "BUY" | "SELL" | "HOLD";
+  reasoning: string | null;
+  riskFactors: string[] | null;
+  screenerAttribution: {
+    screenerNames: string[];
+    families: SignalFamily[];
+    source: string;
+  } | null;
+}
+
+/** Map a swing action to the tracker recommendation vocabulary. */
+export function swingActionToRecommendation(
+  action: SwingStock["analysis"] extends infer _A ? "LONG" | "SHORT" | "OBSERVE" : never,
+): "BUY" | "SELL" | "HOLD" {
+  if (action === "LONG") return "BUY";
+  if (action === "SHORT") return "SELL";
+  return "HOLD";
+}
+
+/** Build a tracker draft from an analyzed swing stock (null when no analysis). */
+export function swingTrackerDraft(stock: SwingStock): SwingTrackerDraft | null {
+  const a = stock.analysis;
+  if (!a) return null;
+  return {
+    symbol: stock.symbol,
+    status: "active",
+    entryPrice: stock.price,
+    currentPrice: stock.price,
+    targetPrice: a.targetPrice,
+    stopLoss: a.stopLoss,
+    timeHorizon: SWING_TIME_HORIZON,
+    confidence: a.confidence,
+    aiRecommendation: swingActionToRecommendation(a.action),
+    reasoning: a.logic || null,
+    riskFactors: a.riskFactors?.length ? a.riskFactors : null,
+    screenerAttribution: {
+      screenerNames: stock.screenerNames,
+      families: stock.families,
+      source: stock.source,
+    },
+  };
+}
+
+/** Minimal DB surface persistSwingTrackers needs (override for tests). */
+export interface SwingTrackerDb {
+  recommendationTracker: {
+    findMany: (args: {
+      where: { symbol: { in: string[] }; timeHorizon: string; status: string };
+      select?: { symbol?: boolean };
+    }) => Promise<Array<{ symbol: string }>>;
+    createMany: (args: { data: SwingTrackerDraft[]; skipDuplicates?: boolean }) => Promise<{ count: number }>;
+    updateMany: (args: {
+      where: { symbol: string; timeHorizon: string; status: string };
+      data: { currentPrice: number; lastCheckedAt: Date };
+    }) => Promise<{ count: number }>;
+  };
+}
+
+/**
+ * Persist AI-analyzed swing picks as active RecommendationTracker rows
+ * (timeHorizon "swing"). New symbols are created; existing active swing
+ * trackers get currentPrice/lastCheckedAt refreshed (targets stay as-of
+ * creation — matching the daily pipeline's tracker convention). Non-fatal —
+ * callers must catch. `db` override keeps this unit-testable.
+ */
+export async function persistSwingTrackers(
+  stocks: SwingStock[],
+  db?: SwingTrackerDb,
+): Promise<{ created: number; updated: number }> {
+  const analyzed = stocks.filter((s) => s.analysis);
+  if (analyzed.length === 0) return { created: 0, updated: 0 };
+
+  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingTrackerDb);
+  const symbols = analyzed.map((s) => s.symbol);
+
+  const existing = await prisma.recommendationTracker.findMany({
+    where: { symbol: { in: symbols }, timeHorizon: SWING_TIME_HORIZON, status: "active" },
+    select: { symbol: true },
+  });
+  const existingSymbols = new Set(existing.map((r) => r.symbol));
+
+  let created = 0;
+  const toCreate = analyzed
+    .filter((s) => !existingSymbols.has(s.symbol))
+    .map((s) => swingTrackerDraft(s))
+    .filter((d): d is SwingTrackerDraft => d !== null);
+  if (toCreate.length > 0) {
+    const res = await prisma.recommendationTracker.createMany({
+      data: toCreate,
+      skipDuplicates: true,
+    });
+    created = res.count;
+  }
+
+  const priceBySymbol = new Map(analyzed.map((s) => [s.symbol, s.price]));
+  const refreshSymbols = symbols.filter((sym) => existingSymbols.has(sym));
+  const updated = (
+    await Promise.all(
+      refreshSymbols.map((sym) =>
+        prisma.recommendationTracker.updateMany({
+          where: { symbol: sym, timeHorizon: SWING_TIME_HORIZON, status: "active" },
+          data: { currentPrice: priceBySymbol.get(sym) ?? 0, lastCheckedAt: new Date() },
+        }),
+      ),
+    )
+  ).reduce((sum, r) => sum + r.count, 0);
+
+  return { created, updated };
+}
+
+// ---------------------------------------------------------------------------
 // Indicators (pure + DB fetch)
 // ---------------------------------------------------------------------------
 
@@ -314,8 +446,29 @@ export async function getSwingRecommendations(
 
   const templateIds = getSwingTemplateIds();
   logger.info({ msg: "Swing run starting", templates: templateIds.length, analyze });
+  createAuditLog({
+    action: "SWING_RUN_START",
+    resource: "swing",
+    resourceId: `${SWING_CACHE_KEY}:${analyze ? "ai" : "noai"}`,
+    path: "/api/recommendations/swing",
+    metadata: { templates: templateIds.length, analyze },
+  }).catch(() => undefined);
 
-  const unified = await runChartinkUnifiedScreeners({ templateIds, forceRefresh });
+  let unified: UnifiedScreenerResult[];
+  try {
+    unified = await runChartinkUnifiedScreeners({ templateIds, forceRefresh });
+  } catch (e) {
+    const runError = e instanceof Error ? e.message : String(e);
+    logger.error({ msg: "Swing screener run failed", error: runError });
+    createAuditLog({
+      action: "SWING_RUN_FAILED",
+      resource: "swing",
+      path: "/api/recommendations/swing",
+      errorMessage: runError,
+      metadata: { templates: templateIds.length, analyze },
+    }).catch(() => undefined);
+    throw e;
+  }
   const nameById = new Map(
     templateIds.map((id) => [id, getChartinkTemplate(id)?.name ?? id]),
   );
@@ -340,7 +493,15 @@ export async function getSwingRecommendations(
 
   // AI target analysis — optional; failure never kills the feed.
   let analysisStatus: SwingResponse["analysisStatus"] = "skipped";
+  let analysisError: string | null | undefined;
   if (analyze && enriched.length > 0) {
+    createAuditLog({
+      action: "SWING_ANALYSIS_START",
+      resource: "swing_analysis",
+      path: "/api/recommendations/swing",
+      metadata: { stocks: enriched.length },
+    }).catch(() => undefined);
+
     try {
       const config = await loadConfig();
       const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
@@ -354,12 +515,56 @@ export async function getSwingRecommendations(
         }
       }
       analysisStatus = analysisStatusAfterBatch(enriched);
+      const succeeded = enriched.filter((s) => s.analysis).length;
+
+      if (analysisStatus === "failed") {
+        analysisError =
+          enriched.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
+        createAuditLog({
+          action: "SWING_ANALYSIS_FAILED",
+          resource: "swing_analysis",
+          path: "/api/recommendations/swing",
+          errorMessage: analysisError,
+          metadata: { stocks: enriched.length, succeeded, failed: enriched.length - succeeded },
+        }).catch(() => undefined);
+      } else {
+        createAuditLog({
+          action: "SWING_ANALYSIS_COMPLETE",
+          resource: "swing_analysis",
+          path: "/api/recommendations/swing",
+          metadata: { stocks: enriched.length, succeeded },
+        }).catch(() => undefined);
+      }
     } catch (e) {
+      analysisError = e instanceof Error ? e.message : String(e);
       logger.error({
         msg: "Swing AI analysis failed — falling back to screener-only feed",
-        error: e instanceof Error ? e.message : String(e),
+        error: analysisError,
       });
       analysisStatus = "failed";
+      createAuditLog({
+        action: "SWING_ANALYSIS_FAILED",
+        resource: "swing_analysis",
+        path: "/api/recommendations/swing",
+        errorMessage: analysisError,
+        metadata: { stocks: enriched.length },
+      }).catch(() => undefined);
+    }
+
+    // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
+    // (timeHorizon "swing") so they surface in the Performance tab's Swing
+    // filter and the daily perf-check cron tracks them. Non-fatal — the feed
+    // must never fail because persistence hiccuped.
+    if (analysisStatus === "done") {
+      try {
+        const { created, updated } = await persistSwingTrackers(enriched);
+        logger.info({ msg: "Swing trackers persisted", created, updated, symbols: enriched.length });
+      } catch (e) {
+        logger.warn({
+          msg: "Swing tracker persistence failed — feed continues",
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
   }
 
@@ -371,8 +576,23 @@ export async function getSwingRecommendations(
     topN: enriched.length,
     segregation: countSegregation(enriched),
     analysisStatus,
+    analysisError,
     stocks: enriched,
   };
+
+  createAuditLog({
+    action: "SWING_RUN_COMPLETE",
+    resource: "swing",
+    path: "/api/recommendations/swing",
+    metadata: {
+      templates: templateIds.length,
+      analyze,
+      totalRaw: deduped.length,
+      topN: enriched.length,
+      analysisStatus,
+      error: analysisError ?? undefined,
+    },
+  }).catch(() => undefined);
 
   staticCache.set(cacheKey, response, SWING_CACHE_TTL);
   return response;

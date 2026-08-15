@@ -1,6 +1,7 @@
 // app/api/admin/workers/engine/route.ts
 import { NextResponse } from "next/server";
 import { startWorker, startScheduler, stopWorkerEngine } from "@/lib/services/worker/worker-engine";
+import { startCronDaemon, stopCronDaemon } from "@/lib/services/worker/cron-daemon";
 import logger from "@/lib/logger";
 import { auth } from "@/lib/auth";
 
@@ -17,6 +18,9 @@ function autoStartEngine() {
     try {
         startWorker(5000); // 5s polling for tasks
         startScheduler(60000); // 1m check for cron jobs
+        // v3.11.0: also start the in-process node-cron daemon so schedules
+        // fire on time (not just within the 1m poll window).
+        startCronDaemon().catch((error) => logger.error({ msg: "Failed to auto-start cron daemon", error }));
         logger.info({ msg: "Worker engine auto-started on first request" });
         autoStarted = true;
     } catch (error) {
@@ -36,10 +40,12 @@ export async function POST(req: Request) {
         if (action === "start") {
             startWorker(5000); // 5s polling
             startScheduler(60000); // 1m check
+            await startCronDaemon(); // v3.11.0: node-cron scheduler daemon
             logger.info({ msg: "Background services started via API" });
             return NextResponse.json({ success: true, message: "Services started" });
         } else if (action === "stop") {
             stopWorkerEngine();
+            stopCronDaemon(); // v3.11.0
             logger.info({ msg: "Background services stopped via API" });
             return NextResponse.json({ success: true, message: "Services stopped" });
         }

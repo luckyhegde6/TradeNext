@@ -9,7 +9,7 @@
 //
 // What it does:
 //   1. Reaps WorkerTask rows stuck in "running" for > 20 min (worker lost after the
-//      Netlify 15-min background cap / serverless container recycle) -> "failed".
+//      worker crash / process restart) -> "failed".
 //   2. Reaps DailyRecommendationRun rows stuck in "running" for > 20 min (the AI
 //      phase did not complete — 0 AI-analyzed after 14+ min) -> "failed".
 //      NOTE: the public recommendations API includes "failed" runs (line 952 of

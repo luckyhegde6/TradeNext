@@ -7,6 +7,7 @@
  */
 import { directPrompt, getPromptTimeoutMs } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
+import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { formatStockContext, type StockContext } from "./recommendation-context";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
@@ -186,7 +187,7 @@ export async function analyzeSingleStock(
 // ─── Internal ────────────────────────────────────────────────────────────
 
 /**
- * Analyze a single batch of up to 5 stocks with retry.
+ * Analyze a single batch of up to 5 stocks with retry + model fallback.
  *
  * VERIFICATION (v3.8.0): directPrompt never throws — it converts failures
  * into strings ("AI request failed…", "No response from AI.", empty content
@@ -195,99 +196,125 @@ export async function analyzeSingleStock(
  * with NO retry. Now the response must parse into a recommendation for EVERY
  * stock in the batch; anything else counts as an attempt failure and is
  * retried (up to RETRY_MAX).
+ *
+ * MODEL FALLBACK (v3.10.1): the primary model gets RETRY_MAX attempts; if it
+ * is dead (404 / consistently unusable — the prod all-HOLD root cause), the
+ * batch falls through to {@link AI_FALLBACK_MODELS} (one attempt each) so a
+ * single broken model cannot kill the batch. The whole chain is bounded by
+ * the hard per-batch deadline.
  */
 async function analyzeBatch(
   stocks: StockAnalysisInput[],
   config?: AIConfig
 ): Promise<StockAnalysisResult[]> {
   const prompt = buildAnalysisPrompt(stocks);
-  // Hard per-batch deadline: the whole retry loop (attempts + backoffs) must
-  // finish within BATCH_TIMEOUT_MS. Each attempt's request timeout is clamped
-  // to the remaining budget so a single call cannot overrun the cap.
+  // Hard per-batch deadline: the whole retry loop (models + attempts +
+  // backoffs) must finish within BATCH_TIMEOUT_MS. Each attempt's request
+  // timeout is clamped to the remaining budget so a single call cannot
+  // overrun the cap.
   const batchDeadline = Date.now() + BATCH_TIMEOUT_MS;
+  const chain = modelFallbackChain(config?.model);
   let lastError: string | undefined;
+  let attemptsMade = 0;
+  let usedModel: string | undefined;
 
-  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-    const remaining = batchDeadline - Date.now();
-    if (remaining <= 0) {
-      lastError = `Batch exceeded ${BATCH_TIMEOUT_MS / 1000}s timeout`;
-      logger.warn({ msg: "Batch timed out", attempt, of: RETRY_MAX, error: lastError });
-      break;
-    }
+  for (const model of chain) {
+    // Primary uses the caller's config as-is; fallbacks swap the model only.
+    // analyzeStocks guards hasValidConfig(config) before this runs, so config
+    // is always populated here (the cast is for TS narrowing only).
+    const modelConfig =
+      model === config?.model ? config : { ...(config as AIConfig), model };
+    const attempts = model === config?.model ? RETRY_MAX : 1;
 
-    const attemptStart = Date.now();
-    let response: string;
-    try {
-      response = await directPrompt(
-        prompt,
-        config,
-        Math.min(remaining, getPromptTimeoutMs()),
-      );
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-      logger.warn({
-        msg: "Batch attempt failed",
-        attempt,
-        of: RETRY_MAX,
-        error: lastError,
-      });
-      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
-      continue;
-    }
-    const attemptMs = Date.now() - attemptStart;
-
-    // Guard: mocks/network may yield non-string — treat as empty.
-    const raw = typeof response === "string" ? response : "";
-
-    const recommendations = parseAIResponse(raw, stocks);
-    if (!recommendations) {
-      lastError = `Unusable AI response (${describeUnusable(raw)})`;
-      logger.warn({
-        msg: "Batch response unusable — retrying",
-        attempt,
-        of: RETRY_MAX,
-        error: lastError,
-        preview: raw.slice(0, 200),
-      });
-      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
-      continue;
-    }
-
-    const batchResults = stocks.map((stock, idx) => {
-      const rec = recommendations[idx];
-      if (!rec) {
-        return failedResult(stock, "No recommendation returned for this stock");
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      attemptsMade++;
+      const remaining = batchDeadline - Date.now();
+      if (remaining <= 0) {
+        lastError = `Batch exceeded ${BATCH_TIMEOUT_MS / 1000}s timeout`;
+        logger.warn({ msg: "Batch timed out", model, attempt, error: lastError });
+        break;
       }
-      return {
-        ...stock,
-        aiRecommendation: rec,
-        tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
-        executionMs: attemptMs,
-        success: true,
-      };
-    });
 
-    // Track AI call for monitoring (await so it persists on serverless)
-    await trackAiCall({
-      timestamp: new Date().toISOString(),
-      action: "recommendation_batch",
-      model: config?.model || "unknown",
-      status: "success",
-      tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
-      responseTimeMs: attemptMs,
-      analysisType: "recommendation",
-      prompt: prompt.slice(0, 500),
-      result: raw.slice(0, 1000),
-    });
+      const attemptStart = Date.now();
+      let response: string;
+      try {
+        response = await directPrompt(
+          prompt,
+          modelConfig,
+          Math.min(remaining, getPromptTimeoutMs()),
+        );
+        usedModel = model;
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+        logger.warn({
+          msg: "Batch attempt failed",
+          model,
+          attempt,
+          of: attempts,
+          error: lastError,
+        });
+        if (attempt < attempts) await sleep(retryDelay(attempt));
+        continue;
+      }
+      const attemptMs = Date.now() - attemptStart;
 
-    return batchResults;
+      // Guard: mocks/network may yield non-string — treat as empty.
+      const raw = typeof response === "string" ? response : "";
+
+      const recommendations = parseAIResponse(raw, stocks);
+      if (!recommendations) {
+        lastError = `Unusable AI response (${describeUnusable(raw)})`;
+        logger.warn({
+          msg: "Batch response unusable — retrying",
+          model,
+          attempt,
+          of: attempts,
+          error: lastError,
+          preview: raw.slice(0, 200),
+        });
+        if (attempt < attempts) await sleep(retryDelay(attempt));
+        continue;
+      }
+
+      const batchResults = stocks.map((stock, idx) => {
+        const rec = recommendations[idx];
+        if (!rec) {
+          return failedResult(stock, "No recommendation returned for this stock");
+        }
+        return {
+          ...stock,
+          aiRecommendation: rec,
+          tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
+          executionMs: attemptMs,
+          success: true,
+        };
+      });
+
+      // Track AI call for monitoring (await so it persists)
+      await trackAiCall({
+        timestamp: new Date().toISOString(),
+        action: "recommendation_batch",
+        model: usedModel || "unknown",
+        status: "success",
+        tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
+        responseTimeMs: attemptMs,
+        analysisType: "recommendation",
+        prompt: prompt.slice(0, 500),
+        result: raw.slice(0, 1000),
+      });
+
+      return batchResults;
+    }
+
+    // Deadline hit — no point trying more models.
+    if (Date.now() >= batchDeadline) break;
   }
 
   // All retries exhausted — track failure
   await trackAiCall({
     timestamp: new Date().toISOString(),
     action: "recommendation_batch",
-    model: config?.model || "unknown",
+    model: usedModel || config?.model || "unknown",
     status: "error",
     tokensUsed: 0,
     responseTimeMs: 0,
@@ -296,7 +323,9 @@ async function analyzeBatch(
     prompt: prompt.slice(0, 500),
   });
 
-  throw new Error(`Batch failed after ${RETRY_MAX} attempts: ${lastError || "unknown"}`);
+  throw new Error(
+    `Batch failed after ${attemptsMade} attempts (${chain.length} models): ${lastError || "unknown"}`,
+  );
 }
 
 /**

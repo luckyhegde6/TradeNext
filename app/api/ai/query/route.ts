@@ -105,8 +105,8 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    // Await persistence so the DB write completes before the serverless
-    // function freezes — otherwise AI calls would be lost on every request.
+    // Await persistence so the DB write completes before the response returns
+    // — otherwise AI calls would be lost on every request.
     await trackAiCall({
       timestamp: new Date().toISOString(),
       action: statusAnalysisType,

@@ -38,6 +38,13 @@ interface DailyPicksTabProps {
   stocks: Stock[];
   runDate: string | null;
   loading: boolean;
+  /**
+   * True when a NEWER run exists but failed with zero picks (AI unavailable,
+   * v3.11.1) — the shown stocks are from the last good run.
+   */
+  aiUnavailable?: boolean;
+  /** runDate of the newer failed run, for the notice text. */
+  aiUnavailableDate?: string | null;
 }
 
 type SortKey = "screener" | "volume" | "price" | "confidence" | "marketCap" | "createdAt";
@@ -62,7 +69,13 @@ const capFilters: { id: CapFilter; label: string; icon?: string }[] = [
   { id: "mid_cap", label: "Mid Cap", icon: "📊" },
 ];
 
-export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTabProps) {
+export default function DailyPicksTab({
+  stocks,
+  runDate,
+  loading,
+  aiUnavailable = false,
+  aiUnavailableDate = null,
+}: DailyPicksTabProps) {
   // ─── State ─────────────────────────────────────────────────────────
   const [recFilter, setRecFilter] = useState<string>("all");
   const [timeFilter, setTimeFilter] = useState<string>("all");
@@ -181,6 +194,15 @@ export default function DailyPicksTab({ stocks, runDate, loading }: DailyPicksTa
   // ─── Render ────────────────────────────────────────────────────────
   return (
     <div>
+      {/* AI-unavailable notice: a newer run failed with no picks, the list
+          below is the last good run (v3.11.1 — no synthetic all-HOLD rows). */}
+      {aiUnavailable && runDate && (
+        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-300" data-testid="ai-unavailable-notice">
+          ⚠️ AI analysis unavailable{aiUnavailableDate ? ` on ${new Date(aiUnavailableDate).toLocaleDateString("en-IN")}` : ""} —
+          showing picks from {new Date(runDate).toLocaleDateString("en-IN")}
+        </div>
+      )}
+
       {/* Run info */}
       {runDate && (
         <div className="text-xs text-gray-500 mb-4">

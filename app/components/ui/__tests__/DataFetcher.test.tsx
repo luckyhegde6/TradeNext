@@ -1,103 +1,89 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DataFetcher } from '../DataFetcher';
+import { DataFetcher, PaginatedDataFetcher, RealtimeDataFetcher } from '../DataFetcher';
+import { useApi, usePaginatedApi, usePollingApi } from '@/lib/hooks/useApi';
 
-// Mock fetch globally (already done in jest.setup.js)
-// But we need to control it for this test
-const mockFetch = global.fetch as jest.MockedFunction<typeof global.fetch>;
+// Mock the useApi hooks so tests control loading/data/error deterministically
+// (no network, no timers). DataFetcher builds its own apiCall from apiUrl.
+jest.mock('@/lib/hooks/useApi', () => ({
+  useApi: jest.fn(),
+  usePaginatedApi: jest.fn(),
+  usePollingApi: jest.fn(),
+}));
 
-describe.skip('DataFetcher', () => {
-const TestChild = ({ data }: { data: unknown }) => <div data-testid="child">{JSON.stringify(data)}</div>;
+const mockUseApi = useApi as jest.Mock;
+const mockUsePaginatedApi = usePaginatedApi as jest.Mock;
+const mockUsePollingApi = usePollingApi as jest.Mock;
 
+const TestChild = (data: unknown) => <div data-testid="child">{JSON.stringify(data)}</div>;
+
+const mockState = (overrides: Record<string, unknown> = {}) => ({
+  data: null,
+  loading: false,
+  error: null,
+  refetch: jest.fn(),
+  ...overrides,
+});
+
+describe('DataFetcher', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  test('should render loading state initially', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {})); // Never resolves
+  test('should render loading state initially', () => {
+    mockUseApi.mockReturnValue(mockState({ loading: true }));
 
     render(
-      <DataFetcher apiUrl="/api/test">
-        {TestChild}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" render={TestChild} />
     );
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText('Loading data...')).toBeInTheDocument();
   });
 
-  test('should render error state', () => {
-    const mockRefetch = jest.fn();
-    mockUseApi.mockReturnValue({
-      data: null,
-      loading: false,
-      error: 'Network error',
-      refetch: mockRefetch,
-    });
+  test('should render skeleton when loadingComponent is skeleton', () => {
+    mockUseApi.mockReturnValue(mockState({ loading: true }));
 
     render(
-      <DataFetcher apiCall={mockApiCall}>
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" loadingComponent="skeleton" render={TestChild} />
+    );
+
+    expect(screen.getByTestId('skeleton')).toBeInTheDocument();
+  });
+
+  test('should render error state and retry calls refetch', async () => {
+    const mockRefetch = jest.fn();
+    mockUseApi.mockReturnValue(mockState({ error: 'Network error', refetch: mockRefetch }));
+
+    render(
+      <DataFetcher apiUrl="/api/test" render={TestChild} />
     );
 
     expect(screen.getByText('Network error')).toBeInTheDocument();
 
     const retryButton = screen.getByRole('button', { name: /try again/i });
-    userEvent.click(retryButton);
+    await userEvent.click(retryButton);
     expect(mockRefetch).toHaveBeenCalled();
   });
 
   test('should render data when available', () => {
     const testData = { message: 'Hello World' };
-    mockUseApi.mockReturnValue({
-      data: testData,
-      loading: false,
-      error: null,
-      refetch: jest.fn(),
-    });
+    mockUseApi.mockReturnValue(mockState({ data: testData }));
 
     render(
-      <DataFetcher apiCall={mockApiCall}>
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" render={TestChild} />
     );
 
     expect(screen.getByTestId('child')).toHaveTextContent(JSON.stringify(testData));
   });
 
   test('should render empty state when no data', () => {
-    mockUseApi.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      refetch: jest.fn(),
-    });
+    mockUseApi.mockReturnValue(mockState({ data: null }));
 
     render(
-      <DataFetcher apiCall={mockApiCall}>
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" render={TestChild} />
     );
 
     expect(screen.getByText('No data available')).toBeInTheDocument();
-  });
-
-  test('should use custom loading component', () => {
-    const CustomLoading = () => <div>Custom Loading...</div>;
-    mockUseApi.mockReturnValue({
-      data: null,
-      loading: true,
-      error: null,
-      refetch: jest.fn(),
-    });
-
-    render(
-      <DataFetcher apiCall={mockApiCall} loadingComponent={CustomLoading}>
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
-    );
-
-    expect(screen.getByText('Custom Loading...')).toBeInTheDocument();
   });
 
   test('should use custom error component', () => {
@@ -108,17 +94,10 @@ const TestChild = ({ data }: { data: unknown }) => <div data-testid="child">{JSO
       </div>
     );
 
-    mockUseApi.mockReturnValue({
-      data: null,
-      loading: false,
-      error: 'Custom error',
-      refetch: jest.fn(),
-    });
+    mockUseApi.mockReturnValue(mockState({ error: 'Custom error' }));
 
     render(
-      <DataFetcher apiCall={mockApiCall} errorComponent={CustomError}>
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" errorComponent={CustomError} render={TestChild} />
     );
 
     expect(screen.getByText('Custom Error: Custom error')).toBeInTheDocument();
@@ -126,31 +105,72 @@ const TestChild = ({ data }: { data: unknown }) => <div data-testid="child">{JSO
   });
 
   test('should pass cache options to useApi', () => {
-    mockUseApi.mockReturnValue({
-      data: { test: 'data' },
-      loading: false,
-      error: null,
-      refetch: jest.fn(),
-    });
+    mockUseApi.mockReturnValue(mockState({ data: { test: 'data' } }));
 
     render(
-      <DataFetcher
-        apiCall={mockApiCall}
-        cacheKey="test-cache"
-        cacheTTL={300000}
-        enableCache={false}
-      >
-        {(data) => <TestChild data={data} />}
-      </DataFetcher>
+      <DataFetcher apiUrl="/api/test" cacheKey="test-cache" cacheTTL={300000} enableCache={false} render={TestChild} />
     );
 
     expect(mockUseApi).toHaveBeenCalledWith(
-      mockApiCall,
+      expect.any(Function),
       {
         cacheKey: 'test-cache',
         cacheTTL: 300000,
         enableCache: false,
       }
     );
+  });
+});
+
+describe('PaginatedDataFetcher', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('should render data from usePaginatedApi and expose loadMore', async () => {
+    const loadMore = jest.fn();
+    mockUsePaginatedApi.mockReturnValue(
+      mockState({
+        data: {
+          items: [{ id: 1 }],
+          pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+        },
+        loadMore,
+        hasMore: false,
+      })
+    );
+
+    render(
+      <PaginatedDataFetcher
+        apiUrl="/api/items"
+        render={({ items, loadMore }) => (
+          <div>
+            <span data-testid="count">{items.length}</span>
+            <button onClick={loadMore}>More</button>
+          </div>
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('count')).toHaveTextContent('1');
+    await userEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(loadMore).toHaveBeenCalled();
+  });
+});
+
+describe('RealtimeDataFetcher', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('should use polling hook and render data', () => {
+    const testData = { price: 100 };
+    mockUsePollingApi.mockReturnValue(mockState({ data: testData }));
+
+    render(
+      <RealtimeDataFetcher apiUrl="/api/live" pollInterval={5000} render={TestChild} />
+    );
+
+    expect(screen.getByTestId('child')).toHaveTextContent(JSON.stringify(testData));
   });
 });

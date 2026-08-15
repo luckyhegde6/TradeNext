@@ -2,7 +2,7 @@
 //
 // Shared fetch chain for NSE/TradingView reference data that is slow-moving
 // (IPO issue calendar, community trading ideas, …) and must survive
-// serverless cold starts without hammering the upstream API:
+// process restarts without hammering the upstream API:
 //
 //   Read path      : memory cache  →  NSE/TV API  →  market_cache DB
 //   DB write path  : ONLY when the fetched payload CHANGED relative to the

@@ -9,6 +9,7 @@
  */
 import { directPrompt, getPromptTimeoutMs } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
+import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
 import type {
@@ -157,93 +158,113 @@ export async function analyzeSwingStocks(
 
 // ─── Internal ────────────────────────────────────────────────────────────
 
-/** Analyze one batch of up to 5 stocks with retry (deadline-capped like v3.8.0). */
+/** Analyze one batch of up to 5 stocks with retry + model fallback (deadline-capped like v3.8.0). */
 async function analyzeSwingBatch(
   stocks: SwingAnalysisInput[],
   config?: AIConfig,
 ): Promise<SwingAnalysisResult[]> {
   const prompt = buildSwingAnalysisPrompt(stocks);
   const batchDeadline = Date.now() + BATCH_TIMEOUT_MS;
+  // Model fallback chain (v3.10.1): primary gets RETRY_MAX attempts, each
+  // fallback route one attempt — a dead primary no longer kills the batch.
+  const chain = modelFallbackChain(config?.model);
   let lastError: string | undefined;
+  let attemptsMade = 0;
+  let usedModel: string | undefined;
 
-  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-    const remaining = batchDeadline - Date.now();
-    if (remaining <= 0) {
-      lastError = `Batch exceeded ${BATCH_TIMEOUT_MS / 1000}s timeout`;
-      logger.warn({ msg: "Swing batch timed out", attempt, of: RETRY_MAX, error: lastError });
-      break;
-    }
+  for (const model of chain) {
+    // Primary uses the caller's config as-is; fallbacks swap the model only.
+    // analyzeSwingStocks guards hasValidConfig(config) before this runs.
+    const modelConfig =
+      model === config?.model ? config : { ...(config as AIConfig), model };
+    const attempts = model === config?.model ? RETRY_MAX : 1;
 
-    const attemptStart = Date.now();
-    let response: string;
-    try {
-      response = await directPrompt(
-        prompt,
-        config,
-        Math.min(remaining, getPromptTimeoutMs()),
-      );
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-      logger.warn({
-        msg: "Swing batch attempt failed",
-        attempt,
-        of: RETRY_MAX,
-        error: lastError,
-      });
-      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
-      continue;
-    }
-    const attemptMs = Date.now() - attemptStart;
-
-    const raw = typeof response === "string" ? response : "";
-
-    const analyses = parseSwingResponse(raw, stocks);
-    if (!analyses) {
-      lastError = `Unusable AI response (${describeUnusable(raw)})`;
-      logger.warn({
-        msg: "Swing batch response unusable — retrying",
-        attempt,
-        of: RETRY_MAX,
-        error: lastError,
-        preview: raw.slice(0, 200),
-      });
-      if (attempt < RETRY_MAX) await sleep(retryDelay(attempt));
-      continue;
-    }
-
-    const batchResults = stocks.map((stock, idx) => {
-      const analysis = analyses[idx];
-      if (!analysis) {
-        return failedSwingResult(stock, "No analysis returned for this stock");
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      attemptsMade++;
+      const remaining = batchDeadline - Date.now();
+      if (remaining <= 0) {
+        lastError = `Batch exceeded ${BATCH_TIMEOUT_MS / 1000}s timeout`;
+        logger.warn({ msg: "Swing batch timed out", model, attempt, error: lastError });
+        break;
       }
-      return {
-        ...stock,
-        analysis,
-        tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
-        executionMs: attemptMs,
-        success: true,
-      };
-    });
 
-    await trackAiCall({
-      timestamp: new Date().toISOString(),
-      action: "swing_analysis_batch",
-      model: config?.model || "unknown",
-      status: "success",
-      tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
-      responseTimeMs: attemptMs,
-      analysisType: "swing",
-      prompt: prompt.slice(0, 500),
-      result: raw.slice(0, 1000),
-    });
+      const attemptStart = Date.now();
+      let response: string;
+      try {
+        response = await directPrompt(
+          prompt,
+          modelConfig,
+          Math.min(remaining, getPromptTimeoutMs()),
+        );
+        usedModel = model;
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+        logger.warn({
+          msg: "Swing batch attempt failed",
+          model,
+          attempt,
+          of: attempts,
+          error: lastError,
+        });
+        if (attempt < attempts) await sleep(retryDelay(attempt));
+        continue;
+      }
+      const attemptMs = Date.now() - attemptStart;
 
-    return batchResults;
+      const raw = typeof response === "string" ? response : "";
+
+      const analyses = parseSwingResponse(raw, stocks);
+      if (!analyses) {
+        lastError = `Unusable AI response (${describeUnusable(raw)})`;
+        logger.warn({
+          msg: "Swing batch response unusable — retrying",
+          model,
+          attempt,
+          of: attempts,
+          error: lastError,
+          preview: raw.slice(0, 200),
+        });
+        if (attempt < attempts) await sleep(retryDelay(attempt));
+        continue;
+      }
+
+      const batchResults = stocks.map((stock, idx) => {
+        const analysis = analyses[idx];
+        if (!analysis) {
+          return failedSwingResult(stock, "No analysis returned for this stock");
+        }
+        return {
+          ...stock,
+          analysis,
+          tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
+          executionMs: attemptMs,
+          success: true,
+        };
+      });
+
+      await trackAiCall({
+        timestamp: new Date().toISOString(),
+        action: "swing_analysis_batch",
+        model: usedModel || "unknown",
+        status: "success",
+        tokensUsed: batchResults.reduce((sum, r) => sum + r.tokensUsed, 0),
+        responseTimeMs: attemptMs,
+        analysisType: "swing",
+        prompt: prompt.slice(0, 500),
+        result: raw.slice(0, 1000),
+      });
+
+      return batchResults;
+    }
+
+    // Deadline hit — no point trying more models.
+    if (Date.now() >= batchDeadline) break;
   }
 
   await trackAiCall({
     timestamp: new Date().toISOString(),
     action: "swing_analysis_batch",
-    model: config?.model || "unknown",
+    model: usedModel || config?.model || "unknown",
     status: "error",
     tokensUsed: 0,
     responseTimeMs: 0,
@@ -252,7 +273,24 @@ async function analyzeSwingBatch(
     prompt: prompt.slice(0, 500),
   });
 
-  throw new Error(`Swing batch failed after ${RETRY_MAX} attempts: ${lastError || "unknown"}`);
+  throw new Error(
+    `Swing AI analysis failed — ${friendlySwingFailure(lastError)} (${attemptsMade} attempt(s) across ${chain.length} model(s))`,
+  );
+}
+
+/**
+ * Map a raw batch failure onto a human-readable phrase (surfaced on the swing
+ * cards' "AI targets unavailable" message and in the audit log). Exported for
+ * tests; unknown errors pass through unchanged.
+ */
+export function friendlySwingFailure(lastError?: string): string {
+  const e = lastError ?? "unknown error";
+  if (e.startsWith("Unusable AI response (empty response)")) return "the model returned an empty response";
+  if (e.startsWith("Unusable AI response (provider error)")) return "the AI provider returned an error";
+  if (e.startsWith("Unusable AI response (empty content)")) return "the model returned no content";
+  if (e.startsWith("Unusable AI response (unparseable JSON)")) return "the model's response was not valid JSON";
+  if (e.startsWith("Batch exceeded")) return "the analysis timed out";
+  return e;
 }
 
 function describeUnusable(response: string): string {

@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 /**
  * GET /api/admin/ai/connection-tests?limit=10
  * Last AI connection-test records (persisted via trackAiCall — survives
- * serverless cold starts). Each entry carries the probe status
+ * process restarts). Each entry carries the probe status
  * ("success" | "error"), model, response time and error.
  */
 export async function GET(req: NextRequest) {

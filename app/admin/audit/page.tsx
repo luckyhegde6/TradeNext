@@ -115,6 +115,31 @@ export default function AdminAuditPage() {
       case "SYSTEM_ANOMALY_DETECTED":
       case "SYSTEM_PROVIDER_OUTAGE":
         return "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-800";
+      // AI connection test events
+      case "AI_CONNECTION_TEST":
+        return "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-800";
+      case "AI_CONNECTION_TEST_FAILED":
+        return "bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-400 border border-rose-200 dark:border-rose-800";
+      // Swing trading events
+      case "SWING_RUN_START":
+      case "SWING_ANALYSIS_START":
+        return "bg-cyan-100 dark:bg-cyan-900/40 text-cyan-800 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800";
+      case "SWING_RUN_COMPLETE":
+      case "SWING_ANALYSIS_COMPLETE":
+        return "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800";
+      case "SWING_RUN_FAILED":
+      case "SWING_ANALYSIS_FAILED":
+        return "bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-400 border border-rose-200 dark:border-rose-800";
+      // IPO analysis events
+      case "IPO_ANALYSIS_GENERATED":
+        return "bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-400 border border-teal-200 dark:border-teal-800";
+      case "IPO_ANALYSIS_SERVED_CACHE":
+        return "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-800";
+      case "IPO_ANALYSIS_SERVED_STALE":
+      case "IPO_ANALYSIS_UNAUTHORIZED":
+        return "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-800";
+      case "IPO_ANALYSIS_FAILED":
+        return "bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800";
       default:
         return "bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-300 border border-gray-200 dark:border-slate-700";
     }
@@ -212,6 +237,25 @@ export default function AdminAuditPage() {
                 <option value="SYSTEM_HEALTH_CHECK">Health Check</option>
                 <option value="SYSTEM_ANOMALY_DETECTED">Anomaly Detected</option>
                 <option value="SYSTEM_PROVIDER_OUTAGE">Provider Outage</option>
+              </optgroup>
+              <optgroup label="AI Connection Test">
+                <option value="AI_CONNECTION_TEST">AI Connection Test</option>
+                <option value="AI_CONNECTION_TEST_FAILED">AI Connection Test Failed</option>
+              </optgroup>
+              <optgroup label="Swing Trading">
+                <option value="SWING_RUN_START">Swing Run Start</option>
+                <option value="SWING_RUN_COMPLETE">Swing Run Complete</option>
+                <option value="SWING_RUN_FAILED">Swing Run Failed</option>
+                <option value="SWING_ANALYSIS_START">Swing AI Analysis Start</option>
+                <option value="SWING_ANALYSIS_COMPLETE">Swing AI Analysis Complete</option>
+                <option value="SWING_ANALYSIS_FAILED">Swing AI Analysis Failed</option>
+              </optgroup>
+              <optgroup label="IPO Analysis">
+                <option value="IPO_ANALYSIS_GENERATED">IPO Analysis Generated</option>
+                <option value="IPO_ANALYSIS_SERVED_CACHE">IPO Analysis Served (Cache)</option>
+                <option value="IPO_ANALYSIS_SERVED_STALE">IPO Analysis Served (Stale)</option>
+                <option value="IPO_ANALYSIS_FAILED">IPO Analysis Failed</option>
+                <option value="IPO_ANALYSIS_UNAUTHORIZED">IPO Analysis Unauthorized</option>
               </optgroup>
             </select>
           </div>

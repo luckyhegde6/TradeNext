@@ -58,6 +58,7 @@ jest.mock("@/lib/services/ai/config", () => ({
 jest.mock("@/lib/services/ai/llm-provider", () => ({
   __esModule: true,
   directPrompt: jest.fn(),
+  getPromptTimeoutMs: jest.fn(() => 120_000),
 }));
 
 jest.mock("@/lib/services/nseIpoService", () => ({
@@ -73,6 +74,11 @@ jest.mock("@/lib/logger", () => ({
     error: jest.fn(),
     debug: jest.fn(),
   },
+}));
+
+jest.mock("@/lib/audit", () => ({
+  __esModule: true,
+  createAuditLog: jest.fn().mockResolvedValue(undefined),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────
@@ -95,6 +101,7 @@ import {
 } from "@/lib/services/ai/config";
 import { directPrompt } from "@/lib/services/ai/llm-provider";
 import { getUpcomingIpoIssues } from "@/lib/services/nseIpoService";
+import { createAuditLog } from "@/lib/audit";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -356,6 +363,15 @@ describe("getIpoAnalysis cache semantics", () => {
   test("throws when directPrompt returns a not-configured/failure sentinel", async () => {
     (directPrompt as jest.Mock).mockResolvedValue("AI request failed: 404 model not found");
     await expect(getIpoAnalysis("SHIPROCKET")).rejects.toThrow("AI analysis failed");
+    // v3.11.0: the failure is audit-logged with the real reason so admin
+    // monitoring shows why IPO analysis keeps failing.
+    expect(createAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "IPO_ANALYSIS_FAILED",
+        resource: "ipo_analysis",
+        resourceId: "SHIPROCKET",
+      }),
+    );
   });
 
   test("serves stale DB row (source 'db') when generation fails", async () => {

@@ -240,6 +240,11 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     // pagination correct (page 1 = true top returners) we fetch ALL matching
     // trackers (bounded, next-day-promoted, cached 15 min) then sort + slice.
     orderBy.createdAt = order;
+  } else if (sort === "daysTracked") {
+    // daysTracked = floor((now - createdAt)/day)+1 is INVERSE-monotonic with
+    // createdAt (newer createdAt ⇒ smaller daysTracked) — flip the direction
+    // so the stored field yields the requested daysTracked order exactly.
+    orderBy.createdAt = order === "asc" ? "desc" : "asc";
   } else {
     orderBy[sort] = order;
   }
@@ -303,7 +308,7 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
  *
  * Idempotent: skips trackers already archived (defensive check on trackerId).
  * Uses runInChunks (bounded concurrency) — NEVER an interactive $transaction
- * (5s serverless timeout on Prisma Accelerate).
+ * (5s interactive-transaction timeout).
  */
 export async function archiveRecommendations(): Promise<ArchiveResult> {
   const startTime = Date.now();

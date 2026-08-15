@@ -1,4 +1,4 @@
-// lib/services/db-logger.ts - Database-backed logger for serverless environments
+// lib/services/db-logger.ts - Database-backed logger (durable, queryable)
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 

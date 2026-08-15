@@ -72,8 +72,8 @@ export async function POST(req: NextRequest) {
       tokensUsed: 0,
       responseTimeMs,
     };
-    // Await persistence so the DB write completes before the serverless
-    // function freezes — otherwise AI calls would be lost on every request.
+    // Await persistence so the DB write completes before the response returns
+    // — otherwise AI calls would be lost on every request.
     await trackAiCall(entry);
   }
 }

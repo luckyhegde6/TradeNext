@@ -1,5 +1,12 @@
 # Serverless Logging & Netlify (v1.10.4 DB logs, v1.9.2 join flow, v1.9.1 notifications, v1.8.2 502 fix)
 
+> ⚠️ **HISTORICAL / SUPERSEDED (v3.11.3)** — this deep-dive documents the SERVERLESS-era logging design
+> (Blob-store mirroring, `/tmp` logs dir, `isServerless()` branches). **All of it was REMOVED in v3.11.3**
+> (full serverless purge — Netlify now runs the app as a persistent Next.js server, so file logs in `logs/`
+> + the DB-backed `ServerLog` table are the single source of truth; `lib/netlify-logger.ts` was deleted and
+> `@netlify/blobs` dropped from dependencies). Keep reading this for HISTORY only — the file-level and
+> DB-backed logging described below still exist, but any Blob/serverless-specific mechanism does not.
+>
 > Legacy feature deep-dive. Index: [../CHANGELOG.md](../CHANGELOG.md).
 
 ## Serverless Logging Fix (v1.10.4)

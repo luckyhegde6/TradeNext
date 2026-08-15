@@ -69,6 +69,13 @@ export interface PerformanceCheckResult {
 export interface LatestRecommendations {
   run: RunWithStocks | null;
   stocks: StockWithTracker[];
+  /**
+   * The overall newest run row (id/runDate/status) regardless of stock count.
+   * When the returned `run` is OLDER than this (a newer run failed with no
+   * picks — v3.11.1 AI-unavailable behavior), clients show an "AI unavailable"
+   * notice while still displaying the last good run's stocks.
+   */
+  latestRun?: { id: string; runDate: Date; status: string } | null;
 }
 
 /** Prisma DailyRecommendationRun with nested stocks. */
@@ -357,8 +364,10 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     // admins on total failure; here we turn that into fast action:
     //   ok       → run normally with the configured model
     //   fallback → run THIS run on the recommended fallback model
-    //   failed   → skip AI entirely (all-HOLD), fail fast — never spend the
-    //              14-minute background cap timing out batch after batch.
+    //   failed   → skip AI entirely (fail fast — never spend the 14-minute
+    //              background cap timing out batch after batch). The zero-
+    //              verdict sentinel below marks the run failed WITHOUT picks
+    //              (v3.11.1) so Today's Picks keeps the last good run.
     const preflightTimeoutMs = 120_000; // nvidia free tier can take 90s+ to start
     let effectiveModel = aiConfig.model;
     let skipAi = false;
@@ -382,7 +391,10 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       }
     }
 
-    // Shared all-HOLD mapping for the catch path and the pre-flight skip.
+    // Zero-verdict sentinel for the catch path and the pre-flight skip.
+    // NOTE (v3.11.1): these rows are NEVER persisted — they exist so the
+    // partition below can detect "no real AI verdicts" and mark the run
+    // failed with no picks (Today's Picks keeps the last good run).
     const holdFallback = (reason: string, errorMsg: string): StockAnalysisResult[] =>
       aiInput.map((s) => ({
         ...s,
@@ -467,8 +479,92 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     }
 
     // 8 & 9 & 10. Batch update stock entries, trackers, and record predictions
+    //
+    // (v3.11.1) NEVER persist synthetic fallback verdicts as real analysis:
+    // holdFallback batches (success:false) used to overwrite Today's Picks
+    // with meaningless HOLD/conf-50 rows whenever AI failed, hiding the last
+    // good run. Persist ONLY stocks with a real AI verdict (success:true);
+    // if ZERO stocks succeeded, mark the run failed with no entries so
+    // getLatestRecommendations (uniqueStocks > 0) falls back to the last
+    // good run and the API surfaces an "AI unavailable" notice.
+    const successfulResults = aiResults.filter((r) => r.success);
+    const aiFailed = aiResults.length - successfulResults.length;
+
+    if (successfulResults.length === 0 && aiResults.length > 0) {
+      // Total AI failure — discard this run's picks entirely. The previous
+      // good run remains the latest shown; no broadcast (nothing to say).
+      const executionTimeMs = Date.now() - startTime;
+      const aiError =
+        aiResults[0]?.error ??
+        "AI analysis failed on all stocks — run kept without picks";
+
+      await prisma.dailyRecommendationStock.deleteMany({ where: { runId: run.id } });
+      await prisma.dailyRecommendationRun.update({
+        where: { id: run.id },
+        data: {
+          status: "failed",
+          errorMessage: aiError,
+          aiProcessed: 0,
+          aiFailed: aiResults.length,
+          uniqueStocks: 0,
+          executionTimeMs,
+          completedAt: new Date(),
+          metadata: {
+            screenerNames: Array.from(successfulScreenerNames),
+            totalRawHits,
+            aiUnavailable: true,
+          },
+        },
+      });
+
+      await recordScreenerEvent(
+        "run_failed",
+        `Daily run failed — AI unavailable, no picks persisted: ${aiError}`,
+        {
+          runId: run.id,
+          uniqueStocks: 0,
+          aiProcessed: 0,
+          aiFailed: aiResults.length,
+          executionTimeMs,
+        },
+      );
+      await createAuditLog({
+        action: "SCREENER_RUN_FAILED",
+        resource: "daily_recommendation",
+        resourceId: run.id,
+        errorMessage: aiError,
+        metadata: {
+          runId: run.id,
+          uniqueStocks: 0,
+          aiProcessed: 0,
+          aiFailed: aiResults.length,
+          executionTimeMs,
+        },
+      });
+
+      invalidateRecommendationsCache();
+
+      logger.warn({
+        msg: "Daily run failed — AI unavailable on all stocks; last good run kept",
+        runId: run.id,
+        aiFailed: aiResults.length,
+        executionTimeMs,
+      });
+
+      return {
+        runId: run.id,
+        totalScreeners: TOTAL_SCREENER_COUNT,
+        successfulScreeners: successfulScreenerNames.size,
+        totalStocks: totalRawHits,
+        uniqueStocks: 0,
+        aiProcessed: 0,
+        aiFailed: aiResults.length,
+        executionTimeMs,
+        stocks: [],
+      };
+    }
+
     let aiProcessed = 0;
-    let aiFailed = 0;
 
     // Pre-fetch all stock entries for this run in one query (instead of N findFirst)
     const allStockEntries = await prisma.dailyRecommendationStock.findMany({
@@ -482,10 +578,9 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const trackerUpdates: Promise<any>[] = [];
     const predictionUpdates: Promise<unknown>[] = [];
 
-    for (const aiResult of aiResults) {
+    for (const aiResult of successfulResults) {
       const stockEntryId = stockEntryMap.get(aiResult.symbol);
       if (!stockEntryId) {
-        aiFailed++;
         continue;
       }
 
@@ -547,11 +642,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         }),
       );
 
-      if (aiResult.success) {
-        aiProcessed++;
-      } else {
-        aiFailed++;
-      }
+      aiProcessed++;
     }
 
     // Execute batched updates concurrently (chunked to bound concurrency)
@@ -560,6 +651,18 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       10,
       (chunk) => Promise.all(chunk),
     );
+
+    // Remove entries that never received a real AI verdict (failed-analyzed
+    // + capped beyond MAX_AI_STOCKS) so Today's Picks shows ONLY analyzed
+    // stocks — no synthetic HOLD rows (v3.11.1).
+    if (successfulResults.length < stockEntries.length) {
+      await prisma.dailyRecommendationStock.deleteMany({
+        where: {
+          runId: run.id,
+          symbol: { notIn: successfulResults.map((r) => r.symbol) },
+        },
+      });
+    }
 
     // 11. Complete run
     const executionTimeMs = Date.now() - startTime;
@@ -570,6 +673,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         status: "completed",
         aiProcessed,
         aiFailed,
+        uniqueStocks: successfulResults.length,
         executionTimeMs,
         completedAt: new Date(),
         metadata: {
@@ -585,7 +689,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       `Daily run completed: ${aiProcessed}/${stockEntries.length} stocks analyzed in ${executionTimeMs}ms`,
       {
         runId: run.id,
-        uniqueStocks: rankedResults.length,
+        uniqueStocks: successfulResults.length,
         aiProcessed,
         aiFailed,
         executionTimeMs,
@@ -599,7 +703,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       resourceId: run.id,
       metadata: {
         runId: run.id,
-        uniqueStocks: rankedResults.length,
+        uniqueStocks: successfulResults.length,
         aiProcessed,
         aiFailed,
         executionTimeMs,
@@ -615,7 +719,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       source: "recommendation_service",
       metadata: {
         runId: run.id,
-        uniqueStocks: rankedResults.length,
+        uniqueStocks: successfulResults.length,
         aiProcessed,
         aiFailed,
       },
@@ -632,7 +736,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       const { broadcastToSubscribers } = await import("./telegramBotService");
       const { buildRecommendationBroadcast } = await import("./recommendationBroadcast");
 
-      const tgMessage = buildRecommendationBroadcast(aiResults);
+      const tgMessage = buildRecommendationBroadcast(successfulResults);
 
       const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
       logger.info({ msg: "Telegram broadcast for recommendations", sent });
@@ -644,7 +748,7 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     logger.info({
       msg: "Daily recommendation run finished",
       runId: run.id,
-      uniqueStocks: rankedResults.length,
+      uniqueStocks: successfulResults.length,
       aiProcessed,
       aiFailed,
       executionTimeMs,
@@ -655,11 +759,11 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       totalScreeners: TOTAL_SCREENER_COUNT,
       successfulScreeners: successfulScreenerNames.size,
       totalStocks: totalRawHits,
-      uniqueStocks: rankedResults.length,
+      uniqueStocks: successfulResults.length,
       aiProcessed,
       aiFailed,
       executionTimeMs,
-      stocks: aiResults.map((r) => ({
+      stocks: successfulResults.map((r) => ({
         symbol: r.symbol,
         aiRecommendation: r.aiRecommendation.recommendation,
         confidence: r.aiRecommendation.confidence,
@@ -980,8 +1084,11 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
  * Get the latest recommendations for the UI (Today's Picks tab).
  *
  * Returns the most recent completed/failed run with stocks, sorted by screenerCount
- * (stronger signal = more screeners agree). Falls back to any run with stocks > 0
- * if no completed run exists.
+ * (stronger signal = more screeners agree). HOLD stocks are INCLUDED — the
+ * latest run is surfaced as-is (honest "Last updated" date). Filtering to
+ * actionable BUY/SELL picks is a presentation concern (UI pills, broadcast),
+ * not a query concern: an all-HOLD run (AI flaky/100% HOLD since Jul 19 on
+ * prod) must show today's date + HOLD rows instead of a stale 2-week-old list.
  *
  * BigInt fields (volume) are converted to Number for JSON serialization.
  *
@@ -998,46 +1105,30 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
     return cached;
   }
 
-  // Today's Picks shows actionable recommendations only (BUY/SELL).
-  // HOLD (and null) stocks are filtered out at the source so the public API,
-  // UI, and Telegram /recommendations all surface only BUY/SELL picks.
-  // Runs with zero actionable stocks are skipped entirely (empty state).
-  const actionable = { aiRecommendation: { in: ["BUY", "SELL"] } };
-
-  // 1. Try latest completed run that has actionable stocks
-  let latestRun = await prisma.dailyRecommendationRun.findFirst({
+  // Honest latest-run selection: ONE query — latest completed/failed run with
+  // stocks, NO verdict filter. All stocks (incl. HOLD) are returned so the
+  // "Last updated" date always reflects the newest run (v3.10.1).
+  const latestRun = await prisma.dailyRecommendationRun.findFirst({
     where: {
       status: { in: ["completed", "failed"] },
       uniqueStocks: { gt: 0 },
-      stocks: { some: actionable },
     },
     orderBy: { runDate: "desc" },
     include: {
       stocks: {
-        where: actionable,
         orderBy: { screenerCount: "desc" },
         include: { tracker: true },
       },
     },
   });
 
-  // 2. Fallback: any run that has actionable stocks
-  if (!latestRun || !latestRun.stocks || latestRun.stocks.length === 0) {
-    latestRun = await prisma.dailyRecommendationRun.findFirst({
-      where: {
-        uniqueStocks: { gt: 0 },
-        stocks: { some: actionable },
-      },
-      orderBy: { runDate: "desc" },
-      include: {
-        stocks: {
-          where: actionable,
-          orderBy: { screenerCount: "desc" },
-          include: { tracker: true },
-        },
-      },
-    });
-  }
+  // Overall newest run (even one with zero picks — a v3.11.1 AI-unavailable
+  // failure). Lets the client show "AI unavailable on <latestRunDate> —
+  // showing picks from <runDate>" while still displaying the last good run.
+  const newestRun = await prisma.dailyRecommendationRun.findFirst({
+    orderBy: { runDate: "desc" },
+    select: { id: true, runDate: true, status: true },
+  });
 
   // Convert BigInt fields to Number for JSON serialization
   const serializedStocks = (latestRun?.stocks ?? []).map((s) => ({
@@ -1048,6 +1139,7 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
   const result: LatestRecommendations = {
     run: latestRun as RunWithStocks | null,
     stocks: serializedStocks as unknown as StockWithTracker[],
+    latestRun: newestRun,
   };
 
   // Store in cache (23hr TTL)

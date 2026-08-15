@@ -293,10 +293,10 @@ export default function AiMonitoringPage() {
                 }`}
                 title={
                   dataSource === "memory"
-                    ? "Showing live in-memory buffer (this serverless instance)"
+                    ? "Showing live in-memory buffer"
                     : dataSource === "hybrid"
-                      ? "Showing live buffer + DB-persisted history (survives serverless restarts)"
-                      : "Showing DB-persisted logs (survives serverless restarts)"
+                      ? "Showing live buffer + DB-persisted history"
+                      : "Showing DB-persisted logs"
                 }
               >
                 {dataSource === "memory" ? "Live buffer" : dataSource === "hybrid" ? "Live + DB" : "DB persisted"}

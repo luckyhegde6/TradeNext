@@ -9,7 +9,7 @@
 //
 //   1. In-memory cache   (historicalCache, 24h TTL)         — 0 DB ops on hit
 //   2. Temp DB table      (BacktestHistory, age-pruned)      — persistent across
-//      serverless cold starts, 1 DB read on memory miss
+//      process restarts, 1 DB read on memory miss
 //   3. Main daily_prices (read-only reuse)                   — 1 DB read, zero
 //      writes, when the symbol is already ingested
 //   4. NSE live           (generateSecurityWiseHistoricalData) — 1 NSE call +
@@ -156,7 +156,7 @@ export async function getBacktestData(
     };
   }
 
-  // 2) Temp DB table (persistent across serverless cold starts)
+  // 2) Temp DB table (persistent across process restarts)
   // Prod gap fix: ensure the table exists first — if the DB user can't create
   // it, skip the temp leg and degrade to daily_prices/NSE (never throw here).
   const tempReady = await ensureBacktestHistoryTable();

@@ -65,7 +65,6 @@ export default function MonitoringPage() {
   const [nseCalls, setNseCalls] = useState<any[]>([]);
   const [httpLogs, setHttpLogs] = useState<any[]>([]);
   const [serverLogs, setServerLogs] = useState<{ date: string; path: string; size: number }[]>([]);
-  const [serverlessLogs, setServerlessLogs] = useState(false);
   const [dbLogs, setDbLogs] = useState<any[]>([]);
   const [dbLogTotal, setDbLogTotal] = useState(0);
   const [dbLogLevel, setDbLogLevel] = useState<string>("all");
@@ -139,10 +138,9 @@ export default function MonitoringPage() {
       if (logsRes.ok) {
         const data = await logsRes.json();
         setServerLogs(data.files || []);
-        setServerlessLogs(!!data.serverless);
       }
 
-      // Fetch DB-backed server logs (works on serverless)
+      // Fetch DB-backed server logs
       const dbLogsRes = await fetch(`/api/admin/monitoring?type=db-logs&limit=200${dbLogLevel !== "all" ? `&level=${dbLogLevel}` : ""}`);
       if (dbLogsRes.ok) {
         const data = await dbLogsRes.json();
@@ -733,27 +731,6 @@ export default function MonitoringPage() {
                     </button>
                   </div>
 
-                  {/* Serverless-aware notice — FS logging is not durable on serverless */}
-                  {serverlessLogs && (
-                    <div className="mb-4 flex items-start gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg p-3">
-                      <ExclamationTriangleIcon className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                      <div className="text-sm text-amber-800 dark:text-amber-200">
-                        <p className="font-medium">Running on serverless — file-system log files are ephemeral here.</p>
-                        <p className="mt-0.5 text-amber-700 dark:text-amber-300">
-                          Files listed below are served from the Netlify Blob mirror and may not persist across deployments.
-                          For durable, queryable logs use the{" "}
-                          <button
-                            onClick={() => setActiveTab("db-logs")}
-                            className="font-semibold underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100"
-                          >
-                            Database Server Logs
-                          </button>{" "}
-                          tab instead.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  
                   {/* Log Files List */}
                   {!selectedLogFile ? (
                     <div className="space-y-2">
@@ -863,7 +840,7 @@ export default function MonitoringPage() {
               </div>
             )}
 
-            {/* DB Logs Tab — DB-backed logs (works on serverless) */}
+            {/* DB Logs Tab — DB-backed logs */}
             {activeTab === "db-logs" && (
               <div className="space-y-4">
                 <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-4">
@@ -871,7 +848,7 @@ export default function MonitoringPage() {
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Database Server Logs</h3>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        Persisted to the database — works on serverless platforms. {dbLogTotal} total entries.
+                        Persisted to the database. {dbLogTotal} total entries.
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

@@ -207,7 +207,7 @@ async function pollAndExecute() {
 
 /**
  * Reap stale in-flight tasks: WorkerTasks stuck in "running" for longer than
- * `staleMs` (they are dead — worker crashed or the serverless function was
+ * `staleMs` (they are dead — worker crashed or the process was restarted
  * killed at the Netlify 15-min cap) and DailyRecommendationRuns stuck in
  * "running" (keyed on createdAt — that model has no startedAt).
  * Exported for tests and the cleanup tooling.
@@ -269,6 +269,89 @@ async function maybeReap(): Promise<void> {
     await reapStaleWorkerTasks();
 }
 
+/** Structural type for the fields spawnDueCronJob needs from a CronJob row. */
+export interface DueCronJob {
+    id: string;
+    name: string;
+    taskType: string;
+    cronExpression: string;
+    config?: unknown;
+}
+
+/**
+ * Spawn a worker task for one due cron job.
+ *
+ * Shared by the 60s poll scheduler (checkScheduledJobs) and the in-process
+ * node-cron daemon (cron-daemon.ts) so both paths behave identically:
+ *   - Dedup guard (v3.8.0): if a task for this cron job is already
+ *     pending/running within the window, skip spawning — a busy job
+ *     or a second server instance must not stack duplicate executions.
+ *     nextRun is still advanced so the schedule keeps ticking.
+ *   - Payload defaults (indexName) derived from taskType.
+ *   - nextRun advanced via calculateNextRun after a successful spawn.
+ */
+export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
+    const { spawnCronTask } = await import("./task-orchestrator");
+
+    logger.info({ msg: "Cron job due, spawning task", jobName: job.name, jobId: job.id, taskType: job.taskType });
+
+    const existing = await prisma.workerTask.findFirst({
+        where: {
+            cronJobId: job.id,
+            status: { in: ["pending", "running"] },
+            createdAt: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
+        },
+        select: { id: true, name: true },
+    });
+    if (existing) {
+        logger.info({
+            msg: "Skipping cron spawn — task already pending/running",
+            jobName: job.name,
+            jobId: job.id,
+            existingTaskId: existing.id,
+        });
+        await prisma.cronJob.update({
+            where: { id: job.id },
+            data: {
+                nextRun: calculateNextRun(job.cronExpression),
+                updatedAt: new Date()
+            },
+        });
+        return;
+    }
+
+    // Build payload with default indexName based on task type
+    let payload = (job.config as Record<string, unknown>) || {};
+
+    // Add default indexName if not specified in config
+    if (!payload.indexName) {
+        if (job.taskType === 'stock_sync' || job.taskType === 'market_data') {
+            payload = { ...payload, indexName: "NIFTY TOTAL MARKET" };
+        } else if (job.taskType === 'corp_actions' || job.taskType === 'events_fetch') {
+            payload = { ...payload, indexName: "NIFTY 50" };
+        }
+    }
+
+    await spawnCronTask(job.id, {
+        name: `Scheduled: ${job.name}`,
+        taskType: job.taskType,
+        payload,
+        // System-managed jobs (e.g. recommendation crons upserted by
+        // ensureRecommendationCrons) carry a systemManaged flag so the
+        // spawned task is marked triggeredBy: "system" for audit.
+        triggeredBy: (job.config as Record<string, unknown>)?.systemManaged === true ? "system" : "cron",
+    });
+
+    // Calculate and update next run time
+    await prisma.cronJob.update({
+        where: { id: job.id },
+        data: {
+            nextRun: calculateNextRun(job.cronExpression),
+            updatedAt: new Date()
+        },
+    });
+}
+
 /**
  * Check for due cron jobs and spawn worker tasks
  * (exported for tests)
@@ -285,73 +368,9 @@ export async function checkScheduledJobs() {
 
     if (dueJobs.length === 0) return;
 
-    const { spawnCronTask } = await import("./task-orchestrator");
-
     for (const job of dueJobs) {
         try {
-            logger.info({ msg: "Cron job due, spawning task", jobName: job.name, jobId: job.id, taskType: job.taskType });
-
-            // Dedup guard (v3.8.0): if a task for this cron job is already
-            // pending/running within the window, skip spawning — a busy job
-            // or a second worker node must not stack duplicate executions.
-            // nextRun is still advanced below so the schedule keeps ticking.
-            const existing = await prisma.workerTask.findFirst({
-                where: {
-                    cronJobId: job.id,
-                    status: { in: ["pending", "running"] },
-                    createdAt: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
-                },
-                select: { id: true, name: true },
-            });
-            if (existing) {
-                logger.info({
-                    msg: "Skipping cron spawn — task already pending/running",
-                    jobName: job.name,
-                    jobId: job.id,
-                    existingTaskId: existing.id,
-                });
-                const nextRun = calculateNextRun(job.cronExpression);
-                await prisma.cronJob.update({
-                    where: { id: job.id },
-                    data: {
-                        nextRun,
-                        updatedAt: new Date()
-                    },
-                });
-                continue;
-            }
-
-            // Build payload with default indexName based on task type
-            let payload = (job.config as Record<string, unknown>) || {};
-            
-            // Add default indexName if not specified in config
-            if (!payload.indexName) {
-                if (job.taskType === 'stock_sync' || job.taskType === 'market_data') {
-                    payload = { ...payload, indexName: "NIFTY TOTAL MARKET" };
-                } else if (job.taskType === 'corp_actions' || job.taskType === 'events_fetch') {
-                    payload = { ...payload, indexName: "NIFTY 50" };
-                }
-            }
-
-            await spawnCronTask(job.id, {
-                name: `Scheduled: ${job.name}`,
-                taskType: job.taskType,
-                payload,
-                // System-managed jobs (e.g. recommendation crons upserted by
-                // ensureRecommendationCrons) carry a systemManaged flag so the
-                // spawned task is marked triggeredBy: "system" for audit.
-                triggeredBy: (job.config as Record<string, unknown>)?.systemManaged === true ? "system" : "cron",
-            });
-
-            // Calculate and update next run time
-            const nextRun = calculateNextRun(job.cronExpression);
-            await prisma.cronJob.update({
-                where: { id: job.id },
-                data: {
-                    nextRun,
-                    updatedAt: new Date()
-                },
-            });
+            await spawnDueCronJob(job);
         } catch (error) {
             logger.error({ msg: "Failed to spawn task for cron job", jobId: job.id, error });
         }

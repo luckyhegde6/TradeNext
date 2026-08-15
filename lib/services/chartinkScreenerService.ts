@@ -93,7 +93,7 @@ const INSERT_CHUNK = 250;
 
 /**
  * Bounded-concurrency batch helper (mirrors dailyRecommendationService).
- * NEVER use an interactive $transaction for large batches on serverless.
+ * NEVER use an interactive $transaction for large batches (5s timeout).
  */
 async function runInChunks<T>(
   items: T[],

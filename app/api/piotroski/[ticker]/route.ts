@@ -127,6 +127,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ ticker: 
     console.error('piotroski error', err);
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   } finally {
-    // don't call prisma.$disconnect() in serverless repeated calls; leave to process lifecycle
+    // don't call prisma.$disconnect() on repeated calls; leave to process lifecycle
   }
 }

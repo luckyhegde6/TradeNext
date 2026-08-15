@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { getIndexStocks, syncStocksToDatabase } from "@/lib/index-service";
 import { logTaskEvent } from "@/lib/services/worker/task-orchestrator";
+import { recordCronRun, SYSTEM_JOB_NAME_BY_TASK_TYPE } from "@/lib/services/recommendationCronService";
 
 /**
  * Worker Service - Handles execution of various worker tasks
@@ -112,12 +113,42 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
 
     await logTaskEvent(taskId, "task_completed", `Task ${taskType} completed successfully`, { result });
     logger.info({ msg: "Task completed successfully", taskId, taskType });
+    await recordSystemRunOutcome(taskId, taskType, true);
     return { success: true, result };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     await logTaskEvent(taskId, "task_failed", `Task ${taskType} failed: ${errorMessage}`);
     logger.error({ msg: "Task execution failed", taskId, taskType, error: errorMessage });
+    await recordSystemRunOutcome(taskId, taskType, false);
     return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * v3.11.0 ledger outcome writer. The in-process cron daemon spawns scheduled
+ * runs via spawnCronTask (runCount +1 + nextRun advanced at spawn) so only
+ * the success/failure outcome is recorded here (skipSpawnCounted). Manual
+ * admin runs (no cronJobId) are counted by recordManualRunLedger on the
+ * workers route — skip them to avoid double counting. Non-fatal.
+ *
+ * SYSTEM_JOB_NAME_BY_TASK_TYPE (recommendationCronService) maps every system
+ * task type so successCount / failureCount are kept honest for all four
+ * system jobs (previously only recommendations + recommendation_performance
+ * were recorded; market_data and ai_connection_test stayed 0 forever).
+ */
+async function recordSystemRunOutcome(taskId: string, taskType: string, success: boolean): Promise<void> {
+  const jobName = SYSTEM_JOB_NAME_BY_TASK_TYPE[taskType] ?? null;
+  if (!jobName) return;
+  try {
+    const task = await prisma.workerTask.findUnique({
+      where: { id: taskId },
+      select: { cronJobId: true },
+    });
+    if (task?.cronJobId) {
+      await recordCronRun(jobName, success, { skipSpawnCounted: true });
+    }
+  } catch (error) {
+    logger.warn({ msg: "Failed to record system run outcome (non-fatal)", taskId, taskType, error });
   }
 }
 

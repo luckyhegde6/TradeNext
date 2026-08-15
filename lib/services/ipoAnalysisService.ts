@@ -16,8 +16,9 @@
 // The template below is the product-defined 14-step analyst brief (do NOT
 // trim sections — the model is instructed to answer every step).
 
-import { directPrompt } from "@/lib/services/ai/llm-provider";
+import { directPrompt, getPromptTimeoutMs } from "@/lib/services/ai/llm-provider";
 import { loadConfig, hasValidConfig, type AIConfig } from "@/lib/services/ai/config";
+import { modelFallbackChain } from "@/lib/services/ai/modelChain";
 import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import cache from "@/lib/cache";
 import prisma from "@/lib/prisma";
@@ -574,7 +575,7 @@ export async function getIpoAnalysis(
     throw new Error("AI is not configured. Admin must set OPENROUTERKEY and enable AI.");
   }
 
-  let content: string;
+  let content: string | undefined;
   let issue: IpoIssue | undefined;
   let report: IpoReport | null | undefined;
   const genStart = Date.now();
@@ -594,12 +595,41 @@ export async function getIpoAnalysis(
       issueEndDate: issue.issueEndDate,
     };
     const prompt = buildIpoReportPrompt(issueInput);
-    content = await directPrompt(prompt, analysisConfig);
-    if (
-      !content ||
-      content.startsWith("AI is not configured") ||
-      content.startsWith("AI request failed")
-    ) {
+
+    // Model fallback chain (v3.10.1): primary first, then the shared fallback
+    // routes — a dead primary model must not fail the whole IPO analysis
+    // (degraded mode then serves a stale row). Each model gets one attempt,
+    // capped by getPromptTimeoutMs like the batch agents.
+    for (const model of modelFallbackChain(analysisConfig.model)) {
+      const modelConfig =
+        model === analysisConfig.model ? analysisConfig : { ...analysisConfig, model };
+      let attempt: string;
+      try {
+        attempt = await directPrompt(prompt, modelConfig, getPromptTimeoutMs());
+      } catch (e) {
+        logger.warn({
+          msg: "IPO analysis model attempt threw",
+          model,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        continue;
+      }
+      if (
+        !attempt ||
+        attempt.startsWith("AI is not configured") ||
+        attempt.startsWith("AI request failed")
+      ) {
+        logger.warn({
+          msg: "IPO analysis model attempt failed",
+          model,
+          preview: (attempt ?? "").slice(0, 200),
+        });
+        continue; // try next model
+      }
+      content = attempt;
+      break;
+    }
+    if (!content) {
       throw new Error("AI analysis failed — please try again.");
     }
 
@@ -668,7 +698,27 @@ export async function getIpoAnalysis(
         return out;
       }
     }
+
+    // No stale row — surface the real error + audit the failure so admin
+    // monitoring shows why IPO analysis keeps failing (provider, model,
+    // timeout, …).
+    const failMessage = err instanceof Error ? err.message : String(err);
+    createAuditLog({
+      action: "IPO_ANALYSIS_FAILED",
+      resource: "ipo_analysis",
+      resourceId: upper,
+      path: `/api/recommendations/ipos/${upper}/analysis`,
+      responseStatus: 502,
+      errorMessage: failMessage,
+      metadata: { symbol: upper, model: config?.model ?? "unknown" },
+    }).catch(() => undefined);
     throw err;
+  }
+
+  // Control only reaches here when the try completed (the catch re-throws).
+  // TS resets narrowing for variables assigned inside loops — re-assert.
+  if (!content) {
+    throw new Error("AI analysis failed — please try again.");
   }
 
   // Derive verdict/recommendation from the structured report when present,
