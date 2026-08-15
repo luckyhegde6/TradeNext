@@ -16,15 +16,15 @@ import { calculateNextRun } from "@/lib/cron-parser";
  *     routes BEFORE the 10:00 AM IST recommendations run so a dead model is
  *     caught early instead of producing an all-HOLD run.
  *
- * The Market Sync job exists for the ledger + admin visibility: on Netlify the
- * actual morning sync runs via the scheduled function cron-market-sync → the
- * `market-sync` action of netlify/functions/run-cron-background.ts, which
- * records the run against MARKET_SYNC_CRON_NAME (same as the two
- * recommendation jobs). The AI Connection Test likewise runs via the
- * scheduled function cron-ai-connection-test → the `ai-connection-test`
- * action, recorded against AI_CONNECTION_TEST_CRON_NAME. Neither flows
- * through the worker scheduler loop (the worker switch also handles
- * `ai_connection_test` for local/admin-triggered runs).
+ * The four jobs are executed by the in-process cron daemon (v3.11.0):
+ * lib/services/worker/cron-daemon.ts registers each active CronJob row on
+ * the node-cron scheduler (timezone Asia/Kolkata) and spawns a WorkerTask
+ * via spawnDueCronJob → spawnCronTask. The daemon replaced the old Netlify
+ * scheduled functions (cron-recommendations / cron-performance /
+ * cron-market-sync / cron-ai-connection-test → run-cron-background.ts,
+ * deleted in v3.11.0). WorkerTask execution still flows through
+ * executeTask, which handles all four taskTypes (plus `ai_connection_test`
+ * for local/admin-triggered runs).
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
  * picks up due jobs via `nextRun` and spawns tasks through `spawnCronTask`,
@@ -57,20 +57,29 @@ export interface RecordCronRunResult {
   nextRun?: Date | null;
 }
 
+export interface RecordCronRunOptions {
+  /**
+   * True when the run was spawned via spawnCronTask (cronJobId linked) — that
+   * path already increments runCount and advances nextRun at spawn time, so
+   * only the outcome counters (and a completion-time lastRun) are written
+   * here to avoid double counting. v3.11.0: the in-process cron daemon always
+   * spawns via spawnCronTask, so scheduled runs use this.
+   */
+  skipSpawnCounted?: boolean;
+}
+
 /**
  * Record an execution of a SYSTEM-managed recommendation cron job.
  *
  * WHY THIS EXISTS:
- * On Netlify (serverless) the actual scheduled runs execute directly via
- * netlify/functions/run-cron-background.ts → runDailyRecommendations() /
- * checkRecommendationPerformance() — they never pass through
- * spawnCronTask() or the resident worker-engine scheduler loop, so the
- * CronJob ledger (lastRun / runCount / successCount / failureCount /
- * nextRun) stayed at defaults and the Admin → Utils → Cron page showed
- * "no recent runs". successCount/failureCount previously had NO writer.
- *
- * This is the single ledger-writer for the real execution paths:
- *   - netlify/functions/run-cron-background.ts (scheduled runs, success+failure)
+ * Scheduled runs (in-process cron daemon, v3.11.0) execute via
+ * spawnDueCronJob → spawnCronTask, which writes the ledger (lastRun /
+ * runCount / successCount / failureCount / nextRun) at spawn time — but the
+ * success/failure OUTCOME is only known after executeTask finishes. Manual
+ * admin runs (spawnRegularTask, no cronJobId) never touch the ledger. So
+ * this function is the single writer for run OUTCOMES:
+ *   - worker-service.ts executeTask completion paths for system task types
+ *     (recommendations / recommendation_performance) — success + failure
  *   - app/api/admin/workers/route.ts PATCH runNow/retry (manual runs for
  *     tasks WITHOUT a cronJobId — cronJobId-linked tasks are already counted
  *     at spawn time by spawnCronTask, so we skip them to avoid double-count)
@@ -78,7 +87,7 @@ export interface RecordCronRunResult {
  * Job is located by stable name (idempotent with ensureRecommendationCrons).
  * Safe no-op (found:false) when the job does not exist — never throws.
  */
-export async function recordCronRun(jobName: string, success: boolean): Promise<RecordCronRunResult> {
+export async function recordCronRun(jobName: string, success: boolean, options?: RecordCronRunOptions): Promise<RecordCronRunResult> {
   try {
     const job = await prisma.cronJob.findFirst({ where: { name: jobName } });
     if (!job) {
@@ -86,16 +95,19 @@ export async function recordCronRun(jobName: string, success: boolean): Promise<
       return { found: false };
     }
 
-    const nextRun = calculateNextRun(job.cronExpression);
+    const data: Record<string, unknown> = {
+      lastRun: new Date(),
+      successCount: success ? { increment: 1 } : undefined,
+      failureCount: success ? undefined : { increment: 1 },
+    };
+    if (!options?.skipSpawnCounted) {
+      data.runCount = { increment: 1 };
+      data.nextRun = calculateNextRun(job.cronExpression);
+    }
+
     const updated = await prisma.cronJob.update({
       where: { id: job.id },
-      data: {
-        lastRun: new Date(),
-        runCount: { increment: 1 },
-        successCount: success ? { increment: 1 } : undefined,
-        failureCount: success ? undefined : { increment: 1 },
-        nextRun,
-      },
+      data: data as never,
     });
 
     logger.info({

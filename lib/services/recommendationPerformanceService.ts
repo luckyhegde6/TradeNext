@@ -241,9 +241,10 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     // trackers (bounded, next-day-promoted, cached 15 min) then sort + slice.
     orderBy.createdAt = order;
   } else if (sort === "daysTracked") {
-    // daysTracked is computed from createdAt (floor((now - createdAt)/day)+1),
-    // so it is strictly monotonic with createdAt — order by the stored field.
-    orderBy.createdAt = order;
+    // daysTracked = floor((now - createdAt)/day)+1 is INVERSE-monotonic with
+    // createdAt (newer createdAt ⇒ smaller daysTracked) — flip the direction
+    // so the stored field yields the requested daysTracked order exactly.
+    orderBy.createdAt = order === "asc" ? "desc" : "asc";
   } else {
     orderBy[sort] = order;
   }

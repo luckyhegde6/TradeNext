@@ -224,16 +224,22 @@ describe("recommendationPerformanceService", () => {
       expect(res.items.map((i) => i.symbol)).toEqual(["CCC", "AAA", "BBB"]);
     });
 
-    it("orders by createdAt when sorting on the computed daysTracked field (regression: passed raw daysTracked to Prisma → 500)", async () => {
+    it("orders by INVERTED createdAt when sorting on the computed daysTracked field (regression: passed raw daysTracked to Prisma → 500; and createdAt direction flip — daysTracked is inverse-monotonic with createdAt)", async () => {
       prisma.recommendationTracker.findMany.mockResolvedValue([makeTracker()]);
       prisma.recommendationTracker.count.mockResolvedValue(1);
 
       await getPerformanceList({ sort: "daysTracked", order: "desc" });
 
-      // Never pass the computed field to Prisma — order by the stored createdAt
+      // Never pass the computed field to Prisma. daysTracked = floor((now-createdAt)/day)+1,
+      // so DESC daysTracked (largest first = oldest) must map to createdAt ASC.
       const callArgs = prisma.recommendationTracker.findMany.mock.calls[0][0];
-      expect(callArgs.orderBy).toEqual({ createdAt: "desc" });
+      expect(callArgs.orderBy).toEqual({ createdAt: "asc" });
       expect(Object.keys(callArgs.orderBy)).not.toContain("daysTracked");
+
+      // And daysTracked ASC (smallest first = newest) maps to createdAt DESC.
+      await getPerformanceList({ sort: "daysTracked", order: "asc" });
+      const callArgs2 = prisma.recommendationTracker.findMany.mock.calls[1][0];
+      expect(callArgs2.orderBy).toEqual({ createdAt: "desc" });
     });
 
     it("caches the response and serves subsequent calls from cache", async () => {

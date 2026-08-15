@@ -49,10 +49,10 @@ const taskActionSchema = z.object({
  * Best-effort ledger update for manually re-run recommendation tasks.
  * Only tasks WITHOUT a cronJobId are recorded here — tasks spawned via
  * spawnCronTask (cronJobId set) are already counted at spawn time, so
- * recording again would double-count. Hosted on-serverless (Netlify) the
- * scheduled path runs directly (netlify/functions/run-cron-background →
- * recordCronRun), and this route covers the admin "Run Now"/"Retry" path
- * (spawnRegularTask → PATCH runNow/retry → executeTask).
+ * recording again would double-count. Scheduled runs (in-process cron
+ * daemon, v3.11.0) are outcome-recorded by worker-service's
+ * recordSystemRunOutcome; this route covers the admin "Run Now"/"Retry"
+ * path (spawnRegularTask → PATCH runNow/retry → executeTask).
  */
 async function recordManualRunLedger(task: { taskType: string; cronJobId: string | null }, result: { success: boolean }) {
   if (task.cronJobId) return; // already counted at spawn

@@ -130,6 +130,33 @@ describe("recordCronRun", () => {
     expect(result.failureCount).toBe(1);
   });
 
+  it("skipSpawnCounted writes outcome counters only (no runCount/nextRun double-count)", async () => {
+    prisma.cronJob.findFirst.mockResolvedValue(JOB);
+    prisma.cronJob.update.mockResolvedValue({
+      ...JOB,
+      lastRun: new Date("2026-08-11T05:00:00.000Z"),
+      runCount: 1,
+      successCount: 1,
+      failureCount: 0,
+      nextRun: new Date("2026-08-12T04:30:00.000Z"),
+    });
+
+    const result = await recordCronRun(RECOMMENDATION_CRON_NAME, true, { skipSpawnCounted: true });
+
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: expect.objectContaining({
+        lastRun: expect.any(Date),
+        successCount: { increment: 1 },
+      }),
+    });
+    // The spawn-timed path already counted the run — outcome recording must not.
+    const updateArg = prisma.cronJob.update.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(updateArg.data).not.toHaveProperty("runCount");
+    expect(updateArg.data).not.toHaveProperty("nextRun");
+    expect(result.found).toBe(true);
+  });
+
   it("is a safe no-op when the job does not exist", async () => {
     prisma.cronJob.findFirst.mockResolvedValue(null);
 
