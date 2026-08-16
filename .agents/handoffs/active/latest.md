@@ -1,41 +1,45 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260815-serverless-purge"
+session_id: "sess-20260816-swing-async-prod-stability"
 agent: "system"
-timestamp: "2026-08-15T00:00:00Z"
+timestamp: "2026-08-16T16:30:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260814-v3-10-1"
+parent_session: "sess-20260815-serverless-purge"
 child_sessions: []
-checkpoint: "v3.11.3-serverless-purge-code-tests-docs-done-commit-pending"
+checkpoint: "v3.12.0-swing-async-prod-stability-backfill-code-tests-docs-done-commit-pending"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.11.3 — full serverless purge: Netlify treated as a persistent server (post node-cron daemon). Remove every "serverless" branch, opt-out, and Blob-store dependency the v3.11.0 in-process daemon made obsolete, so there is ONE codepath (daemon always self-starts, file logs are the single truth). Also un-skip the stale `DataFetcher.test.tsx` suite (the "1 error" the user asked to fix).
-- **Branch**: `fix/cron-tz-swing-perf` (on top of v3.11.2, committed + pushed `84d86ca`/`0cf44a2`; v3.11.0 `6c4ef41` + v3.11.1 `b2d9423` committed but unpushed). Commit v3.11.3 **pending user approval** — NO push/deploy (user consistent holds).
+- **Task**: v3.12.0 on branch `fix/swing-async-analysis` — (1) fix the Swing tab prod failure (`GET /api/recommendations/swing` ran the FULL pipeline synchronously → Netlify 30s wall killed it; split the AI analysis into a background task); (2) prod-stability batch: perf-check live-price fallback + prod `daily_prices` backfill (user-approved) + heartbeat-aware worker reaper + Prisma per-query timeout + worker-logger `resolveLogsDir()` + error serialization + swing-script import fix.
+- **Branch**: `fix/swing-async-analysis`. Work-in-progress, **NOT committed** — commit pending user approval; NO push/deploy (user merges PR so Netlify rebuilds).
 
 ## Progress
-- [x] **Daemon opt-out REMOVED**: `CRON_DAEMON_DISABLED=1` guard + comment removed from `instrumentation.ts` + `lib/services/worker/cron-daemon.ts` — the daemon must self-start on Netlify now (⚠️ BREAKING vs v3.11.0 doc: do NOT set the flag on Netlify anymore). Kept `NEXT_RUNTIME === "nodejs"` + `NEXT_PHASE !== "phase-production-build"` (build/Edge safety, not serverless). Kept `netlify.toml` + `@netlify/plugin-nextjs`.
-- [x] **Blob logging REMOVED**: `lib/netlify-logger.ts` deleted (`git rm`); `@netlify/blobs` dropped from `package.json`/lock (npm install removed 41 packages). `lib/logger.ts` stripped `getNetlifyLogger`, `/tmp` serverless branch in `getLogsDir`, serverless warn-skip, Blob listing in `getLogFiles`, `blob:` read/delete branches, Blob fallback in `readLogsByDate`, Netlify mirror in `writeToFile`. `worker-logger.ts` (~250 lines) stripped Blob imports, `isServerless()`, and Blob branches in `writeLog`/`readLog`/`getAllLogFiles`/`deleteLog`/`cleanupLogs`. File logs = the single truth (local + Netlify persistent filesystem).
-- [x] **Monitoring UI/API**: `app/api/admin/monitoring/route.ts` dropped `isServerless` + `serverless:` response fields; `app/admin/utils/monitoring/page.tsx` dropped `serverlessLogs` state/fetch + amber "file-system logs ephemeral" banner (DB Logs tab stays); `app/admin/utils/ai-monitoring/page.tsx` title copy updated; `app/llms.txt/route.ts` → "Deployed on Netlify".
-- [x] **Comment sweep (~25 files)** to persistent-server reality: ai-monitoring (6), connectionTestService ×2, recommendation-agent, backtestDataService ×2, chartinkScreenerService, db-logger, recommendationPerformanceService, syncedDataService, worker-engine, cronParser.test, db/server, market-cache, nse-client, admin ai/monitoring routes, api/ai/{alerts,query,screener}, alerts/evaluate, piotroski, user/telegram/verify, cleanup-stale-worker-tasks, prisma/schema.prisma (line 1030), docs/architecture.html ×6.
-- [x] **Test-suite un-skip**: `DataFetcher.test.tsx` describe.skip (removed API — `children`/`apiCall` props, undefined globals) REWRITTEN for the current `apiUrl` + `render` render-prop API with `@/lib/hooks/useApi` mocked — **9/9 pass** (was 0 skipped). Caught a real render-prop arg mismatch (raw data passed as the render arg, not `{data}`).
-- [x] **Verification**: `git grep` proves 0 functional serverless/blob references in code (prisma schema line-4 boilerplate kept; "server-logs" monitoring tab names kept — legit file-log feature). **Suite 709 pass / 4 skip** (was 700/11; 4 skips = intentional client-cache IndexedDB). `npx tsc --noEmit` **46 errors — DOWN from 71 baseline, 0 new** (DataFetcher rewrite removed ~25 stale typing errors; remaining jest-dom matcher LSP noise is the pre-existing repo-wide pattern — runtime-fine, do NOT "fix").
-- [x] **Docs updated (all)**: AGENTS.md v3.11.3 row + header, `.agents/CHANGELOG.md` index + `changelog/versions-v3.md` v3.11.3 entry, TODO.md Quick Reference row, Primer.md (Last Updated + status section), agent-memory.md entry, Lessons.md #77 + update log, session `decisions.md` (D8) + `flow.md` (Batch 4), handoff `latest.md` (this file), session-todos.md; `changelog/serverless-logging.md` marked HISTORICAL/SUPERSEDED.
+- [x] **Swing async split**: `getSwingRecommendations({analyze:true})` returns the fast screener feed instantly with `analysisStatus:"pending"` + kicks `runSwingAnalysisInBackground()` (module-guarded fire-and-forget, `swingAnalysisInFlight` dedupe, `flushSwingAnalysis()` test hook) → AI batches (4 × 5, concurrency 3, retry×2), patches `analysis`/`analysisError`, honest `analysisStatusAfterBatch`, persists swing trackers (non-fatal), audits START/COMPLETE|FAILED + RUN_COMPLETE, re-sets the SAME 30-min cache key (pending self-expires at 10-min `SWING_PENDING_TTL`). `SwingResponse.analysisStatus` union + `"pending"`; `SwingTab` pulsing sky-blue "AI targets generating…" badge + SWR function-form `refreshInterval` (10s pending / 60s after).
+- [x] **Perf-check live-price fallback**: `checkRecommendationPerformance` bridges trackers with no `daily_prices` rows (cap 50, chunked 10-batch `Promise.allSettled` via `getStockQuote`, `lastPrice ?? closePrice`, never throws) → Current/Return % never blank (4 new tests; file suite 33/33).
+- [x] **Prod `daily_prices` backfill APPLIED (user-approved)**: 3 passes — run 1 default `--days 120` (300 scoped / 246 fetched / 15,226 bars) → coverage check showed 107/130 tracking trackers still missing (default scope = NIFTY 50 ∪ 30-day trackers ∪ live screener misses July trackers); run 2 explicit `--symbols` (107 → 85 fetched / 5,596 bars); run 3 explicit `--symbols` (22 → 7 fetched / 373 bars). **Total 21,195 bars, 0 errors**. Final: **115/130 tracking trackers (88%)**, prod **37,387 rows / 602 distinct tickers**. 15 stragglers (BAGMANE.RR, SIGACHI, DIGIKORE, ALPEXSOLAR, ELGNZ, GSMFOILS, JAINIK, UCL, BEACON, MAHICKRA, SUNLITE, VHLTD, CURRENT, TUNWAL, NEUEON) = NSE returns HTTP 200 with EMPTY data (probed 4 — SIGACHI/DIGIKORE/BAGMANE.RR/UCL) — data availability, not a bug; covered by the live fallback.
+- [x] **Worker reaper heartbeat-aware rewrite**: `reapStaleWorkerTasks` fails safe `{0,0}` when the liveness lookup errors → transient DB failure can't sweep RUNNING tasks to `failed` (worker-engine.test.ts 11/11).
+- [x] **Prisma per-query timeout**: `lib/prisma.ts` `$extends({query:{$allOperations}})` + `Promise.race` (default 120s, `QUERY_TIMEOUT_MS` env, `.finally(clearTimeout)`) + stage logs added in `runDailyRecommendations`.
+- [x] **Worker-logger `resolveLogsDir()`**: memoized `cwd/.next/server_logs` → `os.tmpdir()/tradenext-logs` → `""` fallback, wired into 5 worker-logger sites + worker-engine startup (Netlify read-only FS can't crash file logging).
+- [x] **Error serialization** (`error instanceof Error ? error.message : String(error)`) in worker-engine.ts + cron-daemon.ts (pino drops non-enumerable Error props — prod logs showed `error={}`).
+- [x] `scripts/fetch-swing-prices-to-prod.ts` dangling import fixed; `DailyRecommendationStock` verdict writes verified pipeline-only at runtime (read-only elsewhere).
+- [x] **Verification**: **suite 722 pass / 4 skip** (was 711/4 — +11: 4 perf-fallback, 4 reaper-sweep, 1 stage-log, 2 swing-orchestration additions; 4 skips = intentional client-cache). `npx tsc --noEmit` **46 errors = exact baseline, 0 new**. Live-verified :3000 — `force=1` → 6s pending (real AI calls 38–53s responseTimeMs each — sync path could never work) → 225ms cached `done` with 20/20 AI targets, 0 console errors. Temp files cleaned (`prod-diagnostic.tmp.*`, `scripts/.tmp-verify-backfill.ts`, `scripts/.tmp-probe-symbol.ts` deleted).
+- [x] **Docs updated (all)**: AGENTS.md v3.12.0 row (amended — 722 pass + stability batch + backfill results), `.agents/CHANGELOG.md` index + `changelog/versions-v3.md` v3.12.0 entry (amended), TODO.md v3.12.0 rows, Primer.md (Session 19 + status), agent-memory.md entry, Lessons.md #78–80 + update log, session-todos.md, HANDOFF.md, handoff `latest.md` (this file), session `decisions.md` + `flow.md` (`2026-08-16-a6d2f41`).
 
 ## Decisions
-- Serverless purge: one codepath — daemon always self-starts; no opt-out for a deployment mode that no longer exists (an opt-out for a deleted mode is a prod footgun, not a safety net). Keep NEXT_RUNTIME/NEXT_PHASE guards (build/Edge safety) + netlify.toml/plugin.
-- Blob store: removed — a persistent server writes normal files; Blob mirror duplicated logging and its read paths dead-ended.
-- Deliberate keeps: prisma/schema.prisma line-4 "serverless" boilerplate (Prisma template text); "server-logs" monitoring tab type names (legit file-log feature).
-- `describe.skip` is a latent failure (hides regressions + poisons suite counts) — rewrite for the current API rather than guessing from stale assertions.
-- NO deploy this session (user explicit; consistent with v3.11.0/1/2 holds).
+- Request-time split (async AI analysis) is the correct fix for the 30s request wall in a persistent-server deployment — background work belongs off the request path (same reality as the v3.11.x daemon). Pending feed self-expires at a short TTL so a dead process degrades to failed state, never hangs.
+- Prod backfill: use explicit `--symbols` from a consumer-coverage query (tracking trackers), not just the script default scope (which missed >30-day trackers). 0 errors ≠ solved — measure coverage against consumers.
+- NSE 200-with-empty-data for 15 symbols = data availability, NOT a code bug — do not retry-loop; cover at consumption time (live-price fallback).
+- Reaper: fail-safe on liveness-lookup failure — a transient DB error must never sweep RUNNING tasks; swallowing a sweep is strictly safer than a false one.
+- Per-query Prisma timeout: a hung query must not wedge a run forever — timeout + clear, per query.
+- No deploy this session (user explicit hold; Netlify rebuild = deploy happens on PR merge).
 
 ## Blockers
-- **v3.11.3 not committed** — code + docs ready, commit pending user approval. Also unpushed on this branch: v3.11.0 `6c4ef41`, v3.11.1 `b2d9423` (v3.11.2 `84d86ca`/`0cf44a2` already pushed). No deploy.
+- **v3.12.0 not committed** — code + tests + docs ready, commit pending user approval. No push/deploy.
 
 ## Next Steps
-1. User approval → pre-commit hygiene (`git status`, junk artifacts, secrets grep — hooks enforce) → conventional commit "v3.11.3 full serverless purge" → push `fix/cron-tz-swing-perf` (carries v3.11.0/1/3) → PR (ask before PR per repo flow).
-2. NO deploy this batch (user holds). When deploying: daemon self-starts (no `CRON_DAEMON_DISABLED`); netlify.toml ships no functions dir; remove Netlify cron UI entries post-deploy.
-3. Optional follow-up: restart dev server → smoke-test instrumentation auto-start + `/api/admin/cron/daemon` liveness + admin Cron tab daemon chip (Playwright per checklist).
+1. User approval → pre-commit hygiene (`git status`, junk artifacts, secrets grep — hooks enforce) → conventional commit for v3.12.0 → push `fix/swing-async-analysis` → PR (ask before PR per repo flow).
+2. NO deploy (user merges PR → Netlify rebuild).
+3. Post-deploy smoke: `/api/recommendations` `latestRun` healthy (was `failed` 08-15), Performance check shows Current/Return % for the 130 trackers, Swing tab loads instantly + targets within ~2–3 min, monitoring DB logs + ai-monitoring rows OK, remove Netlify cron UI entries.
