@@ -10,8 +10,9 @@
  * which never matched the write path — reads always returned [].
  */
 import fs from "fs";
+import os from "os";
 import path from "path";
-import { readLogsByDate, readLogFile, getLogFiles, deleteLogFile } from "@/lib/logger";
+import { readLogsByDate, readLogFile, getLogFiles, deleteLogFile, resolveLogsDir, resetResolvedLogsDir } from "@/lib/logger";
 
 const LOGS_ROOT = path.join(process.cwd(), "logs");
 const TEST_YEAR_MONTH = "2099-11"; // far-future month dir to avoid clobbering real logs
@@ -73,5 +74,43 @@ describe("logger file paths", () => {
     const ok = await deleteLogFile(TEST_FILE);
     expect(ok).toBe(true);
     expect(fs.existsSync(TEST_FILE)).toBe(false);
+  });
+});
+
+describe("logger logs-dir fallback (Netlify read-only FS)", () => {
+  beforeEach(() => {
+    // Clear memoized dir so each test re-resolves from scratch
+    resetResolvedLogsDir();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    resetResolvedLogsDir();
+  });
+
+  it("falls back to <os.tmpdir()>/tradenext-logs when <cwd>/logs is not writable", () => {
+    const cwdLogs = path.join(process.cwd(), "logs");
+    const originalMkdirSync = fs.mkdirSync.bind(fs);
+
+    jest.spyOn(fs, "mkdirSync").mockImplementation(((dir: any, ...args: any[]) => {
+      if (String(dir) === cwdLogs) {
+        // Simulate Netlify's read-only bundle dir
+        throw new Error(`ENOENT: no such file or directory, mkdir '${cwdLogs}'`);
+      }
+      return originalMkdirSync(dir, ...args);
+    }) as typeof fs.mkdirSync);
+
+    const dir = resolveLogsDir();
+    expect(dir).toBe(path.join(os.tmpdir(), "tradenext-logs"));
+    expect(fs.existsSync(dir)).toBe(true);
+  });
+
+  it("returns '' when NO candidate is writable (file logging disabled)", () => {
+    jest.spyOn(fs, "mkdirSync").mockImplementation(() => {
+      throw new Error("ENOENT: read-only filesystem");
+    });
+
+    const dir = resolveLogsDir();
+    expect(dir).toBe("");
   });
 });
