@@ -4,6 +4,7 @@
 [![Quality Gate](https://github.com/luckyhegde6/TradeNext/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/quality-gate.yml)
 [![Playwright Tests](https://github.com/luckyhegde6/TradeNext/actions/workflows/playwright.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/playwright.yml)
 [![Security Scan](https://github.com/luckyhegde6/TradeNext/actions/workflows/security.yml/badge.svg)](https://github.com/luckyhegde6/TradeNext/actions/workflows/security.yml)
+[![Playwright Report](https://img.shields.io/badge/Playwright-Report-blue?logo=playwright&logoColor=white)](https://luckyhegde6.github.io/TradeNext/)
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.1-black?logo=next.js&logoColor=white)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
@@ -144,6 +145,8 @@ node scripts/dev-checks/test-auth.js
 - **E2E** (`e2e/`, 89 tests, 5 Playwright projects): login, nav, home, screener + advanced screener,
   recommendations, portfolio, watchlist, alerts, profile, responsive. CI: `.github/workflows/playwright.yml`
   (TimescaleDB service, migrate + seed, HTML report artifact 30 days).
+- **Live Playwright report**: [Latest report on GitHub Pages](https://luckyhegde6.github.io/TradeNext/) —
+  auto-published on every green `main` push (results + trace viewer).
 - Details + troubleshooting playbook: `.agents/docs/playwright-e2e.md`.
 
 ---

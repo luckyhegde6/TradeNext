@@ -7,6 +7,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  pages: write
+  id-token: write
 jobs:
   test:
     timeout-minutes: 60
@@ -60,3 +62,14 @@ jobs:
         name: playwright-report
         path: playwright-report/
         retention-days: 30
+    # Publish the HTML report (incl. trace viewer) to GitHub Pages on main
+    # pushes so the README can link a stable public report URL.
+    # https://luckyhegde6.github.io/TradeNext/
+    - name: Upload report to GitHub Pages
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled()
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: playwright-report/
+    - name: Deploy report to GitHub Pages
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled()
+      uses: actions/deploy-pages@v4
