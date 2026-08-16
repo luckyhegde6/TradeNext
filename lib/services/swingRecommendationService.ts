@@ -9,20 +9,23 @@
 //   5. Enrich with momentum indicators from daily_prices (~20 sessions).
 //   6. Optional AI target analysis (lib/services/ai/swing-agent.ts).
 //
-// REQUEST-TIME SPLIT (prod fix): the AI analysis takes minutes (4 batches × 5
-// stocks, bounded concurrency, model retry/fallback) — far beyond Netlify's
-// 30s request wall, which killed the synchronous pipeline mid-batch. The HTTP
-// request now returns the FAST screener feed immediately with
-// analysisStatus "pending" and kicks the AI analysis into a fire-and-forget
-// background task (guarded so concurrent requests never double-run). When the
-// analysis settles it re-sets the cache key with the final payload
-// (done/failed), and the tab's polling picks it up. This relies on Netlify
-// running as a persistent server (v3.11.x in-process daemon model) — the
-// detached promise survives the request.
+// REQUEST-TIME SPLIT + DB-BACKED JOB (prod fixes): the AI analysis takes
+// minutes (4 batches × 5 stocks, bounded concurrency, model retry/fallback) —
+// far beyond Netlify's 30s request wall, which killed the synchronous pipeline
+// mid-batch. The HTTP request now returns the FAST screener feed immediately
+// with analysisStatus "pending" and writes a SwingAnalysisJob row (durable —
+// v3.13.0). The in-process daemon (v3.11.x) + the request path both kick
+// maybeProcessSwingAnalysis(), which claims the oldest pending job, runs the
+// AI batches, patches the payload, and flips it done/failed. The DB row is the
+// source of truth: it survives the staticCache LRU eviction, instance
+// recycling, and multi-instance routing that stranded the v3.12.0 detached
+// cache write on prod (pending feed evicted mid-analysis → tab stuck on
+// "generating" forever).
 //
 // The whole result is cached 30 min; forceRefresh bypasses the cache and
 // re-scans/re-analyzes.
 
+import { Prisma } from "@prisma/client";
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
@@ -51,7 +54,6 @@ import type {
 export const SWING_TOP_N = 20;
 const SWING_CACHE_KEY = "swing:recommendations";
 const SWING_CACHE_TTL = 30 * 60; // 30 min — AI analysis is expensive
-const SWING_PENDING_TTL = 10 * 60; // pending feed self-expires if the background dies
 
 /**
  * Extra (non-swing-category) templates that belong in the swing feed — e.g. the
@@ -438,46 +440,100 @@ function toAnalysisInput(stock: SwingStock): SwingAnalysisInput {
 }
 
 /**
- * In-flight background analysis guard. The AI analysis (4 batches × 5 stocks,
- * bounded concurrency, model retry/fallback) takes minutes — Netlify's 30s
- * request wall killed the old synchronous pipeline mid-batch. The HTTP request
- * now returns the fast screener feed ("pending") and this promise completes
- * the analysis, re-setting the cache with the final payload. Concurrent
- * requests (tab + refresh + force) must never start a second run.
+ * In-flight processor guard. The AI analysis (4 batches × 5 stocks, bounded
+ * concurrency, model retry/fallback) takes minutes — the processor must never
+ * run twice in one process (the atomic claim handles multi-instance). The
+ * daemon tick and the request path both kick it; `flushSwingAnalysis` awaits.
  */
-let swingAnalysisInFlight: Promise<void> | null = null;
+let swingProcessorInFlight: Promise<void> | null = null;
 
-/** Test hook — await the in-flight background analysis (no-op when idle). */
+/** Test hook — await the in-flight background processor (no-op when idle). */
 export function flushSwingAnalysis(): Promise<void> {
-  return swingAnalysisInFlight ?? Promise.resolve();
+  return swingProcessorInFlight ?? Promise.resolve();
 }
 
 /**
- * Background AI analysis for a pending swing feed. Never throws — every
- * failure path writes a "failed" response to the cache so the tab can render
- * the honest error instead of hanging on "pending" forever.
+ * A stale running job (instance died/recycled mid-batch) is retried up to
+ * SWING_JOB_MAX_ATTEMPTS before being marked failed. Pending jobs survive
+ * forever in the DB (they're claimed by the next tick), so the tab never hangs
+ * on "generating" — unlike v3.12.0's cache-only pending payload.
  */
-async function runSwingAnalysisInBackground(
-  enriched: SwingStock[],
-  cacheKey: string,
-  templateCount: number,
-  totalRaw: number,
-): Promise<void> {
+export const SWING_JOB_STALE_MS = 45 * 60 * 1000;
+export const SWING_JOB_MAX_ATTEMPTS = 2;
+
+/** Normalize a job row into the public SwingResponse the tab renders. */
+export function jobToResponse(job: {
+  status: string;
+  payload: unknown;
+  error?: string | null;
+  templateCount: number;
+  totalRaw: number;
+}): SwingResponse {
+  const payload = (job.payload ?? {}) as Partial<SwingResponse>;
+  const base: SwingResponse = {
+    success: true,
+    generatedAt: payload.generatedAt ?? new Date().toISOString(),
+    templateCount: job.templateCount,
+    totalRaw: job.totalRaw,
+    topN: payload.stocks?.length ?? 0,
+    segregation: payload.segregation ?? countSegregation([]),
+    analysisStatus: "pending",
+    analysisError: null,
+    stocks: payload.stocks ?? [],
+  };
+  if (job.status === "done") {
+    return { ...base, analysisStatus: "done", analysisError: payload.analysisError ?? null };
+  }
+  if (job.status === "failed") {
+    return {
+      ...base,
+      analysisStatus: "failed",
+      analysisError: job.error ?? payload.analysisError ?? "AI analysis failed",
+    };
+  }
+  // pending | running → the frozen screener feed; the tab polls until done.
+  return base;
+}
+
+/**
+ * Claim + process one analysis job. The atomic updateMany (pending→running,
+ * attemptCount++) is the multi-instance lock — count 0 means another instance
+ * already claimed it (or it was superseded). Never throws to the caller.
+ */
+export async function processSwingAnalysisJob(job: {
+  id: string;
+  payload: unknown;
+  templateCount: number;
+  totalRaw: number;
+}): Promise<void> {
+  const prisma = (await import("@/lib/prisma")).default;
+
+  const claimed = await prisma.swingAnalysisJob.updateMany({
+    where: { id: job.id, status: "pending" },
+    data: { status: "running", startedAt: new Date(), attemptCount: { increment: 1 } },
+  });
+  if (claimed.count === 0) return; // another instance won the claim
+
+  const stocks = ((job.payload ?? {}) as Partial<SwingResponse>).stocks ?? [];
+  const templateCount = job.templateCount;
+  const totalRaw = job.totalRaw;
+
   createAuditLog({
     action: "SWING_ANALYSIS_START",
     resource: "swing_analysis",
+    resourceId: job.id,
     path: "/api/recommendations/swing",
-    metadata: { stocks: enriched.length },
+    metadata: { stocks: stocks.length, jobId: job.id },
   }).catch(() => undefined);
 
-  let analysisStatus: SwingResponse["analysisStatus"] = "failed";
-  let analysisError: string | null | undefined;
+  let analysisStatus: "done" | "failed" = "failed";
+  let analysisError: string | null = null;
 
   try {
     const config = await loadConfig();
-    const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
+    const analyzed = await analyzeSwingStocks(stocks.map(toAnalysisInput), config);
     const bySymbol = new Map(analyzed.map((a) => [a.symbol.toUpperCase(), a]));
-    for (const s of enriched) {
+    for (const s of stocks) {
       const a = bySymbol.get(s.symbol);
       if (a && a.success && a.analysis) {
         s.analysis = a.analysis;
@@ -485,40 +541,44 @@ async function runSwingAnalysisInBackground(
         s.analysisError = a?.error ?? "Analysis failed";
       }
     }
-    analysisStatus = analysisStatusAfterBatch(enriched);
-    const succeeded = enriched.filter((s) => s.analysis).length;
+    analysisStatus = analysisStatusAfterBatch(stocks) as "done" | "failed";
+    const succeeded = stocks.filter((s) => s.analysis).length;
 
     if (analysisStatus === "failed") {
       analysisError =
-        enriched.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
+        stocks.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
       createAuditLog({
         action: "SWING_ANALYSIS_FAILED",
         resource: "swing_analysis",
+        resourceId: job.id,
         path: "/api/recommendations/swing",
         errorMessage: analysisError,
-        metadata: { stocks: enriched.length, succeeded, failed: enriched.length - succeeded },
+        metadata: { stocks: stocks.length, succeeded, failed: stocks.length - succeeded, jobId: job.id },
       }).catch(() => undefined);
     } else {
       createAuditLog({
         action: "SWING_ANALYSIS_COMPLETE",
         resource: "swing_analysis",
+        resourceId: job.id,
         path: "/api/recommendations/swing",
-        metadata: { stocks: enriched.length, succeeded },
+        metadata: { stocks: stocks.length, succeeded, jobId: job.id },
       }).catch(() => undefined);
     }
   } catch (e) {
     analysisError = e instanceof Error ? e.message : String(e);
     logger.error({
-      msg: "Swing AI analysis failed — falling back to screener-only feed",
+      msg: "Swing AI analysis failed — marking job failed",
       error: analysisError,
+      jobId: job.id,
     });
     analysisStatus = "failed";
     createAuditLog({
       action: "SWING_ANALYSIS_FAILED",
       resource: "swing_analysis",
+      resourceId: job.id,
       path: "/api/recommendations/swing",
       errorMessage: analysisError,
-      metadata: { stocks: enriched.length },
+      metadata: { stocks: stocks.length, jobId: job.id },
     }).catch(() => undefined);
   }
 
@@ -528,8 +588,8 @@ async function runSwingAnalysisInBackground(
   // must never fail because persistence hiccuped.
   if (analysisStatus === "done") {
     try {
-      const { created, updated } = await persistSwingTrackers(enriched);
-      logger.info({ msg: "Swing trackers persisted", created, updated, symbols: enriched.length });
+      const { created, updated } = await persistSwingTrackers(stocks);
+      logger.info({ msg: "Swing trackers persisted", created, updated, symbols: stocks.length });
     } catch (e) {
       logger.warn({
         msg: "Swing tracker persistence failed — feed continues",
@@ -538,33 +598,124 @@ async function runSwingAnalysisInBackground(
     }
   }
 
+  // A force refresh may have superseded us mid-analysis — never overwrite the
+  // newer job's payload. Re-read and bail when we're no longer running.
+  const fresh = await prisma.swingAnalysisJob.findUnique({ where: { id: job.id } });
+  if (!fresh || fresh.status !== "running") {
+    logger.warn({
+      msg: "Swing job superseded mid-analysis — discarding result",
+      jobId: job.id,
+      status: fresh?.status,
+    });
+    return;
+  }
+
   const response: SwingResponse = {
     success: true,
     generatedAt: new Date().toISOString(),
     templateCount,
     totalRaw,
-    topN: enriched.length,
-    segregation: countSegregation(enriched),
+    topN: stocks.length,
+    segregation: countSegregation(stocks),
     analysisStatus,
     analysisError,
-    stocks: enriched,
+    stocks,
   };
+
+  await prisma.swingAnalysisJob.update({
+    where: { id: job.id },
+    data: {
+      status: analysisStatus,
+      payload: response as unknown as Prisma.InputJsonValue,
+      completedAt: new Date(),
+      analyzedCount: stocks.filter((s) => s.analysis).length,
+      error: analysisError,
+    },
+  });
 
   createAuditLog({
     action: "SWING_RUN_COMPLETE",
     resource: "swing",
+    resourceId: job.id,
     path: "/api/recommendations/swing",
     metadata: {
       templates: templateCount,
       analyze: true,
       totalRaw,
-      topN: enriched.length,
+      topN: stocks.length,
       analysisStatus,
       error: analysisError ?? undefined,
+      jobId: job.id,
     },
   }).catch(() => undefined);
 
-  staticCache.set(cacheKey, response, SWING_CACHE_TTL);
+  // Warm the cache with the final payload so steady-state polls skip the DB
+  // (30-min TTL; the DB row remains the durable source of truth).
+  staticCache.set(`${SWING_CACHE_KEY}:ai`, response, SWING_CACHE_TTL);
+}
+
+/**
+ * Drain the swing analysis queue. Recovery + claim:
+ *   1. Stale running jobs (instance died mid-batch) → back to pending for a
+ *      retry; exhausted attempts → failed with a readable error.
+ *   2. Claim the OLDEST pending job and process it (multi-instance safe via
+ *      the atomic updateMany claim).
+ * Never throws — the daemon tick and the request path fire-and-forget.
+ */
+export async function maybeProcessSwingAnalysis(): Promise<void> {
+  if (swingProcessorInFlight) return;
+
+  const run = (async () => {
+    try {
+      const prisma = (await import("@/lib/prisma")).default;
+      const staleBefore = new Date(Date.now() - SWING_JOB_STALE_MS);
+
+      const retried = await prisma.swingAnalysisJob.updateMany({
+        where: {
+          status: "running",
+          startedAt: { lt: staleBefore },
+          attemptCount: { lt: SWING_JOB_MAX_ATTEMPTS },
+        },
+        data: { status: "pending", startedAt: null },
+      });
+      const exhausted = await prisma.swingAnalysisJob.updateMany({
+        where: {
+          status: "running",
+          startedAt: { lt: staleBefore },
+          attemptCount: { gte: SWING_JOB_MAX_ATTEMPTS },
+        },
+        data: {
+          status: "failed",
+          error: `Swing AI analysis timed out after ${SWING_JOB_MAX_ATTEMPTS} attempt(s)`,
+          completedAt: new Date(),
+        },
+      });
+      if (retried.count > 0 || exhausted.count > 0) {
+        logger.warn({
+          msg: "Swing analysis jobs recovered from stale running",
+          retried: retried.count,
+          exhausted: exhausted.count,
+        });
+      }
+
+      const pending = await prisma.swingAnalysisJob.findFirst({
+        where: { status: "pending" },
+        orderBy: { createdAt: "asc" },
+      });
+      if (!pending) return;
+      await processSwingAnalysisJob(pending);
+    } catch (e) {
+      logger.error({
+        msg: "Swing analysis processor crashed — job stays pending for next tick",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  })();
+
+  swingProcessorInFlight = run.finally(() => {
+    swingProcessorInFlight = null;
+  });
+  return swingProcessorInFlight;
 }
 
 /**
@@ -590,6 +741,55 @@ export async function getSwingRecommendations(
   }
 
   const templateIds = getSwingTemplateIds();
+  const prisma = (await import("@/lib/prisma")).default;
+
+  // Analyze=true fast path: a completed/pending DB job serves the response
+  // WITHOUT re-running the screener — the job row is the durable source of
+  // truth (survives cache LRU eviction + instance recycle), the cache is only
+  // a 30-min accelerator for steady-state polls.
+  if (analyze) {
+    const latestJob = await prisma.swingAnalysisJob.findFirst({
+      orderBy: { createdAt: "desc" },
+    });
+    if (latestJob && !forceRefresh) {
+      const served = jobToResponse(latestJob);
+      if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
+        staticCache.set(cacheKey, served, SWING_CACHE_TTL);
+      } else {
+        // pending/running — serve the frozen feed; the daemon (or the kick
+        // below) settles it. The job stores the full screener feed, so no
+        // scan is needed here.
+        maybeProcessSwingAnalysis().catch(() => undefined);
+      }
+      logger.info({
+        msg: "Swing served from DB job",
+        status: latestJob.status,
+        jobId: latestJob.id,
+        analyze,
+        forceRefresh,
+      });
+      return served;
+    }
+
+    // forceRefresh supersedes any in-flight work so the UI's "Refresh" always
+    // wins: stale pending/running jobs are failed with a readable reason and
+    // the new job takes over. The superseded processor aborts on its final
+    // re-read (status !== running) and discards its result.
+    if (forceRefresh) {
+      const superseded = await prisma.swingAnalysisJob.updateMany({
+        where: { status: { in: ["pending", "running"] } },
+        data: {
+          status: "failed",
+          error: "Superseded by a newer force refresh",
+          completedAt: new Date(),
+        },
+      });
+      if (superseded.count > 0) {
+        logger.warn({ msg: "Swing jobs superseded by force refresh", count: superseded.count });
+      }
+    }
+  }
+
   logger.info({ msg: "Swing run starting", templates: templateIds.length, analyze });
   createAuditLog({
     action: "SWING_RUN_START",
@@ -636,38 +836,56 @@ export async function getSwingRecommendations(
     indicators: indicatorMap.get(s.symbol) ?? EMPTY_INDICATORS,
   }));
 
-  // AI target analysis — background (see runSwingAnalysisInBackground). The
-  // request returns the pending feed immediately; the tab polls and picks up
-  // the final payload once the analysis settles.
-  if (analyze && enriched.length > 0) {
-    if (!swingAnalysisInFlight) {
-      const run = runSwingAnalysisInBackground(enriched, cacheKey, templateIds.length, deduped.length);
-      swingAnalysisInFlight = run
-        .catch((e) => {
-          logger.error({
-            msg: "Swing background analysis crashed — pending feed stays cached",
-            error: e instanceof Error ? e.message : String(e),
-          });
-        })
-        .finally(() => {
-          swingAnalysisInFlight = null;
-        });
-    }
-
-    const pending: SwingResponse = {
+  // Empty feed → synchronous skipped response (no job, no AI — nothing to
+  // analyze). The tab renders its honest empty state.
+  if (analyze && enriched.length === 0) {
+    const empty: SwingResponse = {
       success: true,
       generatedAt: new Date().toISOString(),
       templateCount: templateIds.length,
-      totalRaw: deduped.length,
-      topN: enriched.length,
+      totalRaw: 0,
+      topN: 0,
+      segregation: countSegregation([]),
+      analysisStatus: "skipped",
+      analysisError: null,
+      stocks: [],
+    };
+    staticCache.set(cacheKey, empty, SWING_CACHE_TTL);
+    return empty;
+  }
+
+  // analyze=true → persist a durable job and return the pending feed
+  // immediately; the processor (daemon tick + this kick) completes it in the
+  // background. The DB row survives Netlify instance recycle and staticCache
+  // LRU eviction — the tab can never hang on "generating".
+  if (analyze) {
+    const created = await prisma.swingAnalysisJob.create({
+      data: {
+        status: "pending",
+        payload: {
+          generatedAt: new Date().toISOString(),
+          stocks: enriched,
+          segregation: countSegregation(enriched),
+        } as unknown as Prisma.InputJsonValue,
+        stockCount: enriched.length,
+        templateCount: templateIds.length,
+        totalRaw: deduped.length,
+      },
+    });
+
+    maybeProcessSwingAnalysis().catch(() => undefined);
+
+    const pending: SwingResponse = {
+      success: true,
+      generatedAt: created.generatedAt.toISOString(),
+      templateCount: created.templateCount,
+      totalRaw: created.totalRaw,
+      topN: created.stockCount,
       segregation: countSegregation(enriched),
       analysisStatus: "pending",
       analysisError: null,
       stocks: enriched,
     };
-    // Short TTL so a stale pending self-expires if the process dies mid-run;
-    // the background overwrites with the 30-min final payload when done.
-    staticCache.set(cacheKey, pending, SWING_PENDING_TTL);
     return pending;
   }
 

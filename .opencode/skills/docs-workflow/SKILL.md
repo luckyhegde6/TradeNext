@@ -101,7 +101,7 @@ Apply after **every** implementation, before commit. Run `git status` + `git dif
 | File | When | What to add |
 |------|------|-------------|
 | `AGENTS.md` | Every change | Version table row (Ver, Date, Summary) + bullets; update Commands/Key Libraries if changed; `## Version History` entry |
-| `.agents/CHANGELOG.md` | Every change | Index row → detail bullet in `.agents/changelog/versions-v3.md` (or v2/v1): Files Created/Modified + root cause/feature |
+| `.agents/CHANGELOG.md` | Every change | Index row → detail bullet in per-minor file `.agents/changelog/versions-v3.<minor>.md` (or v2/v1): Files Created/Modified + root cause/feature |
 | `TODO.md` | Feature/bug | Mark items done; add new rows; update Quick Reference status |
 | `README.md` | User-facing | Feature bullets, credentials, commands, tested-features table |
 | `Primer.md` | Session | Current Project Status + Session History |

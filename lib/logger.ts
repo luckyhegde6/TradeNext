@@ -37,11 +37,50 @@ interface LogEntry {
   args?: any[];
 }
 
+// ── logs-dir resolution (v3.13.1) ──────────────────────────────────────────
+// Netlify's deployed bundle dir is read-only — `fs.mkdirSync('<cwd>/logs')`
+// throws ENOENT on every prod boot, so `logsDirAvailable` flipped to false and
+// NO log file was ever written → the monitoring "Server Logs" tab stayed
+// empty on prod (the pre-v3.11.3 Netlify Blob mirror used to mask this).
+// Resolution order — first writable candidate wins, remembered per process:
+//   1. <cwd>/logs                  (local dev — existing layout/contract)
+//   2. <os.tmpdir()>/tradenext-logs (Netlify — /tmp is writable)
+//   3. "" (no file logging — console still logs)
+let resolvedLogsDir: string | undefined;
+
+export function resolveLogsDir(): string {
+  if (resolvedLogsDir !== undefined) return resolvedLogsDir;
+  if (!isServer || !fs || !pathModule) {
+    resolvedLogsDir = '';
+    return '';
+  }
+  const os = require('os');
+  const candidates = [
+    pathModule.join(process.cwd(), 'logs'),
+    pathModule.join(os.tmpdir(), 'tradenext-logs'),
+  ];
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
+      resolvedLogsDir = dir;
+      return dir;
+    } catch {
+      // candidate not writable — try the next one
+    }
+  }
+  resolvedLogsDir = '';
+  return '';
+}
+
 // Server logs directory
 const getLogsDir = (): string => {
-  const cwd = process.cwd();
-  return isServer ? pathModule.join(cwd, 'logs') : '';
+  return resolveLogsDir();
 };
+
+// Test hook — clear the memoized dir resolution (mirrors resetBacktestHistoryGuard)
+export function resetResolvedLogsDir(): void {
+  resolvedLogsDir = undefined;
+}
 
 // Export for use in other files
 export const LOGS_DIR = ''; // Will be computed dynamically
@@ -55,6 +94,10 @@ function ensureLogsDir() {
 
   try {
     const logsDir = getLogsDir();
+    if (!logsDir) {
+      logsDirAvailable = false;
+      return;
+    }
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
     }
@@ -70,11 +113,16 @@ function getTodayLogPath(): string {
   if (!isServer || !fs || !pathModule || !logsDirAvailable) return '';
 
   try {
+    const logsDir = getLogsDir();
+    if (!logsDir) {
+      logsDirAvailable = false;
+      return '';
+    }
+
     const today = new Date();
     const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
     const yearMonth = dateStr.substring(0, 7); // YYYY-MM
 
-    const logsDir = getLogsDir();
     const yearMonthDir = pathModule.join(logsDir, yearMonth);
     if (!fs.existsSync(yearMonthDir)) {
       fs.mkdirSync(yearMonthDir, { recursive: true });
@@ -95,6 +143,7 @@ export async function getLogFiles(): Promise<{ date: string; path: string; size:
   if (isServer && fs && pathModule) {
     ensureLogsDir();
     const logsDir = getLogsDir();
+    if (!logsDir) return files;
 
     try {
       if (fs.existsSync(logsDir)) {
@@ -140,6 +189,7 @@ export async function readLogFile(filePath: string, limit: number = 1000): Promi
 export async function readLogsByDate(date: string, limit: number = 1000): Promise<string[]> {
   if (!isServer || !fs || !pathModule) return [];
   const logsDir = getLogsDir();
+  if (!logsDir) return [];
   const yearMonth = date.substring(0, 7); // YYYY-MM
   const filePath = pathModule.join(logsDir, yearMonth, `${date}.log`);
 

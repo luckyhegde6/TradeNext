@@ -1,11 +1,12 @@
 /**
  * Tests for swingRecommendationService — pure pipeline pieces:
  * template → signal-family segregation, symbol dedupe, ranking/capping,
- * momentum indicators, and family counting.
+ * momentum indicators, family counting, tracker persistence, and the
+ * DB-backed analysis job orchestration (v3.13.0).
  *
- * NOTE: only PURE functions are tested here (no DB / network). The DB fetch
- * (fetchRecentCloses) and AI orchestration (getSwingRecommendations) are thin
- * wrappers over tested pieces + established services.
+ * The DB fetch (fetchRecentCloses) and AI orchestration (getSwingRecommendations)
+ * are exercised with a stateful in-memory swingAnalysisJob store that mirrors
+ * the service's actual queries (claim, stale recovery, supersede).
  */
 
 // ─── Mocks (before imports — SWC hoists jest.mock) ──────────────────────
@@ -24,10 +25,95 @@ jest.mock("@/lib/services/ai/config", () => ({
   loadConfig: jest.fn(),
 }));
 
-jest.mock("@/lib/prisma", () => ({
-  __esModule: true,
-  default: { $queryRaw: jest.fn() },
-}));
+/**
+ * Stateful in-memory SwingAnalysisJob store mirroring the service's queries:
+ * findFirst (orderBy), findUnique, create, update, updateMany with
+ * status-in / lt / gte / increment conditions (claim, stale recovery,
+ * supersede, force-refresh). Exposed on the mock as `__swingJobs` for tests.
+ */
+jest.mock("@/lib/prisma", () => {
+  const jobs: Array<Record<string, any>> = [];
+
+  const compare = (cond: unknown, val: unknown): boolean => {
+    if (cond === undefined) return true;
+    if (cond && typeof cond === "object") {
+      const c = cond as Record<string, unknown>;
+      if ("in" in c) return Array.isArray(c.in) ? c.in.includes(val) : false;
+      if ("lt" in c) return val !== null && val !== undefined && val < (c.lt as Date | number);
+      if ("lte" in c) return val !== null && val !== undefined && val <= (c.lte as Date | number);
+      if ("gt" in c) return val !== null && val !== undefined && val > (c.gt as Date | number);
+      if ("gte" in c) return val !== null && val !== undefined && val >= (c.gte as Date | number);
+      return true;
+    }
+    return val === cond;
+  };
+
+  const whereMatches = (row: Record<string, any>, where: Record<string, any> | undefined): boolean => {
+    if (!where) return true;
+    return Object.entries(where).every(([key, cond]) => compare(cond, row[key]));
+  };
+
+  const applyData = (row: Record<string, any>, data: Record<string, any>): void => {
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === "object" && "increment" in value) {
+        row[key] = (row[key] ?? 0) + (value as { increment: number }).increment;
+      } else {
+        row[key] = value;
+      }
+    }
+  };
+
+  const swingAnalysisJob = {
+    findFirst: jest.fn(async (args?: { where?: Record<string, any>; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+      const matched = jobs.filter((j) => whereMatches(j, args?.where));
+      matched.sort((a, b) =>
+        args?.orderBy?.createdAt === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
+      return matched[0] ?? null;
+    }),
+    findUnique: jest.fn(async ({ where }: { where: { id: string } }) => jobs.find((j) => j.id === where.id) ?? null),
+    create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
+      const row: Record<string, any> = {
+        id: `job-${jobs.length + 1}`,
+        status: "pending",
+        payload: null,
+        generatedAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+        error: null,
+        stockCount: 0,
+        analyzedCount: 0,
+        attemptCount: 0,
+        templateCount: 0,
+        totalRaw: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...data,
+      };
+      jobs.push(row);
+      return row;
+    }),
+    update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, any> }) => {
+      const row = jobs.find((j) => j.id === where.id);
+      if (!row) throw new Error("swingAnalysisJob not found");
+      applyData(row, data);
+      return row;
+    }),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, any>; data: Record<string, any> }) => {
+      const matched = jobs.filter((j) => whereMatches(j, where));
+      for (const row of matched) applyData(row, data);
+      return { count: matched.length };
+    }),
+  };
+
+  return {
+    __esModule: true,
+    default: { $queryRaw: jest.fn(), swingAnalysisJob },
+    __swingJobs: jobs,
+  };
+});
 
 jest.mock("@/lib/audit", () => ({
   __esModule: true,
@@ -49,6 +135,8 @@ import {
   persistSwingTrackers,
   type SwingTrackerDb,
   SWING_TOP_N,
+  SWING_JOB_MAX_ATTEMPTS,
+  jobToResponse,
 } from "@/lib/services/swingRecommendationService";
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
 import type { SwingResponse, SwingStock } from "@/lib/services/swing-types";
@@ -446,12 +534,14 @@ describe("persistSwingTrackers", () => {
   });
 });
 
-// ─── Orchestration (v3.11.0 audit contract + v3.12.0 request-time split) ─
-// getSwingRecommendations is a thin orchestrator; these tests pin its audit
-// contract: run start/complete always, analysis events only when AI runs, a
-// human-readable analysisError surfaced when AI fails for every stock, and —
-// since v3.12.0 — the analyze=true request returns a fast "pending" feed while
-// the AI analysis settles in the background (the 30s Netlify request wall fix).
+// ─── Orchestration (v3.13.0 DB-backed analysis job) ──────────────────────
+// getSwingRecommendations is a thin orchestrator. Since v3.13.0 the AI
+// analysis runs as a durable SwingAnalysisJob row: the request returns a fast
+// "pending" feed, the processor (daemon tick + request kick) settles the job
+// in the background, and the DB row survives cache LRU eviction + instance
+// recycle. These tests pin: audit contract, job lifecycle (create → claim →
+// done/failed), stale-running recovery (retry once → fail), supersede on
+// force refresh, and the no-double-run guard.
 
 describe("getSwingRecommendations audit logging", () => {
   const { createAuditLog } = jest.requireMock("@/lib/audit") as {
@@ -463,7 +553,17 @@ describe("getSwingRecommendations audit logging", () => {
   const { analyzeSwingStocks } = jest.requireMock("@/lib/services/ai/swing-agent") as {
     analyzeSwingStocks: jest.Mock;
   };
-  const prisma = jest.requireMock("@/lib/prisma").default as { $queryRaw: jest.Mock };
+  const prisma = jest.requireMock("@/lib/prisma").default as {
+    $queryRaw: jest.Mock;
+    swingAnalysisJob: {
+      findFirst: jest.Mock;
+      findUnique: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
+  };
+  const swingJobs = jest.requireMock("@/lib/prisma").__swingJobs as Array<Record<string, any>>;
 
   const fakeUnified = {
     symbol: "RELIANCE",
@@ -479,8 +579,38 @@ describe("getSwingRecommendations audit logging", () => {
     source: "chartink_db",
   } as unknown as UnifiedScreenerResult;
 
+  const makeJobInput = (overrides: Record<string, any> = {}) => ({
+    status: "pending",
+    payload: {
+      stocks: [
+        {
+          symbol: "RELIANCE",
+          name: "Reliance Industries",
+          price: 2500,
+          change: 12.5,
+          changePercent: 0.5,
+          volume: 1_000_000,
+          screenerNames: ["Swing Breakout"],
+          screenerCount: 1,
+          families: ["breakout"],
+          templateIds: ["swing.breakout"],
+          source: "chartink_db",
+          momentumScore: 60,
+          indicators: { momentum10: 5, momentum20: 12, volatility20: 3, distanceFrom20dHigh: 2 },
+          analysis: null,
+          analysisError: null,
+        },
+      ],
+    },
+    stockCount: 1,
+    templateCount: 1,
+    totalRaw: 1,
+    ...overrides,
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    swingJobs.length = 0;
     prisma.$queryRaw.mockResolvedValue([]);
     runChartinkUnifiedScreeners.mockResolvedValue([fakeUnified]);
     staticCache.flushAll();
@@ -497,9 +627,10 @@ describe("getSwingRecommendations audit logging", () => {
     expect(actions).toContain("SWING_RUN_START");
     expect(actions).toContain("SWING_RUN_COMPLETE");
     expect(actions).not.toContain("SWING_ANALYSIS_START");
+    expect(swingJobs).toHaveLength(0); // no job for analyze=false
   });
 
-  it("returns a fast pending feed, then audits the background failure with a readable error", async () => {
+  it("creates a durable pending job and settles it to failed with a readable error", async () => {
     analyzeSwingStocks.mockResolvedValue([
       {
         symbol: "RELIANCE",
@@ -518,17 +649,26 @@ describe("getSwingRecommendations audit logging", () => {
     );
 
     // Request returns immediately with the screener feed + pending status —
-    // the whole point of the v3.12.0 request-time split (no 30s wall).
+    // the whole point of the request-time split (no 30s wall).
     const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
     expect(response.analysisStatus).toBe("pending");
     expect(response.stocks).toHaveLength(1);
     expect(response.stocks[0].analysis).toBeNull();
 
-    // Background settles: failed status + readable error land in the cache.
+    // The job row is the durable source of truth.
+    expect(swingJobs).toHaveLength(1);
+    expect(swingJobs[0].status).toBe("pending");
+    expect(swingJobs[0].stockCount).toBe(1);
+
+    // Background settles: failed status + readable error land in cache + DB.
     await flushSwingAnalysis();
     const cached = staticCache.get("swing:recommendations:ai") as SwingResponse;
     expect(cached.analysisStatus).toBe("failed");
     expect(cached.analysisError).toContain("not valid JSON");
+    expect(swingJobs[0].status).toBe("failed");
+    expect(swingJobs[0].analyzedCount).toBe(0);
+    expect(swingJobs[0].error).toContain("not valid JSON");
+    expect(swingJobs[0].completedAt).toBeInstanceOf(Date);
 
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_START");
@@ -536,7 +676,7 @@ describe("getSwingRecommendations audit logging", () => {
     expect(actions).toContain("SWING_RUN_COMPLETE");
   });
 
-  it("publishes done status + AI targets to the cache after a successful background analysis", async () => {
+  it("publishes done status + AI targets after a successful background analysis", async () => {
     analyzeSwingStocks.mockResolvedValue([
       {
         symbol: "RELIANCE",
@@ -571,23 +711,213 @@ describe("getSwingRecommendations audit logging", () => {
     expect(cached.analysisStatus).toBe("done");
     expect(cached.stocks[0].analysis?.action).toBe("LONG");
     expect(cached.stocks[0].analysis?.confidence).toBe(82);
+    expect(swingJobs[0].status).toBe("done");
+    expect(swingJobs[0].analyzedCount).toBe(1);
 
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_COMPLETE");
   });
 
-  it("does not double-run the background analysis on concurrent requests", async () => {
-    const { getSwingRecommendations, flushSwingAnalysis } = await import(
+  it("serves a completed job from the DB without re-scanning", async () => {
+    const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
-    analyzeSwingStocks.mockResolvedValue([]);
+    await prisma.swingAnalysisJob.create({
+      data: {
+        ...makeJobInput(),
+        status: "done",
+        analyzedCount: 1,
+        payload: {
+          stocks: (makeJobInput().payload as { stocks: unknown[] }).stocks,
+          analysisStatus: "done",
+          analysisError: null,
+        },
+      },
+    });
+    runChartinkUnifiedScreeners.mockRejectedValue(new Error("must not scan"));
+
+    const response = await getSwingRecommendations({ analyze: true }); // no force
+    expect(response.analysisStatus).toBe("done");
+    expect(response.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
+    // Cache warmed for steady-state polls.
+    expect(staticCache.get("swing:recommendations:ai")).toBeDefined();
+  });
+
+  it("serves a frozen pending feed from a pending job without re-scanning", async () => {
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    await prisma.swingAnalysisJob.create({ data: makeJobInput() });
+    runChartinkUnifiedScreeners.mockRejectedValue(new Error("must not scan"));
+
+    const response = await getSwingRecommendations({ analyze: true }); // no force
+    expect(response.analysisStatus).toBe("pending");
+    expect(response.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
+    expect(swingJobs).toHaveLength(1); // no second job created
+  });
+
+  it("force refresh supersedes pending jobs so the UI refresh always wins", async () => {
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    await prisma.swingAnalysisJob.create({
+      data: { ...makeJobInput(), id: "job-old" },
+    });
+    // Force refresh triggers a fresh scan + job, failing the stale pending one.
+    const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
+
+    expect(response.analysisStatus).toBe("pending");
+    expect(swingJobs).toHaveLength(2);
+    const old = swingJobs.find((j) => j.id === "job-old")!;
+    expect(old.status).toBe("failed");
+    expect(old.error).toBe("Superseded by a newer force refresh");
+    const fresh = swingJobs.find((j) => j.id !== "job-old")!;
+    expect(fresh.status).toBe("pending");
+    expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not double-run the analysis on concurrent processor kicks", async () => {
+    const { maybeProcessSwingAnalysis, flushSwingAnalysis } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    analyzeSwingStocks.mockResolvedValue([
+      {
+        symbol: "RELIANCE",
+        price: 2500,
+        changePercent: 0.5,
+        volume: 1_000_000,
+        screenerNames: ["Swing Breakout"],
+        families: ["breakout"],
+        success: false,
+        error: "boom",
+      },
+    ]);
+    await prisma.swingAnalysisJob.create({ data: makeJobInput() });
 
     await Promise.all([
-      getSwingRecommendations({ analyze: true, forceRefresh: true }),
-      getSwingRecommendations({ analyze: true, forceRefresh: true }),
+      maybeProcessSwingAnalysis(),
+      maybeProcessSwingAnalysis(),
+      maybeProcessSwingAnalysis(),
     ]);
     await flushSwingAnalysis();
 
     expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
+    expect(swingJobs[0].status).toBe("failed"); // empty/boom batch → failed
+  });
+
+  it("recovers a stale running job: retries once, then fails (attempts exhausted)", async () => {
+    const { maybeProcessSwingAnalysis } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    analyzeSwingStocks.mockResolvedValue([
+      {
+        symbol: "RELIANCE",
+        price: 2500,
+        changePercent: 0.5,
+        volume: 1_000_000,
+        screenerNames: ["Swing Breakout"],
+        families: ["breakout"],
+        success: false,
+        error: "boom",
+      },
+    ]);
+
+    // Attempt 1 died mid-run (instance recycle) — stale >45min, claim-count 1.
+    const stale = await prisma.swingAnalysisJob.create({
+      data: {
+        ...makeJobInput(),
+        status: "running",
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        attemptCount: 1,
+      },
+    });
+    await maybeProcessSwingAnalysis();
+    // Retried (recovery → pending) then claimed again → attemptCount 2 → failed.
+    expect(swingJobs[0].status).toBe("failed");
+    expect(swingJobs[0].attemptCount).toBe(2);
+    expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
+
+    // Attempt 2 also died — attempts exhausted → failed WITHOUT running AI.
+    await prisma.swingAnalysisJob.create({
+      data: {
+        ...makeJobInput(),
+        status: "running",
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        attemptCount: SWING_JOB_MAX_ATTEMPTS,
+      },
+    });
+    await maybeProcessSwingAnalysis();
+    const exhausted = swingJobs.find((j) => j.id !== stale.id)!;
+    expect(exhausted.status).toBe("failed");
+    expect(exhausted.error).toContain("timed out");
+    expect(exhausted.attemptCount).toBe(SWING_JOB_MAX_ATTEMPTS);
+    expect(analyzeSwingStocks).toHaveBeenCalledTimes(1); // unchanged
+  });
+
+  it("discards the result when the job is superseded mid-analysis", async () => {
+    const { processSwingAnalysisJob } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    let resolveAnalysis!: () => void;
+    analyzeSwingStocks.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAnalysis = () => resolve([]);
+        }),
+    );
+    const job = await prisma.swingAnalysisJob.create({ data: makeJobInput() });
+
+    const processing = processSwingAnalysisJob(job);
+    await new Promise((r) => setTimeout(r, 0)); // let the claim land
+
+    // Force refresh supersedes while the analysis is in flight.
+    await prisma.swingAnalysisJob.update({
+      where: { id: job.id },
+      data: { status: "failed", error: "Superseded by a newer force refresh", completedAt: new Date() },
+    });
+    resolveAnalysis();
+    await processing;
+
+    const fresh = await prisma.swingAnalysisJob.findUnique({ where: { id: job.id } });
+    expect(fresh!.status).toBe("failed");
+    expect(fresh!.error).toBe("Superseded by a newer force refresh");
+    expect(staticCache.get("swing:recommendations:ai")).toBeUndefined();
+  });
+});
+
+// ─── jobToResponse (pure normalization) ───────────────────────────────────
+
+describe("jobToResponse", () => {
+  const baseJob = {
+    status: "pending",
+    payload: {
+      stocks: [],
+      segregation: { momentum: 0, breakout: 0, trend: 0, meanReversion: 0, crossover: 0, bearish: 0, volume: 0, range: 0, reversal: 0 },
+      generatedAt: "2026-08-16T04:00:00.000Z",
+    },
+    error: null,
+    templateCount: 34,
+    totalRaw: 120,
+  };
+
+  it("maps done jobs to analysisStatus done with stock payloads", () => {
+    const res = jobToResponse({ ...baseJob, status: "done" });
+    expect(res.analysisStatus).toBe("done");
+    expect(res.templateCount).toBe(34);
+    expect(res.totalRaw).toBe(120);
+    expect(res.stocks).toEqual([]);
+  });
+
+  it("maps failed jobs to analysisStatus failed with a readable error", () => {
+    const res = jobToResponse({ ...baseJob, status: "failed", error: "AI analysis failed" });
+    expect(res.analysisStatus).toBe("failed");
+    expect(res.analysisError).toBe("AI analysis failed");
+  });
+
+  it("maps pending/running jobs to a frozen pending feed (never claims done)", () => {
+    expect(jobToResponse(baseJob).analysisStatus).toBe("pending");
+    expect(jobToResponse({ ...baseJob, status: "running" }).analysisStatus).toBe("pending");
   });
 });
