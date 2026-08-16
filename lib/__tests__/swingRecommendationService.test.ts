@@ -51,7 +51,8 @@ import {
   SWING_TOP_N,
 } from "@/lib/services/swingRecommendationService";
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
-import type { SwingStock } from "@/lib/services/swing-types";
+import type { SwingResponse, SwingStock } from "@/lib/services/swing-types";
+import { staticCache } from "@/lib/cache";
 
 // ─── templateFamilies ────────────────────────────────────────────────────
 
@@ -445,10 +446,12 @@ describe("persistSwingTrackers", () => {
   });
 });
 
-// ─── Orchestration audit logging (v3.11.0) ───────────────────────────────
+// ─── Orchestration (v3.11.0 audit contract + v3.12.0 request-time split) ─
 // getSwingRecommendations is a thin orchestrator; these tests pin its audit
-// contract: run start/complete always, analysis events only when AI runs,
-// and a human-readable analysisError surfaced when AI fails for every stock.
+// contract: run start/complete always, analysis events only when AI runs, a
+// human-readable analysisError surfaced when AI fails for every stock, and —
+// since v3.12.0 — the analyze=true request returns a fast "pending" feed while
+// the AI analysis settles in the background (the 30s Netlify request wall fix).
 
 describe("getSwingRecommendations audit logging", () => {
   const { createAuditLog } = jest.requireMock("@/lib/audit") as {
@@ -480,6 +483,7 @@ describe("getSwingRecommendations audit logging", () => {
     jest.clearAllMocks();
     prisma.$queryRaw.mockResolvedValue([]);
     runChartinkUnifiedScreeners.mockResolvedValue([fakeUnified]);
+    staticCache.flushAll();
   });
 
   it("audits run start + complete when analysis is skipped", async () => {
@@ -495,7 +499,7 @@ describe("getSwingRecommendations audit logging", () => {
     expect(actions).not.toContain("SWING_ANALYSIS_START");
   });
 
-  it("audits analysis failure with a readable error when AI fails for every stock", async () => {
+  it("returns a fast pending feed, then audits the background failure with a readable error", async () => {
     analyzeSwingStocks.mockResolvedValue([
       {
         symbol: "RELIANCE",
@@ -509,16 +513,81 @@ describe("getSwingRecommendations audit logging", () => {
           "Swing AI analysis failed — the model's response was not valid JSON (2 attempt(s) across 2 model(s))",
       },
     ]);
-    const { getSwingRecommendations } = await import(
+    const { getSwingRecommendations, flushSwingAnalysis } = await import(
       "@/lib/services/swingRecommendationService"
     );
-    const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
 
-    expect(response.analysisStatus).toBe("failed");
-    expect(response.analysisError).toContain("not valid JSON");
+    // Request returns immediately with the screener feed + pending status —
+    // the whole point of the v3.12.0 request-time split (no 30s wall).
+    const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
+    expect(response.analysisStatus).toBe("pending");
+    expect(response.stocks).toHaveLength(1);
+    expect(response.stocks[0].analysis).toBeNull();
+
+    // Background settles: failed status + readable error land in the cache.
+    await flushSwingAnalysis();
+    const cached = staticCache.get("swing:recommendations:ai") as SwingResponse;
+    expect(cached.analysisStatus).toBe("failed");
+    expect(cached.analysisError).toContain("not valid JSON");
+
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_START");
     expect(actions).toContain("SWING_ANALYSIS_FAILED");
     expect(actions).toContain("SWING_RUN_COMPLETE");
+  });
+
+  it("publishes done status + AI targets to the cache after a successful background analysis", async () => {
+    analyzeSwingStocks.mockResolvedValue([
+      {
+        symbol: "RELIANCE",
+        price: 2500,
+        changePercent: 0.5,
+        volume: 1_000_000,
+        screenerNames: ["Swing Breakout"],
+        families: ["breakout"],
+        success: true,
+        analysis: {
+          action: "LONG",
+          confidence: 82,
+          entryPrice: 2500,
+          targetPrice: 2750,
+          stopLoss: 2375,
+          timeHorizon: "short",
+          logic: "Breakout above the swing high with volume expansion.",
+          momentumScore: 71,
+          riskFactors: ["Broader market weakness"],
+        },
+      },
+    ]);
+    const { getSwingRecommendations, flushSwingAnalysis } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+
+    const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
+    expect(response.analysisStatus).toBe("pending");
+
+    await flushSwingAnalysis();
+    const cached = staticCache.get("swing:recommendations:ai") as SwingResponse;
+    expect(cached.analysisStatus).toBe("done");
+    expect(cached.stocks[0].analysis?.action).toBe("LONG");
+    expect(cached.stocks[0].analysis?.confidence).toBe(82);
+
+    const actions = createAuditLog.mock.calls.map((c) => c[0].action);
+    expect(actions).toContain("SWING_ANALYSIS_COMPLETE");
+  });
+
+  it("does not double-run the background analysis on concurrent requests", async () => {
+    const { getSwingRecommendations, flushSwingAnalysis } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    analyzeSwingStocks.mockResolvedValue([]);
+
+    await Promise.all([
+      getSwingRecommendations({ analyze: true, forceRefresh: true }),
+      getSwingRecommendations({ analyze: true, forceRefresh: true }),
+    ]);
+    await flushSwingAnalysis();
+
+    expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,8 +9,19 @@
 //   5. Enrich with momentum indicators from daily_prices (~20 sessions).
 //   6. Optional AI target analysis (lib/services/ai/swing-agent.ts).
 //
-// The whole result is cached 30 min (analysis is expensive); forceRefresh
-// bypasses the cache and re-scans/re-analyzes.
+// REQUEST-TIME SPLIT (prod fix): the AI analysis takes minutes (4 batches × 5
+// stocks, bounded concurrency, model retry/fallback) — far beyond Netlify's
+// 30s request wall, which killed the synchronous pipeline mid-batch. The HTTP
+// request now returns the FAST screener feed immediately with
+// analysisStatus "pending" and kicks the AI analysis into a fire-and-forget
+// background task (guarded so concurrent requests never double-run). When the
+// analysis settles it re-sets the cache key with the final payload
+// (done/failed), and the tab's polling picks it up. This relies on Netlify
+// running as a persistent server (v3.11.x in-process daemon model) — the
+// detached promise survives the request.
+//
+// The whole result is cached 30 min; forceRefresh bypasses the cache and
+// re-scans/re-analyzes.
 
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
@@ -40,6 +51,7 @@ import type {
 export const SWING_TOP_N = 20;
 const SWING_CACHE_KEY = "swing:recommendations";
 const SWING_CACHE_TTL = 30 * 60; // 30 min — AI analysis is expensive
+const SWING_PENDING_TTL = 10 * 60; // pending feed self-expires if the background dies
 
 /**
  * Extra (non-swing-category) templates that belong in the swing feed — e.g. the
@@ -426,9 +438,142 @@ function toAnalysisInput(stock: SwingStock): SwingAnalysisInput {
 }
 
 /**
+ * In-flight background analysis guard. The AI analysis (4 batches × 5 stocks,
+ * bounded concurrency, model retry/fallback) takes minutes — Netlify's 30s
+ * request wall killed the old synchronous pipeline mid-batch. The HTTP request
+ * now returns the fast screener feed ("pending") and this promise completes
+ * the analysis, re-setting the cache with the final payload. Concurrent
+ * requests (tab + refresh + force) must never start a second run.
+ */
+let swingAnalysisInFlight: Promise<void> | null = null;
+
+/** Test hook — await the in-flight background analysis (no-op when idle). */
+export function flushSwingAnalysis(): Promise<void> {
+  return swingAnalysisInFlight ?? Promise.resolve();
+}
+
+/**
+ * Background AI analysis for a pending swing feed. Never throws — every
+ * failure path writes a "failed" response to the cache so the tab can render
+ * the honest error instead of hanging on "pending" forever.
+ */
+async function runSwingAnalysisInBackground(
+  enriched: SwingStock[],
+  cacheKey: string,
+  templateCount: number,
+  totalRaw: number,
+): Promise<void> {
+  createAuditLog({
+    action: "SWING_ANALYSIS_START",
+    resource: "swing_analysis",
+    path: "/api/recommendations/swing",
+    metadata: { stocks: enriched.length },
+  }).catch(() => undefined);
+
+  let analysisStatus: SwingResponse["analysisStatus"] = "failed";
+  let analysisError: string | null | undefined;
+
+  try {
+    const config = await loadConfig();
+    const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
+    const bySymbol = new Map(analyzed.map((a) => [a.symbol.toUpperCase(), a]));
+    for (const s of enriched) {
+      const a = bySymbol.get(s.symbol);
+      if (a && a.success && a.analysis) {
+        s.analysis = a.analysis;
+      } else {
+        s.analysisError = a?.error ?? "Analysis failed";
+      }
+    }
+    analysisStatus = analysisStatusAfterBatch(enriched);
+    const succeeded = enriched.filter((s) => s.analysis).length;
+
+    if (analysisStatus === "failed") {
+      analysisError =
+        enriched.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
+      createAuditLog({
+        action: "SWING_ANALYSIS_FAILED",
+        resource: "swing_analysis",
+        path: "/api/recommendations/swing",
+        errorMessage: analysisError,
+        metadata: { stocks: enriched.length, succeeded, failed: enriched.length - succeeded },
+      }).catch(() => undefined);
+    } else {
+      createAuditLog({
+        action: "SWING_ANALYSIS_COMPLETE",
+        resource: "swing_analysis",
+        path: "/api/recommendations/swing",
+        metadata: { stocks: enriched.length, succeeded },
+      }).catch(() => undefined);
+    }
+  } catch (e) {
+    analysisError = e instanceof Error ? e.message : String(e);
+    logger.error({
+      msg: "Swing AI analysis failed — falling back to screener-only feed",
+      error: analysisError,
+    });
+    analysisStatus = "failed";
+    createAuditLog({
+      action: "SWING_ANALYSIS_FAILED",
+      resource: "swing_analysis",
+      path: "/api/recommendations/swing",
+      errorMessage: analysisError,
+      metadata: { stocks: enriched.length },
+    }).catch(() => undefined);
+  }
+
+  // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
+  // (timeHorizon "swing") so they surface in the Performance tab's Swing
+  // filter and the daily perf-check cron tracks them. Non-fatal — the feed
+  // must never fail because persistence hiccuped.
+  if (analysisStatus === "done") {
+    try {
+      const { created, updated } = await persistSwingTrackers(enriched);
+      logger.info({ msg: "Swing trackers persisted", created, updated, symbols: enriched.length });
+    } catch (e) {
+      logger.warn({
+        msg: "Swing tracker persistence failed — feed continues",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  const response: SwingResponse = {
+    success: true,
+    generatedAt: new Date().toISOString(),
+    templateCount,
+    totalRaw,
+    topN: enriched.length,
+    segregation: countSegregation(enriched),
+    analysisStatus,
+    analysisError,
+    stocks: enriched,
+  };
+
+  createAuditLog({
+    action: "SWING_RUN_COMPLETE",
+    resource: "swing",
+    path: "/api/recommendations/swing",
+    metadata: {
+      templates: templateCount,
+      analyze: true,
+      totalRaw,
+      topN: enriched.length,
+      analysisStatus,
+      error: analysisError ?? undefined,
+    },
+  }).catch(() => undefined);
+
+  staticCache.set(cacheKey, response, SWING_CACHE_TTL);
+}
+
+/**
  * Full swing pipeline (see file header). Cached 30 min; forceRefresh bypasses.
- * Never throws for feed/indicator failures — the tab must degrade gracefully
- * (empty feed / no indicators), not 500.
+ * When `analyze=true` the request returns the FAST screener feed with
+ * analysisStatus "pending" and the AI analysis runs in the background (it
+ * takes minutes and would blow the 30s Netlify request wall). Never throws
+ * for feed/indicator failures — the tab must degrade gracefully (empty feed /
+ * no indicators), not 500.
  */
 export async function getSwingRecommendations(
   options: { forceRefresh?: boolean; analyze?: boolean } = {},
@@ -491,83 +636,42 @@ export async function getSwingRecommendations(
     indicators: indicatorMap.get(s.symbol) ?? EMPTY_INDICATORS,
   }));
 
-  // AI target analysis — optional; failure never kills the feed.
-  let analysisStatus: SwingResponse["analysisStatus"] = "skipped";
-  let analysisError: string | null | undefined;
+  // AI target analysis — background (see runSwingAnalysisInBackground). The
+  // request returns the pending feed immediately; the tab polls and picks up
+  // the final payload once the analysis settles.
   if (analyze && enriched.length > 0) {
-    createAuditLog({
-      action: "SWING_ANALYSIS_START",
-      resource: "swing_analysis",
-      path: "/api/recommendations/swing",
-      metadata: { stocks: enriched.length },
-    }).catch(() => undefined);
-
-    try {
-      const config = await loadConfig();
-      const analyzed = await analyzeSwingStocks(enriched.map(toAnalysisInput), config);
-      const bySymbol = new Map(analyzed.map((a) => [a.symbol.toUpperCase(), a]));
-      for (const s of enriched) {
-        const a = bySymbol.get(s.symbol);
-        if (a && a.success && a.analysis) {
-          s.analysis = a.analysis;
-        } else {
-          s.analysisError = a?.error ?? "Analysis failed";
-        }
-      }
-      analysisStatus = analysisStatusAfterBatch(enriched);
-      const succeeded = enriched.filter((s) => s.analysis).length;
-
-      if (analysisStatus === "failed") {
-        analysisError =
-          enriched.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
-        createAuditLog({
-          action: "SWING_ANALYSIS_FAILED",
-          resource: "swing_analysis",
-          path: "/api/recommendations/swing",
-          errorMessage: analysisError,
-          metadata: { stocks: enriched.length, succeeded, failed: enriched.length - succeeded },
-        }).catch(() => undefined);
-      } else {
-        createAuditLog({
-          action: "SWING_ANALYSIS_COMPLETE",
-          resource: "swing_analysis",
-          path: "/api/recommendations/swing",
-          metadata: { stocks: enriched.length, succeeded },
-        }).catch(() => undefined);
-      }
-    } catch (e) {
-      analysisError = e instanceof Error ? e.message : String(e);
-      logger.error({
-        msg: "Swing AI analysis failed — falling back to screener-only feed",
-        error: analysisError,
-      });
-      analysisStatus = "failed";
-      createAuditLog({
-        action: "SWING_ANALYSIS_FAILED",
-        resource: "swing_analysis",
-        path: "/api/recommendations/swing",
-        errorMessage: analysisError,
-        metadata: { stocks: enriched.length },
-      }).catch(() => undefined);
-    }
-
-    // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
-    // (timeHorizon "swing") so they surface in the Performance tab's Swing
-    // filter and the daily perf-check cron tracks them. Non-fatal — the feed
-    // must never fail because persistence hiccuped.
-    if (analysisStatus === "done") {
-      try {
-        const { created, updated } = await persistSwingTrackers(enriched);
-        logger.info({ msg: "Swing trackers persisted", created, updated, symbols: enriched.length });
-      } catch (e) {
-        logger.warn({
-          msg: "Swing tracker persistence failed — feed continues",
-          error: e instanceof Error ? e.message : String(e),
+    if (!swingAnalysisInFlight) {
+      const run = runSwingAnalysisInBackground(enriched, cacheKey, templateIds.length, deduped.length);
+      swingAnalysisInFlight = run
+        .catch((e) => {
+          logger.error({
+            msg: "Swing background analysis crashed — pending feed stays cached",
+            error: e instanceof Error ? e.message : String(e),
+          });
+        })
+        .finally(() => {
+          swingAnalysisInFlight = null;
         });
-      }
     }
+
+    const pending: SwingResponse = {
+      success: true,
+      generatedAt: new Date().toISOString(),
+      templateCount: templateIds.length,
+      totalRaw: deduped.length,
+      topN: enriched.length,
+      segregation: countSegregation(enriched),
+      analysisStatus: "pending",
+      analysisError: null,
+      stocks: enriched,
+    };
+    // Short TTL so a stale pending self-expires if the process dies mid-run;
+    // the background overwrites with the 30-min final payload when done.
+    staticCache.set(cacheKey, pending, SWING_PENDING_TTL);
+    return pending;
   }
 
+  // analyze=false (or empty feed) — synchronous screener-only feed.
   const response: SwingResponse = {
     success: true,
     generatedAt: new Date().toISOString(),
@@ -575,8 +679,8 @@ export async function getSwingRecommendations(
     totalRaw: deduped.length,
     topN: enriched.length,
     segregation: countSegregation(enriched),
-    analysisStatus,
-    analysisError,
+    analysisStatus: "skipped",
+    analysisError: null,
     stocks: enriched,
   };
 
@@ -589,8 +693,8 @@ export async function getSwingRecommendations(
       analyze,
       totalRaw: deduped.length,
       topN: enriched.length,
-      analysisStatus,
-      error: analysisError ?? undefined,
+      analysisStatus: "skipped",
+      error: undefined,
     },
   }).catch(() => undefined);
 

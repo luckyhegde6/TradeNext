@@ -35,6 +35,7 @@ jest.mock("@/lib/prisma", () => {
     },
     workerStatus: {
       upsert: jest.fn(),
+      findMany: jest.fn(),
     },
   };
   return { __esModule: true, default: mock };
@@ -77,6 +78,9 @@ const { spawnCronTask: mockSpawnCronTask } = require("@/lib/services/worker/task
 describe("reapStaleWorkerTasks", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // No live workers by default — everything is reapable unless a test
+    // marks a worker alive via workerStatus.findMany.
+    prisma.workerStatus.findMany.mockResolvedValue([]);
     prisma.workerTask.findMany.mockResolvedValue([]);
     prisma.dailyRecommendationRun.findMany.mockResolvedValue([]);
   });
@@ -112,6 +116,78 @@ describe("reapStaleWorkerTasks", () => {
     });
   });
 
+  // ── v3.12.0 heartbeat awareness ──────────────────────────────────────────
+
+  it("does NOT reap tasks whose owner worker has a fresh heartbeat", async () => {
+    // worker-live has a recent heartbeat; worker-gone is dead.
+    prisma.workerStatus.findMany.mockResolvedValue([{ workerId: "worker-live" }]);
+    prisma.workerTask.findMany
+      .mockResolvedValueOnce([
+        { id: "t-live", assignedTo: "worker-live" },
+        { id: "t-dead", assignedTo: "worker-gone" },
+      ])
+      .mockResolvedValueOnce([]); // no live run producers
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 1, reapedRuns: 0 });
+    // ONLY the dead-owner task is reaped — the live one is left alone.
+    expect(prisma.workerTask.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["t-dead"] } },
+      data: expect.objectContaining({ status: "failed" }),
+    });
+    // The liveness probe queries heartbeats within the alive window.
+    expect(prisma.workerStatus.findMany).toHaveBeenCalledWith({
+      where: { lastHeartbeat: { gte: expect.any(Date) } },
+      select: { workerId: true },
+    });
+  });
+
+  it("reaps tasks with no owner at all (legacy rows)", async () => {
+    prisma.workerStatus.findMany.mockResolvedValue([{ workerId: "worker-live" }]);
+    prisma.workerTask.findMany
+      .mockResolvedValueOnce([{ id: "t-noowner", assignedTo: null }])
+      .mockResolvedValueOnce([]);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 1, reapedRuns: 0 });
+    expect(prisma.workerTask.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["t-noowner"] } },
+      data: expect.objectContaining({ status: "failed" }),
+    });
+  });
+
+  it("does NOT reap runs while a live worker is executing a recommendations task", async () => {
+    prisma.workerStatus.findMany.mockResolvedValue([{ workerId: "worker-live" }]);
+    prisma.workerTask.findMany
+      .mockResolvedValueOnce([]) // no stale tasks
+      .mockResolvedValueOnce([{ id: "task-rec" }]); // live producer in flight
+    prisma.dailyRecommendationRun.findMany.mockResolvedValue([{ id: "run-1" }]);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+    expect(prisma.dailyRecommendationRun.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reaps runs when the run-producing worker is dead", async () => {
+    // No live workers at all → no live producers → stale run is reaped.
+    prisma.workerStatus.findMany.mockResolvedValue([]);
+    prisma.workerTask.findMany
+      .mockResolvedValueOnce([{ id: "task-rec", assignedTo: "worker-dead" }])
+      .mockResolvedValueOnce([]); // live producers = none
+    prisma.dailyRecommendationRun.findMany.mockResolvedValue([{ id: "run-1" }]);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 1, reapedRuns: 1 });
+    expect(prisma.dailyRecommendationRun.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["run-1"] } },
+      data: expect.objectContaining({ status: "failed" }),
+    });
+  });
+
   it("is a no-op when nothing is stale", async () => {
     const result = await reapStaleWorkerTasks();
     expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
@@ -120,12 +196,13 @@ describe("reapStaleWorkerTasks", () => {
   });
 
   it("never throws when the DB fails — returns zeros", async () => {
-    prisma.workerTask.findMany.mockRejectedValue(new Error("db down"));
-    prisma.dailyRecommendationRun.findMany.mockRejectedValue(new Error("db down"));
+    prisma.workerStatus.findMany.mockRejectedValue(new Error("db down"));
 
     const result = await reapStaleWorkerTasks();
 
     expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+    expect(prisma.workerTask.updateMany).not.toHaveBeenCalled();
+    expect(prisma.dailyRecommendationRun.updateMany).not.toHaveBeenCalled();
   });
 });
 

@@ -90,13 +90,65 @@ try {
 // Use global singleton to avoid multiple connections in development
 const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient | undefined };
 
-export const db = globalForPrisma.prismaClient ?? prismaClient;
-export const prisma = globalForPrisma.prismaClient ?? prismaClient;
+// ─── Per-query timeout (v3.12.0) ───────────────────────────────────────────
+// Prod Accelerate queries had NO timeout — a stalled proxy connection hung a
+// healthy daily run for 16+ min with ZERO logs (run 8715fd51, 2026-08-16:
+// "Capped daily recommendations…" at 12:12:34, then silence until another
+// instance's reaper killed it at 12:29/12:30). Every query is now raced against
+// a deadline so no single DB call can wedge the pipeline: on timeout the query
+// rejects with a distinctive PrismaQueryTimeoutError, the pipeline's existing
+// try/catch marks the run failed, and the next stage proceeds — fail-fast
+// instead of silent hang.
+const QUERY_TIMEOUT_MS = Number(process.env.PRISMA_QUERY_TIMEOUT_MS) || 120_000;
+
+export class PrismaQueryTimeoutError extends Error {
+  constructor(model: string, operation: string) {
+    super(`Prisma query ${model}.${operation} timed out after ${QUERY_TIMEOUT_MS}ms`);
+    this.name = "PrismaQueryTimeoutError";
+  }
+}
+
+function withQueryTimeout<T>(promise: Promise<T>, model: string, operation: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new PrismaQueryTimeoutError(model, operation)),
+      QUERY_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+// Wrap the base client so EVERY model/raw query is timeout-bounded
+// (the $allOperations extension intercepts all operations incl. $queryRaw).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
+  query: {
+    $allOperations({ model, operation, args, query }) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const result = query(args);
+      if (typeof (result as Promise<unknown> | undefined)?.then === "function") {
+        return withQueryTimeout(
+          result as Promise<unknown>,
+          model ?? "?",
+          operation,
+        );
+      }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      return result;
+    },
+  },
+}) as PrismaClient;
+
+export const db = globalForPrisma.prismaClient ?? extendedClient;
+export const prisma = globalForPrisma.prismaClient ?? extendedClient;
 
 // Default export for backward compatibility
 export default prisma;
 
 // Only cache in dev/local to avoid issues in production
 if (isDev) {
-  globalForPrisma.prismaClient = prismaClient;
+  globalForPrisma.prismaClient = extendedClient;
 }

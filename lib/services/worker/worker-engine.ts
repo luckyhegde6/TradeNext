@@ -2,10 +2,8 @@
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { executeTask } from "./worker-service";
-import { createTaskLogger, writeLog } from "./worker-logger";
+import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
-import { join } from "path";
-import { existsSync, mkdirSync, chmodSync } from "fs";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
@@ -16,13 +14,25 @@ const HEARTBEAT_INTERVAL_MS = 60_000; // Write heartbeat every 60s instead of ev
 let lastHeartbeatStatus: "idle" | "busy" = "idle";
 let lastHeartbeatTaskId: string | undefined;
 
-// ─── Stale-task reaping (v3.8.0) ───────────────────────────────────────────
+// ─── Stale-task reaping (v3.8.0, heartbeat-aware v3.12.0) ─────────────────
 // A task left in "running" past STALE_MS is dead: the worker crashed, the
 // Netlify background function hit its 15-min cap, or an admin runNow was
 // killed by the sync-function timeout. Reaping resets it to "failed" so the
 // queue never wedges and monitoring shows the truth.
+//
+// v3.12.0: the reaper now checks WORKER LIVENESS first. The heartbeat interval
+// is 60s, so a live worker's lastHeartbeat is never more than ~2 min old.
+// Tasks/runs owned by a LIVE worker are legitimately in flight (e.g. the AI
+// analysis loop running on another Netlify instance) — reaping them fails
+// healthy work (prod 2026-08-16: healthy run 8715fd51 was killed by another
+// instance's reaper 16 min after start, then the whole run was lost).
 const STALE_MS = 16 * 60_000; // 14-min safety net + 15-min Netlify cap
 const REAP_INTERVAL_MS = 60_000; // reaper throttled to once per minute
+const WORKER_ALIVE_WINDOW_MS = 3 * 60_000; // fresh heartbeat = live worker
+// Task types that CREATE DailyRecommendationRun rows (runDailyRecommendations).
+// A running run is legit only while one of these is executing on a live worker
+// (runs carry no worker id of their own).
+const RUN_PRODUCING_TASK_TYPES = ["recommendations"];
 let lastReapAt = 0;
 
 // ─── Cron spawn dedup (v3.8.0) ─────────────────────────────────────────────
@@ -47,15 +57,14 @@ export function startWorker(pollingIntervalMs = 5000) {
 
     logger.info({ msg: "Starting background worker engine", workerId: WORKER_ID, interval: pollingIntervalMs, heartbeatInterval: HEARTBEAT_INTERVAL_MS });
 
-    // Ensure logs directory exists at startup
+    // Ensure a writable logs directory exists at startup — cwd/.next/server_logs
+    // on local, os.tmpdir()/tradenext-logs on Netlify's read-only FS (v3.12.0;
+    // the old mkdir of `.next/server_logs` threw ENOENT on every prod boot and
+    // permanently disabled worker file logging).
     try {
-        const logsDir = join(process.cwd(), ".next", "server_logs");
-        if (!existsSync(logsDir)) {
-            mkdirSync(logsDir, { recursive: true, mode: 0o777 });
-            chmodSync(logsDir, 0o777);
-        }
+        resolveLogsDir();
     } catch (e) {
-        logger.warn({ msg: "Failed to initialize logs directory at startup", error: e });
+        logger.warn({ msg: "Failed to initialize logs directory at startup", error: e instanceof Error ? e.message : String(e) });
     }
 
     // Task polling — only queries DB when there might be pending tasks
@@ -63,7 +72,10 @@ export function startWorker(pollingIntervalMs = 5000) {
         try {
             await pollAndExecute();
         } catch (error) {
-            logger.error({ msg: "Worker loop error", error });
+            // v3.12.0: pass the MESSAGE, not the raw object — pino's serializer
+            // drops non-enumerable Error props (prod logged `{"clientVersion":"7.9.1"}`
+            // for a Prisma engine error, losing the actual message).
+            logger.error({ msg: "Worker loop error", error: error instanceof Error ? error.message : String(error) });
         }
     }, pollingIntervalMs);
 
@@ -99,13 +111,13 @@ export function startScheduler(checkIntervalMs = 60000) {
     import("@/lib/services/recommendationCronService")
         .then(({ ensureRecommendationCrons }) => ensureRecommendationCrons())
         .then((res) => logger.info({ msg: "Recommendation crons ensured", jobs: res.jobs.length }))
-        .catch((error) => logger.error({ msg: "Failed to ensure recommendation crons", error }));
+        .catch((error) => logger.error({ msg: "Failed to ensure recommendation crons", error: error instanceof Error ? error.message : String(error) }));
 
     schedulerInterval = setInterval(async () => {
         try {
             await checkScheduledJobs();
         } catch (error) {
-            logger.error({ msg: "Scheduler loop error", error });
+            logger.error({ msg: "Scheduler loop error", error: error instanceof Error ? error.message : String(error) });
         }
     }, checkIntervalMs);
 }
@@ -210,6 +222,14 @@ async function pollAndExecute() {
  * `staleMs` (they are dead — worker crashed or the process was restarted
  * killed at the Netlify 15-min cap) and DailyRecommendationRuns stuck in
  * "running" (keyed on createdAt — that model has no startedAt).
+ *
+ * v3.12.0 heartbeat-awareness: only tasks whose owning worker is DEAD (no
+ * WorkerStatus row, or lastHeartbeat older than WORKER_ALIVE_WINDOW_MS) are
+ * reaped. Runs are reaped only while NO live worker is executing a
+ * run-producing task ("recommendations"). If liveness can't be determined
+ * (heartbeat lookup fails) the reaper skips everything — fail-safe: never
+ * kill work we can't prove is dead.
+ *
  * Exported for tests and the cleanup tooling.
  */
 export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<{ reapedTasks: number; reapedRuns: number }> {
@@ -217,43 +237,86 @@ export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<
     let reapedTasks = 0;
     let reapedRuns = 0;
 
+    let aliveWorkerIds: Set<string> | null = null;
+    try {
+        const aliveWorkers = await prisma.workerStatus.findMany({
+            where: { lastHeartbeat: { gte: new Date(Date.now() - WORKER_ALIVE_WINDOW_MS) } },
+            select: { workerId: true },
+        });
+        aliveWorkerIds = new Set(aliveWorkers.map((w) => w.workerId));
+    } catch (error) {
+        logger.warn({
+            msg: "Alive-worker lookup failed — skipping reap (fail-safe)",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { reapedTasks: 0, reapedRuns: 0 };
+    }
+
     try {
         const tasks = await prisma.workerTask.findMany({
             where: { status: "running", startedAt: { lte: cutoff } },
-            select: { id: true },
+            select: { id: true, assignedTo: true },
         });
-        if (tasks.length > 0) {
+        // Only reap tasks with NO owner or a DEAD owner — a task running on a
+        // live worker is a legitimately long-running job (e.g. the AI analysis
+        // loop), not a wedged one.
+        const reapable = tasks.filter((t) => !t.assignedTo || !aliveWorkerIds!.has(t.assignedTo));
+        if (reapable.length > 0) {
             await prisma.workerTask.updateMany({
-                where: { id: { in: tasks.map((t) => t.id) } },
+                where: { id: { in: reapable.map((t) => t.id) } },
                 data: {
                     status: "failed",
                     completedAt: new Date(),
                     error: `Reaped by ${WORKER_ID}: task ran past ${Math.round(staleMs / 60000)} min without completing`,
                 },
             });
-            reapedTasks = tasks.length;
-            logger.warn({ msg: "Reaped stale worker tasks", count: reapedTasks, cutoff: cutoff.toISOString() });
+            reapedTasks = reapable.length;
+            logger.warn({
+                msg: "Reaped stale worker tasks",
+                count: reapedTasks,
+                skippedLiveOwners: tasks.length - reapable.length,
+                cutoff: cutoff.toISOString(),
+            });
         }
     } catch (error) {
         logger.warn({ msg: "Stale worker-task reap failed", error: error instanceof Error ? error.message : String(error) });
     }
 
     try {
+        // Runs carry no worker id — a running run is legit ONLY while its
+        // producing task ("recommendations") is executing on a LIVE worker.
+        const liveProducers = await prisma.workerTask.findMany({
+            where: {
+                status: "running",
+                taskType: { in: RUN_PRODUCING_TASK_TYPES },
+                assignedTo: { in: [...aliveWorkerIds!] },
+            },
+            select: { id: true },
+        });
+
         const runs = await prisma.dailyRecommendationRun.findMany({
             where: { status: "running", createdAt: { lte: cutoff } },
             select: { id: true },
         });
         if (runs.length > 0) {
-            await prisma.dailyRecommendationRun.updateMany({
-                where: { id: { in: runs.map((r) => r.id) } },
-                data: {
-                    status: "failed",
-                    completedAt: new Date(),
-                    errorMessage: `Reaped by ${WORKER_ID}: run past ${Math.round(staleMs / 60000)} min without completing`,
-                },
-            });
-            reapedRuns = runs.length;
-            logger.warn({ msg: "Reaped stale recommendation runs", count: reapedRuns, cutoff: cutoff.toISOString() });
+            if (liveProducers.length > 0) {
+                logger.debug({
+                    msg: "Skipped run reap — live producer task in flight",
+                    runCount: runs.length,
+                    liveProducers: liveProducers.length,
+                });
+            } else {
+                await prisma.dailyRecommendationRun.updateMany({
+                    where: { id: { in: runs.map((r) => r.id) } },
+                    data: {
+                        status: "failed",
+                        completedAt: new Date(),
+                        errorMessage: `Reaped by ${WORKER_ID}: run past ${Math.round(staleMs / 60000)} min without completing`,
+                    },
+                });
+                reapedRuns = runs.length;
+                logger.warn({ msg: "Reaped stale recommendation runs", count: reapedRuns, cutoff: cutoff.toISOString() });
+            }
         }
     } catch (error) {
         logger.warn({ msg: "Stale recommendation-run reap failed", error: error instanceof Error ? error.message : String(error) });
@@ -372,7 +435,7 @@ export async function checkScheduledJobs() {
         try {
             await spawnDueCronJob(job);
         } catch (error) {
-            logger.error({ msg: "Failed to spawn task for cron job", jobId: job.id, error });
+            logger.error({ msg: "Failed to spawn task for cron job", jobId: job.id, error: error instanceof Error ? error.message : String(error) });
         }
     }
 }
