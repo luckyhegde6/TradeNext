@@ -129,10 +129,10 @@ git config core.hooksPath .githooks    # Enable versioned hooks (fresh clone)
 | `.agents/rules/session-decisions-flow.md` | ⚠️ MANDATORY per-session memory: `decisions.md` (decisions + reasoning) + `flow.md` (execution path/code touched) in `.agents/sessions/<YYYY-MM-DD-<hash>>/` — write during work, before code and at every code/package change |
 | `.agents/rules/checklist.md` | Engineering guardrail checklist (v1.2) — hard contract for all changes |
 | `.agents/rules/README.md` | Coding standards index (TS rules, imports, naming, errors, security) |
-| `Primer.md` | Session tracking - read at start of every session |
-| `agent-memory.md` | Activity log - tracks all agent work |
-| `Lessons.md` | Rules & corrections - read before every commit |
-| `HANDOFF.md` | Root orchestration state - read at start of every session |
+| `@Primer.md` | Session tracking - read at start of every session |
+| `@agent-memory.md` | Activity log - tracks all agent work |
+| `@Lessons.md` | Rules & corrections - read before every commit |
+| `@HANDOFF.md` | Root orchestration state - read at start of every session |
 | `.agents/session-todos.md` | Current session todo list - maintained during session |
 | `.agents/sessions/` | Archived sessions as `YYYY-MM-DD-<hash>/` folders, each with `decisions.md` + `flow.md` (see `.agents/rules/session-decisions-flow.md`) |
 | `.agents/pre-commit-workflow.md` | Pre-commit checklist - run before every commit |
@@ -145,15 +145,15 @@ git config core.hooksPath .githooks    # Enable versioned hooks (fresh clone)
 | `.agents/handoffs/active/latest.md` | Current session handoff state |
 | `.agents/handoffs/flow/` | Handoff flows: session-cycle, agent-to-agent, agent-to-human, error-recovery |
 
-**Read order at session start:** `HANDOFF.md` → `.agents/handoffs/active/latest.md` → `Primer.md` → `Lessons.md` → `.agents/session-todos.md`. (See `.agents/rules/session-memory-rules.md`.)
+**Read order at session start:** `@HANDOFF.md` → `.agents/handoffs/active/latest.md` → `@Primer.md` → `@Lessons.md` → `.agents/session-todos.md`. (See `.agents/rules/session-memory-rules.md`.)
 
 ## Agent Operating Model (gardenify pattern)
 
-- **Memory layout**: `HANDOFF.md` (orchestration) → `latest.md` (live resume) → `Primer.md` (status) → `Lessons.md` (corrections) → `agent-memory.md` (activity log).
-- **Handoff = files, not prose**: update `.agents/session-todos.md`, archive to `.agents/sessions/YYYY-MM-DD-<hash>.md`, update `HANDOFF.md` + `Primer.md`. Next agent resumes from files, never conversation memory.
+- **Memory layout**: `@HANDOFF.md` (orchestration) → `latest.md` (live resume) → `@Primer.md` (status) → `@Lessons.md` (corrections) → `@agent-memory.md` (activity log).
+- **Handoff = files, not prose**: update `.agents/session-todos.md`, archive to `.agents/sessions/YYYY-MM-DD-<hash>.md`, update `@HANDOFF.md` + `@Primer.md`. Next agent resumes from files, never conversation memory.
 - **Self-healing**: verify before claiming — `npx tsc --noEmit`, `npm run test`, `npm run lint` after any change. Trust the repo over memory (re-read files).
 - **Anti-hallucination**: every claim traces to a commit, tracked doc, passing test, or verified live check. Never invent file paths/API shapes — grep/read first.
-- **Token efficiency**: small targeted reads; index files (AGENTS.md, Lessons.md) over full dumps; read slices by offset/limit; keep session-todos short (archives absorb history).
+- **Token efficiency**: small targeted reads; index files (@AGENTS.md, `@Lessons.md`) over full dumps; read slices by offset/limit; keep session-todos short (archives absorb history).
 
 ## Git Hooks (versioned in `.githooks/`)
 
@@ -213,16 +213,16 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 **Documentation MUST be updated IMMEDIATELY after any implementation. If docs are not updated, the task is NOT complete.**
 
 1. **AGENTS.md** — add compact row to version table + bullets to `.agents/CHANGELOG.md` (files changed, root cause/feature)
-2. **Primer.md** — Current Project Status + Session History
-3. **agent-memory.md** — activity log entry
-4. **Lessons.md** — new lesson if pattern/bug discovered
+2. **@Primer.md** — Current Project Status + Session History
+3. **@agent-memory.md** — activity log entry
+4. **@Lessons.md** — new lesson if pattern/bug discovered
 
 ## Usage
 
-1. **Start of session**: Read `HANDOFF.md` → `latest.md` → `Primer.md` → `Lessons.md` → session-todos
-2. **During work**: Log in `agent-memory.md`, update `latest.md` handoff, maintain session-todos
-3. **Before commit**: Read `Lessons.md`, run pre-commit workflow + hygiene checklist
-4. **End of session**: Update `Primer.md`, archive handoff
+1. **Start of session**: Read `@HANDOFF.md` → `latest.md` → `@Primer.md` → `@Lessons.md` → session-todos
+2. **During work**: Log in `@agent-memory.md`, update `latest.md` handoff, maintain session-todos
+3. **Before commit**: Read `@Lessons.md`, run pre-commit workflow + hygiene checklist
+4. **End of session**: Update `@Primer.md`, archive handoff
 
 ---
 

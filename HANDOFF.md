@@ -45,10 +45,10 @@ No active handoff. Session v3.12.0 committed (`f1f5a91` code, `7910ed0` docs) + 
 | `.agents/session-todos.md` | Current session todo list | ✅ Yes |
 | `.agents/handoffs/active/latest.md` | Current session handoff | ✅ Yes |
 | `.agents/handoffs/SCHEMA.md` | Handoff file format | ✅ Yes |
-| `Primer.md` | Project status | ✅ Yes |
-| `Lessons.md` | Rules & corrections | ✅ Yes |
-| `AGENTS.md` | Full development guide | 📖 Reference |
-| `agent-memory.md` | Activity log | 📖 Reference |
+| `@Primer.md` | Project status | ✅ Yes |
+| `@Lessons.md` | Rules & corrections | ✅ Yes |
+| `@AGENTS.md` | Full development guide | 📖 Reference |
+| `@agent-memory.md` | Activity log | 📖 Reference |
 | `.agents/learning/README.md` | Self-learning system | 📖 Reference |
 | `.agents/pre-commit-workflow.md` | Pre-commit checklist | 📖 Reference |
 | `.agents/security-checklist.md` | Security checklist | 📖 Reference |
@@ -62,10 +62,10 @@ No active handoff. Session v3.12.0 committed (`f1f5a91` code, `7910ed0` docs) + 
 
 ## Orchestration Rules
 
-1. **Start**: Read HANDOFF.md → Read latest.md → Read Primer.md → Read Lessons.md
-2. **Work**: Update handoff files as you go; log in agent-memory.md
+1. **Start**: Read @HANDOFF.md → Read latest.md → Read @Primer.md → Read @Lessons.md
+2. **Work**: Update handoff files as you go; log in @agent-memory.md
 3. **Handoff**: Use `/handoff` command when switching agents or completing
-4. **Complete**: Archive handoff → Update HANDOFF.md to `ready` → Update docs
+4. **Complete**: Archive handoff → Update @HANDOFF.md to `ready` → Update docs
 5. **Recovery**: If session crashes, next agent reads latest.md and continues
 
 ---

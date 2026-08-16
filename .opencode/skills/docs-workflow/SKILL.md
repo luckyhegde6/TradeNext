@@ -100,14 +100,14 @@ Apply after **every** implementation, before commit. Run `git status` + `git dif
 
 | File | When | What to add |
 |------|------|-------------|
-| `AGENTS.md` | Every change | Version table row (Ver, Date, Summary) + bullets; update Commands/Key Libraries if changed; `## Version History` entry |
+| `@AGENTS.md` | Every change | Version table row (Ver, Date, Summary) + bullets; update Commands/Key Libraries if changed; `## Version History` entry |
 | `.agents/CHANGELOG.md` | Every change | Index row → detail bullet in per-minor file `.agents/changelog/versions-v3.<minor>.md` (or v2/v1): Files Created/Modified + root cause/feature |
-| `TODO.md` | Feature/bug | Mark items done; add new rows; update Quick Reference status |
-| `README.md` | User-facing | Feature bullets, credentials, commands, tested-features table |
-| `Primer.md` | Session | Current Project Status + Session History |
-| `agent-memory.md` | Session/commit | Activity log entry |
-| `Lessons.md` | New gotcha | Root cause + fix lesson (e.g. mermaid quoting, runInChunks, zod enum width) |
-| `HANDOFF.md` | Session | Orchestration state |
+| `@TODO.md` | Feature/bug | Mark items done; add new rows; update Quick Reference status |
+| `@README.md` | User-facing | Feature bullets, credentials, commands, tested-features table; keep **Documentation** + **Agentic Coding** sections in sync |
+| `@Primer.md` | Session | Current Project Status + Session History |
+| `@agent-memory.md` | Session/commit | Activity log entry |
+| `@Lessons.md` | New gotcha | Root cause + fix lesson (e.g. mermaid quoting, runInChunks, zod enum width) |
+| `@HANDOFF.md` | Session | Orchestration state |
 | `.agents/session-todos.md` | Every commit | Done / carry-forward |
 | `.agents/sessions/YYYY-MM-DD-<hash>.md` | Session end | Archived todos |
 | Swagger/OpenAPI | New/changed API route | `app/api/openapi/route.ts` (or per-route docs) — update schema + summary |
@@ -123,7 +123,7 @@ Apply after **every** implementation, before commit. Run `git status` + `git dif
 Then bullets under it: changes, Files Created/Modified, root cause (bugs) or feature description.
 
 ### Pre-commit docs gate
-Run `/pre-commit-check` → verify: AGENTS.md current, TODO current, Primer current, agent-memory logged, Lessons updated if new discovery, session-todos clean, README if user-facing, no stale info. **Delete junk** (`dev-server.log`, `*.yaml` at root, `screenshot-*.png`).
+Run `/pre-commit-check` → verify: @AGENTS.md current, @TODO current, @Primer current, @agent-memory logged, @Lessons updated if new discovery, session-todos clean, @README if user-facing, no stale info. **Delete junk** (`dev-server.log`, `*.yaml` at root, `screenshot-*.png`).
 
 ---
 
@@ -131,10 +131,10 @@ Run `/pre-commit-check` → verify: AGENTS.md current, TODO current, Primer curr
 
 - [ ] Feature plan created in `docs/designDoc/ph<NN>-*.md` (non-trivial features)
 - [ ] Wiki pages pushed + verified rendering (if docs changed)
-- [ ] AGENTS.md version table + bullets updated
+- [ ] @AGENTS.md version table + bullets updated
 - [ ] `.agents/CHANGELOG.md` + detail subfile updated
-- [ ] TODO.md updated
-- [ ] Primer.md + agent-memory.md updated
-- [ ] Lessons.md updated if new discovery
+- [ ] @TODO.md updated
+- [ ] @Primer.md + @agent-memory.md updated
+- [ ] @Lessons.md updated if new discovery
 - [ ] Swagger/OpenAPI updated if API changed
 - [ ] Junk artifacts deleted; `git status` reviewed

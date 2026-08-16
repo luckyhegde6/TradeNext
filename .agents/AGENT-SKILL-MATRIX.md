@@ -52,4 +52,4 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 2. Mirror to `.agents/skills/<name>.md` (short human version, `Source:` footer).
 3. Create/update the owning agent profile (`.agents/agents/<name>.md`) and command (`.agents/commands/<name>.md`).
 4. Wire into `.opencode/opencode.json` (`agent:` + `command:` sections) if it needs agent/command bindings.
-5. Update this matrix + AGENTS.md.
+5. Update this matrix + @AGENTS.md.

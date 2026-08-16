@@ -44,7 +44,7 @@ Look for:
 - Patterns that prevented bugs
 - Techniques that made debugging easier
 
-#### Anti-Patterns (Add to Lessons.md)
+#### Anti-Patterns (Add to @Lessons.md)
 Look for:
 - Repeated mistakes
 - Time-wasting approaches
@@ -52,7 +52,7 @@ Look for:
 
 ### 3. Update Knowledge Base
 
-#### Update Lessons.md
+#### Update @Lessons.md
 ```markdown
 ### [Number]. [Rule Name]
 **Issue**: What happened
@@ -60,7 +60,7 @@ Look for:
 **Solution**: How to fix/prevent
 ```
 
-#### Update agent-memory.md
+#### Update @agent-memory.md
 ```markdown
 ### [Date] | [Session Summary]
 - **Action**: What was done
@@ -84,7 +84,7 @@ Look for:
 ### 5. Commit Learnings
 
 For each significant discovery:
-1. Add to `Lessons.md` with clear problem/solution
+1. Add to `@Lessons.md` with clear problem/solution
 2. Update `checklist.md` YAML if it's a hard rule
 3. Add to `session-log.md` in learning directory
 4. Reference in next handoff
@@ -111,7 +111,7 @@ For each significant discovery:
 - [ ] Session data collected (duration, files, builds, tests)
 - [ ] Good patterns identified
 - [ ] Anti-patterns identified
-- [ ] Lessons.md updated with new rules
+- [ ] @Lessons.md updated with new rules
 - [ ] Session logged in .agents/learning/session-log.md
 - [ ] Metrics recorded
 - [ ] If pattern significant: checklist.yml updated

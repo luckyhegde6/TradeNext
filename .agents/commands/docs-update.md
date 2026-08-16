@@ -17,9 +17,9 @@
 ### Examples
 
 ```
-/docs-update           # Full update: AGENTS.md, CHANGELOG, TODO, Primer, Lessons, swagger
+/docs-update           # Full update: @AGENTS.md, CHANGELOG, @TODO, @Primer, @Lessons, swagger
 /docs-update check     # Dry-run: list what needs updating, no edits
-/docs-update quick     # Minimal: AGENTS.md + CHANGELOG + session-todos only
+/docs-update quick     # Minimal: @AGENTS.md + CHANGELOG + session-todos only
 ```
 
 ## Workflow
@@ -33,14 +33,14 @@ git diff --stat
 ### 2. Apply Updates (per docs-updater skill matrix)
 | File | Update |
 |------|--------|
-| `AGENTS.md` | Version row (Ver, Date, Summary) + bullets; Commands/Key Libraries if changed |
+| `@AGENTS.md` | Version row (Ver, Date, Summary) + bullets; Commands/Key Libraries if changed |
 | `.agents/CHANGELOG.md` | Index row → per-minor detail: `.agents/changelog/versions-v3.<minor>.md` (Files + root cause) |
-| `TODO.md` | Check off done items; add rows |
-| `README.md` | User-facing features/credentials |
-| `Primer.md` | Project status + session history |
-| `agent-memory.md` | Activity log entry |
-| `Lessons.md` | New gotcha → root cause + fix |
-| `HANDOFF.md` | Orchestration state |
+| `@TODO.md` | Check off done items; add rows |
+| `@README.md` | User-facing features/credentials; keep **Documentation** + **Agentic Coding** sections in sync |
+| `@Primer.md` | Project status + session history |
+| `@agent-memory.md` | Activity log entry |
+| `@Lessons.md` | New gotcha → root cause + fix |
+| `@HANDOFF.md` | Orchestration state |
 | `.agents/session-todos.md` | Done / carry-forward |
 | Swagger/OpenAPI | Route schema + summary match zod |
 
@@ -52,15 +52,15 @@ Then bullets: changes, Files Created/Modified, root cause (bugs) or feature desc
 
 ### 4. Cleanup + Gate
 - Delete junk: `dev-server.log`, root `*.yaml`, `screenshot-*.png`
-- Run `/pre-commit-check` → verify AGENTS/TODO/Primer/agent-memory/Lessons/session-todos current, README if user-facing
+- Run `/pre-commit-check` → verify @AGENTS/@TODO/@Primer/@agent-memory/@Lessons/session-todos current, @README if user-facing
 
 ## Checklist
 
 - [ ] `git status` reviewed — know what changed
-- [ ] AGENTS.md version table + bullets updated
+- [ ] @AGENTS.md version table + bullets updated
 - [ ] `.agents/CHANGELOG.md` + detail subfile updated
-- [ ] TODO.md updated
-- [ ] Primer.md + agent-memory.md updated
-- [ ] Lessons.md updated if new discovery
+- [ ] @TODO.md updated
+- [ ] @Primer.md + @agent-memory.md updated
+- [ ] @Lessons.md updated if new discovery
 - [ ] Swagger/OpenAPI updated if API changed
 - [ ] Junk artifacts deleted

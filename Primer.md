@@ -1,8 +1,8 @@
 # Primer.md - Session Tracking
 
 > Agent reads this at the start of every session to understand current state and progress
-> ⚠️ IMPORTANT: After completing ANY task, you MUST update documentation (AGENTS.md, Primer.md, agent-memory.md, Lessons.md). See Lessons.md Lesson 20 for details.
-> 🔄 Handoff System: Read `HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
+> ⚠️ IMPORTANT: After completing ANY task, you MUST update documentation (@AGENTS.md, @Primer.md, @agent-memory.md, @Lessons.md). See @Lessons.md Lesson 20 for details.
+> 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
 2026-08-16 (v3.13.0 DB-backed Swing AI analysis job — durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget: pre-scan DB lookup serves done/failed/pending/running WITHOUT re-scanning, `force=1` supersedes pending/running jobs, atomic `updateMany` claim + supersede-abort, stale recovery 45min/2 attempts, cache holds ONLY final done/failed, cron-daemon 60s resync tick drains the queue; migration `20260816000000_add_swing_analysis_job` applied locally via `migrate diff` + `db execute` — local DB has NO `_prisma_migrations` ledger, never `migrate dev` locally; **suite 730 pass / 4 skip** (was 722/4); tsc 46 exact baseline; **live-verified :3000** — force=1 → 11s pending feed → job running → done 20/20, non-force 39ms frozen pending from DB / 25ms cached done, audit RUN_START→ANALYSIS_START→ANALYSIS_COMPLETE→RUN_COMPLETE, trackers persisted, Swing tab "AI targets ready" 0 console errors. Commit pending user (no push/deploy) — branch `feat/swing-db-analysis-job`. Prior: v3.12.0 MERGED (PR #95) + deployed; v3.11.3 branch `fix/cron-tz-swing-perf` commits still unpushed.)

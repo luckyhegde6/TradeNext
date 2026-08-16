@@ -88,4 +88,4 @@ npm install -g opencode
 opencode --web
 ```
 
-See `AGENTS.md` for full development guide.
+See `@AGENTS.md` for the full development guide and `@README.md` → **Agentic Coding** for the agentic workflow.

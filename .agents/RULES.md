@@ -4,13 +4,13 @@
 
 ## 0. Order of Operations
 
-1. **Read state** — HANDOFF.md → `.agents/handoffs/active/latest.md` → Primer.md → Lessons.md → `.agents/session-todos.md` (see `.agents/rules/session-memory-rules.md`)
+1. **Read state** — @HANDOFF.md → `.agents/handoffs/active/latest.md` → @Primer.md → @Lessons.md → `.agents/session-todos.md` (see `.agents/rules/session-memory-rules.md`)
 2. **Plan** — convert task into verifiable goals (tests pass, tsc clean, docs updated)
 3. **Implement** — minimal code, one todo at a time, update session-todos in real time
 4. **Verify** — `npm run test` (alone, never chained), `npx tsc --noEmit`, `npm run lint`
-5. **Document** — AGENTS.md version entry + TODO.md + Lessons.md (mandatory)
+5. **Document** — @AGENTS.md version entry + @TODO.md + @Lessons.md (mandatory)
 6. **Clean** — git status review, delete junk artifacts (`.agents/code-hygiene.md`)
-7. **Hand off** — update latest.md, archive session, update HANDOFF.md + Primer.md
+7. **Hand off** — update latest.md, archive session, update @HANDOFF.md + @Primer.md
 
 ## 0. Behavioral Guidelines (Think → Simplify → Surgical → Verify)
 
@@ -68,7 +68,7 @@ Merged from the CLAUDE.md operating contract. Tradeoff: **caution over speed** �
 ## 5. Documentation Is Not Optional
 
 - **If documentation is not updated, the task is NOT complete.**
-- Minimum: AGENTS.md version entry, TODO.md, Lessons.md (new discovery), session-todos before commit.
+- Minimum: @AGENTS.md version entry, @TODO.md, @Lessons.md (new discovery), session-todos before commit.
 - API changes → route table + Swagger/OpenAPI + skill files (`.agents/documentation-standards.md`).
 
 ## 6. Git Rules (STRICT)

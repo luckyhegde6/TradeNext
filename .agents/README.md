@@ -45,8 +45,9 @@ This folder contains AI agent configuration files for TradeNext - a Next.js 16 s
 
 ## Quick Commands
 
-- Read `HANDOFF.md` (root) for orchestration state
-- Read `AGENTS.md` for complete development guide
+- Read `@HANDOFF.md` (root) for orchestration state
+- Read `@AGENTS.md` for complete development guide
+- Read `@README.md` → **Agentic Coding** section for the agentic workflow + read order
 - Read `.agents/rules/` for coding standards
 - Read `.agents/handoffs/active/latest.md` for current session context
 - Use `.agents/commands/` for specific workflows

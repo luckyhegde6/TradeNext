@@ -231,20 +231,92 @@ PORT=3000
 └── .agents/                # AI agent configuration + docs (repo-only, not published)
 ```
 
-## AI-Assisted Development
+## Documentation
 
-TradeNext is configured for OpenCode:
+All project documentation lives in this repo — the root-level files below are the primary references.
+Each is named with the `@File.md` convention so agents and humans can reference it unambiguously.
+
+| Reference | File | Purpose |
+|-----------|------|---------|
+| `@README.md` | `README.md` | **This file** — project overview, feature highlights, quick start, credentials, commands, MCP API, agentic-coding guide |
+| `@AGENTS.md` | `AGENTS.md` | **Full development guide** — version history (compact), credentials, commands, agent docs map, common patterns, lessons — read this first |
+| `@ARCHITECTURE.md` | `ARCHITECTURE.md` | Technical architecture — system overview, DB schema, API structure, caching, security, deployment |
+| `@USAGE.md` | `USAGE.md` | Step-by-step setup & usage guide (clone, env, DB, migrations, seed, dev server, tests) |
+| `@SETUP.md` | `SETUP.md` | Prisma Postgres setup guide (starter-template legacy) |
+| `@DOCKER_ENV_SETUP.md` | `DOCKER_ENV_SETUP.md` | Docker Compose environment-variable configuration |
+| `@PRD.md` | `PRD.md` | Product requirements document — personas, features, roadmap |
+| `@TODO.md` | `TODO.md` | Implementation checklist — features tracked by sprint/version |
+| `@TODO_ENHANCEMENTS.md` | `TODO_ENHANCEMENTS.md` | Future enhancement ideas |
+| `@TODO-PENTESTING.md` | `TODO-PENTESTING.md` | Security/penetration-testing checklist + findings log |
+| `@TODO-PERF-TESTING.md` | `TODO-PERF-TESTING.md` | Performance-testing checklist + findings log |
+| `@CHANGELOG.md` | `CHANGELOG.md` | Compact version-history index → per-minor detail in `.agents/changelog/` |
+| `@BUGS.md` | `BUGS.md` | Human-readable bug tracker (mirrors GitHub issues) |
+| `@HANDOFF.md` | `HANDOFF.md` | Agent orchestration state — read at every session start |
+| `@Primer.md` | `Primer.md` | Session tracking — current project status + session history |
+| `@Lessons.md` | `Lessons.md` | Rules & corrections learned by agents — read before every commit |
+| `@agent-memory.md` | `agent-memory.md` | Activity log of all agent work |
+| `@SECURITY.md` | `SECURITY.md` | Security policy (GitHub template) |
+| `@VERIFICATION_REPORT.md` | `VERIFICATION_REPORT.md` | Feature verification report |
+| `@README_Netlify_template.md` | `README_Netlify_template.md` | Legacy Netlify starter-template README |
+
+Deeper subsystem documentation (recommendations engine, tasks/cron/workers, monitoring & logging,
+alerts, playwright-e2e, DB-migration ledger) lives in `.agents/docs/`.
+
+---
+
+## Agentic Coding
+
+TradeNext is built for **AI-assisted, agent-driven development** — most features are implemented by AI
+agents (OpenCode/Claude Code) following a strict memory + documentation discipline.
+
+### Launch
 
 ```bash
 npm install -g opencode
 opencode --web            # Launch web UI (recommended)
 ```
 
-- **MCP servers** (`opencode.json`): Context7 (docs), GitHub Search, Prisma Local/Remote, Playwright.
-- **Skills & agents**: `.opencode/skills/` + `.agents/agents/` (docs-updater, bug-finder, ux-enhancer,
-  wiki-creator, playwright-e2e, nse-integration) — matrix in `.agents/AGENT-SKILL-MATRIX.md`.
-- **Docs**: `ARCHITECTURE.md` + `docs/architecture.html` (interactive Mermaid diagrams), `AGENTS.md`
-  (dev guide + compact version history), `.agents/docs/` (subsystem deep-dives).
+### Read order at session start
+
+Every agent session begins by reading the orchestration state, then resumes from **files, never
+conversation memory**:
+
+1. `@HANDOFF.md` — current orchestration state (status, active handoff, feature in flight)
+2. `.agents/handoffs/active/latest.md` — live resume context from the previous session
+3. `@Primer.md` — project status + session history
+4. `@Lessons.md` — rules & corrections (read before every commit)
+5. `.agents/session-todos.md` — current session todo list
+
+Full rule set: `.agents/RULES.md` (master operating rules), `.agents/SOUL.md` (identity & principles),
+`.agents/rules/` (coding standards, checklist, memory rules).
+
+### How the `.agents/` system works
+
+| Area | Location | What it does |
+|------|----------|--------------|
+| **Rules** | `.agents/rules/` | Hard contracts: engineering checklist, coding standards, session memory rules, pre-commit workflow |
+| **Memory** | `@HANDOFF.md` → `.agents/handoffs/active/latest.md` → `@Primer.md` → `@Lessons.md` → `@agent-memory.md` | Handoff = files, not prose; every session archives `decisions.md` + `flow.md` to `.agents/sessions/` |
+| **Skills** | `.opencode/skills/` + `.agents/skills/` | Specialized workflows (docs-updater, bug-finder, ux-enhancer, wiki-creator, playwright-e2e, nse-integration) |
+| **Agents** | `.agents/agents/` | Expert profiles (doc-writer, bug-hunter, ux-designer, wiki-publisher, …) — matrix in `.agents/AGENT-SKILL-MATRIX.md` |
+| **Commands** | `.agents/commands/` | `/command` templates (plan, code-review, tdd, handoff, self-learn, review-diff, docs-update, …) |
+| **MCP servers** | `opencode.json` | Context7 (docs), GitHub Search, Prisma Local/Remote, Playwright |
+| **Git hooks** | `.githooks/` | Versioned pre-commit/post-commit/pre-push — blocks secrets, warns on main, checks tsc errors |
+
+### Agentic workflow (what agents do)
+
+1. **Read the docs first** — never assume file paths/API shapes; grep/read the actual repo.
+2. **Think before coding** — state assumptions, surface tradeoffs, ask when unclear (`.agents/SOUL.md`).
+3. **Keep changes surgical** — minimum code that solves the problem; touch only what the request needs.
+4. **Write tests** — Jest unit tests in `lib/__tests__/`, Playwright e2e in `e2e/` for UI changes.
+5. **Update documentation after every implementation** — @AGENTS.md version table row + `.agents/CHANGELOG.md`
+   bullets, `@Primer.md`, `@agent-memory.md`, `@Lessons.md` (new lesson if a pattern/bug was discovered).
+6. **Verify before claiming** — `npx tsc --noEmit`, `npm run test`, `npm run lint` after any change.
+7. **Pre-commit discipline** — read `@Lessons.md`, run `.agents/pre-commit-workflow.md` + hygiene checklist,
+   then commit on explicit user request only (agents never auto-push/deploy/merge).
+
+Docs for agents: `@ARCHITECTURE.md` + `docs/architecture.html` (interactive Mermaid diagrams),
+`.agents/docs/` (subsystem deep-dives). See also the `docs-workflow` skill
+(`.opencode/skills/docs-workflow/SKILL.md`) for how documentation updates are made.
 
 ## License
 

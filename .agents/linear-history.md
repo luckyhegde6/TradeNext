@@ -102,5 +102,5 @@ Before pushing ANY branch:
   [ ] Commit messages follow convention
   [ ] No secrets or keys staged
   [ ] Branch is rebased on latest main (if behind)
-  [ ] Documentation updated (AGENTS.md, TODO.md, Primer.md per pre-commit-workflow.md)
+  [ ] Documentation updated (@AGENTS.md, @TODO.md, @Primer.md per pre-commit-workflow.md)
 ```
