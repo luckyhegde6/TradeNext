@@ -86,3 +86,10 @@ tsc 46 = exact baseline; docs fully updated; commit pending user.
 User approval → pre-commit hygiene → commit v3.12.0 → push `fix/swing-async-analysis` → PR (ask first) →
 user merges → Netlify rebuild = deploy → post-deploy smoke (latestRun healthy, Performance Current/Return %,
 Swing tab instant + targets ~2–3 min, monitoring rows, Netlify cron UI entries removal).
+
+## Commit / PR (DONE 2026-08-16)
+- Diff reviewed (all code vs schema/types verified; docs env-var mismatch QUERY_TIMEOUT_MS → PRISMA_QUERY_TIMEOUT_MS fixed in AGENTS.md/versions-v3.md/TODO.md).
+- Commit `f1f5a91` (code+tests, 11 files, 895 insertions) + `7910ed0` (docs, 12 files) — both hook-passed.
+- Pushed `fix/swing-async-analysis`; PR #95 open: https://github.com/luckyhegde6/TradeNext/pull/95
+- Deleted fully-merged branch `feat/v3.6.1-recs-defaults-bridge-context` (local + remote, user request).
+- Remaining: user merges PR #95 → Netlify rebuild = deploy → post-deploy smoke.
