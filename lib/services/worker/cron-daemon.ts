@@ -63,6 +63,15 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
 
   resyncInterval = setInterval(() => {
     syncCronJobs().catch((error) => logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) }));
+    // v3.13.0: drain the swing analysis job queue every tick. The DB-backed
+    // job survives instance recycle — when the process that created it dies
+    // mid-analysis, the stale-running recovery + claim here picks it back up
+    // (never throws; module-guarded in-flight).
+    import("@/lib/services/swingRecommendationService")
+      .then((m) => m.maybeProcessSwingAnalysis())
+      .catch((error) =>
+        logger.error({ msg: "Swing analysis drain failed", error: error instanceof Error ? error.message : String(error) }),
+      );
   }, RESYNC_INTERVAL_MS);
 
   heartbeatInterval = setInterval(() => {

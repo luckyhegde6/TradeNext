@@ -6,6 +6,7 @@
 
 | Category | Status |
 |----------|--------|
+| **DB-backed Swing AI analysis job (v3.13.0)** | [x] Complete (durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget — Option A user-approved: pre-scan DB lookup serves done/failed/pending/running WITHOUT re-scanning, `force=1` supersedes pending/running jobs, processor claims via atomic `updateMany` + aborts on supersede-race re-read, stale recovery 45 min / 2 attempts, cache holds ONLY final done/failed, cron-daemon 60s resync tick drains the queue; migration `20260816000000_add_swing_analysis_job` applied locally via `migrate diff --from-config-datasource` + `db execute` — local DB has NO `_prisma_migrations` ledger, never `migrate dev` locally; **suite 730 pass / 4 skip** (was 722/4, +8); tsc 46 exact baseline; **live-verified :3000** — force=1 → 11s pending feed → job running → done 20/20; non-force 39ms frozen pending from DB, 25ms cached done; audit RUN_START→ANALYSIS_START→ANALYSIS_COMPLETE→RUN_COMPLETE; trackers persisted; Swing tab "AI targets ready" 0 console errors; **commit pending user, no push/deploy — user merges PR so Netlify rebuilds + `migrate deploy` runs**) |
 | Database Migrations | [x] Complete |
 | Authentication | [x] Complete |
 | API Endpoints | [x] Complete |

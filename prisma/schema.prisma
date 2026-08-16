@@ -1416,6 +1416,36 @@ model DailyRecommendationStock {
   @@map("daily_recommendation_stocks")
 }
 
+// ============================================
+// Swing Analysis Job (v3.13.0) — durable background AI analysis
+// ============================================
+
+// One row per swing AI-analysis run. The HTTP request writes the pending feed
+// here and returns instantly (v3.12.0 request-time split); the in-process cron
+// daemon (v3.11.x) polls pending/stale-running rows and runs the AI batches,
+// patching the payload until done/failed. The row is the source of truth — it
+// survives the staticCache LRU eviction, instance recycling, and multi-instance
+// routing that broke the v3.12.0 fire-and-forget cache write on prod.
+model SwingAnalysisJob {
+  id            String    @id @default(uuid())
+  status        String    @default("pending") // pending | running | done | failed | superseded
+  payload       Json?     // SwingResponse snapshot — stocks patched with AI targets as batches settle
+  generatedAt   DateTime  @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  error         String?   // Human-readable failure reason (status === "failed")
+  stockCount    Int       @default(0)
+  analyzedCount Int       @default(0)
+  attemptCount  Int       @default(0) // retries after instance death (stale running → pending)
+  templateCount Int       @default(0)
+  totalRaw      Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@map("swing_analysis_jobs")
+}
+
 // Audit trail for recommendation status changes
 model RecommendationStatusHistory {
   id             String   @id @default(uuid())
