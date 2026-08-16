@@ -7,7 +7,7 @@ Updates TradeNext's tracked documentation after every implementation. **If docs 
 | File | When | What to add |
 |------|------|-------------|
 | `AGENTS.md` | Every change | Version table row (Ver, Date, Summary) + bullets; Commands/Key Libraries if changed |
-| `.agents/CHANGELOG.md` | Every change | Index row → detail in `.agents/changelog/versions-v3.md` (Files Created/Modified + root cause) |
+| `.agents/CHANGELOG.md` | Every change | Index row → detail in per-minor file `.agents/changelog/versions-vX.Y.md` — e.g. `versions-v3.13.md`; `versions-v3.md`/`versions-v2.md`/`versions-v1.md` are per-minor indexes (Files Created/Modified + root cause) |
 | `TODO.md` | Feature/bug | Mark done; add rows; update Quick Reference |
 | `README.md` | User-facing | Feature bullets, credentials, commands, tested table |
 | `Primer.md` | Session | Current Project Status + Session History |

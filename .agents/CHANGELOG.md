@@ -2,7 +2,7 @@
 
 > Full version history + legacy feature docs (moved here from AGENTS.md 2026-08-06). **AGENTS.md keeps only a compact version table** — this directory is the source of detail.
 >
-> **Reading guidance**: load only the subfile you need (e.g. v3.x for recent work), never the whole directory. v3 detail is split per-minor (`versions-v3.13.md` … `versions-v3.0.md`); `versions-v3.md` is a per-minor index.
+> **Reading guidance**: load only the subfile you need (e.g. v3.x for recent work), never the whole directory. v3/v2/v1 detail is split per-minor (`versions-v3.13.md` … `versions-v3.0.md`, `versions-v2.2.md`/`versions-v2.1.md`, `versions-v1.16.md` … `versions-v1.8.md`); `versions-v3.md` / `versions-v2.md` / `versions-v1.md` are per-minor indexes.
 
 ## Index
 
@@ -23,8 +23,8 @@
 | [versions-v3.2.md](./changelog/versions-v3.2.md) | **v3.2.0** — Telegram bot (@tradenext6Bot) + corp-actions price/yield fix |
 | [versions-v3.1.md](./changelog/versions-v3.1.md) | **v3.1.0** — risk metrics (Sharpe, max DD, beta, win rate) + benchmark overlay |
 | [versions-v3.0.md](./changelog/versions-v3.0.md) | **v3.0.0** — CSV export + portfolio value history + P&L timeline chart |
-| [versions-v2.md](./changelog/versions-v2.md) | v2.2.0 → v2.1.0 (alert engine, admin alert config, 98 screener templates) |
-| [versions-v1.md](./changelog/versions-v1.md) | v1.16.1 → v1.0.0 (advanced screener, agent handoff, MCP API, security, workers) |
+| [versions-v2.md](./changelog/versions-v2.md) | v2 per-minor index → [versions-v2.2.md](./changelog/versions-v2.2.md) · [versions-v2.1.md](./changelog/versions-v2.1.md) |
+| [versions-v1.md](./changelog/versions-v1.md) | v1 per-minor index → [versions-v1.16.md](./changelog/versions-v1.16.md) … [versions-v1.8.md](./changelog/versions-v1.8.md) |
 | [changelog/screener.md](./changelog/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement) |
 | [changelog/corp-actions.md](./changelog/corp-actions.md) | Corporate actions (dedup fix, NSE field fix, enhanced UI, management) |
 | [changelog/serverless-logging.md](./changelog/serverless-logging.md) | Serverless logging (ServerLog/db-logger, Netlify Blobs, 502 fix) |

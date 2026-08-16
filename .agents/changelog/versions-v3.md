@@ -24,9 +24,9 @@
 | [versions-v3.1.md](./versions-v3.1.md) | **v3.1.0** — risk metrics (Sharpe, max DD, beta, win rate) + benchmark overlay |
 | [versions-v3.0.md](./versions-v3.0.md) | **v3.0.0** — CSV export + portfolio value history + P&L timeline chart |
 
-## Legacy major files
+## Legacy major indexes
 
 | File | Contents |
 |------|----------|
-| [versions-v2.md](./versions-v2.md) | v2.2.0 → v2.1.0 (alert engine, admin alert config, 98 screener templates) |
-| [versions-v1.md](./versions-v1.md) | v1.16.1 → v1.0.0 (advanced screener, agent handoff, MCP API, security, workers) |
+| [versions-v2.md](./versions-v2.md) | v2 per-minor index → [versions-v2.2.md](./versions-v2.2.md) · [versions-v2.1.md](./versions-v2.1.md) |
+| [versions-v1.md](./versions-v1.md) | v1 per-minor index → [versions-v1.16.md](./versions-v1.16.md) … [versions-v1.8.md](./versions-v1.8.md) |
