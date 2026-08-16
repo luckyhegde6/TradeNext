@@ -23,7 +23,7 @@ git diff --stat
 | File | Update |
 |------|--------|
 | `AGENTS.md` | Version row + bullets; Commands/Key Libraries if changed |
-| `.agents/CHANGELOG.md` | Index row → `.agents/changelog/versions-v3.md` detail |
+| `.agents/CHANGELOG.md` | Index row → per-minor detail: `.agents/changelog/versions-v3.<minor>.md` (e.g. `versions-v3.13.md`; `versions-v3.md` is the index) |
 | `TODO.md` | Check off done items, add rows |
 | `README.md` | User-facing features/credentials |
 | `Primer.md` | Project status + session history |

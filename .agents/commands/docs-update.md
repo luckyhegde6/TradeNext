@@ -34,7 +34,7 @@ git diff --stat
 | File | Update |
 |------|--------|
 | `AGENTS.md` | Version row (Ver, Date, Summary) + bullets; Commands/Key Libraries if changed |
-| `.agents/CHANGELOG.md` | Index row → `.agents/changelog/versions-v3.md` detail (Files + root cause) |
+| `.agents/CHANGELOG.md` | Index row → per-minor detail: `.agents/changelog/versions-v3.<minor>.md` (Files + root cause) |
 | `TODO.md` | Check off done items; add rows |
 | `README.md` | User-facing features/credentials |
 | `Primer.md` | Project status + session history |

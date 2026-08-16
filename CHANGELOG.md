@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Maintainers**: full per-version detail lives in [`.agents/CHANGELOG.md`](./.agents/CHANGELOG.md)
-> (split into `versions-v3.md` / `versions-v2.md` / `versions-v1.md` + feature deep-dives).
+> (v3 split per-minor into `versions-v3.13.md` … `versions-v3.0.md` via the `versions-v3.md` index,
+> plus `versions-v2.md` / `versions-v1.md` + feature deep-dives).
 > This file is the compact, human-facing summary — keep it in sync with `AGENTS.md`.
 
 ---
