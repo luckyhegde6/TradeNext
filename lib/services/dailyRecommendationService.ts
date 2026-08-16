@@ -200,6 +200,16 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const stockEntries: StockAnalysisInput[] = [];
     const BATCH_SIZE = 100;
 
+    // v3.12.0 stage log: the prod 8715fd51 hang sat SILENT between the cap log
+    // and the AI pre-flight — DB writes (findMany/createMany/update) through a
+    // stalled Accelerate connection logged nothing for 16 min. Stage logs make
+    // any future wedge point to the exact query that hung.
+    logger.info({
+      msg: "Persisting screener results",
+      uniqueStocks: rankedResults.length,
+      runId: run.id,
+    });
+
     // Pre-fetch existing trackers in one query
     const symbols = rankedResults.map(r => r.symbol);
     const existingTrackers = await prisma.recommendationTracker.findMany({
@@ -304,6 +314,15 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       },
     });
 
+    // v3.12.0 stage log — persistence block completed (trackers + stocks + run).
+    logger.info({
+      msg: "Screener results persisted",
+      runId: run.id,
+      newTrackers: newTrackerData.length,
+      updatedTrackers: existingToUpdate.length,
+      stockEntries: stockCreateData.length,
+    });
+
     // 7. AI Analysis with circuit breaker protection
     // Cap at MAX_AI_STOCKS to avoid overwhelming the AI provider
     const aiInput = stockEntries.slice(0, MAX_AI_STOCKS);
@@ -372,6 +391,11 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     let effectiveModel = aiConfig.model;
     let skipAi = false;
     if (aiInput.length > 0 && hasValidConfig(aiConfig)) {
+      logger.info({
+        msg: "AI pre-flight starting",
+        configuredModel: aiConfig.model,
+        stocks: aiInput.length,
+      });
       const preflight = await runAiConnectionTest(preflightTimeoutMs);
       if (preflight.status === "ok") {
         logger.info({ msg: "AI pre-flight passed", model: effectiveModel });
@@ -897,6 +921,56 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // Build price lookup map
   const priceMap = new Map(latestPrices.filter(p => p.close !== null).map(p => [p.ticker, Number(p.close)]));
 
+  // ── v3.12.0 live-price fallback ───────────────────────────────────────────
+  // Trackers with NO `daily_prices` rows (fresh trackers, sync gaps) were
+  // skipped with a warning every run — their currentPrice never updated, their
+  // status could never flip, and the Performance tab showed "—" (prod
+  // 2026-08-16: 130 tracking trackers, only 8 had price rows). Fall back to a
+  // live quote via getStockQuote (market-cache 60s TTL; DB-first when the
+  // market is closed). Capped + bounded concurrency + never throws.
+  const MAX_LIVE_FALLBACK_SYMBOLS = 50;
+  const missingSymbols = [
+    ...new Set(trackerSymbols.filter((s) => !priceMap.has(s))),
+  ].slice(0, MAX_LIVE_FALLBACK_SYMBOLS);
+  if (missingSymbols.length > 0) {
+    try {
+      const { getStockQuote } = await import("@/lib/stock-service");
+      const bridged: { symbol: string; price: number }[] = [];
+      for (let i = 0; i < missingSymbols.length; i += 10) {
+        const chunk = missingSymbols.slice(i, i + 10);
+        const settled = await Promise.allSettled(
+          chunk.map(async (symbol) => {
+            const quote = await getStockQuote(symbol, false);
+            const price = quote?.lastPrice ?? quote?.closePrice;
+            return { symbol, price: typeof price === "number" && price > 0 ? price : null };
+          }),
+        );
+        for (const r of settled) {
+          if (r.status === "fulfilled" && r.value.price != null) {
+            bridged.push({ symbol: r.value.symbol, price: r.value.price });
+          }
+        }
+      }
+      let added = 0;
+      for (const row of bridged) {
+        if (!priceMap.has(row.symbol)) {
+          priceMap.set(row.symbol, row.price);
+          added++;
+        }
+      }
+      logger.info({
+        msg: "Perf check: live-price fallback",
+        missing: missingSymbols.length,
+        bridged: added,
+      });
+    } catch (error) {
+      logger.warn({
+        msg: "Perf check: live-price fallback failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   let checked = 0;
   let targetAchieved = 0;
   let stopLossHit = 0;
@@ -1092,17 +1166,75 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
  *
  * BigInt fields (volume) are converted to Number for JSON serialization.
  *
- * Results are cached for 23 hours. Call {@link invalidateRecommendationsCache}
- * after a new run completes to force a refresh.
+ * Caching (v3.12.0): per-instance in-memory cache validated against a DB run-id
+ * fingerprint on every read + a 15-minute TTL backstop. See the function body.
  */
 const LATEST_KEY = "recommendations:latest";
 
+// Explicit TTL backstop (15 min). The payload embeds TRACKER state (status
+// flips, currentPrice refreshes from the perf check) which has no run-level
+// fingerprint, and per-instance memory caches cannot be invalidated
+// cross-instance — so 15 min bounds that staleness window. Run-level changes
+// (a new daily run, an AI-unavailable failed run) invalidate IMMEDIATELY via
+// the fingerprint probe below. (v3.12.0 — was the 23h NodeCache default.)
+const LATEST_CACHE_TTL_SECONDS = 15 * 60;
+
+/** Fingerprint of the two runs that make up the latest-recs payload.
+ *
+ * Cross-instance staleness guard: the in-memory recommendationsCache is
+ * PER-INSTANCE, so `invalidateRecommendationsCache()` only flushes the instance
+ * that ran the job — other Netlify instances kept serving a stale run for up
+ * to 23h (prod 2026-08-16: old 3d221cfe payload at 12:14/12:38/12:49 while the
+ * fresh instance served 998ff24a at 12:52). When a cached entry exists we
+ * re-probe the DB for the two run ids (cheap index-only selects on runDate)
+ * and serve the cache only if they still match.
+ */
+async function getLatestRunFingerprint(): Promise<{ runId: string | null; newestRunId: string | null }> {
+  const [run, newestRun] = await Promise.all([
+    prisma.dailyRecommendationRun.findFirst({
+      where: { status: { in: ["completed", "failed"] }, uniqueStocks: { gt: 0 } },
+      orderBy: { runDate: "desc" },
+      select: { id: true },
+    }),
+    prisma.dailyRecommendationRun.findFirst({
+      orderBy: { runDate: "desc" },
+      select: { id: true },
+    }),
+  ]);
+  return { runId: run?.id ?? null, newestRunId: newestRun?.id ?? null };
+}
+
+interface LatestCacheEntry {
+  runId: string | null;
+  newestRunId: string | null;
+  data: LatestRecommendations;
+}
+
 export async function getLatestRecommendations(): Promise<LatestRecommendations> {
-  // Check cache first
-  const cached = recommendationsCache.get<LatestRecommendations>(LATEST_KEY);
+  // Cache-first, but VALIDATED: only serve the cached payload when its run-id
+  // fingerprint still matches the DB. A new run completing on ANY instance
+  // (or a zero-pick AI-unavailable failure) therefore refreshes every
+  // instance's cache on the next read instead of after up to 23h.
+  const cached = recommendationsCache.get<LatestCacheEntry>(LATEST_KEY);
   if (cached) {
-    logger.debug({ msg: "Latest recommendations served from cache" });
-    return cached;
+    const fingerprint = await getLatestRunFingerprint();
+    if (
+      cached.runId === fingerprint.runId &&
+      cached.newestRunId === fingerprint.newestRunId
+    ) {
+      logger.debug({
+        msg: "Latest recommendations served from validated cache",
+        runId: fingerprint.runId,
+      });
+      return cached.data;
+    }
+    logger.debug({
+      msg: "Latest recommendations cache stale — refetching",
+      cachedRunId: cached.runId,
+      dbRunId: fingerprint.runId,
+      cachedNewestRunId: cached.newestRunId,
+      dbNewestRunId: fingerprint.newestRunId,
+    });
   }
 
   // Honest latest-run selection: ONE query — latest completed/failed run with
@@ -1142,9 +1274,15 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
     latestRun: newestRun,
   };
 
-  // Store in cache (23hr TTL)
+  // Store in cache (validated on read by run-id fingerprint + 15-min TTL
+  // backstop — see getLatestRecommendations doc).
   if (result.run) {
-    recommendationsCache.set(LATEST_KEY, result);
+    const entry: LatestCacheEntry = {
+      runId: latestRun?.id ?? null,
+      newestRunId: newestRun?.id ?? null,
+      data: result,
+    };
+    recommendationsCache.set(LATEST_KEY, entry, LATEST_CACHE_TTL_SECONDS);
     logger.debug({ msg: "Latest recommendations cached", stockCount: result.stocks.length });
   }
 

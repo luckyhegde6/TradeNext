@@ -20,6 +20,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 const ANALYSIS_STATUS_META: Record<SwingResponse["analysisStatus"], { label: string; classes: string }> = {
   done: { label: "AI targets ready", classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
   skipped: { label: "AI targets off", classes: "bg-gray-700/40 text-gray-400 border-gray-600" },
+  pending: { label: "AI targets generating…", classes: "bg-sky-500/15 text-sky-300 border-sky-500/30 animate-pulse" },
   failed: { label: "AI targets failed", classes: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
 };
 
@@ -29,7 +30,13 @@ export default function SwingTab() {
   const { data, error, isLoading, isValidating, mutate } = useSWR<SwingResponse>(
     "/api/recommendations/swing",
     fetcher,
-    { refreshInterval: 60_000, revalidateOnFocus: false },
+    {
+      // Poll fast while AI targets are generating in the background, then
+      // settle back to the standard 60s refresh once done/failed/skipped.
+      refreshInterval: (latestData) =>
+        latestData?.analysisStatus === "pending" ? 10_000 : 60_000,
+      revalidateOnFocus: false,
+    },
   );
 
   const refresh = () => {

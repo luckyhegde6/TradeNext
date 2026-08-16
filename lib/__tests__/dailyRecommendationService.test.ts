@@ -54,6 +54,11 @@ jest.mock("@/lib/prisma", () => {
     recommendationStatusHistory: {
       create: jest.fn(),
     },
+    recommendationArchive: {
+      findMany: jest.fn(),
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     $queryRaw: jest.fn(),
     $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
   };
@@ -72,6 +77,7 @@ jest.mock("@/lib/cache", () => ({
     set: jest.fn(),
     del: jest.fn(),
     flushAll: jest.fn(),
+    keys: jest.fn(() => []),
   },
 }));
 
@@ -119,10 +125,12 @@ mockRecordPrediction.mockResolvedValue(undefined);
 
 const mockRecordScreenerEvent = jest.fn() as any;
 const mockRecordAIEvent = jest.fn() as any;
+const mockRecordSystemEvent = jest.fn() as any;
 jest.mock("@/lib/services/unifiedEventService", () => ({
   __esModule: true,
   recordScreenerEvent: (...args: any[]) => mockRecordScreenerEvent(args[0], args[1], args[2]),
   recordAIEvent: (...args: any[]) => mockRecordAIEvent(args[0], args[1], args[2]),
+  recordSystemEvent: (...args: any[]) => mockRecordSystemEvent(args[0], args[1], args[2]),
 }));
 
 const mockRecordMetric = jest.fn() as any;
@@ -144,6 +152,14 @@ jest.mock("@/lib/audit", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }));
 
+// v3.12.0 perf-check live-price fallback — getStockQuote must be mocked so
+// the fallback never touches the real NSE/DB in tests.
+const mockGetStockQuote = jest.fn() as any;
+jest.mock("@/lib/stock-service", () => ({
+  __esModule: true,
+  getStockQuote: (...args: any[]) => mockGetStockQuote(args[0], args[1]),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────
 
 import {
@@ -151,11 +167,14 @@ import {
   getLatestRecommendations,
   getRecommendationHistory,
   getStockRecommendationDetail,
+  checkRecommendationPerformance,
 } from "@/lib/services/dailyRecommendationService";
 
 // Get mock references via require (mocks already applied by SWC hoisting)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mockPrisma = require("@/lib/prisma").default as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const cache = require("@/lib/cache").recommendationsCache;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -203,6 +222,11 @@ describe("dailyRecommendationService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    // Cache mock default: always a miss (cold path) unless a test overrides.
+    // clearAllMocks() does NOT reset implementations, so this must be set here
+    // or a previous test's mockReturnValue leaks into later tests.
+    cache.get.mockReturnValue(null);
+
     // Default Prisma mocks
     mockPrisma.dailyRecommendationRun.create.mockResolvedValue({
       id: "run-123",
@@ -231,7 +255,12 @@ describe("dailyRecommendationService", () => {
     mockPrisma.dailyRecommendationStock.update.mockResolvedValue({});
     mockPrisma.dailyRecommendationStock.createMany.mockResolvedValue({ count: 0 });
     mockPrisma.recommendationStatusHistory.create.mockResolvedValue({});
+    mockPrisma.recommendationArchive.findMany.mockResolvedValue([]);
+    mockPrisma.recommendationArchive.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.recommendationArchive.deleteMany.mockResolvedValue({ count: 0 });
     mockPrisma.$queryRaw.mockResolvedValue([]);
+    // Default live-quote fallback price (perf-check tests only).
+    mockGetStockQuote.mockResolvedValue({ lastPrice: 500, closePrice: 500 });
     mockPrisma.$transaction.mockImplementation((ops: any[]) => Promise.all(ops));
     // Default pre-flight result: "ok" so the v3.8.0 gate behaves exactly like
     // the pre-gate flow for tests that don't exercise it. (next/jest loads
@@ -707,6 +736,85 @@ describe("dailyRecommendationService", () => {
       const newestCall = mockPrisma.dailyRecommendationRun.findFirst.mock.calls[1][0];
       expect(newestCall?.select).toEqual({ id: true, runDate: true, status: true });
     });
+
+    // v3.12.0 — cross-instance stale-cache guard: the in-memory cache is
+    // PER-INSTANCE, so invalidateRecommendationsCache() on one Netlify instance
+    // never reaches the others. Every cached read re-probes the DB for the
+    // run-id fingerprint and serves the cache only when it matches.
+    describe("validated cache (cross-instance staleness guard)", () => {
+      test("serves the cached payload when the DB run-id fingerprint matches", async () => {
+        const cachedData = {
+          run: { id: "run-1", status: "completed", runDate: new Date(), stocks: [] },
+          stocks: [{ symbol: "RELIANCE", screenerCount: 3, tracker: { id: "t1" } }],
+          latestRun: { id: "run-1", status: "completed" },
+        };
+        cache.get.mockReturnValue({ runId: "run-1", newestRunId: "run-1", data: cachedData });
+        // Fingerprint probes (2) return the SAME ids → cache is fresh.
+        mockPrisma.dailyRecommendationRun.findFirst
+          .mockResolvedValueOnce({ id: "run-1" }) // fingerprint: qualifying run
+          .mockResolvedValueOnce({ id: "run-1" }); // fingerprint: newest run
+
+        const result = await getLatestRecommendations();
+
+        expect(result).toBe(cachedData);
+        // Only the 2 fingerprint probes ran — the heavy stocks-include query did NOT.
+        expect(mockPrisma.dailyRecommendationRun.findFirst).toHaveBeenCalledTimes(2);
+        expect(cache.set).not.toHaveBeenCalled();
+      });
+
+      test("refetches when a NEW qualifying run exists on another instance", async () => {
+        cache.get.mockReturnValue({
+          runId: "run-old",
+          newestRunId: "run-old",
+          data: { run: { id: "run-old" }, stocks: [], latestRun: { id: "run-old" } },
+        });
+        mockPrisma.dailyRecommendationRun.findFirst
+          .mockResolvedValueOnce({ id: "run-new" }) // fingerprint sees new run
+          .mockResolvedValueOnce({ id: "run-new" }) // fingerprint newest
+          .mockResolvedValueOnce({
+            // latestRun (heavy include query)
+            id: "run-new",
+            status: "completed",
+            runDate: new Date(),
+            stocks: [{ symbol: "RELIANCE", screenerCount: 2, tracker: { id: "t1" } }],
+          })
+          .mockResolvedValueOnce({ id: "run-new", runDate: new Date(), status: "completed" });
+
+        const result = await getLatestRecommendations();
+
+        expect(result.run?.id).toBe("run-new");
+        expect(mockPrisma.dailyRecommendationRun.findFirst).toHaveBeenCalledTimes(4);
+        // Cache re-stamped with the fresh fingerprint + 15-min TTL
+        const [key, entry, ttl] = cache.set.mock.calls[0];
+        expect(key).toBe("recommendations:latest");
+        expect(entry).toMatchObject({ runId: "run-new", newestRunId: "run-new" });
+        expect(ttl).toBe(15 * 60);
+      });
+
+      test("refetches when only the newest run changed (AI-unavailable failure on another instance)", async () => {
+        cache.get.mockReturnValue({
+          runId: "run-good",
+          newestRunId: "newest-old",
+          data: { run: { id: "run-good" }, stocks: [], latestRun: { id: "newest-old" } },
+        });
+        mockPrisma.dailyRecommendationRun.findFirst
+          .mockResolvedValueOnce({ id: "run-good" }) // qualifying unchanged
+          .mockResolvedValueOnce({ id: "newest-new" }) // newest CHANGED → stale
+          .mockResolvedValueOnce({
+            id: "run-good",
+            status: "completed",
+            runDate: new Date(),
+            stocks: [],
+          })
+          .mockResolvedValueOnce({ id: "newest-new", runDate: new Date(), status: "failed" });
+
+        const result = await getLatestRecommendations();
+
+        expect(result.latestRun?.id).toBe("newest-new");
+        const entry = cache.set.mock.calls[0][1];
+        expect(entry).toMatchObject({ runId: "run-good", newestRunId: "newest-new" });
+      });
+    });
   });
 
   describe("getRecommendationHistory", () => {
@@ -765,6 +873,91 @@ describe("dailyRecommendationService", () => {
       const result = await getStockRecommendationDetail("UNKNOWN");
       expect(result.tracker).toBeNull();
       expect(result.history).toEqual([]);
+    });
+  });
+
+  // ── checkRecommendationPerformance (v3.12.0 live-price fallback) ────────
+
+  describe("checkRecommendationPerformance", () => {
+    const makePerfTracker = (overrides: Record<string, unknown> = {}) => ({
+      id: "t1",
+      symbol: "RELIANCE",
+      status: "tracking",
+      aiRecommendation: "BUY",
+      entryPrice: 2400,
+      currentPrice: 2400,
+      targetPrice: 2750,
+      stopLoss: 2280,
+      createdAt: new Date(),
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      // Status-change path fires recordAIEvent(...).catch(...) — must resolve.
+      mockRecordAIEvent.mockResolvedValue(undefined);
+      // Perf completion fires recordSystemEvent(...).catch(...) — must resolve.
+      mockRecordSystemEvent.mockResolvedValue(undefined);
+      mockGetStockQuote.mockResolvedValue({ lastPrice: 500, closePrice: 500 });
+    });
+
+    test("uses DB prices when available — no live fallback", async () => {
+      mockPrisma.recommendationTracker.findMany.mockResolvedValue([
+        makePerfTracker({ id: "t1", symbol: "RELIANCE" }),
+        makePerfTracker({ id: "t2", symbol: "TCS" }),
+      ]);
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { ticker: "RELIANCE", close: 2500 },
+        { ticker: "TCS", close: 3400 },
+      ]);
+
+      const result = await checkRecommendationPerformance();
+
+      expect(result.checked).toBe(2);
+      expect(mockGetStockQuote).not.toHaveBeenCalled();
+      expect(mockPrisma.recommendationTracker.update).toHaveBeenCalledTimes(2);
+    });
+
+    test("bridges trackers missing daily_prices rows with a live quote", async () => {
+      mockPrisma.recommendationTracker.findMany.mockResolvedValue([
+        makePerfTracker({ id: "t1", symbol: "RELIANCE" }),
+        makePerfTracker({ id: "t2", symbol: "FRESH" }),
+      ]);
+      mockPrisma.$queryRaw.mockResolvedValue([{ ticker: "RELIANCE", close: 2500 }]);
+      mockGetStockQuote.mockResolvedValue({ lastPrice: 555, closePrice: 555 });
+
+      const result = await checkRecommendationPerformance();
+
+      expect(mockGetStockQuote).toHaveBeenCalledWith("FRESH", false);
+      expect(result.checked).toBe(2);
+      // FRESH updated with the bridged price, RELIANCE with its DB close.
+      const updateCalls = mockPrisma.recommendationTracker.update.mock.calls as any[];
+      expect(updateCalls.some((c) => c[0]?.where?.id === "t2" && c[0]?.data?.currentPrice === 555)).toBe(true);
+      expect(updateCalls.some((c) => c[0]?.where?.id === "t1" && c[0]?.data?.currentPrice === 2500)).toBe(true);
+    });
+
+    test("survives live-quote failures — symbol skipped, no throw", async () => {
+      mockPrisma.recommendationTracker.findMany.mockResolvedValue([
+        makePerfTracker({ id: "t1", symbol: "GONE" }),
+      ]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockGetStockQuote.mockRejectedValue(new Error("NSE 403"));
+
+      const result = await checkRecommendationPerformance();
+
+      expect(result.checked).toBe(1);
+      expect(mockPrisma.recommendationTracker.update).not.toHaveBeenCalled();
+    });
+
+    test("caps live fallback to 50 symbols", async () => {
+      const trackers = Array.from({ length: 60 }, (_, i) =>
+        makePerfTracker({ id: `t${i}`, symbol: `S${i}` }),
+      );
+      mockPrisma.recommendationTracker.findMany.mockResolvedValue(trackers);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+
+      await checkRecommendationPerformance();
+
+      expect(mockGetStockQuote).toHaveBeenCalledTimes(50);
     });
   });
 });

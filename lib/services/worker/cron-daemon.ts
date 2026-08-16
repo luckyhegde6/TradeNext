@@ -55,13 +55,14 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     const res = await ensureRecommendationCrons();
     logger.info({ msg: "Recommendation crons ensured", jobs: res.jobs.length });
   } catch (error) {
-    logger.warn({ msg: "Failed to ensure recommendation crons", error });
+    // v3.12.0: pass the MESSAGE — pino drops non-enumerable Error props.
+    logger.warn({ msg: "Failed to ensure recommendation crons", error: error instanceof Error ? error.message : String(error) });
   }
 
   await syncCronJobs();
 
   resyncInterval = setInterval(() => {
-    syncCronJobs().catch((error) => logger.error({ msg: "Cron daemon resync failed", error }));
+    syncCronJobs().catch((error) => logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) }));
   }, RESYNC_INTERVAL_MS);
 
   heartbeatInterval = setInterval(() => {
@@ -129,7 +130,7 @@ export async function syncCronJobs(): Promise<{ registered: number }> {
       tasks.set(job.id, { task, expression });
       logger.info({ msg: "Scheduled cron job", jobId: job.id, name: job.name, expression, timezone });
     } catch (error) {
-      logger.warn({ msg: "Failed to schedule cron job", jobId: job.id, name: job.name, error });
+      logger.warn({ msg: "Failed to schedule cron job", jobId: job.id, name: job.name, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -152,7 +153,7 @@ async function fireJob(jobId: string): Promise<void> {
     if (!job || !job.isActive) return;
     await spawnDueCronJob(job);
   } catch (error) {
-    logger.error({ msg: "Cron job fire failed", jobId, error });
+    logger.error({ msg: "Cron job fire failed", jobId, error: error instanceof Error ? error.message : String(error) });
   }
 }
 

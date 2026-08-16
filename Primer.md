@@ -447,6 +447,16 @@
 
 ## Current Project Status
 
+### Swing Tab Prod Failure FIX — Request-Time Split (v3.12.0)
+**Issue**: Swing tab could NEVER load on prod — `GET /api/recommendations/swing` ran the FULL pipeline synchronously: 34 Chartink templates (HTTP 419 → TV fallback) then the AI analysis of the top-20 (4 batches × 5, concurrency 3, retry×2) at 38–52s/batch → Netlify's 30s request wall killed the request mid-batch-3 (`Duration: 30000 ms` in prod logs).
+**Fix Applied** (branch `fix/swing-async-analysis`):
+- `getSwingRecommendations({analyze:true})` returns the FAST screener feed instantly with `analysisStatus:"pending"` and kicks `runSwingAnalysisInBackground()` — module-guarded fire-and-forget (`swingAnalysisInFlight` dedupes concurrent requests; `flushSwingAnalysis()` test hook) that runs the AI batches, patches `analysis`/`analysisError`, computes honest `analysisStatusAfterBatch`, persists swing trackers (non-fatal), audits START/COMPLETE|FAILED + RUN_COMPLETE, re-sets the SAME cache key with the final 30-min payload (pending self-expires at 10-min `SWING_PENDING_TTL`).
+- `SwingResponse.analysisStatus` union + `"pending"`; `SwingTab` gains a pulsing sky-blue "AI targets generating…" badge + SWR function-form `refreshInterval` (10s pending / 60s after).
+- **Verification**: suite **722 pass / 4 skip** (was 711/4 — +11: 4 perf-fallback, 4 reaper-sweep, 1 stage-log, 2 swing-orchestration from the split); tsc **46 = exact baseline 0 new**; **live-verified :3000** — `force=1` → 6s pending, then 225ms cached `done` with 20/20 AI targets (MARKSANS LONG 75 …), 0 console errors.
+- **Prod-stability batch (same session)**: perf-check live-price fallback (cap 50, chunked `getStockQuote` — prod perf had 130 trackers but only 8 with `daily_prices` rows); **prod `daily_prices` backfill APPLIED** (3 passes, 21,195 bars, 0 errors → coverage 8 → **115/130 trackers (88%)**, prod 37,387 rows / 602 tickers; 15 stragglers = NSE 200-with-empty-data); heartbeat-aware worker reaper (fail-safe `{0,0}`); Prisma per-query timeout (`QUERY_TIMEOUT_MS` 120s); worker-logger `resolveLogsDir()`; error serialization (worker-engine/cron-daemon); swing-script import fix; verdicts read-only verified.
+**Data sync (prod, user-approved, earlier session)**: local → prod copied daily_prices (17,411 rows), swing trackers (149), latest good 08-15 run (30 stocks); then NSE→prod fetched 1,395 bars for the current 20 swing picks (midcaps had 0 bars). **Verified live**: `/api/recommendations` serves the synced 08-15 run (IDEA BUY 70 …) after an admin Performance-Check flushed the stale 23h cache; swing `analyze=0` returns 20/20 picks WITH indicators (MARKSANS momentum10 26.98% …). `analyze=1` still 502s until this PR deploys.
+**Status**: RESOLVED in v3.12.0 — commit pending user PR merge (Netlify rebuild = deploy).
+
 ### Telegram Bot Alert Delivery (v3.2.0)
 **Issue**: No real-time alert delivery via Telegram — users couldn't receive alerts on their phone.
 **Fix Applied**:
@@ -487,6 +497,11 @@
 ---
 
 ## Session History
+
+### Session 19 (August 16, 2026) — Swing tab prod failure FIX (request-time split, async AI analysis) + prod-stability batch + prod `daily_prices` backfill (v3.12.0, branch `fix/swing-async-analysis`, session `2026-08-16-a6d2f41`)
+- **Swing async split**: `getSwingRecommendations({analyze:true})` returns the fast screener feed instantly with `analysisStatus:"pending"`; AI analysis (4 batches × 5, 38–52s/batch — Netlify's 30s wall killed the old sync pipeline) runs in `runSwingAnalysisInBackground()` (module-guarded, `swingAnalysisInFlight` dedupe, `flushSwingAnalysis()` test hook), patches analysis, re-sets the same 30-min cache key (pending self-expires at 10-min `SWING_PENDING_TTL`). `SwingTab` gains the pulsing "AI targets generating…" badge + SWR function-form `refreshInterval` (10s/60s).
+- **Prod-stability batch**: (1) perf-check live-price fallback (cap 50, chunked `getStockQuote` — prod perf run had 130 trackers, only 8 with `daily_prices` rows); (2) **prod `daily_prices` backfill APPLIED** — 3 passes (300+107+22 scoped → 246+85+7 fetched, **21,195 bars, 0 errors**) → coverage 8 → **115/130 tracking trackers (88%)**, prod **37,387 rows / 602 tickers** (15 stragglers = NSE 200-with-empty-data); (3) heartbeat-aware worker reaper (fail-safe `{0,0}`); (4) Prisma per-query timeout (`QUERY_TIMEOUT_MS` 120s); (5) worker-logger `resolveLogsDir()`; (6) error serialization (worker-engine/cron-daemon); (7) swing-script import fix; (8) verdicts read-only verified.
+- **Verification**: **suite 722 pass / 4 skip** (was 711/4); tsc 46 = exact baseline 0 new; live-verified :3000 (6s pending → 225ms cached done, 20/20 AI targets, 0 console errors). Docs: AGENTS.md, versions-v3, CHANGELOG, TODO, Primer, Lessons #78–80, session-todos, handoff latest.md, `sessions/2026-08-16-a6d2f41/`. **Commit pending user PR merge (Netlify rebuild = deploy).**
 
 ### Session 18 (August 15, 2026) — In-Process node-cron Cron Daemon + `daysTracked` fix + carried v3.10.1 batch (v3.11.0, branch `fix/cron-tz-swing-perf`, session `2026-08-14-b35eca4` continued)
 - **Daemon**: NEW `lib/services/worker/cron-daemon.ts` + root `instrumentation.ts` auto-start (guarded nodejs runtime, not build, `CRON_DAEMON_DISABLED=1` serverless opt-out); `startCronDaemon()` idempotent (self-heal ensure → syncCronJobs → 60s resync + heartbeat); `syncCronJobs()` register/drop/re-register (expr-change, invalid skip, deactivated drop, per-job timezone default Asia/Kolkata); `fireJob` re-fetches row → shared `spawnDueCronJob`.

@@ -7,6 +7,39 @@ import logger from "@/lib/logger";
 // Track if file logging is available
 let fileLoggingAvailable = true;
 
+// ── logs-dir resolution (v3.12.0) ──────────────────────────────────────────
+// Netlify's prod filesystem is read-only except /tmp — mkdirSync of
+// `<cwd>/.next/server_logs` threw ENOENT, which permanently disabled worker
+// file logging on every prod boot (`[WorkerLogger] File logging disabled:
+// Error: ENOENT mkdir '/var/task/.next/server_logs'`). Resolution order —
+// first writable candidate wins, remembered for the process:
+//   1. <cwd>/.next/server_logs   (local dev — existing behavior)
+//   2. <os.tmpdir()>/tradenext-logs   (Netlify — /tmp is writable)
+//   3. "" (no file logging — the DB log fallback takes over)
+let resolvedLogsDir: string | undefined;
+
+export function resolveLogsDir(): string {
+  if (resolvedLogsDir !== undefined) return resolvedLogsDir;
+  const fs = require("fs");
+  const path = require("path");
+  const os = require("os");
+  const candidates = [
+    path.join(process.cwd(), ".next", "server_logs"),
+    path.join(os.tmpdir(), "tradenext-logs"),
+  ];
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
+      resolvedLogsDir = dir;
+      return dir;
+    } catch {
+      // candidate not writable — try the next one
+    }
+  }
+  resolvedLogsDir = "";
+  return "";
+}
+
 /**
  * Sanitize task ID for safe filesystem usage
  * Prevents path traversal attacks by allowing only safe filename characters
@@ -45,10 +78,9 @@ async function writeToBoth(taskId: string, level: string, message: string, data?
       
       const fs = require("fs");
       const path = require("path");
-      const logsDir = path.join(process.cwd(), ".next", "server_logs");
-      
-      if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir, { recursive: true, mode: 0o777 });
+      const logsDir = resolveLogsDir();
+      if (!logsDir) {
+        throw new Error("No writable logs directory");
       }
       
       // Use only the validated safeTaskId - no user input in path construction
@@ -102,7 +134,7 @@ export async function readLog(taskId: string): Promise<string> {
     if (safeTaskId) {
       const fs = require("fs");
       const path = require("path");
-      const logsDir = path.join(process.cwd(), ".next", "server_logs");
+      const logsDir = resolveLogsDir();
       // Use only the validated safeTaskId - no user input in path construction
       const logFileName = safeTaskId + ".log";
       const logFile = path.join(logsDir, logFileName);
@@ -141,9 +173,9 @@ export function getAllLogFiles(): { taskId: string; path: string; size: number; 
   try {
     const fs = require("fs");
     const path = require("path");
-    const logsDir = path.join(process.cwd(), ".next", "server_logs");
+    const logsDir = resolveLogsDir();
     
-    if (!fs.existsSync(logsDir)) {
+    if (!logsDir || !fs.existsSync(logsDir)) {
       return [];
     }
 
@@ -183,13 +215,13 @@ export async function deleteLog(taskId: string): Promise<boolean> {
     if (safeTaskId) {
       const fs = require("fs");
       const path = require("path");
-      const logsDir = path.join(process.cwd(), ".next", "server_logs");
+      const logsDir = resolveLogsDir();
       // Use only the validated safeTaskId - no user input in path construction
       const logFileName = safeTaskId + ".log";
       const logFile = path.join(logsDir, logFileName);
 
       // Security: Verify path is within logsDir to prevent traversal
-      if (logFile.startsWith(logsDir + path.sep) && fs.existsSync(logFile)) {
+      if (logsDir && logFile.startsWith(logsDir + path.sep) && fs.existsSync(logFile)) {
         fs.unlinkSync(logFile);
         deleted = true;
       }
@@ -226,10 +258,10 @@ export async function cleanupLogs(retentionDays = 7): Promise<number> {
   try {
       const fs = require("fs");
       const path = require("path");
-      const logsDir = path.join(process.cwd(), ".next", "server_logs");
+      const logsDir = resolveLogsDir();
       const cutoffTime = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
       
-      if (fs.existsSync(logsDir)) {
+      if (logsDir && fs.existsSync(logsDir)) {
     const files = fs.readdirSync(logsDir).filter((f: string) => f.endsWith(".log"));
       
         for (const file of files) {
