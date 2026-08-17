@@ -29,6 +29,8 @@ const workerTaskSchema = z.object({
     "cleanup", "password_reset", "notification_broadcast", "announcement_mgmt", "user_query", "maintenance",
     // F-Score types
     "fscore_calc", "fscore_batch", "fscore_single",
+    // v3.14.1: IPO analysis pre-warm + cleanup
+    "ipo_analysis_prewarm", "ipo_analysis_cleanup",
   ]),
   taskCategory: z.enum(["cron", "async", "regular"]).optional(),
   priority: z.number().min(1).max(10).optional(),

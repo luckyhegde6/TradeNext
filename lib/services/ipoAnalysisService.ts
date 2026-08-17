@@ -514,6 +514,17 @@ export async function getIpoAnalysis(
     const mem = cache.get<IpoAnalysis>(key);
     if (mem && mem.symbol === upper) {
       logger.debug({ msg: "IPO analysis: memory cache hit", symbol: upper });
+      // v3.14.1: make cache hits visible in AI monitoring so the admin
+      // dashboard always shows IPO analysis activity (not just fresh gens).
+      trackAiCall({
+        timestamp: new Date().toISOString(),
+        action: "ipo_analysis_served",
+        model: "cache",
+        status: "success",
+        tokensUsed: 0,
+        responseTimeMs: 0,
+        analysisType: "ipo",
+      }).catch(() => undefined);
       return { ...mem, source: "cache", cachedAt: mem.generatedAt };
     }
   }
@@ -558,6 +569,16 @@ export async function getIpoAnalysis(
         path: `/api/recommendations/ipos/${upper}/analysis`,
         responseStatus: 200,
         metadata: { symbol: upper, source: "cache" },
+      }).catch(() => undefined);
+      // v3.14.1: make cache hits visible in AI monitoring.
+      trackAiCall({
+        timestamp: new Date().toISOString(),
+        action: "ipo_analysis_served",
+        model: "cache",
+        status: "success",
+        tokensUsed: 0,
+        responseTimeMs: 0,
+        analysisType: "ipo",
       }).catch(() => undefined);
       const out: IpoAnalysisResult = {
         ...analysis,
@@ -786,4 +807,49 @@ export async function getIpoAnalysis(
   const result: IpoAnalysisResult = { ...analysis, source: "ai", cachedAt: null };
   cache.set(key, result, IPO_ANALYSIS_CACHE_TTL_SECONDS);
   return result;
+}
+
+/* ─── TTL Cleanup ─── */
+
+/** Default retention: 90 days — IPO analysis has long-term value. */
+const IPO_ANALYSIS_RETENTION_DAYS = 90;
+
+/**
+ * Delete stale IPO analysis rows from MarketCache.
+ * Rows with `dataType = "ipo_analysis"` and `lastSyncedAt` older than
+ * `retentionDays` are hard-deleted.  Returns the count of deleted rows.
+ *
+ * Non-fatal on DB errors — returns 0 and logs a warning.
+ */
+export async function cleanStaleIpoAnalysisRows(
+  retentionDays: number = IPO_ANALYSIS_RETENTION_DAYS
+): Promise<number> {
+  try {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+
+    const { count } = await prisma.marketCache.deleteMany({
+      where: {
+        dataType: IPO_ANALYSIS_DATATYPE,
+        lastSyncedAt: { lt: cutoff },
+      },
+    });
+
+    if (count > 0) {
+      logger.info({
+        msg: "Stale IPO analysis rows cleaned",
+        deleted: count,
+        retentionDays,
+        cutoff: cutoff.toISOString(),
+      });
+    }
+
+    return count;
+  } catch (err) {
+    logger.warn({
+      msg: "IPO analysis cleanup failed (non-fatal)",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
 }

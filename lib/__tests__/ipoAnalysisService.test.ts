@@ -37,6 +37,7 @@ jest.mock("@/lib/prisma", () => ({
     marketCache: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
+      deleteMany: jest.fn(),
     },
   },
 }));
@@ -59,6 +60,11 @@ jest.mock("@/lib/services/ai/llm-provider", () => ({
   __esModule: true,
   directPrompt: jest.fn(),
   getPromptTimeoutMs: jest.fn(() => 120_000),
+}));
+
+jest.mock("@/lib/services/ai/ai-monitoring", () => ({
+  __esModule: true,
+  trackAiCall: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("@/lib/services/nseIpoService", () => ({
@@ -92,6 +98,7 @@ import {
   extractVerdict,
   extractRecommendation,
   getIpoAnalysis,
+  cleanStaleIpoAnalysisRows,
   IPO_ANALYSIS_CACHE_TTL_SECONDS,
 } from "@/lib/services/ipoAnalysisService";
 import {
@@ -100,6 +107,7 @@ import {
   type AIConfig,
 } from "@/lib/services/ai/config";
 import { directPrompt } from "@/lib/services/ai/llm-provider";
+import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
 import { getUpcomingIpoIssues } from "@/lib/services/nseIpoService";
 import { createAuditLog } from "@/lib/audit";
 
@@ -474,5 +482,120 @@ describe("getIpoAnalysis cache semantics", () => {
     expect(result.report).toBeNull();
     expect(result.content).toBe(SAMPLE_CONTENT);
     expect(directPrompt).not.toHaveBeenCalled();
+  });
+
+  // ─── v3.14.1: cache-hit monitoring visibility ──────────────────────────
+
+  describe("v3.14.1: cache-hit trackAiCall visibility", () => {
+    test("memory cache hit calls trackAiCall with action ipo_analysis_served", async () => {
+      (cache as any).set(
+        "ipo_analysis_SHIPROCKET",
+        {
+          symbol: "SHIPROCKET",
+          companyName: "Shiprocket Logistics Ltd",
+          content: SAMPLE_CONTENT,
+          verdict: "SELL 50% AND HOLD 50%",
+          recommendation: "SELL 50% AND HOLD 50%",
+          generatedAt: new Date().toISOString(),
+        },
+        IPO_ANALYSIS_CACHE_TTL_SECONDS
+      );
+
+      await getIpoAnalysis("SHIPROCKET");
+
+      // trackAiCall should be called for the cache hit
+      expect(trackAiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "ipo_analysis_served",
+          model: "cache",
+          status: "success",
+          tokensUsed: 0,
+          responseTimeMs: 0,
+          analysisType: "ipo",
+        })
+      );
+      // No fresh AI call
+      expect(directPrompt).not.toHaveBeenCalled();
+    });
+
+    test("DB cache hit calls trackAiCall with action ipo_analysis_served", async () => {
+      (prisma.marketCache.findUnique as jest.Mock).mockResolvedValue({
+        cacheKey: "ipo_analysis_SHIPROCKET",
+        dataType: "ipo_analysis",
+        data: {
+          symbol: "SHIPROCKET",
+          companyName: "Shiprocket Logistics Ltd",
+          content: SAMPLE_CONTENT,
+          verdict: "SELL 50% AND HOLD 50%",
+          recommendation: "SELL 50% AND HOLD 50%",
+          generatedAt: new Date().toISOString(),
+        },
+        recordCount: 1,
+        lastSyncedAt: new Date(),
+        nextSyncAt: new Date(Date.now() + IPO_ANALYSIS_CACHE_TTL_SECONDS * 1000),
+      });
+
+      await getIpoAnalysis("SHIPROCKET");
+
+      expect(trackAiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "ipo_analysis_served",
+          model: "cache",
+          status: "success",
+        })
+      );
+      expect(directPrompt).not.toHaveBeenCalled();
+    });
+
+    test("fresh AI generation does NOT call trackAiCall with ipo_analysis_served", async () => {
+      await getIpoAnalysis("SHIPROCKET");
+
+      // Fresh generation uses a different action (ipo_analysis_batch)
+      const servedCalls = (trackAiCall as jest.Mock).mock.calls.filter(
+        (c: any[]) => c[0]?.action === "ipo_analysis_served"
+      );
+      expect(servedCalls).toHaveLength(0);
+      expect(directPrompt).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ─── TTL Cleanup ────────────────────────────────────────────────────────
+
+  describe("cleanStaleIpoAnalysisRows", () => {
+    test("deletes rows older than retention period and returns count", async () => {
+      (prisma.marketCache.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
+
+      const deleted = await cleanStaleIpoAnalysisRows(90);
+
+      expect(deleted).toBe(5);
+      expect(prisma.marketCache.deleteMany).toHaveBeenCalledWith({
+        where: {
+          dataType: "ipo_analysis",
+          lastSyncedAt: { lt: expect.any(Date) },
+        },
+      });
+      // Verify cutoff is ~90 days ago
+      const whereClause = (prisma.marketCache.deleteMany as jest.Mock).mock.calls[0][0];
+      const cutoff = whereClause.where.lastSyncedAt.lt;
+      const expectedCutoff = new Date();
+      expectedCutoff.setDate(expectedCutoff.getDate() - 90);
+      expect(Math.abs(cutoff.getTime() - expectedCutoff.getTime())).toBeLessThan(5000);
+    });
+
+    test("returns 0 on DB error (non-fatal)", async () => {
+      (prisma.marketCache.deleteMany as jest.Mock).mockRejectedValue(new Error("DB down"));
+
+      const deleted = await cleanStaleIpoAnalysisRows();
+
+      expect(deleted).toBe(0);
+    });
+
+    test("returns 0 when no stale rows exist", async () => {
+      (prisma.marketCache.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const deleted = await cleanStaleIpoAnalysisRows();
+
+      expect(deleted).toBe(0);
+    });
   });
 });

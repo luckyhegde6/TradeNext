@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-17 (v3.14.0 Swing signal persistence + performance tracking + spec-driven development workflow: NEW `SwingSignal` model (`@@unique([jobId, symbol])`) snapshots posted picks, per-symbol patch at analysis completion, `swingPerformanceService.ts` direction-aware 45-day expiry evaluator + batch DB/live-price bridge, `swing_performance` worker task + admin trigger, audit tags, worker-logs `resolveLogsDir()` → `cwd/worker_logs` + monitoring Workers tab; **spec-driven dev workflow** (mandatory for all features — spec→plan→implement→verify); suite 758 pass / 4 skip (was 730/4, +28); tsc 46 = exact baseline 0 new. Branch `feat/swing-signals` on top of docs branch; v3.13.0 already merged via PR #96.)
+2026-08-17 (v3.15.0 Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible): Closed IPOs section with current prices + gain/loss, IPO analysis cache-hit monitoring visibility, IPO analysis pre-warm in market-sync, TTL cleanup (90-day retention), pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs); suite 787 pass / 4 skip (was 758/4, +29); tsc 46 = exact baseline 0 new. Branch `feat/closed-ipos-ttl-cleanup`; docs updated, commit pending user.)
 
 ---
 
 ## Current Project Status
+
+### v3.15.0 — Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible) (Aug 17 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
+**Branch**: `feat/closed-ipos-ttl-cleanup` (on top of main after PR #97 merge).
+**Why**: (1) Pipeline sent ALL screener results to AI (potentially 500+) — wasteful; no separation of BUY/SELL from HOLDs in UI. (2) IPO analysis cache hits (12h TTL) were invisible in monitoring. (3) No pre-warm for IPO analysis on market-sync. (4) Closed IPOs had no visibility into current prices/gain-loss. (5) No TTL cleanup for old IPO analysis rows.
+**Fix**: (1) `selectTopByMarketCap(results, 100)` ranks by market cap, sends top 100 to AI; `rankActionableByConfidence()` picks top 50 BUY/SELL; HOLDs stored but shown separately (`showHolds` toggle in `DailyPicksTab`). (2) `trackAiCall({action:"ipo_analysis_served", model:"cache"})` at memory + DB cache hit paths. (3) `executeIpoAnalysisPrewarm()` in market-sync (non-fatal) + standalone `ipo_analysis_prewarm` task type. (4) NEW `/api/recommendations/ipos/closed` endpoint (filters Closed + last 30 days, batch-fetches current prices, computes gain %). (5) `cleanStaleIpoAnalysisRows()` deletes `MarketCache` rows with `dataType="ipo_analysis"` + `lastSyncedAt < 90 days`; wired into market-sync + standalone `ipo_analysis_cleanup` task type. (6) `IposTab.tsx` rewritten: main table Active + Forthcoming only; separate collapsible "Recently Closed IPOs" section with current prices + gain/loss.
+**Tests**: NEW `closedIpoPrices.test.ts` (18 — gain calc, date filtering, price parsing); extended `ipoAnalysisService.test.ts` (+3 cleanup tests); extended `ipoAnalysisPrewarm.test.ts` (5 pre-warm tests); suite 787 pass / 4 skip (was 758/4, +29); tsc 46 = exact baseline, 0 new.
+**Live-verified**: pipeline 30 Total / 16 Buy / 5 Hold / 9 Sell, HOLDs collapsed, IPOs tab 4 Active + 1 Upcoming, AI Analysis modal opens, `ipo_analysis: 2 (29%)` in monitoring.
+- **Status**: docs updated (AGENTS.md v3.15.0 row, CHANGELOG index + versions-v3.15.md, TODO.md row, Primer, agent-memory, session-todos); **commit pending user; no push/deploy**.
 
 ### v3.14.0 — Swing Signal Persistence + Performance Tracking + Spec-Driven Dev (Aug 17 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
 **Branch**: `feat/swing-signals` (on top of `docs-readme-refs-agentic-coding`).

@@ -15,6 +15,15 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-08-17 | v3.15.0 — Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible)
+- **Action**: Implemented closed IPOs section with current prices, IPO analysis TTL cleanup, and pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs).
+- **Files Created**: `app/api/recommendations/ipos/closed/route.ts` (batch price endpoint), `lib/__tests__/closedIpoPrices.test.ts` (18 tests), `.agents/specs/closed-ipos-ttl-cleanup.md`, `.agents/plans/closed-ipos-ttl-cleanup.md`, `.agents/changelog/versions-v3.15.md`
+- **Files Modified**: `lib/services/dailyRecommendationService.ts` (selectTopByMarketCap, rankActionableByConfidence, MAX_AI_STOCKS=100, MAX_RECOMMENDABLE_STOCKS=50), `app/components/recommendations/DailyPicksTab.tsx` (showHolds toggle + collapsible HOLD section), `lib/services/ipoAnalysisService.ts` (cache-hit monitoring + cleanStaleIpoAnalysisRows), `lib/services/worker/worker-service.ts` (executeIpoAnalysisPrewarm + executeIpoAnalysisCleanup + standalone task types), `app/api/admin/cron/route.ts` + `app/api/admin/workers/route.ts` (TASK_TYPES updated), `app/components/recommendations/IposTab.tsx` (rewritten: Active+Forthcoming only + collapsible Closed section with gain/loss), `lib/__tests__/ipoAnalysisService.test.ts` (+3 cleanup tests), `lib/__tests__/ipoAnalysisPrewarm.test.ts` (5 pre-warm tests), `AGENTS.md` (v3.15.0 row), `.agents/CHANGELOG.md` (index updated), `.agents/changelog/versions-v3.md` (index updated), `Primer.md` (v3.15.0 status), `agent-memory.md` (this entry), `.agents/session-todos.md` (updated)
+- **Tests**: Suite 787 pass / 4 skip (was 758/4, +29 new tests); tsc 46 = exact baseline, 0 new
+- **Live-verified**: Pipeline 30 Total / 16 Buy / 5 Hold / 9 Sell, HOLDs collapsed, IPOs tab 4 Active + 1 Upcoming, AI Analysis modal opens, `ipo_analysis: 2 (29%)` in monitoring
+- **Specs**: `.agents/specs/pipeline-top100-confidence.md` (approved), `.agents/plans/pipeline-top100-confidence.md` (approved), `.agents/specs/closed-ipos-ttl-cleanup.md` (approved), `.agents/plans/closed-ipos-ttl-cleanup.md` (approved)
+- **Status**: All code + tests verified, commit pending user, no push/deploy
+
 ### 2026-08-18 | Agent Profile Restructuring — `.agents/` Wiring + Stale Tooling Cleanup
 - **Action**: Restructured `.agents/` ecosystem for proper agentic coding: moved misplaced files, updated agent profiles, wired missing agents in opencode.json, updated matrix.
 - **Files Moved**: `.agents/changelog/{screener,corp-actions,security-workers,serverless-logging}.md` → `.agents/docs/` (legacy feature deep-dives, not version changelogs)

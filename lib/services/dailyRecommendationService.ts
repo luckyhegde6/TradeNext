@@ -106,19 +106,20 @@ const DEFAULT_STOP_LOSS_MULTIPLIER = 0.95;
 const TOTAL_SCREENER_COUNT = 7;
 
 /**
- * Maximum unique stocks kept for a daily run.
+ * Maximum unique stocks kept for AI analysis per run.
  *
- * The screeners can flag 600+ symbols; we rank by a composite score
- * (screener agreement → market cap → momentum) and keep only the top
- * MAX_RECOMMENDED_STOCKS to keep AI cost/time bounded and the feed clean.
+ * The screeners can flag 600+ symbols; we sort by market cap (descending)
+ * and keep only the top MAX_AI_STOCKS for AI analysis. After analysis,
+ * we separate BUY/SELL from HOLDs and rank actionable picks by confidence
+ * to select the top MAX_RECOMMENDED_STOCKS for Today's Picks.
  */
-const MAX_RECOMMENDED_STOCKS = 50;
+const MAX_AI_STOCKS = 100;
 
 /**
- * Maximum unique stocks to send through AI analysis per run.
- * Mirrors MAX_RECOMMENDED_STOCKS — after ranking we never exceed this.
+ * Maximum actionable (BUY/SELL) stocks shown in Today's Picks.
+ * HOLDs are stored in History/Performance but not shown in the main grid.
  */
-const MAX_AI_STOCKS = 50;
+const MAX_RECOMMENDED_STOCKS = 50;
 
 // ─── Main Orchestration ─────────────────────────────────────────────────
 
@@ -190,9 +191,8 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       0,
     );
 
-    // 5. Rank by composite score (screener agreement → market cap → momentum)
-    //    and cap to the top MAX_RECOMMENDED_STOCKS so AI cost/time stays bounded.
-    const rankedResults = rankAndCapRecommendations(screenerResults);
+    // 5. Select top stocks by market cap for AI analysis
+    const rankedResults = selectTopByMarketCap(screenerResults, MAX_AI_STOCKS);
 
     // 6 & 7. Batch upsert trackers and create stock entries
     // Instead of N individual upserts+creates, we batch:
@@ -1476,64 +1476,74 @@ function getTodayMidnight(): Date {
 }
 
 /**
- * Rank screener results by a composite score and cap to the top
- * {@link MAX_RECOMMENDED_STOCKS}.
- *
- * Score is weighted:
- * - **Screener agreement** (primary): more screeners flagging a stock is a
- *   stronger signal → `screenerCount * 10`.
- * - **Market cap** (secondary): prefer liquid, established names so the feed
- *   stays actionable → banded `0..3` (₹100Cr+, ₹1,000Cr+, ₹10,000Cr+).
- * - **Momentum** (tertiary): positive `changePercent` for bullish screeners →
- *   normalized `0..1` from a clamped [-5, +5] band.
- *
- * Ties break by screenerCount. Stocks without market cap data are not
- * penalized (marketCapScore 0 but still ranked by agreement + momentum).
+ * Sort de-duplicated screener results by market cap (descending) and cap
+ * to the given limit. Stocks without market cap data sort last.
  *
  * @param results Full de-duplicated screener results (can be 600+).
- * @returns Top {@link MAX_RECOMMENDED_STOCKS} entries by composite score.
+ * @param limit Maximum number of stocks to return.
+ * @returns Top `limit` entries by market cap.
  */
-function rankAndCapRecommendations(
+function selectTopByMarketCap(
   results: ScreenerResult[],
+  limit: number,
 ): ScreenerResult[] {
-  if (results.length <= MAX_RECOMMENDED_STOCKS) {
+  if (results.length <= limit) {
     return results;
   }
 
-  const scored = results.map((r) => {
-    const marketCap = r.marketCap ?? 0;
-    // Market cap bands in ₹ crore (1 Cr = 10,000,000)
-    const marketCapScore =
-      marketCap >= 100_000_000_000
-        ? 3 // ≥ ₹10,000 Cr (large cap)
-        : marketCap >= 10_000_000_000
-          ? 2 // ≥ ₹1,000 Cr (mid/large cap)
-          : marketCap >= 1_000_000_000
-            ? 1 // ≥ ₹100 Cr (small/mid cap)
-            : 0;
-    // Clamp changePercent to [-5, 5] then normalize to [0, 1]
-    const momentumScore = Math.max(
-      0,
-      Math.min(1, (r.changePercent + 5) / 10),
-    );
-    return {
-      result: r,
-      score: r.screenerCount * 10 + marketCapScore * 2 + momentumScore,
-    };
+  // Sort by market cap descending; undefined/NaN sorts last
+  const sorted = [...results].sort((a, b) => {
+    const aCap = a.marketCap ?? 0;
+    const bCap = b.marketCap ?? 0;
+    return bCap - aCap;
   });
 
-  scored.sort(
-    (a, b) => b.score - a.score || b.result.screenerCount - a.result.screenerCount,
-  );
-
-  const ranked = scored.map((s) => s.result);
-  const kept = ranked.slice(0, MAX_RECOMMENDED_STOCKS);
+  const kept = sorted.slice(0, limit);
 
   logger.info({
-    msg: "Capped daily recommendations to top MAX_RECOMMENDED_STOCKS",
-    total: ranked.length,
+    msg: "Selected top stocks by market cap for AI analysis",
+    total: sorted.length,
     kept: kept.length,
-    dropped: ranked.length - kept.length,
+    dropped: sorted.length - kept.length,
+  });
+
+  return kept;
+}
+
+/**
+ * Rank AI-analyzed stocks by confidence (descending) and cap to the given limit.
+ * Only BUY/SELL recommendations are ranked; HOLDs are excluded from the top picks.
+ *
+ * @param results AI-analyzed stocks with verdicts.
+ * @param limit Maximum number of actionable stocks to return.
+ * @returns Top `limit` actionable entries by confidence, then by screenerCount.
+ */
+function rankActionableByConfidence(
+  results: StockAnalysisResult[],
+  limit: number,
+): StockAnalysisResult[] {
+  // Separate actionable (BUY/SELL) from HOLDs
+  const actionable = results.filter(
+    (r) =>
+      r.success &&
+      r.aiRecommendation.recommendation !== "HOLD",
+  );
+
+    // Sort by confidence descending, tiebreak by screener agreement
+    actionable.sort((a, b) => {
+      const confDiff = b.aiRecommendation.confidence - a.aiRecommendation.confidence;
+      if (confDiff !== 0) return confDiff;
+      return b.screenerNames.length - a.screenerNames.length;
+    });
+
+  const kept = actionable.slice(0, limit);
+
+  logger.info({
+    msg: "Ranked actionable picks by confidence",
+    actionableCount: actionable.length,
+    heldCount: results.filter((r) => r.aiRecommendation.recommendation === "HOLD").length,
+    topPicks: kept.length,
+    dropped: actionable.length - kept.length,
   });
 
   return kept;

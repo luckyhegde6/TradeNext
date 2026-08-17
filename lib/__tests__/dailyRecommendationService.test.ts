@@ -616,21 +616,25 @@ describe("dailyRecommendationService", () => {
       expect(tcsUpdate).toBeUndefined();
     });
 
-    test("caps AI analysis at MAX_AI_STOCKS (50)", async () => {
-      // Create 120 stocks
-      const manyStocks = Array.from({ length: 120 }, (_, i) =>
-        makeScreenerResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
+    test("caps AI analysis at MAX_AI_STOCKS (100) by market cap", async () => {
+      // Create 200 stocks — the new pipeline selects top 100 by market cap
+      const manyStocks = Array.from({ length: 200 }, (_, i) =>
+        makeScreenerResult({
+          symbol: `STOCK${i + 1}`,
+          price: 100 * (i + 1),
+          marketCap: (200 - i) * 1_000_000_000, // Descending market cap
+        }),
       );
       mockRunDailyScreeners.mockResolvedValue(manyStocks);
-      // AI gets called with only 50 (rankAndCapRecommendations top-50 cap)
-      const aiResults = Array.from({ length: 50 }, (_, i) =>
+      // AI gets called with only 100 (selectTopByMarketCap top-100 by market cap)
+      const aiResults = Array.from({ length: 100 }, (_, i) =>
         makeAIResult({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
       mockAnalyzeStocks.mockResolvedValue(aiResults);
 
-      // Mock findMany to return entries for all 50 capped stocks
+      // Mock findMany to return entries for all 100 capped stocks
       mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue(
-        Array.from({ length: 50 }, (_, i) => ({
+        Array.from({ length: 100 }, (_, i) => ({
           id: `stock-${i + 1}`,
           symbol: `STOCK${i + 1}`,
           runId: "run-123",
@@ -638,10 +642,10 @@ describe("dailyRecommendationService", () => {
       );
 
       const result = await runDailyRecommendations();
-      expect(result.uniqueStocks).toBe(50);
-      expect(result.aiProcessed).toBe(50);
-      // analyzeStocks called with array of length 50
-      expect(mockAnalyzeStocks.mock.calls[0][0]).toHaveLength(50);
+      expect(result.uniqueStocks).toBe(100);
+      expect(result.aiProcessed).toBe(100);
+      // analyzeStocks called with array of length 100
+      expect(mockAnalyzeStocks.mock.calls[0][0]).toHaveLength(100);
     });
   });
 
