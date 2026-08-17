@@ -116,6 +116,7 @@ export default function TemplatesPanel({ onApply, onChartinkResult, onClose }: T
   const [loading, setLoading] = React.useState(true);
   const [runningId, setRunningId] = React.useState<string | null>(null);
   const [runError, setRunError] = React.useState<string | null>(null);
+  const [runWarning, setRunWarning] = React.useState<string | null>(null);
   const [activeCategory, setActiveCategory] = React.useState<string | "all">("all");
   const [search, setSearch] = React.useState("");
 
@@ -155,6 +156,7 @@ export default function TemplatesPanel({ onApply, onChartinkResult, onClose }: T
   const handleChartinkApply = async (tpl: ChartinkTemplateItem) => {
     setRunningId(tpl.id);
     setRunError(null);
+    setRunWarning(null);
     try {
       const res = await fetch("/api/screener/chartink", {
         method: "POST",
@@ -165,6 +167,9 @@ export default function TemplatesPanel({ onApply, onChartinkResult, onClose }: T
       if (!res.ok) {
         setRunError(data.error || "Run failed");
         return;
+      }
+      if (data.warning) {
+        setRunWarning(data.warning);
       }
       onChartinkResult?.({
         templateId: tpl.id,
@@ -296,6 +301,13 @@ export default function TemplatesPanel({ onApply, onChartinkResult, onClose }: T
       {runError && (
         <div className="px-3 py-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-700 dark:text-red-400">
           {runError}
+        </div>
+      )}
+
+      {/* Run warning */}
+      {runWarning && !runError && (
+        <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-400">
+          {runWarning}
         </div>
       )}
 

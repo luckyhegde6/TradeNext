@@ -22,6 +22,12 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | **wiki-publisher** | wiki-creator | docs-updater | `/wiki-publish` | docs changed → wiki sync |
 | **bug-hunter** | bug-finder | docs-updater | `/find-bugs` | bugs/contract audits |
 | **ux-designer** | ux-enhancer | bug-finder | `/ux-audit` | UI/UX audit/enhance |
+| **qa** | playwright-e2e | — | — | test execution, cross-browser validation |
+| **e2e-agent** | playwright-e2e | playwright (MCP) | — | user flow validation, responsive |
+| **code-reviewer** | — | bug-finder | — | code quality + security review |
+| **devops** | — | — | — | deployment, CI/CD, infra |
+| **integrator** | — | — | — | API contracts, cross-module wiring |
+| **observability** | — | — | — | monitoring, logging, health, perf |
 
 ## Skill inventory
 
@@ -32,9 +38,9 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | wiki-creator | `.opencode/skills/wiki-creator/` | `.agents/skills/wiki-creator.md` | publish GitHub wiki pages |
 | bug-finder | `.opencode/skills/bug-finder/` | `.agents/skills/bug-finder.md` | hunt/reproduce/verify bugs |
 | ux-enhancer | `.opencode/skills/ux-enhancer/` | `.agents/skills/ux-enhancer.md` | UI/UX audit + enhancement |
-| nse-integration | `.opencode/skills/nse-integration/` | `.agents/skills/nse-integration.md` | NSE API integration |
-| playwright-cli | `.opencode/skills/playwright-cli/` | `.agents/skills/playwright-cli/` | browser testing (exploratory CLI) |
+| nse-integration | `.opencode/skills/nse-integration/` | `.agents/skills/nse-integration.md` | NSE API integration (nseFetch, caching, cookies) |
 | playwright-e2e | `.opencode/skills/playwright-e2e/` | `.agents/skills/playwright-e2e/` | committed e2e suite (`e2e/`, `npm run test:e2e`) — regression guards, cross-browser + mobile |
+| playwright-cli | `.opencode/skills/playwright-cli/` | — | exploratory browser testing via Playwright MCP (not committed) |
 
 ## Command inventory
 
@@ -44,7 +50,8 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | `/wiki-publish` | wiki-publisher | publish wiki pages |
 | `/find-bugs` | bug-hunter | bug hunt + contract audit |
 | `/ux-audit` | ux-designer | UI/UX audit/enhance |
-| `/tdd`, `/code-review`, `/build-fix`, `/plan`, `/pre-commit-check` | existing | existing flows |
+| `/nse-integration` | — | NSE API integration patterns |
+| `/tdd`, `/code-review`, `/build-fix`, `/plan`, `/pre-commit-check` | build/tdd/review | existing flows |
 
 ## Adding a new skill
 
@@ -52,4 +59,4 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 2. Mirror to `.agents/skills/<name>.md` (short human version, `Source:` footer).
 3. Create/update the owning agent profile (`.agents/agents/<name>.md`) and command (`.agents/commands/<name>.md`).
 4. Wire into `.opencode/opencode.json` (`agent:` + `command:` sections) if it needs agent/command bindings.
-5. Update this matrix + AGENTS.md.
+5. Update this matrix + @AGENTS.md.

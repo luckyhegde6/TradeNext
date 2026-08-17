@@ -304,6 +304,78 @@
         "Bash": true,
         "Skill": true
       }
+    },
+    "qa": {
+      "description": "Quality Assurance specialist - writes and executes comprehensive tests, validates workflows",
+      "mode": "subagent",
+      "prompt": "You are the QA agent. Test TradeNext features (playwright-e2e skill + .agents/agents/qa.md). Run unit tests (npm run test), E2E tests (npm run test:e2e), verify cross-browser (Chromium/Firefox/WebKit + Mobile Chrome). Check loading/error/empty states, responsive, zero console errors. Report test results in standard format. Only kill processes you started.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
+    },
+    "e2e-agent": {
+      "description": "End-to-end testing specialist for complete user flow validation",
+      "mode": "subagent",
+      "prompt": "You are the E2E agent. Validate complete user flows using Playwright MCP tools + Chrome DevTools MCP (.agents/agents/e2e-agent.md). Navigate, click, fill forms, take screenshots, check console for errors. Test login (demo credentials), navigation, data display, responsive (375/768/1920). Run the committed e2e suite (npm run test:e2e). Report results per project.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true,
+        "Skill": true
+      }
+    },
+    "devops": {
+      "description": "Infrastructure and deployment specialist - Netlify, CI/CD, environment, database",
+      "mode": "subagent",
+      "prompt": "You are the DevOps agent. Manage TradeNext infrastructure (.agents/agents/devops.md). Pre-deployment checklist (build, test, tsc, e2e, env vars, netlify.toml, secrets scan). Netlify deploy troubleshooting. Docker operations (db:up/down). Database operations (prisma migrate, generate). Environment configuration.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true
+      }
+    },
+    "code-reviewer": {
+      "description": "Code review specialist - analyzes code quality, security, and maintainability",
+      "mode": "subagent",
+      "prompt": "You are the Code Reviewer agent. Review TradeNext code changes for quality, security, and maintainability (.agents/agents/code-reviewer.md). Check against .agents/rules/checklist.md. Flag security issues, exposed secrets, auth/admin vulnerabilities, unvalidated inputs. Do NOT auto-fix — present findings and ask permission.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Write": false,
+        "Edit": false,
+        "Bash": false
+      }
+    },
+    "integrator": {
+      "description": "System integration specialist - API contracts, cross-module consistency, service wiring",
+      "mode": "subagent",
+      "prompt": "You are the Integrator agent. Wire new features into TradeNext's existing systems (.agents/agents/integrator.md). API contracts: route → service → DB must be consistent (zod schemas, Prisma models, UI types). Service composition: services call services, never routes calling routes. Cross-module consistency: new models need relations, indexes, API routes, UI tabs.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Write": false,
+        "Edit": false,
+        "Bash": false
+      }
+    },
+    "observability": {
+      "description": "Monitoring and logging specialist - DB/file logs, events, health, performance",
+      "mode": "subagent",
+      "prompt": "You are the Observability agent. Monitor TradeNext systems (.agents/agents/observability.md). Use Monitoring page (Admin → Monitoring): server logs, worker logs, AI logs, events. Check worker status. Investigate performance issues via Chrome DevTools MCP. Check audit logs.",
+      "tools": {
+        "Read": true,
+        "Glob": true,
+        "Grep": true,
+        "Bash": true
+      }
     }
   },
   "command": {
@@ -351,6 +423,10 @@
       "description": "Audit a page for UI/UX completeness and enhance without over-engineering",
       "template": "./.agents/commands/ux-audit.md",
       "agent": "ux-designer"
+    },
+    "nse-integration": {
+      "description": "NSE API integration patterns and debugging",
+      "template": ".opencode/skills/nse-integration/SKILL.md"
     }
   },
   "permission": {

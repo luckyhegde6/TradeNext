@@ -2,66 +2,118 @@
   {
     "id": "range-breakouts.potential-breakouts",
     "name": "Potential breakouts",
-    "url": "https://chartink.com/scanner/potential-breakouts"
+    "url": "https://chartink.com/scanner/potential-breakouts",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {cash} (  daily close *  1.05 >  daily max( 200 ,  daily high ) and  daily max( 30 ,  daily high ) <=  30 days ago max( 8 ,  daily high ) and  daily volume >  daily sma(  daily volume , 50 ) and  daily close >  90 ) )",
+    "debugClause": "groupcount( 1 where  daily close *  1.05 >  daily max( 200 ,  daily high )),groupcount( 1 where  daily max( 30 ,  daily high ) <=  30 days ago max( 8 ,  daily high )),groupcount( 1 where  daily volume >  daily sma(  daily volume , 50 )),groupcount( 1 where  daily close >  90)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.nr7-current-day",
     "name": "NR7- CURRENT DAY",
-    "url": "https://chartink.com/scanner/nr7-current-day"
+    "url": "https://chartink.com/scanner/nr7-current-day",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  daily high -  daily low <  1 day ago high -  1 day ago low and  daily high -  daily low <  2 days ago high -  2 days ago low and  daily high -  daily low <  3 days ago high -  3 days ago low and  daily high -  daily low <  4 days ago high -  4 days ago low and  daily high -  daily low <  5 days ago high -  5 days ago low and  daily high -  daily low <  6 days ago high -  6 days ago low ) )",
+    "debugClause": "groupcount( 1 where  daily high -  daily low <  1 day ago high -  1 day ago low),groupcount( 1 where  daily high -  daily low <  2 days ago high -  2 days ago low),groupcount( 1 where  daily high -  daily low <  3 days ago high -  3 days ago low),groupcount( 1 where  daily high -  daily low <  4 days ago high -  4 days ago low),groupcount( 1 where  daily high -  daily low <  5 days ago high -  5 days ago low),groupcount( 1 where  daily high -  daily low <  6 days ago high -  6 days ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.copy-nr7-fut-6",
     "name": "Narrow Range 7 - NR7",
-    "url": "https://chartink.com/scanner/copy-nr7-fut-6"
+    "url": "https://chartink.com/scanner/copy-nr7-fut-6",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  1 day ago high -  1 day ago low <  2 days ago high -  2 days ago low and  1 day ago high -  1 day ago low <  3 days ago high -  3 days ago low and  1 day ago high -  1 day ago low <  4 days ago high -  4 days ago low and  1 day ago high -  1 day ago low <  5 days ago high -  5 days ago low and  1 day ago high -  1 day ago low <  6 days ago high -  6 days ago low and  1 day ago high -  1 day ago low <  7 days ago high -  7 days ago low and  daily sma( close,10 ) >  daily sma( close,50 ) and  daily sma( close,50 ) >  daily sma( close,200 ) and  daily volume >  50000 ) )",
+    "debugClause": "groupcount( 1 where  1 day ago high -  1 day ago low <  2 days ago high -  2 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  3 days ago high -  3 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  4 days ago high -  4 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  5 days ago high -  5 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  6 days ago high -  6 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  7 days ago high -  7 days ago low),groupcount( 1 where  daily sma( close,10 ) >  daily sma( close,50 )),groupcount( 1 where  daily sma( close,50 ) >  daily sma( close,200 )),groupcount( 1 where  daily volume >  50000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.nr7-nr4",
     "name": "NR7/NR4 with INSIDE",
-    "url": "https://chartink.com/scanner/nr7-nr4"
+    "url": "https://chartink.com/scanner/nr7-nr4",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  (  daily high -  daily low ) <  (  1 day ago high -  1 day ago low ) and(  daily high -  daily low ) <  (  2 days ago high -  2 days ago low ) and(  daily high -  daily low ) <  (  3 days ago high -  3 days ago low ) and(  daily high -  daily low ) <  (  4 days ago high -  4 days ago low ) and(  daily high -  daily low ) <  (  5 days ago high -  5 days ago low ) and(  daily high -  daily low ) <  (  6 days ago high -  6 days ago low ) and( {cash} (  daily high <  1 day ago high and  daily low >  1 day ago low ) ) ) )",
+    "debugClause": "groupcount( 1 where(  daily high -  daily low ) <  (  1 day ago high -  1 day ago low )),groupcount( 1 where(  daily high -  daily low ) <  (  2 days ago high -  2 days ago low )),groupcount( 1 where(  daily high -  daily low ) <  (  3 days ago high -  3 days ago low )),groupcount( 1 where(  daily high -  daily low ) <  (  4 days ago high -  4 days ago low )),groupcount( 1 where(  daily high -  daily low ) <  (  5 days ago high -  5 days ago low )),groupcount( 1 where(  daily high -  daily low ) <  (  6 days ago high -  6 days ago low )),groupcount( 1 where      daily high <  1 day ago high),groupcount( 1 where      daily low >  1 day ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.52-week-low-3",
     "name": "52 WEEK LOW",
-    "url": "https://chartink.com/scanner/52-week-low-3"
+    "url": "https://chartink.com/scanner/52-week-low-3",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {cash} (  weekly min( 52 ,  weekly low ) =  daily low ) )",
+    "debugClause": "groupcount( 1 where  weekly min( 52 ,  weekly low ) =  daily low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.ohol-prb",
     "name": "OHOL+PRB",
-    "url": "https://chartink.com/scanner/ohol-prb"
+    "url": "https://chartink.com/scanner/ohol-prb",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} ( ( {33489} (  daily open =  daily low and  daily close >=  1 day ago high ) ) or( {33489} (  daily open =  daily high and  daily close <=  1 day ago low ) ) ) )",
+    "debugClause": "groupcount( 1 where      daily open =  daily low),groupcount( 1 where      daily close >=  1 day ago high),groupcount( 1 where      daily open =  daily high),groupcount( 1 where      daily close <=  1 day ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.abc-4",
     "name": "Technical Indicators",
-    "url": "https://chartink.com/scanner/abc-4"
+    "url": "https://chartink.com/scanner/abc-4",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {cash} (  daily ema( close,12 ) >  daily ema( close,24 ) and  1 day ago  ema( close,12 )<=  1 day ago  ema( close,24 ) and  daily rsi( 14 ) >  48 and  daily cci( 34 ) >  72 and  daily adx( 24 ) >  15 and  daily adx di positive( 14 ) >=  daily adx di negative( 14 ) and  daily volume *  2 >=  1 day ago volume ) )",
+    "debugClause": "groupcount( 1 where  daily ema( close,12 ) >  daily ema( close,24 ) and  1 day ago  ema( close,12 )<=  1 day ago  ema( close,24 )),groupcount( 1 where  daily rsi( 14 ) >  48),groupcount( 1 where  daily cci( 34 ) >  72),groupcount( 1 where  daily adx( 24 ) >  15),groupcount( 1 where  daily adx di positive( 14 ) >=  daily adx di negative( 14 )),groupcount( 1 where  daily volume *  2 >=  1 day ago volume)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.nr7-ib-nr7-stocks-with-inside-bar-pattern-by-www-squareoff-in",
     "name": "NR7 IB - NR7 stocks with Inside Bar pattern by www.squareoff.in",
-    "url": "https://chartink.com/scanner/nr7-ib-nr7-stocks-with-inside-bar-pattern-by-www-squareoff-in"
+    "url": "https://chartink.com/scanner/nr7-ib-nr7-stocks-with-inside-bar-pattern-by-www-squareoff-in",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  daily high -  daily low <  2 days ago high -  2 days ago low and  daily high -  daily low <  3 days ago high -  3 days ago low and  daily high -  daily low <  4 days ago high -  4 days ago low and  daily high -  daily low <  5 days ago high -  5 days ago low and  daily high -  daily low <  6 days ago high -  6 days ago low and  daily high <  1 day ago high and  daily low >  1 day ago low and  daily high -  daily low <  1 day ago high -  1 day ago low ) )",
+    "debugClause": "groupcount( 1 where  daily high -  daily low <  2 days ago high -  2 days ago low),groupcount( 1 where  daily high -  daily low <  3 days ago high -  3 days ago low),groupcount( 1 where  daily high -  daily low <  4 days ago high -  4 days ago low),groupcount( 1 where  daily high -  daily low <  5 days ago high -  5 days ago low),groupcount( 1 where  daily high -  daily low <  6 days ago high -  6 days ago low),groupcount( 1 where  daily high <  1 day ago high),groupcount( 1 where  daily low >  1 day ago low),groupcount( 1 where  daily high -  daily low <  1 day ago high -  1 day ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.tn-nr7-9-30-buy-scan",
     "name": "003-NR7-9:30 Buy Scan",
-    "url": "https://chartink.com/scanner/tn-nr7-9-30-buy-scan"
+    "url": "https://chartink.com/scanner/tn-nr7-9-30-buy-scan",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  (  daily high -  daily low ) >  (  1 day ago high -  1 day ago low ) and(  daily high -  daily low ) >  (  2 days ago high -  2 days ago low ) and(  daily high -  daily low ) >  (  3 days ago high -  3 days ago low ) and(  daily high -  daily low ) >  (  4 days ago high -  4 days ago low ) and(  daily high -  daily low ) >  (  5 days ago high -  5 days ago low ) and(  daily high -  daily low ) >  (  6 days ago high -  6 days ago low ) and(  daily high -  daily low ) >  (  7 days ago high -  7 days ago low ) and  daily close >  daily open and  daily close >  1 day ago close and  weekly close >  weekly open and  monthly close >  monthly open and  1 day ago volume >  10000 and  daily sma( close,20 ) >  daily sma( close,40 ) and  daily sma( close,40 ) >  daily sma( close,60 ) ) )",
+    "debugClause": "groupcount( 1 where(  daily high -  daily low ) >  (  1 day ago high -  1 day ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  2 days ago high -  2 days ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  3 days ago high -  3 days ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  4 days ago high -  4 days ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  5 days ago high -  5 days ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  6 days ago high -  6 days ago low )),groupcount( 1 where(  daily high -  daily low ) >  (  7 days ago high -  7 days ago low )),groupcount( 1 where  daily close >  daily open),groupcount( 1 where  daily close >  1 day ago close),groupcount( 1 where  weekly close >  weekly open),groupcount( 1 where  monthly close >  monthly open),groupcount( 1 where  1 day ago volume >  10000),groupcount( 1 where  daily sma( close,20 ) >  daily sma( close,40 )),groupcount( 1 where  daily sma( close,40 ) >  daily sma( close,60 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.copy-nr7",
     "name": "NR7-FUT",
-    "url": "https://chartink.com/scanner/copy-nr7"
+    "url": "https://chartink.com/scanner/copy-nr7",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  1 day ago high -  1 day ago low <  2 days ago high -  2 days ago low and  1 day ago high -  1 day ago low <  3 days ago high -  3 days ago low and  1 day ago high -  1 day ago low <  4 days ago high -  4 days ago low and  1 day ago high -  1 day ago low <  5 days ago high -  5 days ago low and  1 day ago high -  1 day ago low <  6 days ago high -  6 days ago low and  1 day ago high -  1 day ago low <  7 days ago high -  7 days ago low and  daily sma( close,10 ) >  daily sma( close,50 ) and  daily sma( close,50 ) >  daily sma( close,200 ) and  daily volume >  50000 and  daily open >  1 day ago close and  1 day ago high -  1 day ago low <  8 days ago high -  8 days ago low ) )",
+    "debugClause": "groupcount( 1 where  1 day ago high -  1 day ago low <  2 days ago high -  2 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  3 days ago high -  3 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  4 days ago high -  4 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  5 days ago high -  5 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  6 days ago high -  6 days ago low),groupcount( 1 where  1 day ago high -  1 day ago low <  7 days ago high -  7 days ago low),groupcount( 1 where  daily sma( close,10 ) >  daily sma( close,50 )),groupcount( 1 where  daily sma( close,50 ) >  daily sma( close,200 )),groupcount( 1 where  daily volume >  50000),groupcount( 1 where  daily open >  1 day ago close),groupcount( 1 where  1 day ago high -  1 day ago low <  8 days ago high -  8 days ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.15-min-candle-outside-bollinger-band",
     "name": "15 min Candle outside bollinger band",
-    "url": "https://chartink.com/scanner/15-min-candle-outside-bollinger-band"
+    "url": "https://chartink.com/scanner/15-min-candle-outside-bollinger-band",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  [0] 15 minute high <  [0] 15 minute lower bollinger band( 20,2 ) or  [0] 15 minute low >  [0] 15 minute upper bollinger band( 20,2 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute high <  [0] 15 minute lower bollinger band( 20,2 )),groupcount( 1 where  [0] 15 minute low >  [0] 15 minute upper bollinger band( 20,2 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.first-15-min-candle-breakout-on-both-sides",
     "name": "First 15 Min Candle Breakout on both sides",
-    "url": "https://chartink.com/scanner/first-15-min-candle-breakout-on-both-sides"
+    "url": "https://chartink.com/scanner/first-15-min-candle-breakout-on-both-sides",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {33489} (  [0] 15 minute high >=  [-1] 15 minute high and  [0] 15 minute low <=  [-1] 15 minute low ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute high >=  [-1] 15 minute high),groupcount( 1 where  [0] 15 minute low <=  [-1] 15 minute low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "range-breakouts.open-high-low-scanner-intraday",
     "name": "Open High Low Scanner Intraday",
-    "url": "https://chartink.com/scanner/open-high-low-scanner-intraday"
+    "url": "https://chartink.com/scanner/open-high-low-scanner-intraday",
+    "categoryId": "range-breakouts",
+    "scanClause": "( {cash} (  4 days ago high <  5 days ago high and  3 days ago high <  4 days ago high and  2 days ago high <  3 days ago high and  1 day ago low >  2 days ago low ) )",
+    "debugClause": "groupcount( 1 where  4 days ago high <  5 days ago high),groupcount( 1 where  3 days ago high <  4 days ago high),groupcount( 1 where  2 days ago high <  3 days ago high),groupcount( 1 where  1 day ago low >  2 days ago low)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   }
 ]

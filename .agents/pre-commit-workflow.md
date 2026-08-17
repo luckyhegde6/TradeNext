@@ -36,13 +36,13 @@ Always maintain `.agents/session-todos.md` from session start until the final co
   □ New code has tests (jest in lib/__tests__/)
 
 □ DOCUMENTATION (MANDATORY — task is NOT complete without it)
-  □ AGENTS.md version history updated (date + what changed + files)
-  □ TODO.md Quick Reference updated
-  □ Primer.md Current Project Status + Session History updated
-  □ agent-memory.md activity log updated
-  □ Lessons.md updated if new discovery/lesson
-  □ HANDOFF.md orchestration state updated
-  □ .agents/session-todos.md checked — all done/carried-forward; unfulfilled bugs → BUGS.md
+  □ @AGENTS.md version history updated (date + what changed + files)
+  □ @TODO.md Quick Reference updated
+  □ @Primer.md Current Project Status + Session History updated
+  □ @agent-memory.md activity log updated
+  □ @Lessons.md updated if new discovery/lesson
+  □ @HANDOFF.md orchestration state updated
+  □ .agents/session-todos.md checked — all done/carried-forward; unfulfilled bugs → @BUGS.md
 
 □ GIT
   □ Commit message follows conventional format

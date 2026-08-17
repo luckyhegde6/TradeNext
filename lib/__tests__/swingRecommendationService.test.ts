@@ -108,10 +108,55 @@ jest.mock("@/lib/prisma", () => {
     }),
   };
 
+  // v3.14.0: stateful in-memory SwingSignal store mirroring the persistence
+  // queries — createMany with skipDuplicates (jobId+symbol unique) and
+  // updateMany scoped to { jobId, symbol } (AI-level patch). Exposed as
+  // `__swingSignals` for the orchestration assertions.
+  const signals: Array<Record<string, any>> = [];
+
+  const swingSignal = {
+    createMany: jest.fn(
+      async ({
+        data,
+        skipDuplicates,
+      }: {
+        data: Array<Record<string, any>>;
+        skipDuplicates?: boolean;
+      }) => {
+        let created = 0;
+        for (const d of data) {
+          if (skipDuplicates && signals.some((s) => s.jobId === d.jobId && s.symbol === d.symbol)) {
+            continue;
+          }
+          signals.push({
+            id: `signal-${signals.length + 1}`,
+            status: "active",
+            currentPrice: null,
+            returnPercent: null,
+            lastCheckedAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            ...d,
+          });
+          created++;
+        }
+        return { count: created };
+      },
+    ),
+    updateMany: jest.fn(
+      async ({ where, data }: { where: Record<string, any>; data: Record<string, any> }) => {
+        const matched = signals.filter((s) => whereMatches(s, where));
+        for (const row of matched) applyData(row, data);
+        return { count: matched.length };
+      },
+    ),
+  };
+
   return {
     __esModule: true,
-    default: { $queryRaw: jest.fn(), swingAnalysisJob },
+    default: { $queryRaw: jest.fn(), swingAnalysisJob, swingSignal },
     __swingJobs: jobs,
+    __swingSignals: signals,
   };
 });
 
@@ -134,12 +179,17 @@ import {
   swingTrackerDraft,
   persistSwingTrackers,
   type SwingTrackerDb,
+  swingSignalDraft,
+  swingSignalAnalysisPatch,
+  persistSwingSignals,
+  patchSwingSignalAnalysis,
+  type SwingSignalDb,
   SWING_TOP_N,
   SWING_JOB_MAX_ATTEMPTS,
   jobToResponse,
 } from "@/lib/services/swingRecommendationService";
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
-import type { SwingResponse, SwingStock } from "@/lib/services/swing-types";
+import type { SwingResponse, SwingStock, SignalFamily } from "@/lib/services/swing-types";
 import { staticCache } from "@/lib/cache";
 
 // ─── templateFamilies ────────────────────────────────────────────────────
@@ -564,6 +614,7 @@ describe("getSwingRecommendations audit logging", () => {
     };
   };
   const swingJobs = jest.requireMock("@/lib/prisma").__swingJobs as Array<Record<string, any>>;
+  const swingSignals = jest.requireMock("@/lib/prisma").__swingSignals as Array<Record<string, any>>;
 
   const fakeUnified = {
     symbol: "RELIANCE",
@@ -611,6 +662,7 @@ describe("getSwingRecommendations audit logging", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     swingJobs.length = 0;
+    swingSignals.length = 0;
     prisma.$queryRaw.mockResolvedValue([]);
     runChartinkUnifiedScreeners.mockResolvedValue([fakeUnified]);
     staticCache.flushAll();
@@ -659,6 +711,16 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingJobs).toHaveLength(1);
     expect(swingJobs[0].status).toBe("pending");
     expect(swingJobs[0].stockCount).toBe(1);
+
+    // v3.14.0: the posted feed is snapshotted into SwingSignal at posting —
+    // date-of-posting price baseline with NO AI levels yet.
+    expect(swingSignals).toHaveLength(1);
+    expect(swingSignals[0].jobId).toBe(swingJobs[0].id);
+    expect(swingSignals[0].symbol).toBe("RELIANCE");
+    expect(swingSignals[0].status).toBe("active");
+    expect(swingSignals[0].analysis).toBeNull();
+    expect(swingSignals[0].aiRecommendation).toBeNull();
+    expect(swingSignals[0].targetPrice).toBeNull();
 
     // Background settles: failed status + readable error land in cache + DB.
     await flushSwingAnalysis();
@@ -713,6 +775,16 @@ describe("getSwingRecommendations audit logging", () => {
     expect(cached.stocks[0].analysis?.confidence).toBe(82);
     expect(swingJobs[0].status).toBe("done");
     expect(swingJobs[0].analyzedCount).toBe(1);
+
+    // v3.14.0: the posted signal is patched with the AI levels the swing
+    // performance check evaluates (BUY vocabulary, targets as-of posting).
+    expect(swingSignals).toHaveLength(1);
+    expect(swingSignals[0].aiRecommendation).toBe("BUY");
+    expect(swingSignals[0].confidence).toBe(82);
+    expect(swingSignals[0].targetPrice).toBe(2750);
+    expect(swingSignals[0].stopLoss).toBe(2375);
+    expect(swingSignals[0].analysis).toEqual(expect.objectContaining({ action: "LONG", targetPrice: 2750 }));
+    expect(swingSignals[0].updatedAt).toBeInstanceOf(Date);
 
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_COMPLETE");
@@ -884,6 +956,263 @@ describe("getSwingRecommendations audit logging", () => {
     expect(fresh!.status).toBe("failed");
     expect(fresh!.error).toBe("Superseded by a newer force refresh");
     expect(staticCache.get("swing:recommendations:ai")).toBeUndefined();
+  });
+});
+
+// ─── swingSignalDraft (v3.14.0 — posting snapshot) ─────────────────────────
+
+describe("swingSignalDraft", () => {
+  it("snapshots the screener fields with a null analysis at posting", () => {
+    const stock = makeSwingStock("RELIANCE", {
+      name: "Reliance Industries",
+      price: 2500,
+      change: 12.5,
+      changePercent: 0.5,
+      volume: 1_000_000,
+      marketCap: 1e12,
+      screenerNames: ["Swing Breakout"],
+      screenerCount: 1,
+      families: ["breakout"],
+      templateIds: ["swing.breakout"],
+      source: "chartink_db",
+      momentumScore: 60,
+    });
+    expect(swingSignalDraft(stock, "job-1")).toEqual({
+      jobId: "job-1",
+      symbol: "RELIANCE",
+      name: "Reliance Industries",
+      price: 2500,
+      change: 12.5,
+      changePercent: 0.5,
+      volume: 1_000_000,
+      marketCap: 1e12,
+      screenerNames: ["Swing Breakout"],
+      screenerCount: 1,
+      families: ["breakout"],
+      templateIds: ["swing.breakout"],
+      source: "chartink_db",
+      indicators: expect.objectContaining({ momentum10: null }),
+      momentumScore: 60,
+      analysis: null,
+      aiRecommendation: null,
+      confidence: null,
+      targetPrice: null,
+      stopLoss: null,
+    });
+  });
+
+  it("nulls/defaults optional fields and ignores a pre-existing analysis (levels patched later)", () => {
+    const stock = makeSwingStock("TATASTEEL", {
+      change: null as unknown as number,
+      volume: null as unknown as number,
+      marketCap: undefined,
+      screenerNames: undefined as unknown as string[],
+      screenerCount: undefined as unknown as number,
+      families: undefined as unknown as SignalFamily[],
+      templateIds: undefined as unknown as string[],
+      source: undefined as unknown as string,
+      momentumScore: undefined as unknown as number,
+      analysis: {
+        action: "LONG",
+        confidence: 80,
+        entryPrice: 100,
+        targetPrice: 110,
+        stopLoss: 95,
+        timeHorizon: "short",
+        logic: "x",
+        momentumScore: 60,
+        riskFactors: [],
+      },
+    });
+    const draft = swingSignalDraft(stock, "job-2");
+    expect(draft.name).toBe("TATASTEEL");
+    expect(draft.change).toBeNull();
+    expect(draft.volume).toBeNull();
+    expect(draft.marketCap).toBeNull();
+    expect(draft.screenerNames).toEqual([]);
+    expect(draft.screenerCount).toBe(0);
+    expect(draft.families).toEqual([]);
+    expect(draft.templateIds).toEqual([]);
+    expect(draft.source).toBe("chartink");
+    expect(draft.momentumScore).toBe(0);
+    expect(draft.analysis).toBeNull(); // posting snapshot — never carries levels
+    expect(draft.targetPrice).toBeNull();
+  });
+});
+
+// ─── swingSignalAnalysisPatch (v3.14.0 — AI levels) ────────────────────────
+
+describe("swingSignalAnalysisPatch", () => {
+  it("returns null when the stock carries no analysis", () => {
+    expect(swingSignalAnalysisPatch(makeSwingStock("RELIANCE"))).toBeNull();
+  });
+
+  it("maps LONG→BUY with confidence/target/stop and the raw analysis", () => {
+    const patch = swingSignalAnalysisPatch(
+      makeSwingStock("RELIANCE", {
+        analysis: {
+          action: "LONG",
+          confidence: 82,
+          entryPrice: 2500,
+          targetPrice: 2750,
+          stopLoss: 2375,
+          timeHorizon: "short",
+          logic: "Breakout above the swing high with volume expansion.",
+          momentumScore: 71,
+          riskFactors: ["Broader market weakness"],
+        },
+      }),
+    );
+    expect(patch).not.toBeNull();
+    expect(patch!.aiRecommendation).toBe("BUY");
+    expect(patch!.confidence).toBe(82);
+    expect(patch!.targetPrice).toBe(2750);
+    expect(patch!.stopLoss).toBe(2375);
+    expect(patch!.analysis).toEqual(expect.objectContaining({ action: "LONG" }));
+  });
+
+  it("maps SHORT→SELL and OBSERVE→HOLD (direction-aware vocabulary)", () => {
+    const short = swingSignalAnalysisPatch(
+      makeSwingStock("HDFCBANK", {
+        analysis: {
+          action: "SHORT",
+          confidence: 70,
+          entryPrice: 1700,
+          targetPrice: 1600,
+          stopLoss: 1780,
+          timeHorizon: "short",
+          logic: "x",
+          momentumScore: 40,
+          riskFactors: [],
+        },
+      }),
+    );
+    expect(short!.aiRecommendation).toBe("SELL");
+
+    const observe = swingSignalAnalysisPatch(
+      makeSwingStock("LMW", {
+        analysis: {
+          action: "OBSERVE",
+          confidence: 40,
+          entryPrice: 300,
+          targetPrice: 0,
+          stopLoss: 0,
+          timeHorizon: "medium",
+          logic: "x",
+          momentumScore: 30,
+          riskFactors: [],
+        },
+      }),
+    );
+    expect(observe!.aiRecommendation).toBe("HOLD");
+  });
+});
+
+// ─── persistSwingSignals / patchSwingSignalAnalysis (inline db override) ────
+
+describe("swing signal persistence (db override)", () => {
+  const store: Array<Record<string, any>> = [];
+
+  const makeDb = (): SwingSignalDb => {
+    const swingSignal = {
+      createMany: jest.fn(async ({ data }: { data: Array<Record<string, any>> }) => {
+        let created = 0;
+        for (const d of data) {
+          if (store.some((s) => s.jobId === d.jobId && s.symbol === d.symbol)) continue;
+          store.push({ id: `s-${store.length + 1}`, status: "active", ...d });
+          created++;
+        }
+        return { count: created };
+      }),
+      updateMany: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { jobId: string; symbol: string };
+          data: Record<string, any>;
+        }) => {
+          const matched = store.filter((s) => s.jobId === where.jobId && s.symbol === where.symbol);
+          for (const row of matched) Object.assign(row, data);
+          return { count: matched.length };
+        },
+      ),
+    };
+    return { swingSignal };
+  };
+
+  beforeEach(() => {
+    store.length = 0;
+  });
+
+  it("persists one draft per stock at job creation and skips duplicate jobId+symbol rows", async () => {
+    const db = makeDb();
+    const res1 = await persistSwingSignals(
+      "job-1",
+      [makeSwingStock("RELIANCE"), makeSwingStock("TATASTEEL")],
+      db,
+    );
+    expect(res1.created).toBe(2);
+
+    // Idempotent re-persist of the same job+symbol (mirrors @@unique +
+    // skipDuplicates) — creates nothing new.
+    const res2 = await persistSwingSignals("job-1", [makeSwingStock("RELIANCE")], db);
+    expect(res2.created).toBe(0);
+    expect(store).toHaveLength(2);
+    expect(store[0]).toMatchObject({ jobId: "job-1", symbol: "RELIANCE", status: "active" });
+    expect(store[0].analysis).toBeNull();
+    expect(store[0].aiRecommendation).toBeNull();
+  });
+
+  it("persists nothing for an empty feed", async () => {
+    const db = makeDb();
+    const res = await persistSwingSignals("job-1", [], db);
+    expect(res.created).toBe(0);
+    expect(store).toHaveLength(0);
+  });
+
+  it("patches only stocks that carry analysis, scoped to jobId+symbol", async () => {
+    const db = makeDb();
+    await persistSwingSignals(
+      "job-1",
+      [makeSwingStock("RELIANCE"), makeSwingStock("TATASTEEL")],
+      db,
+    );
+
+    const patched = await patchSwingSignalAnalysis(
+      "job-1",
+      [
+        makeSwingStock("RELIANCE", {
+          analysis: {
+            action: "LONG",
+            confidence: 82,
+            entryPrice: 2500,
+            targetPrice: 2750,
+            stopLoss: 2375,
+            timeHorizon: "short",
+            logic: "x",
+            momentumScore: 71,
+            riskFactors: [],
+          },
+        }),
+        makeSwingStock("TATASTEEL"), // no analysis → skipped
+      ],
+      db,
+    );
+
+    expect(patched.patched).toBe(1);
+    const rel = store.find((s) => s.symbol === "RELIANCE")!;
+    expect(rel.aiRecommendation).toBe("BUY");
+    expect(rel.confidence).toBe(82);
+    expect(rel.targetPrice).toBe(2750);
+    expect(rel.stopLoss).toBe(2375);
+    expect(rel.updatedAt).toBeInstanceOf(Date);
+
+    // Unpatched symbols keep the posting snapshot (level-less → can only expire).
+    const tata = store.find((s) => s.symbol === "TATASTEEL")!;
+    expect(tata.aiRecommendation).toBeNull();
+    expect(tata.targetPrice).toBeNull();
+    expect(tata.stopLoss).toBeNull();
   });
 });
 

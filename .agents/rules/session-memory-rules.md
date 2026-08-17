@@ -5,15 +5,15 @@
 ## 1. Session Start (READ order — in this order, nothing more)
 
 ```
-1. HANDOFF.md                    → orchestration state (always)
+1. @HANDOFF.md                → orchestration state (always)
 2. .agents/handoffs/active/latest.md → live resume point (always)
-3. Primer.md                      → project status (if latest.md is stale)
-4. Lessons.md                     → rules & corrections (before writing code)
-5. .agents/session-todos.md       → current todos (always)
-6. .agents/RULES.md + SOUL.md     → operating rules + identity (first session / new clone)
+3. @Primer.md                  → project status (if latest.md is stale)
+4. @Lessons.md                 → rules & corrections (before writing code)
+5. .agents/session-todos.md   → current todos (always)
+6. .agents/RULES.md + SOUL.md → operating rules + identity (first session / new clone)
 ```
 
-**Rule:** Read the index first (AGENTS.md, Lessons.md) — not full dumps. Use `read` with offset/limit, never `cat` whole files.
+**Rule:** Read the index first (@AGENTS.md, @Lessons.md) — not full dumps. Use `read` with offset/limit, never `cat` whole files. See `@README.md` → **Agentic Coding** for the full agentic workflow.
 
 ## 2. Session During Work (maintenance cadence)
 
@@ -23,7 +23,7 @@
 | Step completed | Mark `[x]` in session-todos **immediately** |
 | Blocked | Keep `in_progress`, add follow-up todo describing blocker |
 | Before every commit | Run pre-commit workflow (`.agents/pre-commit-workflow.md`) |
-| New bug/gotcha found | Log in `Lessons.md` at discovery time (not end-of-session) |
+| New bug/gotcha found | Log in `@Lessons.md` at discovery time (not end-of-session) |
 | Every ~5 tool calls | Quick mental check: are todos still accurate? update if drifted |
 
 **Rule:** Exactly ONE `in_progress` todo at a time. Update in real time, never batch.
@@ -44,7 +44,7 @@
 - Content: Context (task/branch/plan refs), Progress (x/done), Decisions, Blockers, Next Steps
 - YAML frontmatter: `session_id` (timestamp-based, e.g. `sess-YYYYMMDD-<phase>`), `checkpoint` (ph<N>), `status`
 - Handoff flows (`.agents/handoffs/flow/`): `session-cycle.md` (start→archive), `agent-to-agent.md` (agent↔agent, HTTP-like status codes), `agent-to-human.md` (consent/decision handoffs, `status: awaiting_human`), `error-recovery.md`
-- On session close: archive handoff → update `HANDOFF.md` + `Primer.md` + `agent-memory.md`
+- On session close: archive handoff → update `@HANDOFF.md` + `@Primer.md` + `@agent-memory.md`
 - **Next agent resumes from files, never conversation memory.** Consent-required operations hand off to the human via `agent-to-human.md` and WAIT — never auto-approve.
 
 ## 5. Documentation Updates (MANDATORY)
@@ -52,11 +52,11 @@
 See `.agents/documentation-standards.md` for the full table. Minimum per change:
 
 ```
-□ After feature/bug → AGENTS.md version entry + TODO.md
-□ After API change  → AGENTS.md route table + Swagger/OpenAPI + skill files if NSE-related
-□ New discovery     → Lessons.md
+□ After feature/bug → @AGENTS.md version entry + @TODO.md
+□ After API change  → @AGENTS.md route table + Swagger/OpenAPI + skill files if NSE-related
+□ New discovery     → @Lessons.md
 □ Before commit     → session-todos.md done/carry-forward
-□ End of session    → archive + Primer.md + agent-memory.md
+□ End of session    → archive + @Primer.md + @agent-memory.md
 ```
 
 **Rule: If documentation is not updated, the task is NOT complete.**
@@ -76,7 +76,7 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 
 ```
 □ Read small slices (offset/limit), not whole files
-□ Index files over full dumps (AGENTS.md, Lessons.md)
+□ Index files over full dumps (@AGENTS.md, @Lessons.md)
 □ Keep session-todos short — archives absorb history
 □ Memory tool: use for cross-session knowledge only (entities/relations), not session trivia
 □ Parallelize independent reads in a single message (batch tool calls)

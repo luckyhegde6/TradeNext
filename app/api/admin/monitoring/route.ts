@@ -228,6 +228,29 @@ export async function GET(req: Request) {
         return NextResponse.json({ files });
       }
 
+      case "worker-logs": {
+        // Worker task log files — written per executed task by the worker
+        // engine (createTaskLogger → writeLog) into <cwd>/worker_logs.
+        const { getAllLogFiles, readLog } = await import("@/lib/services/worker/worker-logger");
+        if (searchParams.get("action") === "list") {
+          const files = getAllLogFiles();
+          logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
+          return NextResponse.json({ files });
+        }
+
+        const taskId = searchParams.get("taskId");
+        if (taskId) {
+          const content = await readLog(taskId);
+          logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
+          return NextResponse.json({ taskId, content });
+        }
+
+        // Default: return list of files
+        const files = getAllLogFiles();
+        logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
+        return NextResponse.json({ files });
+      }
+
       case "recent-requests": {
         const recentRequests = await prisma.aPIRequestLog.findMany({
           orderBy: { createdAt: 'desc' },
@@ -326,6 +349,17 @@ export async function DELETE(req: Request) {
         return NextResponse.json({ success: true, message: "Log file deleted" });
       }
       return NextResponse.json({ error: "Failed to delete log file" }, { status: 500 });
+    }
+
+    // Delete worker task log file
+    const taskId = searchParams.get("taskId");
+    if (type === "worker-logs" && taskId) {
+      const { deleteLog } = await import("@/lib/services/worker/worker-logger");
+      const success = await deleteLog(taskId);
+      if (success) {
+        return NextResponse.json({ success: true, message: "Worker log deleted" });
+      }
+      return NextResponse.json({ error: "Failed to delete worker log" }, { status: 500 });
     }
 
     return NextResponse.json({ error: "Invalid delete request" }, { status: 400 });

@@ -13,6 +13,17 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Automation**: Runs on every `git commit` automatically
 - **⚠️ Important**: Post-commit hook writes to a NON-TRACKED file only to avoid infinite loop. Update `agent-memory.md` manually for meaningful activity entries.
 
+---
+
+### 2026-08-18 | Agent Profile Restructuring — `.agents/` Wiring + Stale Tooling Cleanup
+- **Action**: Restructured `.agents/` ecosystem for proper agentic coding: moved misplaced files, updated agent profiles, wired missing agents in opencode.json, updated matrix.
+- **Files Moved**: `.agents/changelog/{screener,corp-actions,security-workers,serverless-logging}.md` → `.agents/docs/` (legacy feature deep-dives, not version changelogs)
+- **Files Updated**: `.agents/CHANGELOG.md` (index paths), `.agents/docs/README.md` (added 4 moved docs), `AGENTS.md` (skills table + artifact table), `.agents/AGENT-SKILL-MATRIX.md` (14 agents, 8 skills, 6 commands), `Lessons.md` (Lesson 84 — stale tooling refs)
+- **Agent Profiles Updated**: `qa.md` (Playwright MCP tools, skill ref), `e2e-agent.md` (Playwright MCP + Chrome DevTools MCP, skill ref), `devops.md` (Netlify-only, removed Vercel)
+- **opencode.json Updated**: Added 7 missing agents: qa, e2e-agent, devops, code-reviewer, integrator, observability; added `/nse-integration` command
+- **Lesson 84 Added**: Agent profiles must reference correct tooling; every profile needs a Skill reference; opencode.json must have entries for ALL subagent-invocable agents
+- **Status**: Commit pending
+
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
 - Detects hardcoded secrets (passwords, API keys, tokens)
@@ -34,6 +45,13 @@ echo "" >> agent-memory.md
 ---
 
 ## Activity Log
+
+### 2026-08-17 | Swing Signal Persistence + Performance Tracking + Spec-Driven Dev (v3.14.0)
+- **Action**: (1) **NEW `SwingSignal`** model (`@@unique([jobId, symbol])`) — migration `20260817000000_add_swing_signal` applied locally via `migrate diff` + `db execute` + `prisma generate`. `persistSwingSignals(jobId, stocks)` at job creation (`createMany` + `skipDuplicates`, non-fatal). `patchSwingSignalAnalysis(jobId, stocks)` at completion (`updateMany` per symbol, only stocks with analysis, non-fatal). `SWING_DONE_CACHE_TTL` = 24h. `staticCache.del` on supersede + job create. (2) **`swingPerformanceService.ts`** — `evaluateSwingSignalStatus` (direction-aware LONG/SHORT target/stop/expiry, `SWING_EXPIRY_DAYS` = 45), `checkSwingPerformance` (batch open signals, live-price bridge capped 50, chunked `Promise.allSettled` via `getStockQuote`, per-signal evaluation, `updateMany` status writes, audit per update). (3) **Worker task**: `swing_performance` case in `worker-service.ts` + `executeSwingPerformance` (non-fatal, mirrors `checkRecommendationPerformance` convention). (4) **Admin**: `check_swing_performance` action in `app/api/admin/recommendations/route.ts` + teal "📊 Check Swing Performance" button + banner on `/admin/recommendations/daily`. (5) **Audit**: `SWING_PERFORMANCE_CHECK` + `SWING_SIGNAL_STATUS_CHANGED` in `lib/audit.ts`. (6) **Worker-logs**: `resolveLogsDir()` first candidate `cwd/worker_logs` (dropped `.next/server_logs`), monitoring API `type=worker-logs` list/read/delete, monitoring page "Workers" tab. (7) **Spec-driven dev workflow**: `.agents/templates/spec-template.md` (TradeNext-specific) + `.agents/templates/plan-template.md` (6 phases) + `.agents/rules/spec-driven-development.md` (mandatory for all features — spec→plan→implement→verify) + `.agents/rules/checklist.md` v1.2→v1.3 with spec gate + `.agents/rules/README.md` updated + `.agents/specs/` + `.agents/plans/` directories created.
+- **Tests**: NEW `lib/__tests__/swingPerformanceService.test.ts` (18 — 9 evaluateSwingSignalStatus + 9 checkSwingPerformance DB-path with mocks); extended `lib/__tests__/swingRecommendationService.test.ts` (10 — 4 draft + 3 patch + 3 persistence + orchestration assertions, mock `__swingJobs` + `__swingSignals` pattern); **suite 758 pass / 4 skip** (was 730/4, +28); `npx tsc --noEmit` 46 = exact baseline, 0 new.
+- **Files Created**: `lib/services/swingPerformanceService.ts`, `lib/__tests__/swingPerformanceService.test.ts`, `prisma/migrations/20260817000000_add_swing_signal/migration.sql`, `.agents/templates/spec-template.md`, `.agents/templates/plan-template.md`, `.agents/rules/spec-driven-development.md`, `.agents/specs/`, `.agents/plans/`.
+- **Files Modified**: `prisma/schema.prisma`, `lib/services/swingRecommendationService.ts`, `lib/services/swing-types.ts`, `lib/services/worker/worker-service.ts`, `lib/services/worker/worker-logger.ts`, `lib/audit.ts`, `app/api/admin/recommendations/route.ts`, `app/admin/recommendations/daily/page.tsx`, `app/api/admin/monitoring/route.ts`, `app/admin/utils/monitoring/page.tsx`, `lib/__tests__/swingRecommendationService.test.ts`, `AGENTS.md`, `.agents/CHANGELOG.md`, `.agents/changelog/versions-v3.md`, `.agents/rules/checklist.md`, `.agents/rules/README.md`, `TODO.md`, `Primer.md`, `Lessons.md`.
+- **Status**: **CODE + TESTS VERIFIED; commit pending user (no push/deploy)** — branch `feat/swing-signals` on top of docs branch.
 
 ### 2026-08-16 | DB-Backed Swing AI Analysis Job — durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (v3.13.0)
 - **Action**: (1) **NEW Prisma `SwingAnalysisJob`** (after `DailyRecommendationStock`; migration `20260816000000_add_swing_analysis_job`). Applied locally via `npx prisma migrate diff --from-config-datasource --to-schema prisma\schema.prisma --script` → `db execute --file` → `prisma generate` (Prisma 7: `--from-url` removed; `db execute` reads datasource from `prisma.config.ts`). **⚠️ local `tradenext` DB has NO `_prisma_migrations` ledger — never `migrate dev` locally (destructive reset); prod uses normal `migrate deploy`**. (2) **Service rewrite** `lib/services/swingRecommendationService.ts`: `getSwingRecommendations({analyze:true})` pre-scans the DB (`findFirst orderBy createdAt desc`) — done/failed/pending/running served WITHOUT re-scanning (pending kicks `maybeProcessSwingAnalysis()`); absent → scan + create durable job + frozen pending feed; `force=1` supersedes pending/running jobs (`updateMany → failed "Superseded by a newer force refresh"`), re-scans, new job; empty feed → synchronous skipped. Processor: atomic **claim = `updateMany({where:{id,status:"pending"},data:{status:"running",startedAt,attemptCount:{increment:1}}})`** (multi-instance safe), re-read before final write + **abort unless status still `running`** (supersede race), stale recovery `SWING_JOB_STALE_MS=45min` / `SWING_JOB_MAX_ATTEMPTS=2` (retry once then fail "timed out after 2 attempt(s)"), audits SWING_ANALYSIS_START/COMPLETE/FAILED + SWING_RUN_COMPLETE, `persistSwingTrackers` only when done (non-fatal), warms cache. **Cache holds ONLY final done/failed** (30-min TTL) — pending/running always served from the DB row. REMOVED: `SWING_PENDING_TTL`/`swingAnalysisInFlight`/`runSwingAnalysisInBackground` (grep 0 refs). (3) **Daemon drain** `lib/services/worker/cron-daemon.ts`: 60s `RESYNC_INTERVAL_MS` tick dynamic-imports the service + calls `maybeProcessSwingAnalysis()` fire-and-forget (no circular dep). Module guard `swingProcessorInFlight` + `flushSwingAnalysis()` test hook.
@@ -715,6 +733,18 @@ echo "" >> agent-memory.md
 - **Verification**: full suite **700 passed / 11 skipped** (was 696; 54 suites pass + 1 pre-existing skip); `npx tsc --noEmit` 71 = exact pre-existing baseline (0 new). No UI change → no Playwright re-run needed.
 - **Files**: lib/cache.ts (globalThis singleton for `recommendationsCache` only), lib/__tests__/cacheSingleton.test.ts (new), AGENTS.md (v3.11.2 row), .agents/CHANGELOG.md (index), .agents/changelog/versions-v3.md (v3.11.2 entry), TODO.md (row), Lessons.md (#76), Primer.md, agent-memory.md, .agents/session-todos.md, .agents/sessions/2026-08-14-b35eca4/ (decisions + flow).
 - **Status**: docs updated; **commit pending user; NO push/deploy**.
+
+## 2026-08-17 (v3.14.0 screener fix) — Advanced Screener: all 117 Chartink templates working + graceful TV fallback — branch `docs-readme-refs-agentic-coding`
+
+- **Problem**: advanced screener `/markets/analytics` showed empty table for 83 of 117 Chartink templates. Only "Short Term Breakouts" (which had both `scanClause` AND a curated TV proxy) worked.
+- **Root cause**: (1) 83 templates were added to the Chartink registry without their `scanClause` DSL (catalog-only). (2) `runChartinkScreenerById` had no try/catch around the TradingView fallback — a rate-limit error (HTTP 429) threw uncaught. (3) `advancedScan` catches ALL errors silently returning `[]` → empty table with no user-visible error.
+- **Fix A — Playwright capture**: `scripts/chartink-capture/capture.ts` scraped `scanClause` from Chartink's `/screener/process` endpoint for all 150 templates (150/150, 0 failures, Chromium + clipboard-click fallback). Populated 8 JSON config files (`lib/services/chartink-scans/*.json`). All 169 templates across 10 files now have `scanClause`.
+- **Fix D — graceful TV fallback**: `runChartinkScreenerById` now returns `{stocks, source, warning?}`. POST `/api/screener/chartink` surfaces `warning` in the response. `TemplatesPanel.tsx` shows amber warning banner when stocks=0 but warning present ("0 stocks found — TradingView fallback active: <reason>").
+- **Tests**: updated stale catalog-only test (was asserting a real template was catalog-only → now uses a mock template). 143 chartink+screener tests pass.
+- **Files**: lib/services/chartinkUnifiedScreenerService.ts (Fix D), app/api/screener/chartink/route.ts (warning), app/components/screener/TemplatesPanel.tsx (warning UI), lib/services/chartink-scans/*.json (8 files populated), lib/__tests__/chartinkTemplateServices.test.ts (updated)
+- **Committed + pushed**: `98b595b` (12 files, +592/-134) on `docs-readme-refs-agentic-coding`
+
+---
 
 ## How to Use
 

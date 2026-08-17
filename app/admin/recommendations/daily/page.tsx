@@ -62,6 +62,10 @@ export default function AdminDailyRecommendationsPage() {
   const [checkingPerformance, setCheckingPerformance] = useState(false);
   const [perfResult, setPerfResult] = useState<string | null>(null);
 
+  // Swing performance check state (v3.14.0)
+  const [checkingSwing, setCheckingSwing] = useState(false);
+  const [swingResult, setSwingResult] = useState<string | null>(null);
+
   // Expanded run detail
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
@@ -154,6 +158,30 @@ export default function AdminDailyRecommendationsPage() {
       setError("Failed to check performance");
     } finally {
       setCheckingPerformance(false);
+    }
+  };
+
+  const handleCheckSwingPerformance = async () => {
+    setCheckingSwing(true);
+    setSwingResult(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check_swing_performance" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSwingResult(data.message || "Swing performance check queued in background");
+        fetchOverview();
+      } else {
+        setError(data.error || "Swing performance check failed");
+      }
+    } catch (e) {
+      setError("Failed to check swing performance");
+    } finally {
+      setCheckingSwing(false);
     }
   };
 
@@ -288,6 +316,14 @@ export default function AdminDailyRecommendationsPage() {
           </div>
           <div className="flex gap-3">
             <button
+              onClick={handleCheckSwingPerformance}
+              disabled={checkingSwing}
+              className="px-4 py-2 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/30 rounded-lg text-sm font-medium text-teal-300 transition-colors disabled:opacity-50"
+              title="Evaluate posted swing signals (targets / stops / 45-day expiry)"
+            >
+              {checkingSwing ? "Checking..." : "Check Swing Performance"}
+            </button>
+            <button
               onClick={handleCheckPerformance}
               disabled={checkingPerformance}
               className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-lg text-sm font-medium text-amber-300 transition-colors disabled:opacity-50"
@@ -321,6 +357,11 @@ export default function AdminDailyRecommendationsPage() {
         {perfResult && (
           <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm text-blue-300">
             ✓ {perfResult}
+          </div>
+        )}
+        {swingResult && (
+          <div className="p-4 bg-teal-500/10 border border-teal-500/30 rounded-lg text-sm text-teal-300">
+            ✓ {swingResult}
           </div>
         )}
 
@@ -516,6 +557,7 @@ export default function AdminDailyRecommendationsPage() {
             <p>• <strong className="text-gray-400">Data Pipeline:</strong> 7 Chartink screeners → deduplication → AI analysis via OpenRouter → DB storage → Telegram broadcast</p>
             <p>• <strong className="text-gray-400">Run Now:</strong> Triggers an immediate run (takes 30-60 seconds depending on screener response)</p>
             <p>• <strong className="text-gray-400">Check Performance:</strong> Scans all active trackers against current prices to update status</p>
+            <p>• <strong className="text-gray-400">Check Swing Performance:</strong> Evaluates posted swing signals (AI targets/stops from the date of posting; expires after 45 days) — also runs automatically with the 3:30 PM IST performance check</p>
             <p>• <strong className="text-gray-400">Edit Stocks:</strong> Click "Edit" on any stock row to override AI recommendation, target, stop loss, or reasoning</p>
           </div>
         </div>

@@ -54,7 +54,7 @@ You are a senior full-stack engineer working on **TradeNext** — a Next.js 16 +
 
 A task is complete only when ALL hold:
 - [ ] Tests pass (`npm run test`) and production code typechecks (`npx tsc --noEmit`)
-- [ ] Documentation updated (AGENTS.md version entry, TODO.md, Lessons.md if discovery)
+- [ ] Documentation updated (@AGENTS.md version entry, @TODO.md, @Lessons.md if discovery)
 - [ ] Session-todos current; handoff/latest.md reflects actual state
 - [ ] No junk artifacts, no secrets, no dead code in the diff
 - [ ] Change is minimal and surgical — every line traces to the request

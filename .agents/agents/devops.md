@@ -1,17 +1,18 @@
 # DevOps Agent
 
-> Infrastructure and deployment specialist: Docker, Vercel, Netlify, CI/CD, environment management.
+> Infrastructure and deployment specialist: Netlify, CI/CD, environment management, database operations.
+
+**Skill**: none dedicated (uses build agent capabilities)
+**Tools**: `gh` CLI, `netlify` CLI, `docker`, `prisma` CLI
 
 ## Expertise
 
-- **Containerization**: Docker, docker-compose, Dockerfile optimization
-- **Netlify Deployment**: netlify.toml, environment variables, functions, build pipeline
-- **Vercel Deployment**: vercel.json, serverless functions, edge config
-- **CI/CD Pipelines**: GitHub Actions, workflow optimization
+- **Netlify Deployment**: netlify.toml, environment variables, build pipeline, secrets scanning
+- **CI/CD Pipelines**: GitHub Actions (quality-gate, playwright, security)
 - **Infrastructure as Code**: Configuration management, secrets management
-- **Database Operations**: Prisma migrations, backup, restore
+- **Database Operations**: Prisma migrations, backup, restore, TimescaleDB
+- **Docker**: Local dev (docker-compose for Postgres/TimescaleDB)
 - **Monitoring**: Uptime monitoring, health checks, alerting
-- **Domain & SSL**: Custom domains, SSL certificates, DNS
 
 ## Workflow
 
@@ -22,12 +23,12 @@
 - [ ] Build succeeds (`npm run build`)
 - [ ] Tests pass (`npm run test`)
 - [ ] No TypeScript errors (`npx tsc --noEmit`)
+- [ ] E2E tests pass (`npm run test:e2e`)
 - [ ] Environment variables documented in `.env.example`
-- [ ] netlify.toml / vercel.json is valid
+- [ ] netlify.toml is valid
 - [ ] Database migrations are backward-compatible
-- [ ] Secrets scan omits known false positives
+- [ ] Secrets scan omits known false positives (`SECRETS_SCAN_OMIT_PATHS`)
 - [ ] Cache headers set on API routes
-- [ ] Lazy loading for heavy components
 ```
 
 ### 2. Netlify Deployment
@@ -36,107 +37,60 @@
 # Build locally first
 npm run build
 
-# Check netlify.toml configuration
-cat netlify.toml
-
-# Deploy via CLI (if needed)
-npx netlify deploy --prod
-
-# Or via git push (automatic)
+# Deploy via git push (automatic on main)
 git push origin main
+
+# Check deploy status
+gh api repos/luckyhegde6/TradeNext/deployments
 ```
 
 #### Common Netlify Issues
-```markdown
+
 | Issue | Solution |
 |-------|----------|
-| 502 Bad Gateway | Remove NextAuth from middleware, use minimal proxy |
-| Build succeeds but runtime fails | Check function logs in Netlify Dashboard |
-| Prisma errors | Verify DATABASE_URL in environment variables |
-| Missing modules | Move type packages to `dependencies` |
-```
+| 502 Bad Gateway | Middleware must NOT import NextAuth (Edge runtime limitation) |
+| Secrets scan failure | Add file to `SECRETS_SCAN_OMIT_PATHS` in `netlify.toml` |
+| Build timeout | Check for heavy postbuild scripts |
+| Prisma errors | Verify `DATABASE_URL` uses `prisma+postgres://` (Accelerate) |
 
-### 3. Docker Operations
+### 3. Docker Operations (Local Dev)
 
 ```bash
-# Build and start
-docker-compose up --build -d
-
-# Check logs
-docker-compose logs -f app
-
-# Database operations
-docker-compose exec db psql -U postgres -d tradenext
-
-# Stop
-docker-compose down
-```
-
-#### Docker Configuration
-```yaml
-# docker-compose.yml patterns
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/tradenext
-    depends_on:
-      - db
-  db:
-    image: timescale/timescaledb:latest-pg16
-    environment:
-      POSTGRES_DB: tradenext
-      POSTGRES_PASSWORD: postgres
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+npm run db:up              # Start Postgres/TimescaleDB
+npm run db:down            # Stop
+npx prisma migrate dev     # Apply migrations
+npx prisma db seed         # Seed demo data
 ```
 
 ### 4. Database Operations
 
 ```bash
-# Migration commands
-npx prisma migrate dev --name migration_name  # Development
-npx prisma migrate deploy                      # Production
-npx prisma db push                             # Schema sync (dev only)
-npx prisma generate                            # Client generation
+# Development
+npx prisma migrate dev --name migration_name
+npx prisma generate
 
-# Backup (PostgreSQL)
-pg_dump "postgresql://user:pass@host:5432/db" > backup.sql
+# Production (Netlify build step)
+npx prisma migrate deploy
 
-# Restore
-psql "postgresql://user:pass@host:5432/db" < backup.sql
+# ⚠️ NEVER run `migrate dev` on a DB without `_prisma_migrations` ledger
+# Use `migrate diff --from-config-datasource` + `db execute` instead
 ```
 
 ### 5. Environment Configuration
 
-```bash
-# Required environment variables
-DATABASE_URL=postgresql://...
-AUTH_SECRET=your-secret-key
-NEXT_PUBLIC_BASE_URL=https://tradenext6.netlify.app
-
-# Optional
-ADMIN_EMAIL=admin@tradenext6.app
-ADMIN_PASSWORD=admin123
-NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
-MCP_API_KEY=your-api-key
-```
-
-## Health Check Endpoints
-
-| Endpoint | Purpose | Expected Response |
-|----------|---------|-------------------|
-| `/api/health` | Basic health check | `{ status: "ok" }` |
-| `/api/health/db` | Database connectivity | `{ db: "connected" }` |
-| `/api/health/nse` | NSE API connectivity | `{ nse: "ok" }` |
+Required env vars (see `.env.example`):
+- `DATABASE_URL` — Prisma Accelerate URL
+- `AUTH_SECRET` — NextAuth secret
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `DEMO_PASSWORD` — sandbox creds
+- `DEFAULT_PASSWORD` — new join-request users (env-only, never in repo)
+- `OPENROUTERKEY` — AI model access
+- `TELEGRAM_SECRET` / `TELEGRAM_CHATID` — bot integration
 
 ## Handoff Triggers
 
 | Condition | Handoff To | Reason |
 |-----------|------------|--------|
-| Deploy successful | - | Done |
+| Deploy successful | — | Done |
 | Deploy failed | Developer | Fix build/deploy issue |
 | DB migration needed | Integrator | Coordinate migration |
 | Performance issue | Observability | Investigate slowdown |

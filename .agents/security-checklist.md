@@ -89,7 +89,7 @@ If a security issue is found:
 2. **ASSESS**: Determine scope of impact
 3. **FIX**: Patch the vulnerability
 4. **NOTIFY**: Inform affected users if needed
-5. **DOCUMENT**: Add to `Lessons.md` with prevention steps
+5. **DOCUMENT**: Add to `@Lessons.md` with prevention steps
 6. **PREVENT**: Add test/rule to prevent recurrence
 
 ## Security Audit Schedule

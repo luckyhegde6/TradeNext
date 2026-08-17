@@ -8,7 +8,8 @@
 
 | File | Contents |
 |------|----------|
-| [versions-v3.md](./changelog/versions-v3.md) | v3 per-minor index → [versions-v3.13.md](./changelog/versions-v3.13.md) … [versions-v3.0.md](./changelog/versions-v3.0.md) |
+| [versions-v3.md](./changelog/versions-v3.md) | v3 per-minor index → [versions-v3.14.md](./changelog/versions-v3.14.md) … [versions-v3.0.md](./changelog/versions-v3.0.md) |
+| [versions-v3.14.md](./changelog/versions-v3.14.md) | **v3.14.0** — Swing signal persistence + performance tracking (45-day expiry, direction-aware targets/stops) + worker-logs tab + spec-driven development workflow |
 | [versions-v3.13.md](./changelog/versions-v3.13.md) | **v3.13.0** — DB-backed Swing AI analysis job: durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic claim + supersede-abort, stale recovery, cron-daemon drain) |
 | [versions-v3.12.md](./changelog/versions-v3.12.md) | **v3.12.0** — Swing tab prod failure FIX (request-time split — async AI analysis; Netlify 30s wall) + prod-stability batch (perf live-price fallback, prod `daily_prices` backfill 21,195 bars, heartbeat-aware reaper, Prisma query timeout, worker-logger tmpdir fallback, error serialization) |
 | [versions-v3.11.md](./changelog/versions-v3.11.md) | **v3.11.0–v3.11.3** — in-process node-cron daemon + `daysTracked` 500 fix + carried v3.10.1 batch · no-fake-HOLD Today's Picks (partial persistence) · `recommendationsCache` globalThis singleton · full serverless purge (persistent-server reality, Blob logging removed, DataFetcher test un-skip) |
@@ -25,10 +26,10 @@
 | [versions-v3.0.md](./changelog/versions-v3.0.md) | **v3.0.0** — CSV export + portfolio value history + P&L timeline chart |
 | [versions-v2.md](./changelog/versions-v2.md) | v2 per-minor index → [versions-v2.2.md](./changelog/versions-v2.2.md) · [versions-v2.1.md](./changelog/versions-v2.1.md) |
 | [versions-v1.md](./changelog/versions-v1.md) | v1 per-minor index → [versions-v1.16.md](./changelog/versions-v1.16.md) … [versions-v1.8.md](./changelog/versions-v1.8.md) |
-| [changelog/screener.md](./changelog/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement) |
-| [changelog/corp-actions.md](./changelog/corp-actions.md) | Corporate actions (dedup fix, NSE field fix, enhanced UI, management) |
-| [changelog/serverless-logging.md](./changelog/serverless-logging.md) | Serverless logging (ServerLog/db-logger, Netlify Blobs, 502 fix) |
-| [changelog/security-workers.md](./changelog/security-workers.md) | Security (cookies/sessions), cron/workers, historical sync, tested features |
+| [docs/screener.md](./docs/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement, v3.5.x Chartink 117-registry + TV fallback) |
+| [docs/corp-actions.md](./docs/corp-actions.md) | Corporate actions (dedup fix, NSE field fix, enhanced UI, management) |
+| [docs/serverless-logging.md](./docs/serverless-logging.md) | Serverless logging (ServerLog/db-logger, Netlify Blobs, 502 fix) — HISTORICAL, superseded by v3.11.3 |
+| [docs/security-workers.md](./docs/security-workers.md) | Security (cookies/sessions), cron/workers, historical sync, tested features |
 
 ---
 

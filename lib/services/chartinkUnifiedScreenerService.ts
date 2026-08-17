@@ -439,7 +439,7 @@ export async function runChartinkUnifiedScreeners(
 export async function runChartinkScreenerById(
   templateId: string,
   options: { forceRefresh?: boolean; tvFallbackLimit?: number } = {},
-): Promise<{ template: ChartinkTemplate; stocks: ChartinkStock[]; source: ScreenerSource }> {
+): Promise<{ template: ChartinkTemplate; stocks: ChartinkStock[]; source: ScreenerSource; warning?: string }> {
   const template = getChartinkTemplate(templateId);
   if (!template) throw new Error(`Unknown Chartink template: ${templateId}`);
 
@@ -489,18 +489,51 @@ export async function runChartinkScreenerById(
 
   // 3. TV fallback
   const tv = resolveTvFallback(template);
-  if (!tv) return { template, stocks: [], source: "tradingview" };
+  if (!tv) {
+    return {
+      template,
+      stocks: [],
+      source: "tradingview",
+      warning: !template.scanClause
+        ? `No scan clause available and no TV fallback found for this template.`
+        : `All data sources failed for this template.`,
+    };
+  }
 
-  const columns = Array.from(new Set(getRequiredColumns(tv.filterGroup)));
-  columns.push("name", "close", "volume", "market_cap_basic");
-  const universe = await advancedScan([], columns, TV_UNIVERSE);
-  const { stocks } = applyFilterGroup(tv.filterGroup, universe, {
-    limit: tvFallbackLimit,
-  });
+  try {
+    const columns = Array.from(new Set(getRequiredColumns(tv.filterGroup)));
+    columns.push("name", "close", "volume", "market_cap_basic");
+    const universe = await advancedScan([], columns, TV_UNIVERSE);
+    const { stocks } = applyFilterGroup(tv.filterGroup, universe, {
+      limit: tvFallbackLimit,
+    });
 
-  return {
-    template,
-    source: "tradingview",
-    stocks: stocks.map(tvRowToChartinkStock),
-  };
+    if (stocks.length === 0) {
+      return {
+        template,
+        stocks: [],
+        source: "tradingview",
+        warning: `TV fallback "${tv.name}" returned 0 results — may be rate-limited or filter mismatch.`,
+      };
+    }
+
+    return {
+      template,
+      source: "tradingview",
+      stocks: stocks.map(tvRowToChartinkStock),
+    };
+  } catch (e: unknown) {
+    logger.warn({
+      msg: "TV fallback failed for single run",
+      templateId,
+      tvTemplate: tv.name,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return {
+      template,
+      stocks: [],
+      source: "tradingview",
+      warning: `TV fallback failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 }

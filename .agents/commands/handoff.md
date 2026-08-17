@@ -37,7 +37,7 @@ Write a complete handoff file following the schema in `.agents/handoffs/SCHEMA.m
 - Set `status` to `handoff_required` or `completed`
 - Fill in all context sections
 - Document decisions, blockers, and next steps
-- Set `target_agent` in HANDOFF.md
+- Set `target_agent` in @HANDOFF.md
 
 ### 3. Archive Current State
 ```bash
@@ -48,7 +48,7 @@ cp .agents/handoffs/active/latest.md .agents/handoffs/archive/sess-YYYYMMDD-HHMM
 ### 4. Reset Active Handoff
 Create a fresh template for the next session.
 
-### 5. Update HANDOFF.md
+### 5. Update @HANDOFF.md
 Update the root orchestration file with:
 - New handoff_required = true (if not completed)
 - Target agent
@@ -57,8 +57,8 @@ Update the root orchestration file with:
 
 ### 6. Notify Target Agent
 If using agent-to-agent handoff:
-- Update the `next_agent` field in HANDOFF.md
-- The target agent will read HANDOFF.md on start
+- Update the `next_agent` field in @HANDOFF.md
+- The target agent will read @HANDOFF.md on start
 
 ## Handoff Quick Template
 

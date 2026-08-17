@@ -72,4 +72,4 @@ curl "http://localhost:3000/api/...?sort=entryPrice&order=desc"
 - [ ] Console + network errors checked
 - [ ] Edge cases: empty/null/pagination/sort/filter/cache
 - [ ] Fix verified: `npx tsc --noEmit` + `npx jest <affected>` + browser + curl
-- [ ] Root cause recorded in Lessons.md
+- [ ] Root cause recorded in @Lessons.md

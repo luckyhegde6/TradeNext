@@ -56,7 +56,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 export default function MonitoringPage() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "nse-calls" | "http-logs" | "server-logs" | "db-logs" | "anomalies" | "rate-limits">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "nse-logs" | "nse-calls" | "http-logs" | "server-logs" | "db-logs" | "worker-logs" | "anomalies" | "rate-limits">("overview");
   const [stats, setStats] = useState<APIStats | null>(null);
   const [httpStats, setHttpStats] = useState<any>(null);
   const [alerts, setAlerts] = useState<AnomalyAlert[]>([]);
@@ -70,6 +70,9 @@ export default function MonitoringPage() {
   const [dbLogLevel, setDbLogLevel] = useState<string>("all");
   const [selectedLogFile, setSelectedLogFile] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
+  const [workerLogs, setWorkerLogs] = useState<{ taskId: string; path: string; size: number; created: string }[]>([]);
+  const [selectedWorkerLog, setSelectedWorkerLog] = useState<string | null>(null);
+  const [workerLogContent, setWorkerLogContent] = useState("");
   const [hours, setHours] = useState(24);
 
   useEffect(() => {
@@ -147,6 +150,22 @@ export default function MonitoringPage() {
         setDbLogs(data.logs || []);
         setDbLogTotal(data.total || 0);
       }
+
+      // Fetch worker task log files
+      const workerLogsRes = await fetch("/api/admin/monitoring?type=worker-logs&action=list");
+      if (workerLogsRes.ok) {
+        const data = await workerLogsRes.json();
+        setWorkerLogs(data.files || []);
+      }
+
+      // Refresh the open worker log content (if any)
+      if (selectedWorkerLog) {
+        const contentRes = await fetch(`/api/admin/monitoring?type=worker-logs&taskId=${encodeURIComponent(selectedWorkerLog)}`);
+        if (contentRes.ok) {
+          const data = await contentRes.json();
+          setWorkerLogContent(data.content || "");
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch monitoring data:", error);
     } finally {
@@ -221,7 +240,7 @@ export default function MonitoringPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-slate-800 overflow-x-auto">
-          {(["overview", "nse-logs", "nse-calls", "http-logs", "server-logs", "db-logs", "anomalies", "rate-limits"] as const).map((tab) => (
+          {(["overview", "nse-logs", "nse-calls", "http-logs", "server-logs", "db-logs", "worker-logs", "anomalies", "rate-limits"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -236,6 +255,7 @@ export default function MonitoringPage() {
                tab === "http-logs" ? "HTTP Logs" :
                tab === "server-logs" ? "Server Logs" :
                tab === "db-logs" ? "DB Logs" :
+               tab === "worker-logs" ? "Workers" :
                tab === "rate-limits" ? "Rate Limits" : 
                tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -924,6 +944,121 @@ export default function MonitoringPage() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Workers Tab — per-task worker log files */}
+            {activeTab === "worker-logs" && (
+              <div className="space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Worker Task Logs</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Per-executed-task log files written by the worker engine into <code className="bg-gray-100 dark:bg-slate-800 px-1 rounded">worker_logs/</code> (DB fallback when the filesystem is read-only).
+                      </p>
+                    </div>
+                    <button
+                      onClick={fetchData}
+                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
+                    >
+                      <FolderIcon className="w-4 h-4" />
+                      Refresh
+                    </button>
+                  </div>
+
+                  {!selectedWorkerLog ? (
+                    <div className="space-y-2">
+                      {workerLogs.length === 0 ? (
+                        <p className="text-gray-500 text-center py-8">No worker log files found — execute a task (admin → Workers) to generate one.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {workerLogs.map((file) => (
+                            <div
+                              key={file.taskId}
+                              className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <DocumentTextIcon className="w-5 h-5 text-blue-500 shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white font-mono truncate">{file.taskId}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {(file.size / 1024).toFixed(1)} KB · {new Date(file.created).toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2 shrink-0">
+                                <button
+                                  onClick={async () => {
+                                    setSelectedWorkerLog(file.taskId);
+                                    const res = await fetch(`/api/admin/monitoring?type=worker-logs&taskId=${encodeURIComponent(file.taskId)}`);
+                                    if (res.ok) {
+                                      const data = await res.json();
+                                      setWorkerLogContent(data.content || "");
+                                    }
+                                  }}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                                  title="View"
+                                >
+                                  <DocumentTextIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(`Delete log file for ${file.taskId}?`)) {
+                                      const res = await fetch(`/api/admin/monitoring?type=worker-logs&taskId=${encodeURIComponent(file.taskId)}`, { method: 'DELETE' });
+                                      if (res.ok) {
+                                        fetchData();
+                                      }
+                                    }
+                                  }}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                  title="Delete"
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => {
+                            setSelectedWorkerLog(null);
+                            setWorkerLogContent("");
+                          }}
+                          className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          ← Back to files
+                        </button>
+                        <button
+                          onClick={() => {
+                            const blob = new Blob([workerLogContent], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `worker-log-${selectedWorkerLog}.log`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+                        >
+                          <ArrowDownTrayIcon className="w-4 h-4" />
+                          Export
+                        </button>
+                      </div>
+
+                      <div className="bg-gray-900 dark:bg-black rounded-lg p-4 max-h-[500px] overflow-auto">
+                        <pre className="text-xs font-mono text-green-400 whitespace-pre-wrap">
+                          {workerLogContent || 'No log entries for this task'}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

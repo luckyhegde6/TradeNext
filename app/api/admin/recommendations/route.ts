@@ -105,6 +105,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, message: "Performance check queued", taskId: task.id });
     }
 
+    if (action === "check_swing_performance") {
+      // Swing signals share the 15:30 IST recommendation_performance cron
+      // (non-fatal companion); this standalone button runs the same check on
+      // demand via its own swing_performance task.
+      const task = await spawnRegularTask({
+        name: "Swing Performance Check (Admin)",
+        taskType: "swing_performance",
+        triggeredBy: "system",
+        priority: 8,
+        payload: { source: "admin_manual" },
+        createdBy: Number(session.user.id),
+      });
+      logger.info({ msg: "Admin triggered swing performance check", taskId: task.id });
+      return NextResponse.json({ success: true, message: "Swing performance check queued", taskId: task.id });
+    }
+
     return NextResponse.json({ success: false, error: "Invalid action" }, { status: 400 });
   } catch (error) {
     logger.error({ msg: "Admin recommendation action failed", error });
