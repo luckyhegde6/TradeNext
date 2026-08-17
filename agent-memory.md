@@ -723,6 +723,18 @@ echo "" >> agent-memory.md
 - **Files**: lib/cache.ts (globalThis singleton for `recommendationsCache` only), lib/__tests__/cacheSingleton.test.ts (new), AGENTS.md (v3.11.2 row), .agents/CHANGELOG.md (index), .agents/changelog/versions-v3.md (v3.11.2 entry), TODO.md (row), Lessons.md (#76), Primer.md, agent-memory.md, .agents/session-todos.md, .agents/sessions/2026-08-14-b35eca4/ (decisions + flow).
 - **Status**: docs updated; **commit pending user; NO push/deploy**.
 
+## 2026-08-17 (v3.14.0 screener fix) — Advanced Screener: all 117 Chartink templates working + graceful TV fallback — branch `docs-readme-refs-agentic-coding`
+
+- **Problem**: advanced screener `/markets/analytics` showed empty table for 83 of 117 Chartink templates. Only "Short Term Breakouts" (which had both `scanClause` AND a curated TV proxy) worked.
+- **Root cause**: (1) 83 templates were added to the Chartink registry without their `scanClause` DSL (catalog-only). (2) `runChartinkScreenerById` had no try/catch around the TradingView fallback — a rate-limit error (HTTP 429) threw uncaught. (3) `advancedScan` catches ALL errors silently returning `[]` → empty table with no user-visible error.
+- **Fix A — Playwright capture**: `scripts/chartink-capture/capture.ts` scraped `scanClause` from Chartink's `/screener/process` endpoint for all 150 templates (150/150, 0 failures, Chromium + clipboard-click fallback). Populated 8 JSON config files (`lib/services/chartink-scans/*.json`). All 169 templates across 10 files now have `scanClause`.
+- **Fix D — graceful TV fallback**: `runChartinkScreenerById` now returns `{stocks, source, warning?}`. POST `/api/screener/chartink` surfaces `warning` in the response. `TemplatesPanel.tsx` shows amber warning banner when stocks=0 but warning present ("0 stocks found — TradingView fallback active: <reason>").
+- **Tests**: updated stale catalog-only test (was asserting a real template was catalog-only → now uses a mock template). 143 chartink+screener tests pass.
+- **Files**: lib/services/chartinkUnifiedScreenerService.ts (Fix D), app/api/screener/chartink/route.ts (warning), app/components/screener/TemplatesPanel.tsx (warning UI), lib/services/chartink-scans/*.json (8 files populated), lib/__tests__/chartinkTemplateServices.test.ts (updated)
+- **Committed + pushed**: `98b595b` (12 files, +592/-134) on `docs-readme-refs-agentic-coding`
+
+---
+
 ## How to Use
 
 1. **Start of session**: Read `Primer.md` to understand current state
