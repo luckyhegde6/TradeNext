@@ -53,6 +53,12 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "historical_price_sync":
         result = await executeHistoricalPriceSync(payload);
         break;
+      case "ipo_analysis_prewarm":
+        result = await executeIpoAnalysisPrewarm(payload);
+        break;
+      case "ipo_analysis_cleanup":
+        result = await executeIpoAnalysisCleanup(payload);
+        break;
       case "market_data":
         result = await executeMarketDataSync(payload);
         break;
@@ -688,7 +694,110 @@ async function executeMarketDataSync(payload?: Record<string, unknown>): Promise
 
   logger.info({ msg: "Market data sync completed", indexName, synced });
 
-  return { indexName, total: stocks.length, synced };
+  // v3.14.1: Step 5 — pre-warm IPO AI analysis for all Active IPOs so the
+  // analysis is ready before any user clicks "AI Analysis". Non-fatal:
+  // IPO pre-warm failure must not block the stock sync.
+  try {
+    const ipoResult = await executeIpoAnalysisPrewarm(payload);
+
+    // Step 6 — clean stale IPO analysis rows (90-day TTL). Non-fatal.
+    let cleanupResult: { deleted: number } | undefined;
+    try {
+      cleanupResult = (await executeIpoAnalysisCleanup(payload)) as { deleted: number };
+    } catch (cleanupErr) {
+      logger.warn({
+        msg: "IPO analysis cleanup failed (non-fatal)",
+        error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+      });
+    }
+
+    return { indexName, total: stocks.length, synced, ipoPrewarm: ipoResult, ipoCleanup: cleanupResult };
+  } catch (ipoErr) {
+    logger.warn({
+      msg: "IPO analysis pre-warm failed (non-fatal, stock sync still succeeds)",
+      error: ipoErr instanceof Error ? ipoErr.message : String(ipoErr),
+    });
+    return { indexName, total: stocks.length, synced };
+  }
+}
+
+/**
+ * v3.14.1: IPO Analysis Pre-warm — generates AI analysis for all Active
+ * (Open Now) IPOs so the analysis is ready before any user clicks "AI
+ * Analysis". Uses the cache-aware `getIpoAnalysis` — if analysis already
+ * exists (cache hit), no AI call is made. Per-IPO error tolerance.
+ *
+ * Called at the end of `executeMarketDataSync` (non-fatal) and also
+ * available as a standalone `ipo_analysis_prewarm` worker task.
+ */
+export async function executeIpoAnalysisPrewarm(_payload?: Record<string, unknown>): Promise<unknown> {
+  const { getUpcomingIpoIssues } = await import("@/lib/services/nseIpoService");
+  const { getIpoAnalysis } = await import("@/lib/services/ipoAnalysisService");
+
+  logger.info({ msg: "Starting IPO analysis pre-warm" });
+
+  const { data: issues } = await getUpcomingIpoIssues();
+  const activeIssues = issues.filter(
+    (i) => (i.status || "").toLowerCase() === "active"
+  );
+
+  if (activeIssues.length === 0) {
+    logger.info({ msg: "IPO analysis pre-warm: no Active IPOs found" });
+    return { total: 0, generated: 0, cached: 0, errors: 0 };
+  }
+
+  let generated = 0;
+  let cached = 0;
+  let errors = 0;
+
+  for (const issue of activeIssues) {
+    try {
+      const result = await getIpoAnalysis(issue.symbol);
+      if (result.source === "ai") {
+        generated++;
+      } else {
+        cached++;
+      }
+      logger.info({
+        msg: "IPO analysis pre-warm: processed",
+        symbol: issue.symbol,
+        source: result.source,
+      });
+    } catch (err) {
+      errors++;
+      logger.warn({
+        msg: "IPO analysis pre-warm: failed for symbol (non-fatal)",
+        symbol: issue.symbol,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const summary = { total: activeIssues.length, generated, cached, errors };
+  logger.info({ msg: "IPO analysis pre-warm completed", ...summary });
+
+  return summary;
+}
+
+/**
+ * IPO Analysis TTL Cleanup — deletes stale IPO analysis rows from
+ * MarketCache (retention: 90 days).  Non-fatal: DB errors are logged
+ * and returned as `{ deleted: 0, error: "..." }`.
+ *
+ * Called at the end of `executeMarketDataSync` (non-fatal) and also
+ * available as a standalone `ipo_analysis_cleanup` worker task.
+ */
+export async function executeIpoAnalysisCleanup(_payload?: Record<string, unknown>): Promise<unknown> {
+  const { cleanStaleIpoAnalysisRows } = await import("@/lib/services/ipoAnalysisService");
+
+  logger.info({ msg: "Starting IPO analysis TTL cleanup" });
+
+  const deleted = await cleanStaleIpoAnalysisRows();
+
+  const summary = { deleted };
+  logger.info({ msg: "IPO analysis TTL cleanup completed", ...summary });
+
+  return summary;
 }
 
 /**

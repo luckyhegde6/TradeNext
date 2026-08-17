@@ -26,10 +26,34 @@ interface DetailApiResult {
   } | null;
 }
 
-const STATUS_SECTIONS = [
+/** Closed IPO enriched with current market price from the /closed endpoint. */
+interface ClosedIpoIssue {
+  symbol: string;
+  companyName: string;
+  series: string;
+  status: string;
+  issueStartDate: string;
+  issueEndDate: string;
+  issuePrice: string;
+  issueSize: string;
+  lotSize?: string;
+  priceBand?: string;
+  currentPrice: number | null;
+  gainPercent: number | null;
+  issuePriceLow: number | null;
+}
+
+interface ClosedApiResult {
+  success: boolean;
+  issues?: ClosedIpoIssue[];
+  source?: string;
+  count?: number;
+}
+
+/** Only Active + Forthcoming rendered in the main flat table. */
+const MAIN_SECTIONS = [
   { status: "Active", key: "current", label: "Current IPOs", emoji: "🟢", subtitle: "Open for subscription" },
   { status: "Forthcoming", key: "upcoming", label: "Upcoming IPOs", emoji: "🕐", subtitle: "Opens soon" },
-  { status: "Closed", key: "closed", label: "Recently Closed", emoji: "⚪", subtitle: "Subscription ended" },
 ] as const;
 
 // Status pill styles — Active (current) gets a strong emerald "Open Now" label.
@@ -76,6 +100,28 @@ function sourceLabel(source: string | undefined): string {
   }
 }
 
+/** Format a number as ₹ with commas (en-IN). Falls back to "—" when null. */
+function formatPrice(n: number | null): string {
+  if (n === null || n === undefined) return "—";
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Gain/loss pill — green for positive, red for negative, gray for null. */
+function GainPill({ gain }: { gain: number | null }) {
+  if (gain === null) {
+    return <span className="text-xs text-gray-500">—</span>;
+  }
+  const isPositive = gain >= 0;
+  return (
+    <span
+      className={`text-xs font-medium ${isPositive ? "text-emerald-400" : "text-red-400"}`}
+    >
+      {isPositive ? "+" : ""}
+      {gain.toFixed(2)}%
+    </span>
+  );
+}
+
 export default function IposTab({ loading = false }: IposTabProps) {
   const [issues, setIssues] = useState<IpoIssue[]>([]);
   const [error, setError] = useState("");
@@ -85,6 +131,11 @@ export default function IposTab({ loading = false }: IposTabProps) {
   const [analysisTarget, setAnalysisTarget] = useState<IpoIssue | null>(null);
   // Per-symbol parsed IPO detail (Bid Lot → shares per lot) for Issue Size display.
   const [details, setDetails] = useState<Record<string, DetailApiResult["detail"]>>({});
+
+  // ─── Closed IPOs (collapsible, fetched separately) ───
+  const [closedIssues, setClosedIssues] = useState<ClosedIpoIssue[]>([]);
+  const [closedLoading, setClosedLoading] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
 
   const fetchIpos = async (force = false) => {
     try {
@@ -107,6 +158,23 @@ export default function IposTab({ loading = false }: IposTabProps) {
   useEffect(() => {
     fetchIpos();
   }, []);
+
+  // Fetch closed IPOs with current prices when user expands the section.
+  const fetchClosedIpos = async () => {
+    if (closedIssues.length > 0 || closedLoading) return; // already loaded or loading
+    setClosedLoading(true);
+    try {
+      const res = await fetch("/api/recommendations/ipos/closed?days=30");
+      const data: ClosedApiResult = await res.json();
+      if (data.success && data.issues) {
+        setClosedIssues(data.issues);
+      }
+    } catch {
+      // Non-fatal — section stays empty
+    } finally {
+      setClosedLoading(false);
+    }
+  };
 
   // Lightweight per-symbol detail fetch (24h-cached server-side). Only the
   // displayed issue set is requested, batched; failures fall back to the raw
@@ -151,10 +219,17 @@ export default function IposTab({ loading = false }: IposTabProps) {
     setRefreshing(false);
   };
 
+  // Filter: main table only shows Active + Forthcoming (Closed rendered separately).
+  const mainIssues = issues.filter((i) => i.status !== "Closed");
   const currentCount = issues.filter((i) => i.status === "Active").length;
   const upcomingCount = issues.filter((i) => i.status === "Forthcoming").length;
-  const closedCount = issues.filter((i) => i.status === "Closed").length;
-  const hasSections = currentCount > 0 || upcomingCount > 0 || closedCount > 0;
+  const hasMainSections = currentCount > 0 || upcomingCount > 0;
+
+  const toggleClosed = () => {
+    const next = !showClosed;
+    setShowClosed(next);
+    if (next) fetchClosedIpos();
+  };
 
   return (
     <div className="space-y-4">
@@ -214,11 +289,12 @@ export default function IposTab({ loading = false }: IposTabProps) {
         <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg p-8 text-center">
           <p className="text-sm text-gray-400">No IPO issues at the moment.</p>
         </div>
-      ) : !hasSections ? (
+      ) : !hasMainSections ? (
         <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg p-8 text-center">
           <p className="text-sm text-gray-400">No IPO issues listed right now.</p>
         </div>
       ) : (
+        /* ─── Main table: Active + Forthcoming only ─── */
         <div className="overflow-x-auto rounded-lg border border-gray-800">
           <table className="min-w-full text-sm">
             <thead>
@@ -234,8 +310,8 @@ export default function IposTab({ loading = false }: IposTabProps) {
               </tr>
             </thead>
             <tbody>
-              {STATUS_SECTIONS.map((section) => {
-                const sectionIssues = issues.filter((i) => i.status === section.status);
+              {MAIN_SECTIONS.map((section) => {
+                const sectionIssues = mainIssues.filter((i) => i.status === section.status);
                 if (sectionIssues.length === 0) return null;
                 return (
                   <Fragment key={section.key}>
@@ -297,6 +373,82 @@ export default function IposTab({ loading = false }: IposTabProps) {
           </table>
         </div>
       )}
+
+      {/* ─── Collapsible: Recently Closed IPOs (last 30 days) ─── */}
+      <div className="rounded-lg border border-gray-800 overflow-hidden">
+        <button
+          onClick={toggleClosed}
+          className="w-full flex items-center justify-between px-4 py-3 bg-gray-800/50 hover:bg-gray-800/80 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <span>⚪</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-300">
+              Recently Closed
+              {closedIssues.length > 0 && (
+                <span className="ml-2 text-gray-500 font-normal normal-case">
+                  {closedIssues.length} · Last 30 days
+                </span>
+              )}
+            </span>
+          </div>
+          <span className="text-gray-500 text-xs">{showClosed ? "▴" : "▾"}</span>
+        </button>
+
+        {showClosed && (
+          <div className="border-t border-gray-800">
+            {closedLoading ? (
+              <div className="p-6 space-y-3 animate-pulse">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-4 bg-gray-700/50 rounded w-3/4" />
+                ))}
+              </div>
+            ) : closedIssues.length === 0 ? (
+              <div className="p-6 text-center text-sm text-gray-500">
+                No recently closed IPOs in the last 30 days.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-gray-500 bg-gray-900/40">
+                      <th className="px-4 py-2">Company</th>
+                      <th className="px-4 py-2">Series</th>
+                      <th className="px-4 py-2">Closed</th>
+                      <th className="px-4 py-2">Issue Price</th>
+                      <th className="px-4 py-2">Current</th>
+                      <th className="px-4 py-2">Gain / Loss</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedIssues.map((ipo) => (
+                      <tr
+                        key={ipo.symbol}
+                        className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors"
+                      >
+                        <td className="px-4 py-2.5">
+                          <div className="text-gray-300 font-medium">{ipo.companyName}</div>
+                          <div className="text-xs text-gray-600">{ipo.symbol}</div>
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-500">{ipo.series}</td>
+                        <td className="px-4 py-2.5 text-gray-500">{ipo.issueEndDate}</td>
+                        <td className="px-4 py-2.5 text-gray-400">
+                          {ipo.issuePriceLow !== null ? `₹${ipo.issuePriceLow}` : ipo.issuePrice}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-300 font-medium">
+                          {formatPrice(ipo.currentPrice)}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <GainPill gain={ipo.gainPercent} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* AI Analysis modal — only for Active (Open Now) rows */}
       {analysisTarget && (

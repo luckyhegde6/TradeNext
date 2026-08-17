@@ -17,7 +17,9 @@ const cronJobSchema = z.object({
     "corp_actions_fetch", "events_fetch", "news_fetch", "market_data_fetch", "announcement_fetch", "screener_sync",
     // v3.11.0: system cron task types (previously only creatable by code —
     // the in-process daemon makes every system job admin-manageable).
-    "recommendation_performance", "ai_connection_test", "historical_price_sync"
+    "recommendation_performance", "ai_connection_test", "historical_price_sync",
+    // v3.14.1: IPO analysis pre-warm + cleanup
+    "ipo_analysis_prewarm", "ipo_analysis_cleanup"
   ]),
   cronExpression: z.string().min(9), // Minimum cron expression
   isActive: z.boolean().optional(),

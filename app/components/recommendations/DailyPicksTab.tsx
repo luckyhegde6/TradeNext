@@ -83,12 +83,20 @@ export default function DailyPicksTab({
   const [capFilter, setCapFilter] = useState<CapFilter>("all");
   const [highlightCaps, setHighlightCaps] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [showHolds, setShowHolds] = useState(false);
 
-  // ─── Filter + Sort ─────────────────────────────────────────────────
+  // ─── Separate actionable (BUY/SELL) from HOLDs ─────────────────────
+  const { actionableStocks, holdStocks } = useMemo(() => {
+    const actionable = stocks.filter((s) => s.aiRecommendation !== "HOLD");
+    const holds = stocks.filter((s) => s.aiRecommendation === "HOLD");
+    return { actionableStocks: actionable, holdStocks: holds };
+  }, [stocks]);
+
+  // ─── Filter + Sort (for actionable stocks) ─────────────────────────
   const processedStocks = useMemo(() => {
-    let result = [...stocks];
+    let result = [...actionableStocks];
 
-    // 1. Recommendation filter
+    // 1. Recommendation filter (BUY/SELL only — HOLDs are in separate section)
     if (recFilter !== "all") {
       result = result.filter((s) => s.aiRecommendation === recFilter);
     }
@@ -147,19 +155,19 @@ export default function DailyPicksTab({
     });
 
     return result;
-  }, [stocks, recFilter, timeFilter, sortBy, capFilter, highlightCaps]);
+  }, [actionableStocks, recFilter, timeFilter, sortBy, capFilter, highlightCaps]);
 
   const visibleStocks = processedStocks.slice(0, visibleCount);
   const hasMore = visibleCount < processedStocks.length;
 
   // ─── Stats ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const nifty50Count = stocks.filter((s) => isNifty50(s.symbol)).length;
-    const bluechipCount = stocks.filter((s) => isBluechip(s.symbol)).length;
-    const largeCapCount = stocks.filter((s) => isLargeCap(s.symbol)).length;
-    const midCapCount = stocks.filter((s) => isMidCap(s.symbol)).length;
+    const nifty50Count = actionableStocks.filter((s) => isNifty50(s.symbol)).length;
+    const bluechipCount = actionableStocks.filter((s) => isBluechip(s.symbol)).length;
+    const largeCapCount = actionableStocks.filter((s) => isLargeCap(s.symbol)).length;
+    const midCapCount = actionableStocks.filter((s) => isMidCap(s.symbol)).length;
     return { nifty50Count, bluechipCount, largeCapCount, midCapCount };
-  }, [stocks]);
+  }, [actionableStocks]);
 
   // ─── Loading ───────────────────────────────────────────────────────
   if (loading) {
@@ -207,7 +215,11 @@ export default function DailyPicksTab({
       {runDate && (
         <div className="text-xs text-gray-500 mb-4">
           Last updated: {new Date(runDate).toLocaleString("en-IN")} &bull;{" "}
-          {stocks.length} stocks total &bull; showing {processedStocks.length} after filters
+          <span className="text-emerald-400">{actionableStocks.length} Buy/Sell</span>
+          {holdStocks.length > 0 && (
+            <> &bull; <span className="text-gray-400">{holdStocks.length} Hold</span></>
+          )}
+          &bull; showing {processedStocks.length} after filters
         </div>
       )}
 
@@ -265,7 +277,7 @@ export default function DailyPicksTab({
                   ? stats.largeCapCount
                   : f.id === "mid_cap"
                     ? stats.midCapCount
-                    : stocks.length;
+                    : actionableStocks.length;
           return (
             <button
               key={f.id}
@@ -386,6 +398,30 @@ export default function DailyPicksTab({
       {!hasMore && processedStocks.length > PAGE_SIZE && (
         <div className="mt-6 text-center text-xs text-gray-500">
           All {processedStocks.length} stocks shown
+        </div>
+      )}
+
+      {/* ── HOLDs Section (collapsible) ───────────────────────────── */}
+      {holdStocks.length > 0 && (
+        <div className="mt-6 border-t border-gray-800 pt-4">
+          <button
+            onClick={() => setShowHolds(!showHolds)}
+            className="flex items-center gap-2 text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors"
+          >
+            <span className={`transition-transform ${showHolds ? "rotate-90" : ""}`}>▶</span>
+            <span>HOLDs ({holdStocks.length})</span>
+            <span className="text-xs text-gray-600">— stored in History &amp; Performance</span>
+          </button>
+
+          {showHolds && (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {holdStocks.map((stock) => (
+                <div key={stock.symbol} className="relative opacity-75">
+                  <RecommendationCard {...stock} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@
 - [x] Update `.opencode/opencode.json` — DONE (7 agents added: qa, e2e-agent, devops, code-reviewer, integrator, observability, nse-integration command)
 - [x] Update AGENT-SKILL-MATRIX.md — DONE (14 agents, 8 skills, 6 commands)
 - [x] Update session-todos + agent-memory + Lessons — DONE
+- [x] v3.15.0 documentation updates — DONE (AGENTS.md row, CHANGELOG index + versions-v3.15.md, versions-v3.md index, Primer.md, agent-memory.md)
 - [ ] Commit + push — PENDING user request
 
 ## Completed This Session
@@ -18,3 +19,4 @@
 - HANDOFF.md updated for v3.14.0 + screener fix
 - Lesson #83 added (screener silent failure)
 - Agent profiles restructuring — DONE (all files updated, commit pending)
+- v3.15.0 pipeline redesign + Closed IPOs + TTL cleanup — DONE (code + tests + docs, commit pending)
