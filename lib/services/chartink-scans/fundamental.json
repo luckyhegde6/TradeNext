@@ -12,61 +12,109 @@
   {
     "id": "fundamental.large-cap-stocks",
     "name": "Large cap stocks",
-    "url": "https://chartink.com/scanner/large-cap-stocks"
+    "url": "https://chartink.com/scanner/large-cap-stocks",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  market cap >  10000 ) )",
+    "debugClause": "groupcount( 1 where  market cap >  10000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.stocks-below-book-value",
     "name": "Stocks below Book value - Undervalued",
-    "url": "https://chartink.com/scanner/stocks-below-book-value"
+    "url": "https://chartink.com/scanner/stocks-below-book-value",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  daily close <  yearly {custom_indicator_179038_start}\"share capital +  reserves\"{custom_indicator_179038_end} /  (  quarterly total number /  10000000 ) ) )",
+    "debugClause": "groupcount( 1 where  daily close <  yearly {custom_indicator_179038_start}\"share capital +  reserves\"{custom_indicator_179038_end} /  (  quarterly total number /  10000000 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.low-debt-companies",
     "name": "Low debt companies",
-    "url": "https://chartink.com/scanner/low-debt-companies"
+    "url": "https://chartink.com/scanner/low-debt-companies",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  (  yearly secured loans +  yearly unsecured loans ) <  (  1 year ago secured loans +  1 year ago unsecured loans ) and(  1 year ago secured loans +  1 year ago unsecured loans ) <  (  2 years ago secured loans +  2 years ago unsecured loans ) and(  2 years ago secured loans +  2 years ago unsecured loans ) <  (  3 years ago secured loans +  3 years ago unsecured loans ) ) )",
+    "debugClause": "groupcount( 1 where(  yearly secured loans +  yearly unsecured loans ) <  (  1 year ago secured loans +  1 year ago unsecured loans )),groupcount( 1 where(  1 year ago secured loans +  1 year ago unsecured loans ) <  (  2 years ago secured loans +  2 years ago unsecured loans )),groupcount( 1 where(  2 years ago secured loans +  2 years ago unsecured loans ) <  (  3 years ago secured loans +  3 years ago unsecured loans ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.mid-cap-stocks",
     "name": "Mid cap stocks",
-    "url": "https://chartink.com/scanner/mid-cap-stocks"
+    "url": "https://chartink.com/scanner/mid-cap-stocks",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  market cap >=  100 and  market cap <=  10000 ) )",
+    "debugClause": "groupcount( 1 where  market cap >=  100),groupcount( 1 where  market cap <=  10000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.sales-jump-by-200",
     "name": "Sales jump by 200%",
-    "url": "https://chartink.com/scanner/sales-jump-by-200"
+    "url": "https://chartink.com/scanner/sales-jump-by-200",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  yearly net sales >  1 year ago net sales *  3 ) )",
+    "debugClause": "groupcount( 1 where  yearly net sales >  1 year ago net sales *  3)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.top-stocks-with-the-lowest-pe-pricing-earnings",
     "name": "Top stocks with the lowest Price Earning Ratios(PE)",
-    "url": "https://chartink.com/scanner/top-stocks-with-the-lowest-pe-pricing-earnings"
+    "url": "https://chartink.com/scanner/top-stocks-with-the-lowest-pe-pricing-earnings",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  market cap /  yearly net profit after minority interest & pnl assoco <  5 and  market cap /  yearly net profit after minority interest & pnl assoco >=  1 ) )",
+    "debugClause": "groupcount( 1 where  market cap /  yearly net profit after minority interest & pnl assoco <  5),groupcount( 1 where  market cap /  yearly net profit after minority interest & pnl assoco >=  1)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.highest-earning-per-share-eps-stocks",
     "name": "Highest Earning per share - EPS Stocks",
-    "url": "https://chartink.com/scanner/highest-earning-per-share-eps-stocks"
+    "url": "https://chartink.com/scanner/highest-earning-per-share-eps-stocks",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} ( ( {cash} (  yearly eps after extraordinary items basic >  1 year ago max( 5 ,  yearly eps after extraordinary items basic ) and  5 years ago close >  0 and  yearly count( 6, 1 where  yearly net profit/reported profit after tax >  0 ) =  6 ) ) ) )",
+    "debugClause": "groupcount( 1 where      yearly eps after extraordinary items basic >  1 year ago max( 5 ,  yearly eps after extraordinary items basic )),groupcount( 1 where      5 years ago close >  0),groupcount( 1 where      yearly count( 6, 1 where  yearly net profit/reported profit after tax >  0 ) =  6)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.small-cap-stocks",
     "name": "Small cap stocks",
-    "url": "https://chartink.com/scanner/small-cap-stocks"
+    "url": "https://chartink.com/scanner/small-cap-stocks",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  market cap <  5000 ) )",
+    "debugClause": "groupcount( 1 where  market cap <  5000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.pious-volume-generator",
     "name": "pious volume generator",
-    "url": "https://chartink.com/scanner/pious-volume-generator"
+    "url": "https://chartink.com/scanner/pious-volume-generator",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  daily close >=  1 week ago close and  1 day ago close >  10 and  1 day ago close >  1 day ago open and  daily low >  1 day ago open and  daily open >  1 day ago close and( {cash} (  weekly close >=  1 week ago close and  1 day ago close >  1 day ago open and  daily open >  1 day ago open and  daily volume >  1 day ago volume and  1 day ago \"sum( close  *  volume, 5 ) / sum( volume ,5 )\" <  2 days ago min( 5 ,  2 days ago \"sum( close  *  volume, 5 ) / sum( volume ,5 )\" ) and  daily volume >  2 days ago volume and  daily volume >  3 days ago volume and  weekly volume >  1 week ago volume and  weekly volume >  2 weeks ago volume and  weekly volume >  3 weeks ago volume ) ) ) )",
+    "debugClause": "groupcount( 1 where  daily close >=  1 week ago close),groupcount( 1 where  1 day ago close >  10),groupcount( 1 where  1 day ago close >  1 day ago open),groupcount( 1 where  daily low >  1 day ago open),groupcount( 1 where  daily open >  1 day ago close),groupcount( 1 where      weekly close >=  1 week ago close),groupcount( 1 where      1 day ago close >  1 day ago open),groupcount( 1 where      daily open >  1 day ago open),groupcount( 1 where      daily volume >  1 day ago volume),groupcount( 1 where      1 day ago \"sum( close  *  volume, 5 ) / sum( volume ,5 )\" <  2 days ago min( 5 ,  2 days ago \"sum( close  *  volume, 5 ) / sum( volume ,5 )\" )),groupcount( 1 where      daily volume >  2 days ago volume),groupcount( 1 where      daily volume >  3 days ago volume),groupcount( 1 where      weekly volume >  1 week ago volume),groupcount( 1 where      weekly volume >  2 weeks ago volume),groupcount( 1 where      weekly volume >  3 weeks ago volume)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.top-stocks-with-the-highest-eps-earning-per-share",
     "name": "Top stocks with the highest EPS - Earning per share",
-    "url": "https://chartink.com/scanner/top-stocks-with-the-highest-eps-earning-per-share"
+    "url": "https://chartink.com/scanner/top-stocks-with-the-highest-eps-earning-per-share",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  earning per share[eps] >  100 ) )",
+    "debugClause": "groupcount( 1 where  earning per share[eps] >  100)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.penny-stocks-multi-bagger-1",
     "name": "Penny Stocks - Multi Bagger",
-    "url": "https://chartink.com/scanner/penny-stocks-multi-bagger-1"
+    "url": "https://chartink.com/scanner/penny-stocks-multi-bagger-1",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  daily close >  daily sma( close,100 ) and  daily close >  daily sma( close,200 ) and  daily close >  daily sma( close,50 ) and  daily close <  5 and  yearly face value >=  5 and  yearly book value >  10 ) )",
+    "debugClause": "groupcount( 1 where  daily close >  daily sma( close,100 )),groupcount( 1 where  daily close >  daily sma( close,200 )),groupcount( 1 where  daily close >  daily sma( close,50 )),groupcount( 1 where  daily close <  5),groupcount( 1 where  yearly face value >=  5),groupcount( 1 where  yearly book value >  10)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "fundamental.position-buy-seema",
     "name": "position buy seema",
-    "url": "https://chartink.com/scanner/position-buy-seema"
+    "url": "https://chartink.com/scanner/position-buy-seema",
+    "categoryId": "fundamental",
+    "scanClause": "( {cash} (  weekly ema( close,10 ) >  weekly ema( close,30 ) and  daily macd line( 26,12,9 ) >  daily macd signal( 26,12,9 ) and  1 day ago  macd line( 26,12,9 ) <=  1 day ago  macd signal( 26,12,9 ) and  daily high >  1 day ago high and  daily slow stochastic %k( 14,3 ) >  daily slow stochastic %d( 14,3 ) and  daily macd signal( 26,12,9 ) >  0 and  weekly macd line( 26,12,9 ) >  weekly macd signal( 26,12,9 ) and( {cash} (  daily slow stochastic %k( 14,3 ) <  69 or  daily fast stochastic %d( 14,3 ) >  81 ) ) and  daily volume >  1 day ago volume and  daily close >  daily open and  daily rsi( 14 ) >  60 ) )",
+    "debugClause": "groupcount( 1 where  weekly ema( close,10 ) >  weekly ema( close,30 )),groupcount( 1 where  daily macd line( 26,12,9 ) >  daily macd signal( 26,12,9 ) and  1 day ago  macd line( 26,12,9 ) <=  1 day ago  macd signal( 26,12,9 )),groupcount( 1 where  daily high >  1 day ago high),groupcount( 1 where  daily slow stochastic %k( 14,3 ) >  daily slow stochastic %d( 14,3 )),groupcount( 1 where  daily macd signal( 26,12,9 ) >  0),groupcount( 1 where  weekly macd line( 26,12,9 ) >  weekly macd signal( 26,12,9 )),groupcount( 1 where      daily slow stochastic %k( 14,3 ) <  69),groupcount( 1 where      daily fast stochastic %d( 14,3 ) >  81),groupcount( 1 where  daily volume >  1 day ago volume),groupcount( 1 where  daily close >  daily open),groupcount( 1 where  daily rsi( 14 ) >  60)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   }
 ]

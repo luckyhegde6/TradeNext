@@ -2,66 +2,118 @@
   {
     "id": "intraday-bearish.sell-open-high-7",
     "name": "SELL OPEN=HIGH",
-    "url": "https://chartink.com/scanner/sell-open-high-7"
+    "url": "https://chartink.com/scanner/sell-open-high-7",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  daily open =  daily high ) )",
+    "debugClause": "groupcount( 1 where  daily open =  daily high)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.my-intraday-buy-setup",
     "name": "My Intraday sell setup",
-    "url": "https://chartink.com/scanner/my-intraday-buy-setup"
+    "url": "https://chartink.com/scanner/my-intraday-buy-setup",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 5 minute close <  [0] 5 minute ema( close,8 ) and  [0] 5 minute close <  [0] 5 minute ema( close,34 ) and  [0] 5 minute close <  [0] 5 minute ema( close,100 ) and  [0] 5 minute volume >  [0] 5 minute wma( volume,5 ) and  [0] 10 minute adx di negative( 14 ) >=  35 and  [0] 5 minute ema( close,8 ) <  [0] 5 minute ema( close,34 ) and  [0] 5 minute ema( close,34 ) <  [0] 5 minute ema( close,100 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 5 minute close <  [0] 5 minute ema( close,8 )),groupcount( 1 where  [0] 5 minute close <  [0] 5 minute ema( close,34 )),groupcount( 1 where  [0] 5 minute close <  [0] 5 minute ema( close,100 )),groupcount( 1 where  [0] 5 minute volume >  [0] 5 minute wma( volume,5 )),groupcount( 1 where  [0] 10 minute adx di negative( 14 ) >=  35),groupcount( 1 where  [0] 5 minute ema( close,8 ) <  [0] 5 minute ema( close,34 )),groupcount( 1 where  [0] 5 minute ema( close,34 ) <  [0] 5 minute ema( close,100 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.fully-bearish-with-selling-seen-in-last-15min",
     "name": "FULLY BEARISH WITH SELLING SEEN IN LAST 15MIN",
-    "url": "https://chartink.com/scanner/fully-bearish-with-selling-seen-in-last-15min"
+    "url": "https://chartink.com/scanner/fully-bearish-with-selling-seen-in-last-15min",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 15 minute close <  [0] 15 minute ema( close,8 ) and  [0] 15 minute close <  [0] 15 minute ema( close,34 ) and  daily volume >  500000 and  daily close >  90 and  daily close <  700 and( {33489} (  daily close <  1 day ago low or  daily close <  1 day ago close ) ) and  daily close <  daily supertrend( 7,3 ) and  [0] 5 minute close <  [-1] 5 minute close and  [-1] 5 minute close <  [-2] 5 minute close and  [-2] 5 minute close <  [-3] 5 minute close ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute close <  [0] 15 minute ema( close,8 )),groupcount( 1 where  [0] 15 minute close <  [0] 15 minute ema( close,34 )),groupcount( 1 where  daily volume >  500000),groupcount( 1 where  daily close >  90),groupcount( 1 where  daily close <  700),groupcount( 1 where      daily close <  1 day ago low),groupcount( 1 where      daily close <  1 day ago close),groupcount( 1 where  daily close <  daily supertrend( 7,3 )),groupcount( 1 where  [0] 5 minute close <  [-1] 5 minute close),groupcount( 1 where  [-1] 5 minute close <  [-2] 5 minute close),groupcount( 1 where  [-2] 5 minute close <  [-3] 5 minute close)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.intraday-future-sell-with-supertrend-80-accuracy",
     "name": "Intraday Future Sell with SuperTrend -80 % Accuracy",
-    "url": "https://chartink.com/scanner/intraday-future-sell-with-supertrend-80-accuracy"
+    "url": "https://chartink.com/scanner/intraday-future-sell-with-supertrend-80-accuracy",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 5 minute supertrend( 7,3 ) >  [0] 5 minute close and  [ -1 ] 5 minute supertrend( 7,3 ) <=  [ -1 ] 5 minute close and  [0] 1 hour rsi( 14 ) <=  50 ) )",
+    "debugClause": "groupcount( 1 where  [0] 5 minute supertrend( 7,3 ) >  [0] 5 minute close and  [ -1 ] 5 minute supertrend( 7,3 ) <=  [ -1 ] 5 minute close),groupcount( 1 where  [0] 1 hour rsi( 14 ) <=  50)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.mohan-sure-sell-candidate",
     "name": "Mohan'S sure sell candidate -- MACD CROSS",
-    "url": "https://chartink.com/scanner/mohan-sure-sell-candidate"
+    "url": "https://chartink.com/scanner/mohan-sure-sell-candidate",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 2 hour macd line( 26,12,9 ) <  [0] 2 hour macd signal( 26,12,9 ) and  [ -1 ] 2 hour macd line( 26,12,9 ) >=  [ -1 ] 2 hour macd signal( 26,12,9 ) and  [0] 4 hour macd line( 26,12,9 ) <  [0] 4 hour macd signal( 26,12,9 ) and  [ -1 ] 4 hour macd line( 26,12,9 ) >=  [ -1 ] 4 hour macd signal( 26,12,9 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 2 hour macd line( 26,12,9 ) <  [0] 2 hour macd signal( 26,12,9 ) and  [ -1 ] 2 hour macd line( 26,12,9 ) >=  [ -1 ] 2 hour macd signal( 26,12,9 )),groupcount( 1 where  [0] 4 hour macd line( 26,12,9 ) <  [0] 4 hour macd signal( 26,12,9 ) and  [ -1 ] 4 hour macd line( 26,12,9 ) >=  [ -1 ] 4 hour macd signal( 26,12,9 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.day-short-trade",
     "name": "Day Short Trade",
-    "url": "https://chartink.com/scanner/day-short-trade"
+    "url": "https://chartink.com/scanner/day-short-trade",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {cash} (  daily close <=  1 day ago low and  [0] 15 minute close <=  [-1] 15 minute close and  [0] 15 minute close <=  [-1] 1 hour low and  [0] 15 minute close <=  [-1] 2 hour low and  [0] 15 minute close <=  [-1] 4 hour low and  [0] 15 minute close <=  [0] 15 minute vwap ) )",
+    "debugClause": "groupcount( 1 where  daily close <=  1 day ago low),groupcount( 1 where  [0] 15 minute close <=  [-1] 15 minute close),groupcount( 1 where  [0] 15 minute close <=  [-1] 1 hour low),groupcount( 1 where  [0] 15 minute close <=  [-1] 2 hour low),groupcount( 1 where  [0] 15 minute close <=  [-1] 4 hour low),groupcount( 1 where  [0] 15 minute close <=  [0] 15 minute vwap)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.stocks-near-support-level-bearish-parimal-wadiwala",
     "name": "Stocks near support level - bearish (Parimal Wadiwala) 15 minutes",
-    "url": "https://chartink.com/scanner/stocks-near-support-level-bearish-parimal-wadiwala"
+    "url": "https://chartink.com/scanner/stocks-near-support-level-bearish-parimal-wadiwala",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {cash} (  [0] 15 minute close <  [-1] 15 minute min( 20 ,  [0] 15 minute low ) and  [ -1 ] 15 minute close >=  [ -2 ] 15 minute min( 20 ,  [0] 15 minute low ) and  [0] 15 minute volume >  [0] 15 minute sma( volume,20 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute close <  [-1] 15 minute min( 20 ,  [0] 15 minute low ) and  [ -1 ] 15 minute close >=  [ -2 ] 15 minute min( 20 ,  [0] 15 minute low )),groupcount( 1 where  [0] 15 minute volume >  [0] 15 minute sma( volume,20 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.shoot-up",
     "name": "Shot Down",
-    "url": "https://chartink.com/scanner/shoot-up"
+    "url": "https://chartink.com/scanner/shoot-up",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {cash} (  daily macd line( 26,12,9 ) <  daily macd signal( 26,12,9 ) and  1 day ago  macd line( 26,12,9 ) >=  1 day ago  macd signal( 26,12,9 ) and  daily volume >  1000000 and  daily sma( close,20 ) >  20 ) )",
+    "debugClause": "groupcount( 1 where  daily macd line( 26,12,9 ) <  daily macd signal( 26,12,9 ) and  1 day ago  macd line( 26,12,9 ) >=  1 day ago  macd signal( 26,12,9 )),groupcount( 1 where  daily volume >  1000000),groupcount( 1 where  daily sma( close,20 ) >  20)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.ichimoku-cloud-bottom-crossover",
     "name": "Ichimoku Cloud Bottom Crossover",
-    "url": "https://chartink.com/scanner/ichimoku-cloud-bottom-crossover"
+    "url": "https://chartink.com/scanner/ichimoku-cloud-bottom-crossover",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {cash} (  [0] 15 minute close <  [0] 15 minute ichimoku cloud bottom( 9,26,52 ) and  [ -1 ] 15 minute close >=  [ -1 ] 15 minute ichimoku cloud bottom( 9,26,52 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute close <  [0] 15 minute ichimoku cloud bottom( 9,26,52 ) and  [ -1 ] 15 minute close >=  [ -1 ] 15 minute ichimoku cloud bottom( 9,26,52 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.secondary-gap-up-opening-open-high-short-intraday",
     "name": "Secondary Gap Up Opening, Open-High - SHORT Intraday",
-    "url": "https://chartink.com/scanner/secondary-gap-up-opening-open-high-short-intraday"
+    "url": "https://chartink.com/scanner/secondary-gap-up-opening-open-high-short-intraday",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  daily open <=  daily high and  daily open -  1 day ago close >  1 and  daily close <=  1200 and  daily close >=  100 and  daily high -  daily open <=  0.03 and  daily volume >  10000 ) )",
+    "debugClause": "groupcount( 1 where  daily open <=  daily high),groupcount( 1 where  daily open -  1 day ago close >  1),groupcount( 1 where  daily close <=  1200),groupcount( 1 where  daily close >=  100),groupcount( 1 where  daily high -  daily open <=  0.03),groupcount( 1 where  daily volume >  10000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.intra-opt-1",
     "name": "Intra Opt pe 5",
-    "url": "https://chartink.com/scanner/intra-opt-1"
+    "url": "https://chartink.com/scanner/intra-opt-1",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 5 minute adx di negative( 14 ) >  [0] 5 minute adx di positive( 14 ) and  [ -1 ] 5 minute adx di negative( 14 ) <=  [ -1 ] 5 minute adx di positive( 14 ) and  [0] 5 minute adx( 14 ) >  [-1] 5 minute adx( 14 ) and  [0] 5 minute volume >  [-1] 5 minute volume and  daily volume >  1000000 and  [0] 1 hour adx di negative( 14 ) >  [0] 1 hour adx di positive( 14 ) ) )",
+    "debugClause": "groupcount( 1 where  [0] 5 minute adx di negative( 14 ) >  [0] 5 minute adx di positive( 14 ) and  [ -1 ] 5 minute adx di negative( 14 ) <=  [ -1 ] 5 minute adx di positive( 14 )),groupcount( 1 where  [0] 5 minute adx( 14 ) >  [-1] 5 minute adx( 14 )),groupcount( 1 where  [0] 5 minute volume >  [-1] 5 minute volume),groupcount( 1 where  daily volume >  1000000),groupcount( 1 where  [0] 1 hour adx di negative( 14 ) >  [0] 1 hour adx di positive( 14 ))",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.intraday-bearish-but-longer-time-frame-bullish",
     "name": "Intraday bearish but longer time frame bullish",
-    "url": "https://chartink.com/scanner/intraday-bearish-but-longer-time-frame-bullish"
+    "url": "https://chartink.com/scanner/intraday-bearish-but-longer-time-frame-bullish",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  monthly rsi( 14 ) >  60 and  weekly rsi( 14 ) >  60 and  daily rsi( 14 ) >=  60 and  [0] 15 minute rsi( 14 ) >=  40 and  [0] 15 minute rsi( 14 ) <  44 ) )",
+    "debugClause": "groupcount( 1 where  monthly rsi( 14 ) >  60),groupcount( 1 where  weekly rsi( 14 ) >  60),groupcount( 1 where  daily rsi( 14 ) >=  60),groupcount( 1 where  [0] 15 minute rsi( 14 ) >=  40),groupcount( 1 where  [0] 15 minute rsi( 14 ) <  44)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   },
   {
     "id": "intraday-bearish.intra-pe-15",
     "name": "Intra PE 15",
-    "url": "https://chartink.com/scanner/intra-pe-15"
+    "url": "https://chartink.com/scanner/intra-pe-15",
+    "categoryId": "intraday-bearish",
+    "scanClause": "( {33489} (  [0] 15 minute adx di negative( 14 ) >  [0] 15 minute adx di positive( 14 ) and  [ -1 ] 15 minute adx di negative( 14 ) <=  [ -1 ] 15 minute adx di positive( 14 ) and  [0] 15 minute adx( 14 ) >  [-1] 15 minute adx( 14 ) and  [0] 15 minute volume >  [-1] 15 minute volume and  daily volume >  1000000 ) )",
+    "debugClause": "groupcount( 1 where  [0] 15 minute adx di negative( 14 ) >  [0] 15 minute adx di positive( 14 ) and  [ -1 ] 15 minute adx di negative( 14 ) <=  [ -1 ] 15 minute adx di positive( 14 )),groupcount( 1 where  [0] 15 minute adx( 14 ) >  [-1] 15 minute adx( 14 )),groupcount( 1 where  [0] 15 minute volume >  [-1] 15 minute volume),groupcount( 1 where  daily volume >  1000000)",
+    "columnClause": " Daily Close as 'scan-column-default-close',  Daily \"close - 1 candle ago close / 1 candle ago close * 100\" as 'scan-column-default-percent-change', filternumber( daily close >  1 day ago close,1) as 'default-percent-change-conditional-filters-color',  Daily Volume as 'scan-column-default-volume'"
   }
 ]

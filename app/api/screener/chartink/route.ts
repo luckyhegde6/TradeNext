@@ -97,7 +97,7 @@ export async function POST(req: Request) {
     }
 
     const start = Date.now();
-    const { template, stocks, source } = await runChartinkScreenerById(
+    const { template, stocks, source, warning } = await runChartinkScreenerById(
       body.templateId,
       {
         forceRefresh: !!body.forceRefresh,
@@ -122,6 +122,7 @@ export async function POST(req: Request) {
       })),
       count: stocks.length,
       executionMs: Date.now() - start,
+      ...(warning ? { warning } : {}),
     });
   } catch (error) {
     logger.error({ msg: "Chartink template run failed", error: error instanceof Error ? error.message : String(error) });

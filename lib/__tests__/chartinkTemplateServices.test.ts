@@ -272,21 +272,21 @@ describe("chartinkScanService", () => {
     expect(result.stocks.length).toBeGreaterThan(0);
   });
 
-  test("throws for catalog-only templates without scan_clause", async () => {
+  test("throws for templates without scan_clause (catalog-only guard)", async () => {
     global.fetch = jest.fn(async () => makeResponse(scanResponse)) as never;
 
-    const catalogOnly = {
-      id: "fundamental.large-cap-stocks",
-      name: "Large cap stocks",
-      url: "https://chartink.com/scanner/large-cap-stocks",
+    // Use a mock template object with no scanClause — the function must still
+    // guard against this even though all real templates now have a clause after
+    // the v3.14.0 capture pass.
+    const noClause = {
+      id: "test.no-clause-template",
+      name: "No clause template",
+      url: "https://chartink.com/scanner/no-clause",
       categoryId: "fundamental",
     };
-    await expect(fetchChartinkScan(catalogOnly)).rejects.toThrow(
+    await expect(fetchChartinkScan(noClause)).rejects.toThrow(
       "no scan_clause yet (catalog-only)",
     );
-    // Also verify the registry entry is catalog-only (no clause in JSON yet)
-    const t = getChartinkTemplate("fundamental.large-cap-stocks")!;
-    expect(t.scanClause).toBeUndefined();
   });
 });
 
