@@ -53,7 +53,13 @@ import type {
 
 export const SWING_TOP_N = 20;
 const SWING_CACHE_KEY = "swing:recommendations";
-const SWING_CACHE_TTL = 30 * 60; // 30 min — AI analysis is expensive
+const SWING_FEED_CACHE_TTL = 30 * 60; // analyze=false screener-only feed — cheap to regenerate
+// v3.14.0: completed (done/failed) AI payloads are cached 24h as a safety net
+// beyond the durable DB row — targets stay visible until the next swing run
+// replaces them. The cache is DELETED the moment a new run starts (force
+// refresh supersede + job creation), so stale targets can never show while a
+// newer feed is analyzing.
+const SWING_DONE_CACHE_TTL = 24 * 60 * 60;
 
 /**
  * Extra (non-swing-category) templates that belong in the swing feed — e.g. the
@@ -350,6 +356,147 @@ export async function persistSwingTrackers(
 }
 
 // ---------------------------------------------------------------------------
+// Swing signal persistence (v3.14.0 — new SwingSignal table)
+// ---------------------------------------------------------------------------
+
+/** SwingSignal-shaped draft for one posted swing stock. PURE. */
+export interface SwingSignalDraft {
+  jobId: string;
+  symbol: string;
+  name: string | null;
+  price: number;
+  change: number | null;
+  changePercent: number | null;
+  volume: number | null;
+  marketCap: number | null;
+  screenerNames: string[];
+  screenerCount: number;
+  families: SignalFamily[];
+  templateIds: string[];
+  source: string;
+  indicators: Prisma.InputJsonValue | null;
+  momentumScore: number;
+  analysis: Prisma.InputJsonValue | null;
+  aiRecommendation: "BUY" | "SELL" | "HOLD" | null;
+  confidence: number | null;
+  targetPrice: number | null;
+  stopLoss: number | null;
+}
+
+/**
+ * Build the DB row for one stock at JOB CREATION (= date of posting): the
+ * screener snapshot + price baseline. AI levels are null here — they're
+ * patched by patchSwingSignalAnalysis when the background analysis completes.
+ * PURE.
+ */
+export function swingSignalDraft(stock: SwingStock, jobId: string): SwingSignalDraft {
+  return {
+    jobId,
+    symbol: stock.symbol,
+    name: stock.name ?? null,
+    price: stock.price,
+    change: stock.change ?? null,
+    changePercent: stock.changePercent ?? null,
+    volume: stock.volume ?? null,
+    marketCap: stock.marketCap ?? null,
+    screenerNames: stock.screenerNames ?? [],
+    screenerCount: stock.screenerCount ?? 0,
+    families: stock.families ?? [],
+    templateIds: stock.templateIds ?? [],
+    source: stock.source ?? "chartink",
+    indicators: (stock.indicators ?? null) as unknown as Prisma.InputJsonValue | null,
+    momentumScore: stock.momentumScore ?? 0,
+    analysis: null,
+    aiRecommendation: null,
+    confidence: null,
+    targetPrice: null,
+    stopLoss: null,
+  };
+}
+
+/** Analysis patch fields for one completed swing stock. */
+export interface SwingSignalAnalysisPatch {
+  analysis: Prisma.InputJsonValue;
+  aiRecommendation: "BUY" | "SELL" | "HOLD";
+  confidence: number;
+  targetPrice: number;
+  stopLoss: number;
+}
+
+/** Analysis patch for one stock (null when it carries no analysis). PURE. */
+export function swingSignalAnalysisPatch(stock: SwingStock): SwingSignalAnalysisPatch | null {
+  const a = stock.analysis;
+  if (!a) return null;
+  return {
+    analysis: a as unknown as Prisma.InputJsonValue,
+    aiRecommendation: swingActionToRecommendation(a.action),
+    confidence: a.confidence,
+    targetPrice: a.targetPrice,
+    stopLoss: a.stopLoss,
+  };
+}
+
+/** Minimal DB surface swing signal persistence needs (override for tests). */
+export interface SwingSignalDb {
+  swingSignal: {
+    createMany: (args: {
+      data: SwingSignalDraft[];
+      skipDuplicates?: boolean;
+    }) => Promise<{ count: number }>;
+    updateMany: (args: {
+      where: { jobId: string; symbol: string };
+      data: Partial<SwingSignalAnalysisPatch> & { updatedAt?: Date };
+    }) => Promise<{ count: number }>;
+  };
+}
+
+/**
+ * Persist the posted feed into SwingSignal at JOB CREATION — the durable
+ * "date of posting" snapshot the swing performance check tracks. Idempotent
+ * via the @@unique([jobId, symbol]) constraint + skipDuplicates. Non-fatal —
+ * callers catch; the pipeline must never fail because persistence hiccuped.
+ */
+export async function persistSwingSignals(
+  jobId: string,
+  stocks: SwingStock[],
+  db?: SwingSignalDb,
+): Promise<{ created: number }> {
+  if (stocks.length === 0) return { created: 0 };
+  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingSignalDb);
+  const res = await prisma.swingSignal.createMany({
+    data: stocks.map((s) => swingSignalDraft(s, jobId)),
+    skipDuplicates: true,
+  });
+  return { created: res.count };
+}
+
+/**
+ * Patch the AI levels into the posted signals when the job completes. Only
+ * stocks that actually carried analysis are patched (analysisStatus "done");
+ * the levels become the predictions the performance check evaluates. A signal
+ * that never gets patched (job failed, partial batch) simply has no levels and
+ * can only expire. Non-fatal — callers catch.
+ */
+export async function patchSwingSignalAnalysis(
+  jobId: string,
+  stocks: SwingStock[],
+  db?: SwingSignalDb,
+): Promise<{ patched: number }> {
+  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingSignalDb);
+  let patched = 0;
+  for (const stock of stocks) {
+    const patch = swingSignalAnalysisPatch(stock);
+    if (!patch) continue;
+    const res = await prisma.swingSignal.updateMany({
+      where: { jobId, symbol: stock.symbol },
+      data: { ...patch, updatedAt: new Date() },
+    });
+    patched += res.count;
+  }
+  return { patched };
+}
+
+// ---------------------------------------------------------------------------
 // Indicators (pure + DB fetch)
 // ---------------------------------------------------------------------------
 
@@ -596,6 +743,19 @@ export async function processSwingAnalysisJob(job: {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+    // v3.14.0: patch the posted SwingSignal rows with the AI levels so the
+    // swing performance check can evaluate targets/stops. Non-fatal — a
+    // level-less signal can only expire (its date-of-posting price baseline
+    // is already stored).
+    try {
+      const { patched } = await patchSwingSignalAnalysis(job.id, stocks);
+      logger.info({ msg: "Swing signal analysis patched", patched, jobId: job.id });
+    } catch (e) {
+      logger.warn({
+        msg: "Swing signal analysis patch failed — signals stay level-less",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   // A force refresh may have superseded us mid-analysis — never overwrite the
@@ -650,8 +810,8 @@ export async function processSwingAnalysisJob(job: {
   }).catch(() => undefined);
 
   // Warm the cache with the final payload so steady-state polls skip the DB
-  // (30-min TTL; the DB row remains the durable source of truth).
-  staticCache.set(`${SWING_CACHE_KEY}:ai`, response, SWING_CACHE_TTL);
+  // (24h done-cache; the DB row remains the durable source of truth).
+  staticCache.set(`${SWING_CACHE_KEY}:ai`, response, SWING_DONE_CACHE_TTL);
 }
 
 /**
@@ -754,7 +914,7 @@ export async function getSwingRecommendations(
     if (latestJob && !forceRefresh) {
       const served = jobToResponse(latestJob);
       if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
-        staticCache.set(cacheKey, served, SWING_CACHE_TTL);
+        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
       } else {
         // pending/running — serve the frozen feed; the daemon (or the kick
         // below) settles it. The job stores the full screener feed, so no
@@ -787,6 +947,10 @@ export async function getSwingRecommendations(
       if (superseded.count > 0) {
         logger.warn({ msg: "Swing jobs superseded by force refresh", count: superseded.count });
       }
+      // v3.14.0: drop any cached done/failed payload — the old run's targets
+      // must never show once a newer run has started (a stale "ready" feed
+      // while the new one analyzes is exactly the bug this feature fixes).
+      staticCache.del(cacheKey);
     }
   }
 
@@ -850,7 +1014,7 @@ export async function getSwingRecommendations(
       analysisError: null,
       stocks: [],
     };
-    staticCache.set(cacheKey, empty, SWING_CACHE_TTL);
+    staticCache.set(cacheKey, empty, SWING_DONE_CACHE_TTL);
     return empty;
   }
 
@@ -872,6 +1036,25 @@ export async function getSwingRecommendations(
         totalRaw: deduped.length,
       },
     });
+
+    // v3.14.0: drop any cached done/failed payload from the previous run —
+    // the tab must show THIS run's frozen pending feed, not the last run's
+    // targets (the processor re-warms the cache when this run completes).
+    staticCache.del(cacheKey);
+
+    // v3.14.0: persist the durable SwingSignal rows at posting time (the
+    // date-of-posting snapshot the swing performance check tracks; AI levels
+    // are patched in when the background analysis completes). Non-fatal — a
+    // persistence hiccup must not fail the feed.
+    try {
+      const { created: signalCount } = await persistSwingSignals(created.id, enriched);
+      logger.info({ msg: "Swing signals persisted", created: signalCount, jobId: created.id });
+    } catch (e) {
+      logger.warn({
+        msg: "Swing signal persistence failed — feed continues",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     maybeProcessSwingAnalysis().catch(() => undefined);
 
@@ -916,6 +1099,6 @@ export async function getSwingRecommendations(
     },
   }).catch(() => undefined);
 
-  staticCache.set(cacheKey, response, SWING_CACHE_TTL);
+  staticCache.set(cacheKey, response, SWING_FEED_CACHE_TTL);
   return response;
 }

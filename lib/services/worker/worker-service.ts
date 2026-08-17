@@ -44,6 +44,9 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "recommendation_performance":
         result = await executeRecommendationPerformance(payload);
         break;
+      case "swing_performance":
+        result = await executeSwingPerformance(payload);
+        break;
       case "ai_connection_test":
         result = await executeAiConnectionTest(payload);
         break;
@@ -554,10 +557,56 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
     const { checkRecommendationPerformance } = await import("@/lib/services/dailyRecommendationService");
     const result = await checkRecommendationPerformance();
     logger.info({ msg: "Performance tracking completed", checked: result.checked, success: true });
+    // v3.14.0: swing signal performance rides the same 15:30 IST check but is
+    // NON-FATAL — a swing check failure must never fail (or retry) the daily
+    // recommendations performance task.
+    try {
+      const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
+      const swing = await checkSwingPerformance();
+      logger.info({
+        msg: "Swing performance tracking completed",
+        checked: swing.checked,
+        targetAchieved: swing.targetAchieved,
+        stopLossHit: swing.stopLossHit,
+        expired: swing.expired,
+      });
+    } catch (swingError) {
+      const swingErrMsg = swingError instanceof Error ? swingError.message : String(swingError);
+      logger.error({ msg: "Swing performance tracking failed (non-fatal)", error: swingErrMsg });
+    }
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error({ msg: "Performance tracking failed", error: errMsg });
+    throw error;
+  }
+}
+
+/**
+ * Swing Performance - Evaluate posted SwingSignal rows against their AI
+ * targets/stops (or expiry after SWING_EXPIRY_DAYS). Invoked standalone via
+ * the swing_performance worker task (admin button) — the 15:30 IST daily
+ * check runs it inline as a non-fatal companion to the daily performance.
+ */
+export async function executeSwingPerformance(payload?: Record<string, unknown>): Promise<unknown> {
+  logger.info({ msg: "Starting swing performance tracking" });
+
+  try {
+    const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
+    const result = await checkSwingPerformance();
+    logger.info({
+      msg: "Swing performance tracking completed",
+      checked: result.checked,
+      targetAchieved: result.targetAchieved,
+      stopLossHit: result.stopLossHit,
+      expired: result.expired,
+      updated: result.updated,
+      success: true,
+    });
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ msg: "Swing performance tracking failed", error: errMsg });
     throw error;
   }
 }

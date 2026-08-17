@@ -3,7 +3,24 @@
 Engineering guardrails for AI agents and contributors. All changes must be validated against this checklist.
 
 ## Version
-1.2
+1.3
+
+## Spec-Driven Development Gate
+
+> ⚠️ **MANDATORY for all feature development.** Must pass BEFORE implementation begins.
+
+- [ ] spec_created_in_.agents/specs/
+- [ ] plan_created_in_.agents/plans/
+- [ ] human_approved_spec
+- [ ] human_approved_plan
+- [ ] spec_follows_template (.agents/templates/spec-template.md)
+- [ ] plan_follows_template (.agents/templates/plan-template.md)
+- [ ] branch_created_from_main
+
+**Workflow**: see `.agents/rules/spec-driven-development.md` for the full flow.
+**Templates**: `.agents/templates/spec-template.md` + `.agents/templates/plan-template.md`.
+
+---
 
 ## Meta Rules
 

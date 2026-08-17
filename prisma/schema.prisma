@@ -1442,8 +1442,58 @@ model SwingAnalysisJob {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  signals SwingSignal[]
+
   @@index([status, createdAt])
   @@map("swing_analysis_jobs")
+}
+
+// Swing signals (v3.14.0) — one row per stock per posted swing run.
+// Written at JOB CREATION (= "date of posting") with the full screener
+// snapshot, then the AI analysis is patched in when the job completes.
+// Each posting is tracked independently — the swing performance check flips
+// status active → target_achieved / stop_loss_hit / expired (45 days with
+// no hit). Unlike RecommendationTracker (daily recs), swing signals carry
+// change/volume/families/indicators and an explicit expiry, so they live in
+// their own table (no "expired" status exists in the rec tracker lifecycle).
+model SwingSignal {
+  id               String    @id @default(uuid())
+  jobId            String
+  symbol           String
+  name             String?
+  price            Float // posting price (₹) — return-percent baseline
+  change           Float? // ₹ change at posting
+  changePercent    Float? // % change at posting
+  volume           Float?
+  marketCap        Float?
+  screenerNames    String[]  @default([])
+  screenerCount    Int       @default(0)
+  families         String[]  @default([]) // trend | breakout | reversal | momentum | volume | range
+  templateIds      String[]  @default([])
+  source           String    @default("chartink") // chartink_db | chartink_live | tradingview
+  indicators       Json? // SwingIndicators snapshot as-of posting
+  momentumScore    Int       @default(0)
+  analysis         Json? // SwingAnalysis snapshot (patched at job completion)
+  aiRecommendation String? // BUY | SELL | HOLD (derived from analysis.action)
+  confidence       Float?
+  targetPrice      Float?
+  stopLoss         Float?
+  currentPrice     Float? // latest price at last swing performance check
+  returnPercent    Float? // (currentPrice - price) / price * 100
+  status           String    @default("active") // active | target_achieved | stop_loss_hit | expired
+  lastCheckedAt    DateTime?
+  postedAt         DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  job SwingAnalysisJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, symbol])
+  @@index([jobId])
+  @@index([symbol])
+  @@index([status])
+  @@index([createdAt])
+  @@map("swing_signals")
 }
 
 // Audit trail for recommendation status changes

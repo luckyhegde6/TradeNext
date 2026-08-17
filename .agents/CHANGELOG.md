@@ -8,7 +8,8 @@
 
 | File | Contents |
 |------|----------|
-| [versions-v3.md](./changelog/versions-v3.md) | v3 per-minor index → [versions-v3.13.md](./changelog/versions-v3.13.md) … [versions-v3.0.md](./changelog/versions-v3.0.md) |
+| [versions-v3.md](./changelog/versions-v3.md) | v3 per-minor index → [versions-v3.14.md](./changelog/versions-v3.14.md) … [versions-v3.0.md](./changelog/versions-v3.0.md) |
+| [versions-v3.14.md](./changelog/versions-v3.14.md) | **v3.14.0** — Swing signal persistence + performance tracking (45-day expiry, direction-aware targets/stops) + worker-logs tab + spec-driven development workflow |
 | [versions-v3.13.md](./changelog/versions-v3.13.md) | **v3.13.0** — DB-backed Swing AI analysis job: durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic claim + supersede-abort, stale recovery, cron-daemon drain) |
 | [versions-v3.12.md](./changelog/versions-v3.12.md) | **v3.12.0** — Swing tab prod failure FIX (request-time split — async AI analysis; Netlify 30s wall) + prod-stability batch (perf live-price fallback, prod `daily_prices` backfill 21,195 bars, heartbeat-aware reaper, Prisma query timeout, worker-logger tmpdir fallback, error serialization) |
 | [versions-v3.11.md](./changelog/versions-v3.11.md) | **v3.11.0–v3.11.3** — in-process node-cron daemon + `daysTracked` 500 fix + carried v3.10.1 batch · no-fake-HOLD Today's Picks (partial persistence) · `recommendationsCache` globalThis singleton · full serverless purge (persistent-server reality, Blob logging removed, DataFetcher test un-skip) |

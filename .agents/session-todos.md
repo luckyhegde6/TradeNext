@@ -8,26 +8,31 @@
 > 3. If an unfulfilled todo is a confirmed bug, log it in `BUGS.md`.
 > 4. Never delete history — archive it to `.agents/sessions/` (date + commit hash in the filename) for future reference.
 
-## Current Session (2026-08-16) — v3.13.0 (DB-backed Swing AI analysis job — durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget) — branch `feat/swing-db-analysis-job`
+## Current Session (2026-08-17) — v3.14.0 (Swing signal persistence + performance tracking + spec-driven development) — branch `feat/swing-signals`
 
-**Working tree**: v3.13.0 code + tests + docs COMPLETE + LIVE-VERIFIED — **commit pending user** (user merges PR → Netlify rebuild = deploy + `migrate deploy` applies the table). Full suite **730 pass / 4 skip** (was 722/4; 4 skips = intentional client-cache IndexedDB); `npx tsc --noEmit` **46 errors = exact baseline, 0 new**. Branch on top of main (v3.12.0 merged via PR #95).
+**Working tree**: v3.14.0 code + tests + spec-driven workflow + docs ALL COMPLETE — suite **758 pass / 4 skip** (was 730/4, +28); `npx tsc --noEmit` **46 = exact baseline, 0 new**. Branch on top of docs branch `docs-readme-refs-agentic-coding`.
 
 ### Completed
-- [x] **NEW Prisma `SwingAnalysisJob`** (after `DailyRecommendationStock`) — migration `20260816000000_add_swing_analysis_job` applied locally via `migrate diff --from-config-datasource` + `db execute` (⚠️ local DB has NO `_prisma_migrations` ledger — never `migrate dev` locally, destructive; prod uses `migrate deploy`)
-- [x] **Service rewrite**: pre-scan DB lookup (done/failed/pending/running served WITHOUT re-scan; pending kicks `maybeProcessSwingAnalysis()`), absent → scan + durable job + frozen pending feed, `force=1` supersedes pending/running (`updateMany → failed "Superseded by a newer force refresh"`), empty feed → synchronous skipped; processor atomic claim `updateMany({where:{id,status:"pending"},data:{running,startedAt,attemptCount:{increment}}})`, re-read + abort unless still `running`, stale recovery 45min / 2 attempts, audits START/COMPLETE/FAILED + RUN_COMPLETE, trackers persisted when done (non-fatal), cache warm; **cache holds ONLY final done/failed**; REMOVED `SWING_PENDING_TTL`/`swingAnalysisInFlight`/`runSwingAnalysisInBackground` (grep 0 refs)
-- [x] **Daemon drain**: `cron-daemon.ts` 60s resync tick → `maybeProcessSwingAnalysis()` fire-and-forget (dynamic import, no circular dep); module guard `swingProcessorInFlight` + `flushSwingAnalysis()` test hook
-- [x] **Tests**: stateful in-memory `swing_analysis_job` mock + orchestration suite — file 44/44; **suite 730 pass / 4 skip** (was 722/4, +8); tsc 46 = exact baseline, 0 new
-- [x] **Live-verified :3000**: `force=1` → **11.11s pending feed** → job `68bbed30…` claimed (running, attempt 1) → 4 batches (24.9s each) → **done 20/20**; non-force 39ms DB-served frozen pending / 25ms cached done; audit RUN_START→ANALYSIS_START→ANALYSIS_COMPLETE→RUN_COMPLETE; 5 new swing trackers (idempotent); Swing tab "AI targets ready" + 20/20 direction-aware targets, **0 console errors**
-- [x] **Docs**: AGENTS.md v3.13.0 row, CHANGELOG index + versions-v3.md entry, TODO.md row, Primer (status + Last Updated), agent-memory entry, Lessons #81 + Last Updated + Update Log, session `decisions.md` + `flow.md` (`2026-08-16-swing-db-job`)
+- [x] **NEW Prisma `SwingSignal`** (`@@unique([jobId, symbol])`) — migration `20260817000000_add_swing_signal` applied
+- [x] **`swingPerformanceService.ts`** — `evaluateSwingSignalStatus` (direction-aware) + `checkSwingPerformance` (batch DB + live-price bridge)
+- [x] **`swingRecommendationService.ts`** — `persistSwingSignals`/`patchSwingSignalAnalysis` + `SWING_DONE_CACHE_TTL` + `staticCache.del`
+- [x] **`worker-service.ts`** — `swing_performance` task case + `executeSwingPerformance`
+- [x] **Admin**: `check_swing_performance` action + teal button on daily page
+- [x] **Audit tags**: `SWING_PERFORMANCE_CHECK` + `SWING_SIGNAL_STATUS_CHANGED`
+- [x] **Worker-logs**: `resolveLogsDir()` → `worker_logs` + monitoring API `type=worker-logs` + Workers tab
+- [x] **Tests**: NEW `swingPerformanceService.test.ts` (18); extended `swingRecommendationService.test.ts` (10); suite 758 pass / 4 skip
+- [x] **Spec-driven development workflow**: `.agents/templates/spec-template.md` + `.agents/templates/plan-template.md` + `.agents/rules/spec-driven-development.md` + checklist v1.3 + AGENTS.md + rules README
+- [x] **Docs**: AGENTS.md v3.14.0 row + spec-driven workflow, CHANGELOG index + versions-v3.14.md, TODO.md row, Primer.md, agent-memory.md, Lessons #82, session-todos, session decisions/flow `2026-08-17-swing-signals`
 
 ### Pending (this session)
-- [ ] **Commit + push `feat/swing-db-analysis-job` + open PR** (user approval; commit message without credential literals — hook blocks them)
-- [ ] **PR merge (user)** → Netlify rebuild = deploy + `migrate deploy` applies `SwingAnalysisJob`
-- [ ] Post-deploy smoke: Swing tab instant load + targets ~2–3 min (Refresh → pending → done), audit rows for SWING_ANALYSIS_*, no stale Netlify cron UI entries (remove if present)
+- [ ] **Commit + push** (user approval)
+- [ ] **Live-verify :3000** — swing API force=1 → signals persisted, admin button queues `swing_performance`, Workers tab lists/views/deletes logs
 
 ### Pending (carried forward — other branches / later sessions)
-- [ ] Post-deploy (v3.10.0): verify swing indicators render + MCP `getHistoricalData` 200 (prod backfill manual trigger + market-sync step 4 auto-backfill)
-- [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan` (commit message WITHOUT credential literals — hook blocks them), open PR
-- [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (PR #88 open; pre-commit tsc must pass — never `--no-verify`), live-verify analytics side-nav
+- [ ] Advanced screener template fixes (user-reported: only 1 template working)
+- [ ] Prod DB fetch failures (reaper + processor `fetch failed` — DB connection issue)
+- [ ] Post-deploy (v3.10.0): verify swing indicators render + MCP `getHistoricalData` 200
+- [ ] Commit + push v3.7.2 on `fix/netlify-secrets-scan`
+- [ ] Commit + push v3.7.1 on `fix/ai-config-cron-ledger` (PR #88)
 - [ ] Re-seed demo holdings on prod
-- [ ] Prod: AI Connection Test cron first runs (verify audit entries + AI Monitoring `connection_test` rows after deploy) + Netlify cron UI entries removal
+- [ ] Prod: AI Connection Test cron first runs + Netlify cron UI entries removal

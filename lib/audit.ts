@@ -93,6 +93,9 @@ export type AuditAction =
   | 'SWING_ANALYSIS_START'
   | 'SWING_ANALYSIS_COMPLETE'
   | 'SWING_ANALYSIS_FAILED'
+  // Swing Performance Events (v3.14.0 — swing signal lifecycle tracking)
+  | 'SWING_PERFORMANCE_CHECK'
+  | 'SWING_SIGNAL_STATUS_CHANGED'
   // NSE Events / Notifications
   | 'EVENTS_FETCH'
   | 'EVENTS_FETCH_FAILED';

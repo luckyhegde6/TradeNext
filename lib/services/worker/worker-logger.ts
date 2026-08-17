@@ -7,15 +7,16 @@ import logger from "@/lib/logger";
 // Track if file logging is available
 let fileLoggingAvailable = true;
 
-// ── logs-dir resolution (v3.12.0) ──────────────────────────────────────────
-// Netlify's prod filesystem is read-only except /tmp — mkdirSync of
-// `<cwd>/.next/server_logs` threw ENOENT, which permanently disabled worker
-// file logging on every prod boot (`[WorkerLogger] File logging disabled:
-// Error: ENOENT mkdir '/var/task/.next/server_logs'`). Resolution order —
-// first writable candidate wins, remembered for the process:
-//   1. <cwd>/.next/server_logs   (local dev — existing behavior)
-//   2. <os.tmpdir()>/tradenext-logs   (Netlify — /tmp is writable)
+// ── logs-dir resolution (v3.12.0; v3.14.0 re-ordered) ─────────────────────
+// Resolution order — first writable candidate wins, remembered for the
+// process:
+//   1. <cwd>/worker_logs   (local dev + persistent Netlify server — stable,
+//      gitignored, and the admin "Workers" tab reads from here)
+//   2. <os.tmpdir()>/tradenext-logs   (Netlify /tmp fallback)
 //   3. "" (no file logging — the DB log fallback takes over)
+// The old first candidate `<cwd>/.next/server_logs` is dropped — .next is a
+// build artifact dir (wiped on rebuild) and threw ENOENT on read-only prod
+// filesystems, which permanently disabled worker file logging.
 let resolvedLogsDir: string | undefined;
 
 export function resolveLogsDir(): string {
@@ -24,7 +25,7 @@ export function resolveLogsDir(): string {
   const path = require("path");
   const os = require("os");
   const candidates = [
-    path.join(process.cwd(), ".next", "server_logs"),
+    path.join(process.cwd(), "worker_logs"),
     path.join(os.tmpdir(), "tradenext-logs"),
   ];
   for (const dir of candidates) {
