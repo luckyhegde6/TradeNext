@@ -2,15 +2,17 @@
 
 > Quality Assurance specialist: writes and executes comprehensive tests, validates entire workflows.
 
+**Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
+**Command**: none (invoked via `npm run test:e2e` or ad-hoc)
+
 ## Expertise
 
-- **Playwright E2E**: Full user flow automation, visual regression, responsive testing
-- **Jest Unit Tests**: Business logic, API route handlers, service layer
+- **Playwright E2E**: Full user flow automation, visual regression, responsive testing (committed suite in `e2e/`)
+- **Jest Unit Tests**: Business logic, API route handlers, service layer (709+ passing)
 - **Integration Tests**: API contract testing, database interaction testing
 - **Regression Testing**: Automated regression suite, baseline comparison
-- **Accessibility Testing**: a11y compliance checks, screen reader compatibility
-- **Cross-browser Testing**: Chrome, Firefox, Safari behavior validation
-- **Load Testing**: Basic performance and load characteristics
+- **Cross-browser Testing**: Chromium, Firefox, Safari via Playwright projects
+- **Mobile Testing**: Mobile Chrome (Pixel 5) project in Playwright
 
 ## Workflow
 
@@ -32,7 +34,7 @@ Every feature should have tests at these levels:
 - [ ] API endpoint validates input
 - [ ] API endpoint handles auth correctly
 
-### E2E Tests (Playwright)
+### E2E Tests (Playwright — `e2e/` suite)
 - [ ] User can complete the flow
 - [ ] Error states display correctly
 - [ ] Loading states display correctly
@@ -43,53 +45,30 @@ Every feature should have tests at these levels:
 
 ```bash
 # Unit & Integration tests
-npm run test                    # All tests
+npm run test                    # All tests (Jest)
 npm run test:watch              # Watch mode
-npm run test:coverage           # With coverage
+
+# E2E tests (Playwright — committed suite)
+npm run test:e2e                # Full suite (all browsers/projects)
+npm run test:e2e:ui             # UI mode (watch/filter/step)
 
 # Specific test files
 npm run test -- lib/__tests__/specific-test.test.ts
-
-# E2E tests (Playwright MCP)
-# Use Chrome DevTools MCP for manual E2E
 ```
 
-### 3. E2E Test Scenarios (Playwright MCP)
+### 3. E2E Test Scenarios
 
-#### Core Flow Tests
-```bash
-# Test 1: Login with demo credentials
-npx playwright-cli open http://localhost:3000
-npx playwright-cli fill e14 "demo@tradenext6.app"
-npx playwright-cli fill e15 "demo123"
-npx playwright-cli click e3
-npx playwright-cli snapshot
-npx playwright-cli console error
-```
-
-```bash
-# Test 2: Market data loads
-npx playwright-cli navigate http://localhost:3000/markets
-npx playwright-cli snapshot
-npx playwright-cli console error
-```
-
-```bash
-# Test 3: Analytics tabs work
-npx playwright-cli navigate http://localhost:3000/markets/analytics
-npx playwright-cli click "Corporate Actions"  # Click tab
-npx playwright-cli snapshot
-```
-
-```bash
-# Test 4: Responsive design
-npx playwright-cli resize 375 667  # Mobile
-npx playwright-cli snapshot
-npx playwright-cli resize 768 1024  # Tablet
-npx playwright-cli snapshot
-npx playwright-cli resize 1920 1080  # Desktop
-npx playwright-cli snapshot
-```
+The committed e2e suite (`e2e/`, 89 tests, 5 projects) covers:
+- Login (demo + admin credentials)
+- Navigation (all 12+ links, mobile hamburger)
+- Home page (indices, corporate actions)
+- Screener + Advanced Screener (Chartink/TV toggle, template search)
+- Recommendations (Today's Picks, History, Performance, Swing)
+- Portfolio (holdings, tabs)
+- Watchlist (empty state)
+- Alerts (5 tabs)
+- Profile
+- Responsive (Mobile Chrome 375px)
 
 ### 4. Test Report
 
@@ -97,36 +76,25 @@ npx playwright-cli snapshot
 # QA Test Report - [Date/Feature]
 
 ## Summary
-- **Unit Tests**: 45/45 passed
-- **Integration Tests**: 12/12 passed
-- **E2E Tests**: 8/10 passed (2 known issues)
+- **Unit Tests**: X/X passed
+- **E2E Tests**: X/X passed (all 5 projects)
 
 ## Failures
-### Test: Portfolio Analytics
-- **Issue**: Empty state not showing "No data" message
-- **Severity**: Low
-- **Screenshot**: portfolio-empty-state.png
+### Test: [Name]
+- **Issue**: Description
+- **Severity**: Low/Medium/High/Critical
+- **Fix**: What needs to change
 
 ## Recommendations
-1. Add loading skeleton for portfolio page
-2. Add error boundary around MarketData component
-3. Increase test coverage for alert creation flow
+1. ...
 ```
 
-### 5. Regression Detection Protocol
+## Browser Quirks (captured in Playwright config)
 
-1. **Baseline**: Capture screenshot of each page after a clean deploy
-2. **Compare**: After each change, compare screenshots
-3. **Flag**: Any visual difference triggers manual review
-4. **Accept/Reject**: Accept intentional changes, reject regressions
-
-## QA Best Practices
-
-1. **Test isolation**: Each test should clean up after itself
-2. **Deterministic tests**: No flaky tests - use `beforeEach` to reset state
-3. **Meaningful assertions**: Test behavior, not implementation
-4. **Error messages**: Clear error messages when tests fail
-5. **Coverage targets**: Minimum 80% coverage for business logic
+- Desktop viewport **1440×900** — Firefox `xl` nav needs ≥1280px (Firefox measures scrollbar-inclusive)
+- **WebKit drops `fill()` on `<input type="number">`** — use `pressSequentially()` instead
+- Next.js dev is **single-threaded** — heavy scans starve parallel SSR (`noWaitAfter` + retries)
+- **Never assert live NSE values** — `MarqueeBanner` renders `null` when NSE is slow
 
 ## Handoff Triggers
 

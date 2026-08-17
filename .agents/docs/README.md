@@ -15,6 +15,10 @@ These docs are the **single source of truth** for the subsystems they cover. If 
 | [Playwright E2E](./playwright-e2e.md) | Committed e2e suite (`e2e/`): project matrix, auth bootstrap, agent workflow, reports/Trace Viewer, troubleshooting (browser quirks + dev-server-load flakiness) | `playwright.config.ts`, `e2e/auth.setup.ts`, `e2e/*.spec.ts`, `.github/workflows/playwright.yml` |
 | [Database Migration Ledger](./db-migrations.md) | Running bookkeeping of every Prisma migration (what/why/decision), apply + verification workflow, schema-change checklist | `prisma/migrations/`, `prisma/schema.prisma` |
 | [Chartink API Reference](./chartink-api.md) | Captured Chartink `screener/process` + `backtest/process` wire formats, DSL, column aliases, capture tool | `lib/services/chartinkScreenerService.ts`, `lib/services/chartinkUnifiedScreenerService.ts`, `scripts/chartink-capture/` |
+| [Screener & Backtest](./screener.md) | Legacy deep-dive: v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement, v3.5.2 TV `change`=% fix, v3.5.5–v3.5.6 Chartink 117-registry + TV fallback unified runner | `lib/services/chartinkUnifiedScreenerService.ts`, `lib/services/chartinkTemplates.ts`, `app/components/screener/TemplatesPanel.tsx` |
+| [Corporate Actions](./corp-actions.md) | Legacy deep-dive: dedup fix (v1.10.1), NSE field fix (v1.10.5), enhanced UI (v1.4.0), management (v1.3.0) | `app/api/corporate-actions/*`, `lib/services/syncedDataService.ts` |
+| [Security & Workers](./security-workers.md) | Legacy deep-dive: Netlify 502 fix (v1.8.2), cookies/sessions (v1.8.0), cron/workers (v1.7.0), historical sync (v1.6.x) | `middleware.ts`, `lib/auth.ts`, `lib/services/worker/*` |
+| [Serverless Logging](./serverless-logging.md) | HISTORICAL — superseded by v3.11.3. Blob-store mirroring, `/tmp` logs, `isServerless()` branches. File logs + DB `ServerLog` table are now the single source of truth | `lib/logger.ts`, `lib/services/db-logger.ts`, `lib/services/worker/worker-logger.ts` |
 
 ## How to Use These Docs
 

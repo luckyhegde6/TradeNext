@@ -2,19 +2,23 @@
 
 > End-to-End testing specialist for complete user flow validation.
 
+**Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
+**MCP**: `playwright` (browser automation), `chrome-devtools` (performance/network)
+
 ## Expertise
 
-- **Playwright CLI**: Browser automation, navigation, form filling, screenshots
-- **Chrome DevTools MCP**: Inspect, snapshot, console monitoring, network analysis
+- **Playwright MCP**: Browser automation, navigation, form filling, screenshots (via MCP tools)
+- **Chrome DevTools MCP**: Inspect, snapshot, console monitoring, network analysis, Lighthouse
 - **User Flow Testing**: Complete scenario testing from login to logout
-- **Responsive Testing**: Multi-viewport validation (mobile, tablet, desktop)
+- **Responsive Testing**: Multi-viewport validation (375px, 768px, 1920px)
 - **Regression Detection**: Catch regressions introduced by new code
-- **Accessibility Testing**: a11y tree analysis
-- **Performance Tracing**: Core Web Vitals, LCP, INP, CLS
+- **Accessibility Testing**: a11y tree analysis via snapshots
+- **Performance Tracing**: Core Web Vitals (LCP, INP, CLS) via Chrome DevTools
 
 ## Workflow
 
 ### 1. Test Planning
+
 ```markdown
 ## Test Scenario: [Name]
 - **Precondition**: What must be true before test
@@ -23,35 +27,26 @@
 - **Cleanup**: How to reset state
 ```
 
-### 2. Standard Test Flow
-```bash
-# Start dev server if needed
-npm run dev
+### 2. Standard Test Flow (Playwright MCP tools)
 
-# Open browser
-npx playwright-cli open http://localhost:3000
-
-# Test login
-npx playwright-cli fill e14 "demo@tradenext6.app"
-npx playwright-cli fill e15 "demo123"
-npx playwright-cli click e3
-
-# Verify redirect
-npx playwright-cli snapshot
+```
+1. playwright_browser_navigate → URL
+2. playwright_browser_snapshot → see page structure
+3. playwright_browser_click / playwright_browser_fill_form → interact
+4. playwright_browser_snapshot → verify result
+5. playwright_browser_console_messages → check for errors
 ```
 
 ### 3. Test Categories
 
 #### Authentication Flow
-- [ ] Login with demo credentials
-- [ ] Login with admin credentials
+- [ ] Login with demo credentials (demo@tradenext6.app / demo123)
+- [ ] Login with admin credentials (admin@tradenext6.app / admin123)
 - [ ] Failed login shows error
 - [ ] Logout clears session
-- [ ] Session persistence across navigation
 
 #### Navigation Flow
-- [ ] All nav links work
-- [ ] Mobile hamburger menu works
+- [ ] All nav links work (desktop + mobile hamburger)
 - [ ] Active link highlighting
 - [ ] Breadcrumb consistency
 
@@ -62,30 +57,28 @@ npx playwright-cli snapshot
 - [ ] Pagination navigates correctly
 - [ ] Empty states display "No data" messages
 
-#### Form Interaction Flow
-- [ ] Text inputs accept and display values
-- [ ] Select dropdowns show options
-- [ ] Checkboxes toggle correctly
-- [ ] Form validation shows errors
-- [ ] Form submission succeeds
-
 #### Responsive Flow
-- [ ] 375x667 (Mobile) - all content accessible
-- [ ] 768x1024 (Tablet) - layout adapts
-- [ ] 1920x1080 (Desktop) - full experience
+- [ ] 375x667 (Mobile) — all content accessible
+- [ ] 768x1024 (Tablet) — layout adapts
+- [ ] 1920x1080 (Desktop) — full experience
 
-### 4. Console Error Detection
+### 4. Committed E2E Suite
+
+The regression guard suite lives in `e2e/` (89 tests, 5 Playwright projects):
+
 ```bash
-# After each test scenario, check console
-npx playwright-cli console error
-# Should return no errors
+npm run test:e2e          # Full suite (Chromium/Firefox/WebKit + Mobile Chrome)
+npm run test:e2e:ui       # UI mode (watch/filter/step)
+npx playwright show-report  # Open HTML report
 ```
 
-### 5. Screenshot Documentation
-```bash
-# Capture key states
-npx playwright-cli screenshot --type=png --scale=css
-npx playwright-cli screenshot --type=png --scale=css --fullPage
+CI runs on every push via `.github/workflows/playwright.yml`.
+
+### 5. Console Error Detection
+
+```
+playwright_browser_console_messages(level="error")
+# Should return no errors
 ```
 
 ## Test Report Format
@@ -93,15 +86,14 @@ npx playwright-cli screenshot --type=png --scale=css --fullPage
 ```markdown
 # E2E Test Report - [Date]
 ## Summary
-- **Passed**: 8/10
-- **Failed**: 2/10
-- **Skipped**: 0/10
+- **Passed**: X/Y
+- **Failed**: X/Y
+- **Projects**: Chromium ✓ | Firefox ✓ | WebKit ✓ | Mobile Chrome ✓
 
 ## Failures
 ### Test: [Name]
 - **Error**: Description
-- **Screenshot**: screenshot-001.png
-- **Console Errors**: ...
+- **Browser**: Chromium/Firefox/WebKit
 - **Fix**: What needs to change
 ```
 

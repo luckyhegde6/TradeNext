@@ -13,6 +13,17 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Automation**: Runs on every `git commit` automatically
 - **⚠️ Important**: Post-commit hook writes to a NON-TRACKED file only to avoid infinite loop. Update `agent-memory.md` manually for meaningful activity entries.
 
+---
+
+### 2026-08-18 | Agent Profile Restructuring — `.agents/` Wiring + Stale Tooling Cleanup
+- **Action**: Restructured `.agents/` ecosystem for proper agentic coding: moved misplaced files, updated agent profiles, wired missing agents in opencode.json, updated matrix.
+- **Files Moved**: `.agents/changelog/{screener,corp-actions,security-workers,serverless-logging}.md` → `.agents/docs/` (legacy feature deep-dives, not version changelogs)
+- **Files Updated**: `.agents/CHANGELOG.md` (index paths), `.agents/docs/README.md` (added 4 moved docs), `AGENTS.md` (skills table + artifact table), `.agents/AGENT-SKILL-MATRIX.md` (14 agents, 8 skills, 6 commands), `Lessons.md` (Lesson 84 — stale tooling refs)
+- **Agent Profiles Updated**: `qa.md` (Playwright MCP tools, skill ref), `e2e-agent.md` (Playwright MCP + Chrome DevTools MCP, skill ref), `devops.md` (Netlify-only, removed Vercel)
+- **opencode.json Updated**: Added 7 missing agents: qa, e2e-agent, devops, code-reviewer, integrator, observability; added `/nse-integration` command
+- **Lesson 84 Added**: Agent profiles must reference correct tooling; every profile needs a Skill reference; opencode.json must have entries for ALL subagent-invocable agents
+- **Status**: Commit pending
+
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
 - Detects hardcoded secrets (passwords, API keys, tokens)

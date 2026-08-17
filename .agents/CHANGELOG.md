@@ -26,10 +26,10 @@
 | [versions-v3.0.md](./changelog/versions-v3.0.md) | **v3.0.0** — CSV export + portfolio value history + P&L timeline chart |
 | [versions-v2.md](./changelog/versions-v2.md) | v2 per-minor index → [versions-v2.2.md](./changelog/versions-v2.2.md) · [versions-v2.1.md](./changelog/versions-v2.1.md) |
 | [versions-v1.md](./changelog/versions-v1.md) | v1 per-minor index → [versions-v1.16.md](./changelog/versions-v1.16.md) … [versions-v1.8.md](./changelog/versions-v1.8.md) |
-| [changelog/screener.md](./changelog/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement) |
-| [changelog/corp-actions.md](./changelog/corp-actions.md) | Corporate actions (dedup fix, NSE field fix, enhanced UI, management) |
-| [changelog/serverless-logging.md](./changelog/serverless-logging.md) | Serverless logging (ServerLog/db-logger, Netlify Blobs, 502 fix) |
-| [changelog/security-workers.md](./changelog/security-workers.md) | Security (cookies/sessions), cron/workers, historical sync, tested features |
+| [docs/screener.md](./docs/screener.md) | Screener & backtest deep-dive (v1.16.0 FilterBuilder/BacktestDialog, v1.10.0 enhancement, v3.5.x Chartink 117-registry + TV fallback) |
+| [docs/corp-actions.md](./docs/corp-actions.md) | Corporate actions (dedup fix, NSE field fix, enhanced UI, management) |
+| [docs/serverless-logging.md](./docs/serverless-logging.md) | Serverless logging (ServerLog/db-logger, Netlify Blobs, 502 fix) — HISTORICAL, superseded by v3.11.3 |
+| [docs/security-workers.md](./docs/security-workers.md) | Security (cookies/sessions), cron/workers, historical sync, tested features |
 
 ---
 

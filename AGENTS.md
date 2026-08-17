@@ -184,7 +184,7 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | Commands | `.agents/commands/<name>.md` | `/command` templates |
 | Wiring | `.opencode/opencode.json` | `agent:` + `command:` sections |
 
-**Focused skills** (beyond umbrella `docs-workflow`):
+**Focused skills**:
 
 | Skill | Agent | Command | Purpose |
 |-------|-------|---------|---------|
@@ -192,7 +192,9 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `wiki-creator` | wiki-publisher | `/wiki-publish` | publish GitHub wiki pages (GitHub-renderer-safe mermaid) |
 | `bug-finder` | bug-hunter | `/find-bugs` | hunt/reproduce/verify bugs, layer contract audits |
 | `ux-enhancer` | ux-designer | `/ux-audit` | UI/UX audit (states/responsive/dark-mode) + enhancement |
-| `playwright-e2e` | — | — | committed e2e suite (`e2e/`, `npm run test:e2e`): regression guards, cross-browser (Chromium/Firefox/WebKit) + Mobile Chrome, report/trace diagnostics — see `.agents/docs/playwright-e2e.md` |
+| `nse-integration` | — | — | NSE API integration patterns (nseFetch, caching, cookie handling) |
+| `playwright-e2e` | e2e-agent | — | committed e2e suite (`e2e/`, `npm run test:e2e`): regression guards, cross-browser + mobile |
+| `playwright-cli` | — | — | exploratory browser testing via Playwright MCP tools (not committed) |
 
 **Adding a new skill**: create `.opencode/skills/<name>/SKILL.md` → mirror `.agents/skills/<name>.md` → profile + command → wire `opencode.json` → update matrix + this table.
 
@@ -208,7 +210,7 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 |-----------|--------|--------|
 | `*.yaml` (root) | `npx playwright-cli snapshot` w/o `--filename` | Delete or use `--filename=.playwright-cli/snapshots/` |
 | `dev-server.log`, `next-dev.log` | dev server redirect | Delete |
-| `screenshot-*.png` | Playwright CLI | Delete or move to `e2e-screenshots/` |
+| `screenshot-*.png` | Playwright MCP | Delete or move to `e2e-screenshots/` |
 | `worker_logs/` | worker engine logging | Already gitignored |
 
 ## ⚠️ MANDATORY: Documentation Update Rule
