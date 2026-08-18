@@ -32,8 +32,14 @@ let lastHeartbeatTaskId: string | undefined;
 // legitimately takes 15–25 min on prod. The old 16-min limit killed healthy
 // tasks mid-analysis. A separate TASK_TIMEOUT_MS (25 min) wraps executeTask()
 // with Promise.race so even a truly stuck task is cleaned up predictably.
-export const STALE_MS = 30 * 60_000;
-export const TASK_TIMEOUT_MS = 25 * 60_000; // hard ceiling on any single task execution
+//
+// v3.17.0: STALE_MS raised to 45 min, TASK_TIMEOUT_MS to 40 min because
+// prod daily-recommendations still takes 30+ min on slow AI days (free-tier
+// OpenRouter models + retries + 20 batches). TASK_TIMEOUT_MS must stay below
+// STALE_MS so the Promise.race fires first — the catch block marks the task
+// "failed" cleanly instead of the reaper having to discover it.
+export const STALE_MS = 45 * 60_000;
+export const TASK_TIMEOUT_MS = 40 * 60_000; // hard ceiling on any single task execution
 const REAP_INTERVAL_MS = 60_000; // reaper throttled to once per minute
 const WORKER_ALIVE_WINDOW_MS = 3 * 60_000; // fresh heartbeat = live worker
 // Task types that CREATE DailyRecommendationRun rows (runDailyRecommendations).
@@ -190,14 +196,14 @@ async function pollAndExecute() {
 
     try {
         // 3. Execute the task logic with a hard timeout.
-        // v3.16.0: Promise.race prevents a truly stuck task from holding the
-        // worker slot indefinitely. The daily-recommendations pipeline
-        // legitimately takes 15–25 min (screener + 100-stock AI analysis in
-        // 20 batches × 3 concurrent), so TASK_TIMEOUT_MS (25 min) gives headroom
-        // above the typical wall-clock while still capping the worst case. When
-        // the timeout fires, executeTask() continues in the background (we
-        // can't abort Prisma/HTTP calls cleanly), but the task is marked
-        // "failed" and the worker picks up new work.
+        // v3.17.0: TASK_TIMEOUT_MS raised to 40 min — the daily-recommendations
+        // pipeline (screener + AI pre-flight + 100-stock AI analysis in 20
+        // batches × 5 concurrent) legitimately takes 25–35 min on prod with
+        // free-tier OpenRouter models. TASK_TIMEOUT_MS (40 min) is below
+        // STALE_MS (45 min) so the Promise.race fires first and marks the task
+        // "failed" cleanly. When the timeout fires, executeTask() continues in
+        // the background (we can't abort Prisma/HTTP calls cleanly), but the
+        // worker is free to pick up new work.
         const executePromise = executeTask(task.id, task.taskType, (task.payload as any) || {});
         const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error(`Task timed out after ${Math.round(TASK_TIMEOUT_MS / 60000)} min`)), TASK_TIMEOUT_MS),

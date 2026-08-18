@@ -53,7 +53,7 @@ const RETRY_BASE_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 8000;
 
 /** Number of batch workers running concurrently (OpenRouter free-tier friendly). */
-const CONCURRENCY = 3;
+const CONCURRENCY = 5;
 
 /**
  * Hard per-batch wall-clock cap (5 minutes), covering ALL retry attempts for
@@ -107,7 +107,7 @@ const RESPONSE_SCHEMA_HINT = `Return a JSON array like:
  * Analyze a list of stocks in batches of 5.
  * Partial failures are graceful — failed stocks get HOLD defaults.
  *
- * Batches run on a bounded-concurrency worker pool (CONCURRENCY=3): a
+ * Batches run on a bounded-concurrency worker pool (CONCURRENCY=5): a
  * 50-stock run drops from ~10 sequential 30-90s calls to ~4 waves, keeping
  * the whole AI phase inside the 14-minute background-function safety net.
  * Results preserve input order regardless of completion order.

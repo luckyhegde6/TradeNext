@@ -96,7 +96,7 @@ describe("reapStaleWorkerTasks", () => {
       data: expect.objectContaining({
         status: "failed",
         completedAt: expect.any(Date),
-        error: expect.stringContaining("30 min"),
+        error: expect.stringContaining("45 min"),
       }),
     });
   });
@@ -111,7 +111,7 @@ describe("reapStaleWorkerTasks", () => {
       where: { id: { in: ["run-1"] } },
       data: expect.objectContaining({
         status: "failed",
-        errorMessage: expect.stringContaining("30 min"),
+        errorMessage: expect.stringContaining("45 min"),
       }),
     });
   });
@@ -269,12 +269,12 @@ describe("checkScheduledJobs", () => {
 // ─── v3.16.0 timeout constants ────────────────────────────────────────────
 
 describe("timeout constants", () => {
-  it("STALE_MS is 30 minutes", () => {
-    expect(STALE_MS).toBe(30 * 60_000);
+  it("STALE_MS is 45 minutes", () => {
+    expect(STALE_MS).toBe(45 * 60_000);
   });
 
-  it("TASK_TIMEOUT_MS is 25 minutes (must be less than STALE_MS)", () => {
-    expect(TASK_TIMEOUT_MS).toBe(25 * 60_000);
+  it("TASK_TIMEOUT_MS is 40 minutes (must be less than STALE_MS)", () => {
+    expect(TASK_TIMEOUT_MS).toBe(40 * 60_000);
     expect(TASK_TIMEOUT_MS).toBeLessThan(STALE_MS);
   });
 });
