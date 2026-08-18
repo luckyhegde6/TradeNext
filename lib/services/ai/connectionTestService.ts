@@ -209,6 +209,28 @@ export async function runAiConnectionTest(
   }
 
   // Primary failed — probe fallback routes in order until one answers.
+  // 429/402: quota exhausted — all fallbacks will fail too, skip them.
+  if (primary.httpStatus === 429 || primary.httpStatus === 402) {
+    logger.warn({
+      msg: "AI connection test: quota exhausted, skipping fallback probes",
+      httpStatus: primary.httpStatus,
+    });
+    const report: AiConnectionTestReport = {
+      testedAt,
+      status: "failed",
+      configuredModel,
+      primary,
+      fallbacks: [],
+    };
+    await createAuditLog({
+      action: "AI_CONNECTION_TEST_FAILED",
+      resource: "ai-config",
+      metadata: { status: "failed", configuredModel, testedAt, quotaExhausted: true },
+      errorMessage: `AI quota exhausted (HTTP ${primary.httpStatus}) — daily free-tier limit reached`,
+    });
+    return report;
+  }
+
   const fallbacks: AiModelTestResult[] = [];
   for (const model of AI_FALLBACK_MODELS) {
     const r = await testOpenRouterModel(model, config, timeoutMs);

@@ -3,7 +3,7 @@
  * Analyzes triggered alerts and provides market context and actionable insights.
  * No tool calling needed — uses direct prompt for simplicity.
  */
-import { directPrompt } from "./llm-provider";
+import { directPrompt, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 import { ALERT_SYSTEM_PROMPT, getAlertAnalysisPrompt } from "./prompts";
 import type { AIConfig } from "./config";
 import logger from "@/lib/logger";
@@ -37,6 +37,15 @@ export async function analyzeAlerts(
     const limitedAlerts = alerts.slice(0, 10);
     const prompt = `${ALERT_SYSTEM_PROMPT}\n\n${getAlertAnalysisPrompt(limitedAlerts)}`;
     const analysis = await directPrompt(prompt, config);
+
+    // 429/402: quota exhausted — return user-facing message
+    if (isQuotaExhausted(analysis)) {
+      return {
+        success: false,
+        analysis: QUOTA_EXHAUSTED_MESSAGE,
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
 
     return {
       success: true,
