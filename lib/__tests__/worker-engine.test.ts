@@ -1,7 +1,7 @@
 /**
  * Tests for worker-engine (lib/services/worker/worker-engine.ts) — v3.8.0:
  *   - reapStaleWorkerTasks: reaps WorkerTasks + DailyRecommendationRuns stuck
- *     in "running" past the 16-min staleness threshold; graceful on errors.
+ *     in "running" past the 30-min staleness threshold; graceful on errors.
  *   - checkScheduledJobs: dedup guard — skips spawning when a task for the
  *     same cron job is already pending/running (still advances nextRun).
  *
@@ -68,7 +68,7 @@ jest.mock("@/lib/services/worker/task-orchestrator", () => ({
 
 // ─── Imports ──────────────────────────────────────────────────────────────
 
-import { reapStaleWorkerTasks, checkScheduledJobs } from "@/lib/services/worker/worker-engine";
+import { reapStaleWorkerTasks, checkScheduledJobs, STALE_MS, TASK_TIMEOUT_MS } from "@/lib/services/worker/worker-engine";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const prisma = require("@/lib/prisma").default as Record<string, any>;
@@ -96,7 +96,7 @@ describe("reapStaleWorkerTasks", () => {
       data: expect.objectContaining({
         status: "failed",
         completedAt: expect.any(Date),
-        error: expect.stringContaining("16 min"),
+        error: expect.stringContaining("30 min"),
       }),
     });
   });
@@ -111,7 +111,7 @@ describe("reapStaleWorkerTasks", () => {
       where: { id: { in: ["run-1"] } },
       data: expect.objectContaining({
         status: "failed",
-        errorMessage: expect.stringContaining("16 min"),
+        errorMessage: expect.stringContaining("30 min"),
       }),
     });
   });
@@ -263,5 +263,18 @@ describe("checkScheduledJobs", () => {
 
     expect(mockSpawnCronTask).not.toHaveBeenCalled();
     expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+// ─── v3.16.0 timeout constants ────────────────────────────────────────────
+
+describe("timeout constants", () => {
+  it("STALE_MS is 30 minutes", () => {
+    expect(STALE_MS).toBe(30 * 60_000);
+  });
+
+  it("TASK_TIMEOUT_MS is 25 minutes (must be less than STALE_MS)", () => {
+    expect(TASK_TIMEOUT_MS).toBe(25 * 60_000);
+    expect(TASK_TIMEOUT_MS).toBeLessThan(STALE_MS);
   });
 });

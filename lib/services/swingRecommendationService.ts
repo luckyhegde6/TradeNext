@@ -812,6 +812,25 @@ export async function processSwingAnalysisJob(job: {
   // Warm the cache with the final payload so steady-state polls skip the DB
   // (24h done-cache; the DB row remains the durable source of truth).
   staticCache.set(`${SWING_CACHE_KEY}:ai`, response, SWING_DONE_CACHE_TTL);
+
+  // v3.16.0: broadcast actionable swing signals (LONG/SHORT) to Telegram
+  // subscribers after successful analysis. Non-critical — notification
+  // failures must never affect the feed or the DB job.
+  if (analysisStatus === "done") {
+    try {
+      const { broadcastToSubscribers } = await import("./telegramBotService");
+      const { buildSwingBroadcast } = await import("./recommendationBroadcast");
+      const tgMessage = buildSwingBroadcast(stocks.map((s) => ({
+        symbol: s.symbol,
+        price: s.price,
+        analysis: s.analysis,
+      })));
+      const sent = await broadcastToSubscribers("🌊 Swing Signals", tgMessage);
+      logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId: job.id });
+    } catch (tgErr) {
+      logger.warn({ msg: "Swing Telegram broadcast failed (non-critical)", error: tgErr });
+    }
+  }
 }
 
 /**

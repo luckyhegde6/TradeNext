@@ -715,6 +715,17 @@ export async function sendAlertToUser(chatId: string, title: string, message: st
  */
 export async function broadcastToSubscribers(title: string, message: string): Promise<number> {
   try {
+    // v3.16.0: surface a clear warning when Telegram env vars are missing so
+    // admins can diagnose silent broadcast failures from logs.
+    const envConfig = getTelegramEnvConfig();
+    if (!envConfig?.configured) {
+      logger.warn({
+        msg: "Telegram broadcast skipped — env vars missing",
+        error: envConfig?.error ?? "getTelegramEnvConfig returned null",
+      });
+      return 0;
+    }
+
     const subscribers = await prisma.user.findMany({
       where: {
         telegramChatId: { not: null },
