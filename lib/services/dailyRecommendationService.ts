@@ -568,6 +568,20 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
 
       invalidateRecommendationsCache();
 
+      // v3.16.0: Notify subscribers even when AI is entirely unavailable so
+      // they know the system is operating normally. Without this, a total AI
+      // failure silently swallows the broadcast — subscribers think the bot
+      // is dead.
+      try {
+        const { broadcastToSubscribers } = await import("./telegramBotService");
+        const { buildAiUnavailableNotice } = await import("./recommendationBroadcast");
+        const tgMessage = buildAiUnavailableNotice();
+        const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage);
+        logger.info({ msg: "Telegram broadcast for AI unavailability notice", sent });
+      } catch (tgErr) {
+        logger.warn({ msg: "Telegram AI-unavailable broadcast failed (non-critical)", error: tgErr });
+      }
+
       logger.warn({
         msg: "Daily run failed — AI unavailable on all stocks; last good run kept",
         runId: run.id,
