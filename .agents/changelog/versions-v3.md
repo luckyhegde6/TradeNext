@@ -1,6 +1,6 @@
 # Version History v3
 
-> From TradeNext version history. Index: [../CHANGELOG.md](../CHANGELOG.md). Latest versions in [versions-v3.15.md](./versions-v3.15.md).
+> From TradeNext version history. Index: [../CHANGELOG.md](../CHANGELOG.md). Latest versions in [versions-v3.18.md](./versions-v3.18.md).
 >
 > **Per-minor index** — full detail lives in the per-minor file for each minor version.
 > Load only the file you need; never the whole directory.
@@ -9,6 +9,7 @@
 
 | File | Contents |
 |------|----------|
+| [versions-v3.18.md](./versions-v3.18.md) | **v3.18.0** — AI Investment Intelligence: company-level AI analysis with NSE data adapters, write-through dual-layer cache, structured JSON prompt, orchestrator, API + MCP, 14-file UI |
 | [versions-v3.15.md](./versions-v3.15.md) | **v3.15.0** — Closed IPOs with current prices + IPO analysis TTL cleanup (90-day retention) + pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs) |
 | [versions-v3.14.md](./versions-v3.14.md) | **v3.14.0** — Swing signal persistence + performance tracking (45-day expiry, direction-aware targets/stops) + worker-logs tab + spec-driven development workflow |
 | [versions-v3.13.md](./versions-v3.13.md) | **v3.13.0** — DB-backed Swing AI analysis job: durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic `updateMany` claim, supersede-abort, stale recovery 45 min / 2 attempts, cron-daemon 60s resync drain) |

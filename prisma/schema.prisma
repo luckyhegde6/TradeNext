@@ -1741,3 +1741,20 @@ model ChartinkScreenerResult {
   @@index([runId])
   @@map("chartink_screener_results")
 }
+
+// ─── AI Investment Intelligence Cache ────────────────────────────────────────
+
+model IntelligenceCache {
+  id          String   @id @default(cuid())
+  symbol      String
+  version     Int      @default(1)
+  data        Json     // Full IntelligenceReport as JSON
+  modelUsed   String?
+  generatedAt DateTime @default(now())
+  expiresAt   DateTime // generatedAt + TTL (default 7 days)
+  createdAt   DateTime @default(now())
+
+  @@unique([symbol])
+  @@index([symbol, expiresAt])
+  @@map("intelligence_cache")
+}

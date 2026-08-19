@@ -43,6 +43,7 @@ type McpFunction =
   | "getNseEvents"        // NSE events / notifications feed
   | "getOptionChain"      // F&O option chain (option-chain-v3)
   | "getFoExpiries"       // F&O contract expiry dates
+  | "getInvestmentIntelligence" // AI investment intelligence report
   | "listFunctions"       // List available functions (for discovery)
   | "describe"            // Get function description
   | "help"                // Get help with MCP usage
@@ -128,6 +129,7 @@ function getFunctionList() {
     { name: "getNseEvents", description: "Get NSE events / notifications feed" },
     { name: "getOptionChain", description: "Get F&O option chain (params: symbol, optional expiry)" },
     { name: "getFoExpiries", description: "Get F&O contract expiry dates (param: symbol)" },
+    { name: "getInvestmentIntelligence", description: "Get AI investment intelligence report (param: symbol, optional force)" },
   ];
 }
 
@@ -163,6 +165,7 @@ function getFunctionDescription(functionName: string): string | null {
     getNseEvents: "Returns the NSE events / notifications feed (listing ceremonies etc.) with thumbnails. No parameters required. Cached 6h.",
     getOptionChain: "Returns the F&O option chain (option-chain-v3) for a symbol — CE/PE contracts with last price, OI, OI-change %, IV, volume, bid/ask, plus per-side totals (total OI + volume) and available expiries. Parameters: symbol (e.g., 'NIFTY', 'RELIANCE'), optional expiry (ISO date 'YYYY-MM-DD' to filter server-side). Cached 300s.",
     getFoExpiries: "Returns the available F&O contract expiry dates for a symbol with days-to-expiry and weekly/monthly flag. Parameters: symbol (e.g., 'NIFTY'). Cached 3600s.",
+    getInvestmentIntelligence: "Returns the AI investment intelligence report for a stock — verdict (BUY/HOLD/SELL), confidence, fair value range, technical/fundamental/valuation analysis, risk factors, catalysts, and scenario analysis. Parameters: symbol (e.g., 'RELIANCE'). Optional: force (boolean, default false). Cached 7 days; force=true regenerates.",
   };
   return descriptions[functionName] || null;
 }
@@ -261,6 +264,14 @@ function getFunctionSchema(functionName: string): object | null {
       type: "object",
       properties: {
         symbol: { type: "string", description: "F&O symbol (e.g., 'NIFTY')" },
+      },
+      required: ["symbol"],
+    },
+    getInvestmentIntelligence: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Stock symbol (e.g., 'RELIANCE')" },
+        force: { type: "boolean", description: "Force regeneration (default false)", default: false },
       },
       required: ["symbol"],
     },
@@ -742,6 +753,27 @@ async function handleGetFoExpiries(params: Record<string, unknown>): Promise<unk
 }
 
 /**
+ * Handler: getInvestmentIntelligence - AI investment intelligence report
+ */
+async function handleGetInvestmentIntelligence(params: Record<string, unknown>): Promise<unknown> {
+  const symbol = (params.symbol as string)?.toUpperCase();
+  if (!symbol) {
+    throw new Error("Missing required parameter: symbol");
+  }
+
+  const force = params.force === true;
+  const { getInvestmentIntelligence } = await import("@/lib/services/ai/intelligence");
+  const result = await getInvestmentIntelligence(symbol, { force });
+
+  return {
+    symbol,
+    status: result.status,
+    report: result.report ?? null,
+    error: result.error ?? null,
+  };
+}
+
+/**
  * Handler: help - Get usage help
  */
 function handleHelp(): object {
@@ -920,6 +952,9 @@ export async function POST(request: NextRequest) {
       case "getFoExpiries":
         result = await handleGetFoExpiries(parameters);
         break;
+      case "getInvestmentIntelligence":
+        result = await handleGetInvestmentIntelligence(parameters);
+        break;
       default:
         return NextResponse.json(
           { 
@@ -1032,6 +1067,9 @@ export async function GET(request: NextRequest) {
         break;
       case "getMarquee":
         result = await handleGetMarquee();
+        break;
+      case "getInvestmentIntelligence":
+        result = await handleGetInvestmentIntelligence(parameters);
         break;
       default:
         // For other functions, suggest using POST
