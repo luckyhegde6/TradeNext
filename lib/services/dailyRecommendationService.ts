@@ -33,6 +33,7 @@ import { createAuditLog } from "@/lib/audit";
 import { recommendationsCache } from "@/lib/cache";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { isDbUnavailableError } from "@/lib/db-utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -1231,76 +1232,103 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
   // instance's cache on the next read instead of after up to 23h.
   const cached = recommendationsCache.get<LatestCacheEntry>(LATEST_KEY);
   if (cached) {
-    const fingerprint = await getLatestRunFingerprint();
-    if (
-      cached.runId === fingerprint.runId &&
-      cached.newestRunId === fingerprint.newestRunId
-    ) {
+    try {
+      const fingerprint = await getLatestRunFingerprint();
+      if (
+        cached.runId === fingerprint.runId &&
+        cached.newestRunId === fingerprint.newestRunId
+      ) {
+        logger.debug({
+          msg: "Latest recommendations served from validated cache",
+          runId: fingerprint.runId,
+        });
+        return cached.data;
+      }
       logger.debug({
-        msg: "Latest recommendations served from validated cache",
-        runId: fingerprint.runId,
+        msg: "Latest recommendations cache stale — refetching",
+        cachedRunId: cached.runId,
+        dbRunId: fingerprint.runId,
+        cachedNewestRunId: cached.newestRunId,
+        dbNewestRunId: fingerprint.newestRunId,
       });
-      return cached.data;
+    } catch (fingerprintErr) {
+      // DB unavailable (plan limit / connection error) — serve stale cache
+      // rather than returning 500. The cache entry may be slightly outdated
+      // but is infinitely better than a broken page.
+      if (isDbUnavailableError(fingerprintErr)) {
+        logger.warn({
+          msg: "Latest recommendations: DB unavailable for fingerprint — serving stale cache",
+          error: fingerprintErr instanceof Error ? fingerprintErr.message : String(fingerprintErr),
+        });
+        return cached.data;
+      }
+      throw fingerprintErr;
     }
-    logger.debug({
-      msg: "Latest recommendations cache stale — refetching",
-      cachedRunId: cached.runId,
-      dbRunId: fingerprint.runId,
-      cachedNewestRunId: cached.newestRunId,
-      dbNewestRunId: fingerprint.newestRunId,
-    });
   }
 
   // Honest latest-run selection: ONE query — latest completed/failed run with
   // stocks, NO verdict filter. All stocks (incl. HOLD) are returned so the
   // "Last updated" date always reflects the newest run (v3.10.1).
-  const latestRun = await prisma.dailyRecommendationRun.findFirst({
-    where: {
-      status: { in: ["completed", "failed"] },
-      uniqueStocks: { gt: 0 },
-    },
-    orderBy: { runDate: "desc" },
-    include: {
-      stocks: {
-        orderBy: { screenerCount: "desc" },
-        include: { tracker: true },
+  try {
+    const latestRun = await prisma.dailyRecommendationRun.findFirst({
+      where: {
+        status: { in: ["completed", "failed"] },
+        uniqueStocks: { gt: 0 },
       },
-    },
-  });
+      orderBy: { runDate: "desc" },
+      include: {
+        stocks: {
+          orderBy: { screenerCount: "desc" },
+          include: { tracker: true },
+        },
+      },
+    });
 
-  // Overall newest run (even one with zero picks — a v3.11.1 AI-unavailable
-  // failure). Lets the client show "AI unavailable on <latestRunDate> —
-  // showing picks from <runDate>" while still displaying the last good run.
-  const newestRun = await prisma.dailyRecommendationRun.findFirst({
-    orderBy: { runDate: "desc" },
-    select: { id: true, runDate: true, status: true },
-  });
+    // Overall newest run (even one with zero picks — a v3.11.1 AI-unavailable
+    // failure). Lets the client show "AI unavailable on <latestRunDate> —
+    // showing picks from <runDate>" while still displaying the last good run.
+    const newestRun = await prisma.dailyRecommendationRun.findFirst({
+      orderBy: { runDate: "desc" },
+      select: { id: true, runDate: true, status: true },
+    });
 
-  // Convert BigInt fields to Number for JSON serialization
-  const serializedStocks = (latestRun?.stocks ?? []).map((s) => ({
-    ...s,
-    volume: s.volume != null ? Number(s.volume) : null,
-  }));
+    // Convert BigInt fields to Number for JSON serialization
+    const serializedStocks = (latestRun?.stocks ?? []).map((s) => ({
+      ...s,
+      volume: s.volume != null ? Number(s.volume) : null,
+    }));
 
-  const result: LatestRecommendations = {
-    run: latestRun as RunWithStocks | null,
-    stocks: serializedStocks as unknown as StockWithTracker[],
-    latestRun: newestRun,
-  };
-
-  // Store in cache (validated on read by run-id fingerprint + 15-min TTL
-  // backstop — see getLatestRecommendations doc).
-  if (result.run) {
-    const entry: LatestCacheEntry = {
-      runId: latestRun?.id ?? null,
-      newestRunId: newestRun?.id ?? null,
-      data: result,
+    const result: LatestRecommendations = {
+      run: latestRun as RunWithStocks | null,
+      stocks: serializedStocks as unknown as StockWithTracker[],
+      latestRun: newestRun,
     };
-    recommendationsCache.set(LATEST_KEY, entry, LATEST_CACHE_TTL_SECONDS);
-    logger.debug({ msg: "Latest recommendations cached", stockCount: result.stocks.length });
-  }
 
-  return result;
+    // Store in cache (validated on read by run-id fingerprint + 15-min TTL
+    // backstop — see getLatestRecommendations doc).
+    if (result.run) {
+      const entry: LatestCacheEntry = {
+        runId: latestRun?.id ?? null,
+        newestRunId: newestRun?.id ?? null,
+        data: result,
+      };
+      recommendationsCache.set(LATEST_KEY, entry, LATEST_CACHE_TTL_SECONDS);
+      logger.debug({ msg: "Latest recommendations cached", stockCount: result.stocks.length });
+    }
+
+    return result;
+  } catch (dbErr) {
+    // DB completely unavailable — return empty results (not 500).
+    // The API route wraps this in { success: true, stocks: [] }.
+    if (isDbUnavailableError(dbErr)) {
+      logger.warn({
+        msg: "Latest recommendations: DB unavailable — returning empty results",
+        error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+      });
+      return { run: null, stocks: [], latestRun: null };
+    }
+    throw dbErr;
+  }
 }
 
 /**

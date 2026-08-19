@@ -209,3 +209,98 @@ export function detectCandlestickPatterns(ohlcv: OHLCV[]): CandlestickPattern[] 
 
   return patterns;
 }
+
+// ─── Average True Range (ATR) ────────────────────────────────────────────────
+
+/**
+ * Compute Average True Range over `period` bars.
+ * TR = max(high-low, |high-prevClose|, |low-prevClose|)
+ * ATR = SMA of TR over `period`
+ */
+export function computeATR(bars: OHLCV[], period: number = 14): number[] {
+  if (bars.length < 2) return [];
+
+  const trueRanges: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    const high = bars[i].high;
+    const low = bars[i].low;
+    if (i === 0) {
+      trueRanges.push(high - low);
+    } else {
+      const prevClose = bars[i - 1].close;
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trueRanges.push(tr);
+    }
+  }
+
+  // ATR = SMA of true ranges starting from index `period - 1`
+  const atr: number[] = [];
+  for (let i = period - 1; i < trueRanges.length; i++) {
+    const slice = trueRanges.slice(i - period + 1, i + 1);
+    const avg = slice.reduce((sum, v) => sum + v, 0) / period;
+    atr.push(parseFloat(avg.toFixed(2)));
+  }
+  return atr;
+}
+
+// ─── Support / Resistance (Pivot-Point Based) ────────────────────────────────
+
+export interface SupportResistance {
+  support: number | null;
+  resistance: number | null;
+  pivotHighs: number[];
+  pivotLows: number[];
+}
+
+/**
+ * Detect support and resistance levels using pivot-point highs/lows.
+ * A pivot high is a bar whose high is higher than the N bars on each side.
+ * A pivot low is a bar whose low is lower than the N bars on each side.
+ * Returns the most recent support (highest pivot low below current price)
+ * and resistance (lowest pivot high above current price).
+ */
+export function findSupportResistance(
+  bars: OHLCV[],
+  lookback: number = 5
+): SupportResistance {
+  if (bars.length < lookback * 2 + 1) {
+    return { support: null, resistance: null, pivotHighs: [], pivotLows: [] };
+  }
+
+  const pivotHighs: number[] = [];
+  const pivotLows: number[] = [];
+
+  for (let i = lookback; i < bars.length - lookback; i++) {
+    let isPivotHigh = true;
+    let isPivotLow = true;
+
+    for (let j = 1; j <= lookback; j++) {
+      if (bars[i].high <= bars[i - j].high || bars[i].high <= bars[i + j].high) {
+        isPivotHigh = false;
+      }
+      if (bars[i].low >= bars[i - j].low || bars[i].low >= bars[i + j].low) {
+        isPivotLow = false;
+      }
+    }
+
+    if (isPivotHigh) pivotHighs.push(bars[i].high);
+    if (isPivotLow) pivotLows.push(bars[i].low);
+  }
+
+  const currentPrice = bars[bars.length - 1].close;
+
+  // Support = highest pivot low below current price
+  const supportsBelow = pivotLows.filter((l) => l < currentPrice);
+  const support = supportsBelow.length > 0 ? Math.max(...supportsBelow) : null;
+
+  // Resistance = lowest pivot high above current price
+  const resistancesAbove = pivotHighs.filter((h) => h > currentPrice);
+  const resistance = resistancesAbove.length > 0 ? Math.min(...resistancesAbove) : null;
+
+  return {
+    support: support !== null ? parseFloat(support.toFixed(2)) : null,
+    resistance: resistance !== null ? parseFloat(resistance.toFixed(2)) : null,
+    pivotHighs,
+    pivotLows,
+  };
+}

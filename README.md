@@ -160,7 +160,7 @@ POST /api/mcp        # JSON body: { "function": "getStockQuote", "params": {...}
 GET  /api/mcp?function=getStockQuote&symbol=RELIANCE
 ```
 
-- **31 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
+- **29 functions**: quotes, indices, historical OHLCV, gainers/losers, most active, corporate actions,
   corporate info, marquee, deals, announcements, insider trading, events, heatmap, symbols, trends,
   IPO analysis / IPO issue detail / NSE events, F&O option chain / F&O expiries + discovery.
 - Optional auth via `x-api-key` header (`MCP_API_KEY` env). Caching: quotes 60s, market 2m, corp actions 5m.

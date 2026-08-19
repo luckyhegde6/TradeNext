@@ -319,7 +319,14 @@ describe("clear + prune (TTL maintenance)", () => {
 });
 
 describe("getChartinkScreeners (read flags)", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Clear the staticCache so each test hits the DB mock, not a cached result
+    // from a prior test (Phase 1b added a 5-min NodeCache to getChartinkScreeners).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { staticCache } = require("@/lib/cache") as { staticCache: { del: (k: string) => void } };
+    staticCache.del("chartink:screeners:overview");
+  });
 
   const def = (overrides: Partial<Record<string, unknown>>) => ({
     id: "screener-1",

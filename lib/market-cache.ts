@@ -105,7 +105,7 @@ export async function getOrFetchNseData<T>(
   fetchFromNse: () => Promise<T>,
   options: CacheOptions
 ): Promise<GetOrFetchResult<T>> {
-  const { dataType, indexName, nseLastModified, ttlSecondsOpen = 300, ttlSecondsClosed = 3600 } = options;
+  const { dataType, indexName, nseLastModified, ttlSecondsOpen = 600, ttlSecondsClosed = 7200 } = options;
 
   const cacheKey = generateCacheKey(dataType, indexName);
   const marketOpen = isMarketOpen();

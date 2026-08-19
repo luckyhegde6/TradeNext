@@ -16,7 +16,7 @@
 // The template below is the product-defined 14-step analyst brief (do NOT
 // trim sections — the model is instructed to answer every step).
 
-import { directPrompt, getPromptTimeoutMs } from "@/lib/services/ai/llm-provider";
+import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "@/lib/services/ai/llm-provider";
 import { loadConfig, hasValidConfig, type AIConfig } from "@/lib/services/ai/config";
 import { modelFallbackChain } from "@/lib/services/ai/modelChain";
 import { trackAiCall } from "@/lib/services/ai/ai-monitoring";
@@ -621,6 +621,7 @@ export async function getIpoAnalysis(
     // routes — a dead primary model must not fail the whole IPO analysis
     // (degraded mode then serves a stale row). Each model gets one attempt,
     // capped by getPromptTimeoutMs like the batch agents.
+    // 429/402 early-exit: quota exhausted → stop immediately (no fallback).
     for (const model of modelFallbackChain(analysisConfig.model)) {
       const modelConfig =
         model === analysisConfig.model ? analysisConfig : { ...analysisConfig, model };
@@ -634,6 +635,15 @@ export async function getIpoAnalysis(
           error: e instanceof Error ? e.message : String(e),
         });
         continue;
+      }
+      // 429/402: quota exhausted — stop all fallback models immediately
+      if (isQuotaExhausted(attempt)) {
+        logger.warn({
+          msg: "IPO analysis: quota exhausted, stopping fallback chain",
+          model,
+          preview: (attempt ?? "").slice(0, 200),
+        });
+        throw new Error(QUOTA_EXHAUSTED_MESSAGE);
       }
       if (
         !attempt ||
@@ -651,7 +661,7 @@ export async function getIpoAnalysis(
       break;
     }
     if (!content) {
-      throw new Error("AI analysis failed — please try again.");
+      throw new Error("AI analysis failed — all models returned errors");
     }
 
     // v2: parse the structured JSON report. On failure we still render the

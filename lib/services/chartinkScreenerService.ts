@@ -27,6 +27,8 @@
 import logger from "@/lib/logger";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { staticCache } from "@/lib/cache";
+import { isDbUnavailableError } from "@/lib/db-utils";
 import type { ChartinkTemplate } from "@/lib/services/chartinkTemplates";
 
 // ---------------------------------------------------------------------------
@@ -329,36 +331,77 @@ export async function pruneExpiredChartinkResults(
 /**
  * Return screener definitions with run metadata (counts + staleness).
  * Used by admin/UI listings and the capture tool's dry-run report.
+ *
+ * Cached in memory for 5 minutes — template definitions rarely change and
+ * every page load hits this. Saves 1 DB op per request under normal load,
+ * and prevents 500 cascades when DB is unavailable.
  */
+const CHARTINK_SCREENERS_CACHE_KEY = "chartink:screeners:overview";
+const CHARTINK_SCREENERS_CACHE_TTL = 5 * 60; // 5 minutes
+
 export async function getChartinkScreeners(
   options: ChartinkScreenerReadOptions = {},
 ): Promise<ChartinkScreenerOverview[]> {
   const { categoryId } = options;
 
-  const defs = await prisma.chartinkScreener.findMany({
-    where: categoryId ? { categoryId } : undefined,
-    orderBy: [{ categoryId: "asc" }, { name: "asc" }],
-  });
+  // Cache-only for unfiltered listing (most common path — admin + TemplatesPanel).
+  // Category-filtered queries skip cache (rare, small result set).
+  if (!categoryId) {
+    const cached = staticCache.get<ChartinkScreenerOverview[]>(CHARTINK_SCREENERS_CACHE_KEY);
+    if (cached) return cached;
+  }
 
-  // A screener is "stale" when its rows' TTL has passed (or was never run).
-  // nextRunAt = lastRunAt + TTL, so nextRunAt <= now ⇒ all rows expired.
-  const nowMs = Date.now();
-  return defs.map((d) => {
-    const stale = d.lastRunAt === null || d.nextRunAt === null || d.nextRunAt.getTime() <= nowMs;
-    return {
-      id: d.id,
-      name: d.name,
-      url: d.url,
-      categoryId: d.categoryId,
-      categoryName: d.categoryName,
-      fetchable: !!d.scanClause,
-      enabled: d.enabled,
-      lastRunAt: d.lastRunAt,
-      nextRunAt: d.nextRunAt,
-      resultCount: d.resultCount,
-      stale,
-    };
-  });
+  try {
+    const defs = await prisma.chartinkScreener.findMany({
+      where: categoryId ? { categoryId } : undefined,
+      orderBy: [{ categoryId: "asc" }, { name: "asc" }],
+    });
+
+    // A screener is "stale" when its rows' TTL has passed (or was never run).
+    // nextRunAt = lastRunAt + TTL, so nextRunAt <= now ⇒ all rows expired.
+    const nowMs = Date.now();
+    const result = defs.map((d) => {
+      const stale = d.lastRunAt === null || d.nextRunAt === null || d.nextRunAt.getTime() <= nowMs;
+      return {
+        id: d.id,
+        name: d.name,
+        url: d.url,
+        categoryId: d.categoryId,
+        categoryName: d.categoryName,
+        fetchable: !!d.scanClause,
+        enabled: d.enabled,
+        lastRunAt: d.lastRunAt,
+        nextRunAt: d.nextRunAt,
+        resultCount: d.resultCount,
+        stale,
+      };
+    });
+
+  // Cache the unfiltered listing (common path). DB-unavailable callers
+  // get stale data instead of 500.
+  if (!categoryId) {
+    staticCache.set(CHARTINK_SCREENERS_CACHE_KEY, result, CHARTINK_SCREENERS_CACHE_TTL);
+  }
+
+  return result;
+  } catch (err) {
+    // DB unavailable — return stale cache or empty array.
+    if (!categoryId) {
+      const staleCache = staticCache.get<ChartinkScreenerOverview[]>(CHARTINK_SCREENERS_CACHE_KEY);
+      if (staleCache) {
+        logger.warn({ msg: "Chartink screeners: DB unavailable — serving stale cache" });
+        return staleCache;
+      }
+    }
+    if (isDbUnavailableError(err)) {
+      logger.warn({
+        msg: "Chartink screeners: DB unavailable — returning empty",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+    throw err;
+  }
 }
 
 /**
@@ -445,6 +488,8 @@ export async function runFullChartinkSync(
     });
 
     await completeChartinkRun(runId, screenersRun, rowsInserted);
+    // Invalidate screeners listing cache so next read picks up fresh data.
+    staticCache.del(CHARTINK_SCREENERS_CACHE_KEY);
     return { runId, screenersRun, rowsInserted };
   } catch (error) {
     await failChartinkRun(

@@ -98,7 +98,13 @@ export type AuditAction =
   | 'SWING_SIGNAL_STATUS_CHANGED'
   // NSE Events / Notifications
   | 'EVENTS_FETCH'
-  | 'EVENTS_FETCH_FAILED';
+  | 'EVENTS_FETCH_FAILED'
+  // Intelligence Events (v3.18.0 — AI Investment Intelligence)
+  | 'INTELLIGENCE_REQUESTED'
+  | 'INTELLIGENCE_GENERATED'
+  | 'INTELLIGENCE_CACHE_HIT'
+  | 'INTELLIGENCE_FAILED'
+  | 'INTELLIGENCE_UNAUTHORIZED';
 
 interface AuditLogParams {
   userId?: number;
