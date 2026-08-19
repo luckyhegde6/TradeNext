@@ -76,6 +76,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           throw new Error("Missing credentials");
         }
 
+        // ─── Admin OTP fallback (DB-unavailable path) ──────────────────────
+        // When the DB is unreachable (e.g. Prisma Postgres plan limit exceeded),
+        // the admin can still log in using a one-time code set via the
+        // ADMIN_OTP environment variable. This bypasses ALL DB queries.
+        const adminOtp = process.env.ADMIN_OTP;
+        if (
+          adminOtp &&
+          email === (process.env.ADMIN_EMAIL || "admin@tradenext6.app") &&
+          password === adminOtp
+        ) {
+          logger.info({ msg: "Auth: Admin OTP login (DB fallback)", email });
+          return {
+            id: "1",
+            email,
+            name: "Admin (OTP)",
+            role: "admin",
+          };
+        }
+
         try {
           const user = await prisma.user.findUnique({
             where: { email },

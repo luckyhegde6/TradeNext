@@ -8,6 +8,7 @@
 
 | File | Contents |
 |------|----------|
+| [versions-v3.19.md](./changelog/versions-v3.19.md) | **v3.19.0** — DB plan limit resilience: graceful degradation, op reduction, write budget guard, admin OTP fallback, admin DB usage dashboard |
 | [versions-v3.15.md](./changelog/versions-v3.15.md) | **v3.15.0** — Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible) |
 | [versions-v3.14.md](./changelog/versions-v3.14.md) | **v3.14.0** — Swing signal persistence + performance tracking (45-day expiry, direction-aware targets/stops) + worker-logs tab + spec-driven development workflow |
 | [versions-v3.13.md](./changelog/versions-v3.13.md) | **v3.13.0** — DB-backed Swing AI analysis job: durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic claim + supersede-abort, stale recovery, cron-daemon drain) |

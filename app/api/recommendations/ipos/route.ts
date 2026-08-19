@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUpcomingIpoIssues } from "@/lib/services/nseIpoService";
+import { isDbUnavailableError } from "@/lib/db-utils";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -37,9 +38,16 @@ export async function GET(request: NextRequest) {
       error: error instanceof Error ? error.message : String(error),
       traceId,
     });
+    // Return empty results with warning instead of 500 when DB/NSE unavailable.
     return NextResponse.json(
-      { success: false, issues: [], error: "Failed to fetch IPO issues" },
-      { status: 500 }
+      {
+        success: true,
+        issues: [],
+        warning: "Data temporarily unavailable",
+        source: "fallback",
+        timestamp: new Date().toISOString(),
+        traceId,
+      }
     );
   }
 }

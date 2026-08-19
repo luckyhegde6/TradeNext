@@ -33,6 +33,15 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Lesson 84 Added**: Agent profiles must reference correct tooling; every profile needs a Skill reference; opencode.json must have entries for ALL subagent-invocable agents
 - **Status**: Commit pending
 
+### 2026-08-19 | v3.19.0 — DB Plan Limit Resilience (Prisma Postgres 10K ops/day exceeded)
+- **Action**: Implemented full DB plan limit resilience stack across 14 files: graceful degradation, op reduction, write budget guard, admin OTP fallback, admin DB usage dashboard.
+- **Files Created**: `lib/db-utils.ts` (`isDbUnavailableError()`), `app/api/admin/db-usage/route.ts` (admin dashboard endpoint)
+- **Files Modified**: `lib/prisma.ts` (dbOpsCounter + write budget guard), `lib/auth.ts` (admin OTP fallback), `lib/services/dailyRecommendationService.ts` (fingerprint bypass + DB error fallback), `lib/services/chartinkScreenerService.ts` (NodeCache + DB error fallback + cache invalidation + fixed cache key to `chartink:screeners:overview`), `lib/services/historicalPriceSyncService.ts` (NIFTY50-only scope, `DEFAULT_MAX_SYMBOLS=300→50`), `lib/services/worker/cron-daemon.ts` (`HEARTBEAT_INTERVAL_MS=300_000`), `lib/services/worker/worker-engine.ts` (`HEARTBEAT_INTERVAL_MS=300_000`, `WORKER_ALIVE_WINDOW_MS=600_000`), `lib/market-cache.ts` (TTL defaults 600/7200), `app/api/corporate-actions/combined/route.ts` (NodeCache + DB error fallback + variable scope fix), `app/api/events/route.ts` (graceful empty on failure), `app/api/recommendations/ipos/route.ts` (graceful empty on failure), `.env.example` (ADMIN_OTP, DB_WRITE_BUDGET docs)
+- **Test fixes**: `chartinkScreenerService.test.ts` (correct cache key `chartink:screeners:overview`), `historicalPriceSyncService.test.ts` (NIFTY50-only scope), `cron-daemon.test.ts` (600s heartbeat window)
+- **Docs updated**: AGENTS.md v3.19.0 row, CHANGELOG index + versions-v3.19.md, TODO.md marked done, Primer, agent-memory (this entry), Lessons #85 (cache key must match source)
+- **Suite**: 852 pass / 4 skip = exact baseline; tsc 46 = exact baseline, 0 new
+- **Status**: All code + tests verified, commit pending user, no push/deploy
+
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
 - Detects hardcoded secrets (passwords, API keys, tokens)

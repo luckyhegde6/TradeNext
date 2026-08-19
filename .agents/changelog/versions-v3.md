@@ -1,6 +1,6 @@
 # Version History v3
 
-> From TradeNext version history. Index: [../CHANGELOG.md](../CHANGELOG.md). Latest versions in [versions-v3.18.md](./versions-v3.18.md).
+> From TradeNext version history. Index: [../CHANGELOG.md](../CHANGELOG.md). Latest versions in [versions-v3.19.md](./versions-v3.19.md).
 >
 > **Per-minor index** — full detail lives in the per-minor file for each minor version.
 > Load only the file you need; never the whole directory.
@@ -9,6 +9,7 @@
 
 | File | Contents |
 |------|----------|
+| [versions-v3.19.md](./versions-v3.19.md) | **v3.19.0** — DB plan limit resilience: graceful degradation, op reduction (NIFTY50-only sync, 5-min heartbeat), write budget guard (8K/day), admin OTP fallback, admin DB usage dashboard |
 | [versions-v3.18.md](./versions-v3.18.md) | **v3.18.0** — AI Investment Intelligence: company-level AI analysis with NSE data adapters, write-through dual-layer cache, structured JSON prompt, orchestrator, API + MCP, 14-file UI |
 | [versions-v3.15.md](./versions-v3.15.md) | **v3.15.0** — Closed IPOs with current prices + IPO analysis TTL cleanup (90-day retention) + pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs) |
 | [versions-v3.14.md](./versions-v3.14.md) | **v3.14.0** — Swing signal persistence + performance tracking (45-day expiry, direction-aware targets/stops) + worker-logs tab + spec-driven development workflow |

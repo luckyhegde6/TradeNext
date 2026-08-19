@@ -90,6 +90,36 @@ try {
 // Use global singleton to avoid multiple connections in development
 const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient | undefined };
 
+// ─── DB operations counter + write budget limiter (v3.19.0) ──────────────
+// Tracks reads/writes per calendar day (IST). When writes exceed the budget,
+// non-critical write operations are rejected to protect the Prisma Postgres
+// plan limit (10K ops/day). The counter lives on globalThis so it survives
+// hot-reloads in dev and is shared across module graphs.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const g = globalThis as any;
+const todayKey = (): string => {
+  const now = new Date();
+  // IST date key (YYYY-MM-DD)
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.toISOString().split("T")[0];
+};
+if (!g.__dbOpsCounter || g.__dbOpsCounter._day !== todayKey()) {
+  g.__dbOpsCounter = { reads: 0, writes: 0, _day: todayKey() };
+}
+export const dbOpsCounter: { reads: number; writes: number; _day: string } = g.__dbOpsCounter;
+
+const WRITE_BUDGET = Number(process.env.DB_WRITE_BUDGET) || 8_000;
+
+export function isDbWriteBudgetExceeded(): boolean {
+  // Refresh day key if rollover happened
+  if (dbOpsCounter._day !== todayKey()) {
+    dbOpsCounter.reads = 0;
+    dbOpsCounter.writes = 0;
+    dbOpsCounter._day = todayKey();
+  }
+  return dbOpsCounter.writes >= WRITE_BUDGET;
+}
+
 // ─── Per-query timeout (v3.12.0) ───────────────────────────────────────────
 // Prod Accelerate queries had NO timeout — a stalled proxy connection hung a
 // healthy daily run for 16+ min with ZERO logs (run 8715fd51, 2026-08-16:
@@ -127,6 +157,26 @@ function withQueryTimeout<T>(promise: Promise<T>, model: string, operation: stri
 const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
   query: {
     $allOperations({ model, operation, args, query }) {
+      // Track ops counter (refresh day key on rollover)
+      if (dbOpsCounter._day !== todayKey()) {
+        dbOpsCounter.reads = 0;
+        dbOpsCounter.writes = 0;
+        dbOpsCounter._day = todayKey();
+      }
+      const isWrite = ["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany", "executeRaw", "executeRawUnsafe"].includes(operation);
+      if (isWrite) {
+        dbOpsCounter.writes++;
+      } else {
+        dbOpsCounter.reads++;
+      }
+
+      // Write budget guard — reject non-critical writes when budget exceeded
+      // (raw/exec operations are never blocked — they're used by critical infra)
+      if (isWrite && !operation.startsWith("executeRaw") && dbOpsCounter.writes > WRITE_BUDGET) {
+        logger.warn({ msg: "DB write budget exceeded", writes: dbOpsCounter.writes, budget: WRITE_BUDGET, model, operation });
+        return Promise.reject(new Error(`DB write budget exceeded (${dbOpsCounter.writes}/${WRITE_BUDGET} writes today). Try again tomorrow or set DB_WRITE_BUDGET env.`)) as ReturnType<typeof query>;
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const result = query(args);
       if (typeof (result as Promise<unknown> | undefined)?.then === "function") {

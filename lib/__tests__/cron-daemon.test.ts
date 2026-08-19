@@ -312,8 +312,9 @@ describe("isDaemonHeartbeatFresh", () => {
   it("true within the window, false beyond it", () => {
     const now = Date.UTC(2026, 7, 15, 12, 0, 0);
     expect(isDaemonHeartbeatFresh(new Date(now - 60_000), now)).toBe(true);
-    expect(isDaemonHeartbeatFresh(new Date(now - 120_000), now)).toBe(true); // exact boundary
-    expect(isDaemonHeartbeatFresh(new Date(now - 121_000), now)).toBe(false);
+    expect(isDaemonHeartbeatFresh(new Date(now - 120_000), now)).toBe(true);
+    expect(isDaemonHeartbeatFresh(new Date(now - 599_000), now)).toBe(true); // just within 600s window
+    expect(isDaemonHeartbeatFresh(new Date(now - 601_000), now)).toBe(false); // just beyond 600s window
     expect(isDaemonHeartbeatFresh(new Date(now + 60_000), now)).toBe(true); // future clock skew tolerated
   });
 });

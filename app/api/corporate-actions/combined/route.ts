@@ -3,6 +3,8 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { nseFetch } from "@/lib/nse-client";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
+import cache from "@/lib/cache";
+import { isDbUnavailableError } from "@/lib/db-utils";
 
 function parseNseDate(dateStr: string): string | null {
   if (!dateStr || dateStr === "-") return null;
@@ -203,16 +205,20 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
 }
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const actionType = url.searchParams.get("type");
+  const symbol = url.searchParams.get("symbol");
+  const fromDate = url.searchParams.get("fromDate");
+  const toDate = url.searchParams.get("toDate");
+  const pageParam = url.searchParams.get("page");
+  const limitParam = url.searchParams.get("limit");
+  const forceRefresh = url.searchParams.get("forceRefresh") === "true";
+  const isDefaultQuery = !actionType && !symbol && !fromDate && !toDate && !pageParam && !limitParam;
+  const CORP_CACHE_KEY = "corp-actions:combined:default";
+  const CORP_CACHE_TTL = 5 * 60;
+
   try {
-    const url = new URL(req.url);
     const sourceParam = url.searchParams.get("source") || "all";
-    const actionType = url.searchParams.get("type");
-    const symbol = url.searchParams.get("symbol");
-    const fromDate = url.searchParams.get("fromDate");
-    const toDate = url.searchParams.get("toDate");
-    const pageParam = url.searchParams.get("page");
-    const limitParam = url.searchParams.get("limit");
-    const forceRefresh = url.searchParams.get("forceRefresh") === "true";
     const page = pageParam ? parseInt(pageParam, 10) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : undefined;
 
@@ -258,6 +264,14 @@ export async function GET(req: Request) {
         const endDate = new Date(toDate);
         endDate.setHours(23, 59, 59, 999);
         where.exDate.lte = endDate;
+      }
+    }
+
+    if (isDefaultQuery && !forceRefresh) {
+      const cached = cache.get(CORP_CACHE_KEY);
+      if (cached) {
+        logger.debug({ msg: "CorporateActions: Serving from memory cache" });
+        return NextResponse.json(cached);
       }
     }
 
@@ -358,14 +372,29 @@ export async function GET(req: Request) {
       });
     }
 
-    return NextResponse.json({ 
+    const responseBody = { 
       data: enriched, 
       source: cacheResult.source,
       lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
       cached: !cacheResult.needsRefresh
-    });
+    };
+
+    // Cache the default unfiltered response (most common path).
+    if (isDefaultQuery) {
+      cache.set(CORP_CACHE_KEY, responseBody, CORP_CACHE_TTL);
+    }
+
+    return NextResponse.json(responseBody);
 
   } catch (e) {
+    // DB unavailable — try serving stale cache before 500.
+    if (isDbUnavailableError(e)) {
+      const stale = cache.get("corp-actions:combined:default");
+      if (stale) {
+        logger.warn({ msg: "CorporateActions: DB unavailable — serving stale cache" });
+        return NextResponse.json(stale);
+      }
+    }
     logger.error({ msg: "Failed to fetch combined corporate actions", error: e });
     return NextResponse.json({ error: "Failed to fetch corporate actions" }, { status: 500 });
   }

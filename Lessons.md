@@ -1277,6 +1277,32 @@ If the chain involves dynamic import or `setImmediate`/timers, use `setTimeout(r
 **Applied**: v3.14.0 screener fix commit `98b595b`.
 
 ### 84. Agent Profiles Must Reference the Correct Tooling — Stale `playwright-cli` References Break Agent Workflows
+
+---
+
+### 85. Cache Key Name Must Match Source — `require()` in `beforeEach` Needs the Exact Key Used by the Service
+
+**Issue**: Tests fail after adding a NodeCache layer to a service — `beforeEach` cache clear uses wrong cache key name → cached result from previous test leaks into the next test.
+
+**Root Cause**: `getChartinkScreeners()` caches results under `staticCache.get("chartink:screeners:overview")`, but the test's `beforeEach` called `staticCache.del("chartink-screeners:list")` — a different key. The NodeCache was not cleared, so the first test's cached result leaked into subsequent tests.
+
+**Fix**: Ensure the `beforeEach` cache flush uses the exact same key string as the service. Grep the service for the cache key constant before writing the test. In this case: `staticCache.del("chartink:screeners:overview")`.
+
+**Prevention**: When adding NodeCache/Redis caching to a service, immediately search the test file for stale cache keys and update them. Cache key constants are a layer contract between service and test.
+
+**Example**:
+```typescript
+// In the service:
+staticCache.set("chartink:screeners:overview", result, 300);
+
+// In the test:
+beforeEach(() => {
+  const { staticCache } = require("@/lib/cache");
+  staticCache.del("chartink:screeners:overview"); // ✅ matches the service key
+});
+```
+
+- 2026-08-19: Added Lesson 85 (cache key must match source — `require()` test flush needs exact key)
 **Issue**: Agent profiles (`qa.md`, `e2e-agent.md`, `devops.md`) referenced `playwright-cli open`, `playwright-cli snapshot`, and Vercel deployment — all stale. The Playwright CLI tool was replaced by Playwright MCP tools + Chrome DevTools MCP. Vercel was never used (Netlify only).
 **Root Cause**: Agent profiles were created early and never updated when the tooling stack changed. The `playwright-cli` npm package was replaced by `@playwright/mcp` (MCP server) + `chrome-devtools-mcp`, but agent profiles still referenced the old CLI commands.
 **Rule**: (1) Agent profiles MUST reference the actual tooling in use — grep for stale tool names after any tooling change. (2) Every agent profile MUST have a `Skill` reference pointing to the machine-readable `.opencode/skills/<name>/SKILL.md` file. (3) The `opencode.json` `agent:` section MUST have entries for ALL agents that subagents can invoke.
