@@ -1,4 +1,4 @@
-# v3.19.0 — DB Plan Limit Resilience (Prisma Postgres 10K ops/day exceeded)
+# v3.19.0–v3.19.1 — DB Plan Limit Resilience + SQLite Backup Layer
 
 > **Date**: Aug 19 2026 · **Branch**: `feature/ai-intelligence` (on top of v3.18.0) · **Suite**: 852 pass / 4 skip · **tsc**: 46 = exact baseline
 
@@ -83,4 +83,48 @@ Prisma Postgres monthly plan limit (10K ops/day) exceeded on prod → all DB-dep
 
 - **Suite**: 852 pass / 4 skip = exact baseline (62 suites, 4 intentional client-cache IndexedDB skips)
 - **tsc**: 46 errors = exact baseline (0 new)
-- **Commits**: pending user approval
+- **Commits**: v3.19.0 = `552041d` (PR #101); v3.19.1 below
+
+---
+
+# v3.19.1 — SQLite Backup Layer
+
+> **Date**: Aug 25 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 861 pass / 4 skip (+9) · **tsc**: 46 = exact baseline
+
+## Problem
+
+When Prisma DB ops budget is exceeded, all DB-dependent routes return 500 — no graceful degradation to an in-memory fallback. Need a persistent in-memory SQLite layer seeded from Prisma on startup.
+
+## Files Created
+
+| File | Purpose |
+|------|---------|
+| `lib/sqlite.ts` | sql.js pure-JS in-memory SQLite singleton (globalThis pattern matching `lib/prisma.ts`); 5 tables; `initSqliteBackup()` + `syncFromPrisma()`; `SqliteFallback` interface with query helpers |
+| `lib/__tests__/sqlite.test.ts` | 9 tests — initialization, empty state, data roundtrip, Prisma failure handling |
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `instrumentation.ts` | Imports + awaits `initSqliteBackup()` on startup |
+| `app/api/recommendations/route.ts` | SQLite fallback chain (DB→SQLite→memory→500) + background SQLite sync after successful DB writes |
+| `app/api/corporate-actions/combined/route.ts` | SQLite fallback in catch block |
+| `app/api/screener/chartink/route.ts` | SQLite fallback with category rebuild from DB |
+| `lib/db-utils.ts` | Expanded `isDbUnavailableError()` for Accelerate proxy errors (ECONNREFUSED, ECONNRESET, etc.) |
+| `package.json` | Added `sql.js` + `@types/sql.js` |
+
+## SQLite Schema
+
+| Table | Purpose |
+|-------|---------|
+| `daily_recommendation_run` | Latest recommendation runs (id, runDate, status, metadata, triggeredBy) |
+| `daily_recommendation_stock` | Per-stock picks (symbol, verdict, confidence, targetPrice, stopLoss, analysis, screenerAttribution) |
+| `corporate_action` | Corporate actions (symbol, type, exDate, dividendPerShare, etc.) |
+| `chartink_screener` | Screener results cache (symbol, screenerName, percentageChange, volume, etc.) |
+| `_backup_meta` | Sync metadata (lastSyncAt, rowsSynced per table) |
+
+## Verification
+
+- **Suite**: 861 pass / 4 skip (+9 from v3.19.0's 852)
+- **tsc**: 46 = exact baseline (0 new)
+- **Commit**: `4f6ff89`

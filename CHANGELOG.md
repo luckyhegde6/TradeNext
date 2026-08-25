@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Summary | Detail |
 |---------|---------|--------|
+| **v3.19.0–v3.19.1** · Aug 19/25 | DB plan limit resilience (graceful degradation, op reduction, write budget guard, admin OTP, staticCache key fix) + SQLite backup layer (sql.js in-memory fallback, route fallback chains, `isDbUnavailableError` for Accelerate proxy) | [versions-v3.19.md](./.agents/changelog/versions-v3.19.md) |
+| **v3.18.0** · Aug 19 | AI Investment Intelligence — company-level analysis (14 interfaces, TA extensions, IntelligenceCache, dual-layer cache, 8 NSE adapters, structured JSON prompt, orchestrator, API + MCP, 14-file UI) | [versions-v3.18.md](./.agents/changelog/versions-v3.18.md) |
 | **v3.13.0** · Aug 16 | DB-backed Swing AI analysis job — durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic claim + supersede-abort, stale recovery 45 min / 2 attempts, cron-daemon drain) | [versions-v3.13.md](./.agents/changelog/versions-v3.13.md) |
 | **v3.12.0** · Aug 16 | Swing tab prod failure FIX (request-time split — async AI analysis; Netlify 30s wall) + prod-stability batch (perf live-price fallback, prod `daily_prices` backfill, heartbeat-aware reaper, Prisma query timeout, worker-logger tmpdir fallback, error serialization) | [versions-v3.12.md](./.agents/changelog/versions-v3.12.md) |
 | **v3.11.0–v3.11.3** · Aug 15 | In-process node-cron daemon + `daysTracked` 500 fix · no-fake-HOLD Today's Picks (partial persistence) · `recommendationsCache` globalThis singleton · full serverless purge (persistent-server reality, Blob logging removed) | [versions-v3.11.md](./.agents/changelog/versions-v3.11.md) |

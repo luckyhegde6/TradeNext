@@ -5,18 +5,25 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-19 (v3.19.0 DB plan limit resilience: graceful degradation + op reduction + write budget guard + admin OTP fallback; suite 852 pass / 4 skip; tsc 46 = exact baseline; commit pending user)
+2026-08-25 (v3.19.1 SQLite backup layer: sql.js in-memory fallback + route fallback chains; suite 861 pass / 4 skip; tsc 46 = exact baseline; commit `4f6ff89`)
 
 ---
 
 ## Current Project Status
 
-### v3.19.0 — DB Plan Limit Resilience (Aug 19 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
+### v3.19.1 — SQLite Backup Layer (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED, NO DEPLOY
+**Branch**: `feature/ai-intelligence` (on top of v3.19.0).
+**Why**: When Prisma DB ops budget is exceeded, all DB-dependent routes return 500 with no graceful fallback. Need a persistent in-memory SQLite layer seeded from Prisma on startup, so routes degrade gracefully.
+**Fix**: (1) `lib/sqlite.ts` — sql.js pure-JS in-memory SQLite singleton (globalThis pattern matching `lib/prisma.ts`), 5 tables (daily_recommendation_run/stock, corporate_action, chartink_screener, _backup_meta), `initSqliteBackup()` + `syncFromPrisma()` called from `instrumentation.ts`, `SqliteFallback` interface with query helpers (`getLatestRecommendations`, `getChartinkScreeners`, `getCorporateActions`). (2) Route fallback chains — `recommendations/route.ts` DB→SQLite→memory→500 with background SQLite sync after successful DB writes; `corporate-actions/combined/route.ts` + `screener/chartink/route.ts` SQLite fallback in catch blocks. (3) `lib/db-utils.ts` expanded `isDbUnavailableError()` for Accelerate proxy errors (ECONNREFUSED, ECONNRESET, etc.).
+**Tests**: 9 new tests (init, empty state, data roundtrip, Prisma failure handling); suite 861 pass / 4 skip (+9 from 852); tsc 46 = exact baseline, 0 new.
+- **Status**: committed `4f6ff89`; docs updated; no push/deploy (part of PR #101 on feature/ai-intelligence).
+
+### v3.19.0 — DB Plan Limit Resilience (Aug 19 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED, NO DEPLOY
 **Branch**: `feature/ai-intelligence` (on top of v3.18.0).
-**Why**: Prisma Postgres monthly plan limit (10K ops/day) exceeded on prod → all DB-dependent routes return 500. Root causes: historical price sync 3K-6K ops/day, dual heartbeats 2,880 ops/day, no cache on chartink templates, recommendations fingerprint always hits DB.
-**Fix**: (1) Graceful degradation: `lib/db-utils.ts` (`isDbUnavailableError()`), `dailyRecommendationService.ts` fingerprint bypass on DB error → cached last good run, `chartinkScreenerService.ts` NodeCache + DB error fallback, `corporate-actions/combined` NodeCache + DB error fallback, `events/route.ts` + `ipos/route.ts` graceful empty (200 with `warning`, not 500). (2) Op reduction: historical-price sync scope → NIFTY 50 only (`DEFAULT_MAX_SYMBOLS=300→50`, est. 2,500–5,500 ops/day saved), heartbeat 60s→300s in `cron-daemon.ts` + `worker-engine.ts` (1,152 ops/day saved), `WORKER_ALIVE_WINDOW_MS` 180K→600K, `MarketCache` TTLs increased (open 300→600, closed 3600→7200). (3) Write budget guard: `lib/prisma.ts` globalThis `dbOpsCounter` (reads/writes, IST-day auto-reset), `isDbWriteBudgetExceeded()`, `$allOperations` extension tracks ops + rejects non-critical writes when budget exceeded (default 8,000, configurable `DB_WRITE_BUDGET`), `executeRaw`/`executeRawUnsafe` never blocked. (4) Admin OTP fallback: `lib/auth.ts` bypasses DB entirely for admin login when `ADMIN_OTP` matches; `ADMIN_EMAIL` defaults to `admin@tradenext6.app`. (5) Admin DB usage dashboard: `GET /api/admin/db-usage`. (6) `staticCache` key fix: `chartinkScreenerService.ts` key → `chartink:screeners:overview`, `completeChartinkRun` invalidates on completion.
-**Tests**: 3 test fixes for v3.19.0 changes (chartinkScreenerService correct cache key flush, historicalPriceSyncService NIFTY50-only scope, cron-daemon 600s heartbeat window); suite 852 pass / 4 skip = exact baseline; tsc 46 = exact baseline, 0 new.
-- **Status**: docs updated (AGENTS.md v3.19.0 row, CHANGELOG index + versions-v3.19.md, TODO.md row marked done, Primer, agent-memory, Lessons #85); **commit pending user; no push/deploy**.
+**Why**: Prisma Postgres monthly plan limit (10K ops/day) exceeded on prod → all DB-dependent routes return 500.
+**Fix**: (1) Graceful degradation: `lib/db-utils.ts` (`isDbUnavailableError()`), fingerprint bypass on DB error, NodeCache fallbacks, events/IPOs graceful empty. (2) Op reduction: historical sync → NIFTY50 only, heartbeat 60s→300s, MarketCache TTLs doubled. (3) Write budget guard: `dbOpsCounter`, `isDbWriteBudgetExceeded()`, `$allOperations` extension. (4) Admin OTP fallback. (5) Admin DB usage dashboard. (6) `staticCache` key fix.
+**Tests**: 3 test fixes; suite 852 pass / 4 skip; tsc 46 = exact baseline.
+- **Status**: committed `552041d` (PR #101); docs updated; no push/deploy.
 
 ### v3.18.0 — AI Investment Intelligence (Aug 19 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
 **Branch**: `feature/ai-intelligence`.
