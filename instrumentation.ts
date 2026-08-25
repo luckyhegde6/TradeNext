@@ -18,10 +18,11 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
+      import("@/lib/sqlite"),
       import("@/lib/logger"),
     ]);
 
@@ -34,7 +35,12 @@ export async function register() {
       logger.warn({ msg: "Intelligence cache restore failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
 
-    logger.info({ msg: "Cron daemon + worker + intelligence cache started via instrumentation" });
+    // Initialize SQLite backup (background sync, non-blocking)
+    await initSqliteBackup().catch((err: unknown) =>
+      logger.warn({ msg: "SQLite backup init failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
+    );
+
+    logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite backup started via instrumentation" });
   } catch (error) {
     // Never crash server startup — crons can still be started manually from
     // the admin Workers/Cron pages. console fallback in case logger's own

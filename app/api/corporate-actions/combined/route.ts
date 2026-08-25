@@ -5,6 +5,7 @@ import { nseFetch } from "@/lib/nse-client";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
 import cache from "@/lib/cache";
 import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 function parseNseDate(dateStr: string): string | null {
   if (!dateStr || dateStr === "-") return null;
@@ -387,6 +388,20 @@ export async function GET(req: Request) {
     return NextResponse.json(responseBody);
 
   } catch (e) {
+    // --- SQLite fallback ---
+    const sqlite = getSqliteFallback();
+    if (sqlite?.isReady()) {
+      try {
+        const actions = sqlite.getCorporateActions(500);
+        if (actions.length) {
+          logger.warn({ msg: "CorporateActions: DB unavailable — serving SQLite backup" });
+          return NextResponse.json({ data: actions, source: "sqlite_backup" });
+        }
+      } catch {
+        // SQLite fallback itself failed — fall through to memory cache
+      }
+    }
+
     // DB unavailable — try serving stale cache before 500.
     if (isDbUnavailableError(e)) {
       const stale = cache.get("corp-actions:combined:default");

@@ -11,6 +11,7 @@ import {
 import {
   runChartinkScreenerById,
 } from "@/lib/services/chartinkUnifiedScreenerService";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +60,45 @@ export async function GET() {
 
     return NextResponse.json({ categories, templates });
   } catch (error) {
+    // --- SQLite fallback for template listing ---
+    const sqlite = getSqliteFallback();
+    if (sqlite?.isReady()) {
+      try {
+        const screeners = sqlite.getChartinkScreeners();
+        if (screeners.length) {
+          logger.warn({ msg: "Chartink templates: DB unavailable — serving SQLite backup" });
+          // Rebuild categories from SQLite data
+          const catMap = new Map<string, { id: string; name: string; count: number; fetchableCount: number }>();
+          for (const s of screeners) {
+            const catId = (s.category_id as string) || "uncategorized";
+            const catName = (s.category_name as string) || catId;
+            if (!catMap.has(catId)) catMap.set(catId, { id: catId, name: catName, count: 0, fetchableCount: 0 });
+            const cat = catMap.get(catId)!;
+            cat.count++;
+            if (s.scan_clause) cat.fetchableCount++;
+          }
+          return NextResponse.json({
+            categories: [...catMap.values()],
+            templates: screeners.map((s) => ({
+              id: s.id,
+              name: s.name,
+              url: s.url,
+              categoryId: s.category_id,
+              categoryName: s.category_name,
+              fetchable: Boolean(s.scan_clause),
+              enabled: s.enabled,
+              lastRunAt: s.last_run_at,
+              nextRunAt: s.next_run_at,
+              resultCount: s.result_count ?? 0,
+              stale: true,
+            })),
+            source: "sqlite_backup",
+          });
+        }
+      } catch {
+        // SQLite fallback itself failed — fall through to error
+      }
+    }
     logger.error({ msg: "Chartink template list failed", error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to list Chartink templates" },
