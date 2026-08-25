@@ -33,6 +33,23 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Lesson 84 Added**: Agent profiles must reference correct tooling; every profile needs a Skill reference; opencode.json must have entries for ALL subagent-invocable agents
 - **Status**: Commit pending
 
+### 2026-08-19 | v3.19.0 — DB Plan Limit Resilience (Prisma Postgres 10K ops/day exceeded)
+- **Action**: Implemented full DB plan limit resilience stack across 14 files: graceful degradation, op reduction, write budget guard, admin OTP fallback, admin DB usage dashboard.
+- **Files Created**: `lib/db-utils.ts` (`isDbUnavailableError()`), `app/api/admin/db-usage/route.ts` (admin dashboard endpoint)
+- **Files Modified**: `lib/prisma.ts` (dbOpsCounter + write budget guard), `lib/auth.ts` (admin OTP fallback), `lib/services/dailyRecommendationService.ts` (fingerprint bypass + DB error fallback), `lib/services/chartinkScreenerService.ts` (NodeCache + DB error fallback + cache invalidation + fixed cache key to `chartink:screeners:overview`), `lib/services/historicalPriceSyncService.ts` (NIFTY50-only scope, `DEFAULT_MAX_SYMBOLS=300→50`), `lib/services/worker/cron-daemon.ts` (`HEARTBEAT_INTERVAL_MS=300_000`), `lib/services/worker/worker-engine.ts` (`HEARTBEAT_INTERVAL_MS=300_000`, `WORKER_ALIVE_WINDOW_MS=600_000`), `lib/market-cache.ts` (TTL defaults 600/7200), `app/api/corporate-actions/combined/route.ts` (NodeCache + DB error fallback + variable scope fix), `app/api/events/route.ts` (graceful empty on failure), `app/api/recommendations/ipos/route.ts` (graceful empty on failure), `.env.example` (ADMIN_OTP, DB_WRITE_BUDGET docs)
+- **Test fixes**: `chartinkScreenerService.test.ts` (correct cache key `chartink:screeners:overview`), `historicalPriceSyncService.test.ts` (NIFTY50-only scope), `cron-daemon.test.ts` (600s heartbeat window)
+- **Docs updated**: AGENTS.md v3.19.0 row, CHANGELOG index + versions-v3.19.md, TODO.md marked done, Primer, agent-memory (this entry), Lessons #85 (cache key must match source)
+- **Suite**: 852 pass / 4 skip = exact baseline; tsc 46 = exact baseline, 0 new
+- **Status**: All code + tests verified, commit pending user, no push/deploy
+
+### 2026-08-25 | v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard
+- **Action**: Expanded the SQLite backup layer to cover all 10 tables (6 new: worker_status, server_log, audit_log, cron_job, cron_run, worker_task), added background recovery sync (5-min probe when Prisma is down, auto-sync on recovery), and built a full admin DB health monitoring dashboard.
+- **Files Created**: `app/api/admin/db-health/route.ts` (GET: Prisma probe + ops + table counts + SQLite health; POST: manual sync), `app/admin/utils/db-health/page.tsx` (dashboard: status badges, stat cards, write budget bar, table comparison, sync history, manual sync, 30s refresh)
+- **Files Modified**: `lib/sqlite.ts` (rewritten — 6 new tables, expanded `syncFromPrisma()` for all 10 tables, new query helpers `getServerLogs`/`getAuditLogs`/`getCronJobs`/`getCronRuns`/`getWorkerStatuses`/`getWorkerTasks`/`getHealthStatus`, `syncHistory` array, `startRecoveryProbe()` background interval, `lastProbeAt`), `app/admin/utils/layout.tsx` (DB Health nav entry), `lib/__tests__/sqlite.test.ts` (expanded 9 → 17 tests for new tables + health status + failure history)
+- **Tests**: Suite 869 pass / 4 skip (was 861/4, +8 new); tsc 46 = exact baseline, 0 new
+- **Docs updated**: AGENTS.md v3.19.2 row, CHANGELOG index + versions-v3.19.md, TODO.md, Primer.md, agent-memory (this entry), HANDOFF.md, ARCHITECTURE.md, docs/architecture.html, Lessons.md (Lesson 86), README.md, .agents/docs/monitoring-and-logging.md
+- **Status**: All code + tests verified + committed + pushed on `feature/ai-intelligence`
+
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
 - Detects hardcoded secrets (passwords, API keys, tokens)

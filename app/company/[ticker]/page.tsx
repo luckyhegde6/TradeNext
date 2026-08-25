@@ -1,11 +1,13 @@
 // app/company/[ticker]/page.tsx
 import { notFound } from 'next/navigation';
+import { auth } from '@/lib/auth';
 import DynamicChartWrapper from './DynamicChartWrapper';
 import { getCompanyData } from '@/lib/services/companyService';
 import StockQuoteHeader from '@/app/components/StockQuoteHeader';
 import NSEStockChart from '@/app/components/NSEStockChart';
 import CorporateDataTabs from '@/app/components/analytics/CorporateDataTabs';
 import PiotroskiFScore from '@/app/components/analytics/PiotroskiFScore';
+import CompanyIntelligence from '@/app/components/intelligence/CompanyIntelligence';
 
 async function getCompany(ticker: string) {
     try {
@@ -19,7 +21,7 @@ async function getCompany(ticker: string) {
 export default async function CompanyPage({ params }: { params: Promise<{ ticker: string }> }) {
     const { ticker: tickerParam } = await params;
     const ticker = tickerParam.toUpperCase();
-    const data = await getCompany(ticker);
+    const [data, session] = await Promise.all([getCompany(ticker), auth()]);
 
     // Don't require database data - NSE components will work independently
     if (!data) return notFound();
@@ -29,6 +31,9 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
             <div className="max-w-7xl mx-auto space-y-6">
                 {/* NSE Stock Quote Header */}
                 <StockQuoteHeader symbol={ticker} />
+
+                {/* AI Investment Intelligence */}
+                <CompanyIntelligence ticker={ticker} isAuthenticated={!!session?.user?.id} />
 
                 {/* NSE Real-time Chart */}
                 <NSEStockChart symbol={ticker} />

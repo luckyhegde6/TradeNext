@@ -57,7 +57,7 @@ export interface HistoricalPriceSyncResult {
 }
 
 const DEFAULT_DAYS = 180;
-const DEFAULT_MAX_SYMBOLS = 300;
+const DEFAULT_MAX_SYMBOLS = 50; // NIFTY 50 only (was 300 — too many DB ops for plan limit)
 const DEFAULT_FETCH_DELAY_MS = 200;
 const UPSERT_CHUNK_SIZE = 200;
 
@@ -109,10 +109,15 @@ export function dedupeSymbols(symbols: string[]): string[] {
 /**
  * Resolve the symbol scope to sync.
  * - Explicit list → deduped + capped.
- * - Default → NIFTY 50 constituents ∪ RecommendationTracker symbols from the
- *   last 30 days ∪ ChartinkScreenerResult symbols with a live capture (the
- *   swing/daily screeners' candidate universe). Every scope source degrades
- *   to [] on failure so a scope problem never throws the whole job.
+ * - Default → NIFTY 50 constituents only. The previous scope included
+ *   RecommendationTracker + ChartinkScreenerResult symbols (capped 300)
+ *   but those extra DB queries + the larger symbol count consumed 3K-6K
+ *   ops/day — exceeding the Prisma Postgres plan limit. Reducing to
+ *   NIFTY 50 only brings the sync to ~500 ops/day. Callers can pass
+ *   explicit symbols for wider coverage when needed.
+ *
+ * Every scope source degrades to [] on failure so a scope problem never
+ * throws the whole job.
  */
 export async function resolveSyncScope(explicit: string[] | undefined, maxSymbols: number): Promise<string[]> {
   if (explicit) {
@@ -120,39 +125,17 @@ export async function resolveSyncScope(explicit: string[] | undefined, maxSymbol
     return dedupeSymbols(explicit).slice(0, maxSymbols);
   }
 
-  const prisma = (await import("@/lib/prisma")).default;
-  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  // NIFTY 50 only — avoids 2 DB queries (trackers + screener results) and
+  // caps the sync at ~50 symbols instead of 300.
+  const indexStocks = await (await import("@/lib/index-service"))
+    .getIndexStocks("NIFTY 50")
+    .then((stocks: Array<{ symbol?: string }>) => stocks.map((s) => s.symbol ?? ""))
+    .catch((e: unknown) => {
+      logger.warn({ msg: "Historical price sync: NIFTY 50 scope fetch failed", error: e });
+      return [];
+    });
 
-  const [indexStocks, trackers, captured] = await Promise.all([
-    (await import("@/lib/index-service"))
-      .getIndexStocks("NIFTY 50")
-      .then((stocks: Array<{ symbol?: string }>) => stocks.map((s) => s.symbol ?? ""))
-      .catch((e: unknown) => {
-        logger.warn({ msg: "Historical price sync: NIFTY 50 scope fetch failed", error: e });
-        return [];
-      }),
-    prisma.recommendationTracker
-      .findMany({ where: { createdAt: { gte: since30d } }, distinct: ["symbol"], select: { symbol: true } })
-      .then((rows: Array<{ symbol: string }>) => rows.map((r) => r.symbol))
-      .catch((e: unknown) => {
-        logger.warn({ msg: "Historical price sync: tracker scope query failed", error: e });
-        return [];
-      }),
-    prisma.chartinkScreenerResult
-      .findMany({
-        where: { expiresAt: { gt: new Date() } },
-        distinct: ["symbol"],
-        orderBy: { symbol: "asc" },
-        select: { symbol: true },
-      })
-      .then((rows: Array<{ symbol: string }>) => rows.map((r) => r.symbol))
-      .catch((e: unknown) => {
-        logger.warn({ msg: "Historical price sync: screener-result scope query failed", error: e });
-        return [];
-      }),
-  ]);
-
-  return dedupeSymbols([...indexStocks, ...trackers, ...captured]).slice(0, maxSymbols);
+  return dedupeSymbols(indexStocks).slice(0, maxSymbols);
 }
 
 /**

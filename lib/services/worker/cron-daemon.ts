@@ -21,7 +21,7 @@ import { spawnDueCronJob } from "./worker-engine";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
 const RESYNC_INTERVAL_MS = 60_000; // pick up admin edits within a minute
-const HEARTBEAT_INTERVAL_MS = 60_000;
+const HEARTBEAT_INTERVAL_MS = 300_000; // 5 min — reduces DB ops from ~1,440/day to ~288/day
 /** A heartbeat older than this is treated as "daemon down" (2x heartbeat cadence). */
 export const DAEMON_HEARTBEAT_WINDOW_MS = 2 * HEARTBEAT_INTERVAL_MS;
 export const DAEMON_ID = `cron-daemon-${os.hostname()}-${process.pid}`;

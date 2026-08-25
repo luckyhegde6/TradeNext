@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNseEvents } from "@/lib/services/nseEventsService";
 import { createAuditLog } from "@/lib/audit";
+import { isDbUnavailableError } from "@/lib/db-utils";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -43,12 +44,20 @@ export async function GET(request: NextRequest) {
       action: "EVENTS_FETCH_FAILED",
       resource: "nse_events",
       path: "/api/events",
-      responseStatus: 500,
+      responseStatus: isDbUnavailableError(error) ? 200 : 500,
       errorMessage: message,
     }).catch(() => undefined);
+    // Return empty results with warning instead of 500 when DB/NSE unavailable.
+    // Prevents cascade failures on the dashboard.
     return NextResponse.json(
-      { success: false, events: [], error: "Failed to fetch NSE events" },
-      { status: 500 }
+      {
+        success: true,
+        events: [],
+        warning: "Data temporarily unavailable",
+        source: "fallback",
+        timestamp: new Date().toISOString(),
+        traceId,
+      }
     );
   }
 }

@@ -5,8 +5,10 @@ import { useState, useEffect } from "react";
 interface TelegramEnvStatus {
   configured: boolean;
   hasBotToken: boolean;
-  hasChatId: boolean;
+  chatId: string;
+  hasMessageId: boolean;
   botUsername?: string;
+  lastVerified?: string;
   error?: string;
 }
 
@@ -81,11 +83,11 @@ export default function TelegramSettingsPage() {
               <p className="text-xs text-gray-500 dark:text-slate-400">TELEGRAM_CHATID environment variable</p>
             </div>
             <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-              envStatus?.hasChatId
+              envStatus?.chatId && envStatus.chatId !== "(not set)"
                 ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
                 : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
             }`}>
-              {envStatus?.hasChatId ? "Configured" : "Missing"}
+              {envStatus?.chatId && envStatus.chatId !== "(not set)" ? "Configured" : "Missing"}
             </span>
           </div>
 

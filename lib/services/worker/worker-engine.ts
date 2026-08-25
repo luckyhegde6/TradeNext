@@ -10,7 +10,7 @@ let workerInterval: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let schedulerInterval: NodeJS.Timeout | null = null;
 const WORKER_ID = `worker-${os.hostname()}-${process.pid}`;
-const HEARTBEAT_INTERVAL_MS = 60_000; // Write heartbeat every 60s instead of every 5s
+const HEARTBEAT_INTERVAL_MS = 300_000; // 5 min — reduces DB ops from ~1,440/day to ~288/day
 let lastHeartbeatStatus: "idle" | "busy" = "idle";
 let lastHeartbeatTaskId: string | undefined;
 
@@ -41,7 +41,7 @@ let lastHeartbeatTaskId: string | undefined;
 export const STALE_MS = 45 * 60_000;
 export const TASK_TIMEOUT_MS = 40 * 60_000; // hard ceiling on any single task execution
 const REAP_INTERVAL_MS = 60_000; // reaper throttled to once per minute
-const WORKER_ALIVE_WINDOW_MS = 3 * 60_000; // fresh heartbeat = live worker
+const WORKER_ALIVE_WINDOW_MS = 10 * 60_000; // 10 min — 2x heartbeat cadence (5 min)
 // Task types that CREATE DailyRecommendationRun rows (runDailyRecommendations).
 // A running run is legit only while one of these is executing on a live worker
 // (runs carry no worker id of their own).

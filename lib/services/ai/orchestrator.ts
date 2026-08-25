@@ -11,7 +11,7 @@
  * - Audit logging
  */
 import { getDefaultConfig, hasValidConfig, type AIConfig } from "./config";
-import { getClient, directPrompt, resetClient } from "./llm-provider";
+import { getClient, directPrompt, resetClient, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 import { checkPromptSafety, filterAIResponse, estimateTokenCount, type SafetyCheckResult } from "./safety";
 import { checkRateLimit, recordViolation, getRateLimitHeaders, type RateLimitResult } from "./rateLimit";
 import {
@@ -208,6 +208,11 @@ export async function executeAIQuery(input: OrchestratorInput): Promise<Orchestr
           // Direct prompt (simpler queries, dividend/market/alert analysis)
           const fullPrompt = `${systemPrompt}\n\nUser Query: ${safetyResult.sanitized}\n\nProvide a detailed, well-structured analysis.`;
           aiResult = await directPrompt(fullPrompt, activeConfig);
+
+          // 429/402: quota exhausted — throw to stop retries immediately
+          if (isQuotaExhausted(aiResult)) {
+            throw new Error(QUOTA_EXHAUSTED_MESSAGE);
+          }
         }
 
         lastError = null;

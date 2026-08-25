@@ -5,19 +5,39 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-17 (v3.15.0 Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible): Closed IPOs section with current prices + gain/loss, IPO analysis cache-hit monitoring visibility, IPO analysis pre-warm in market-sync, TTL cleanup (90-day retention), pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs); suite 787 pass / 4 skip (was 758/4, +29); tsc 46 = exact baseline 0 new. Branch `feat/closed-ipos-ttl-cleanup`; docs updated, commit pending user.)
+2026-08-25 (v3.19.2 SQLite expanded + re-sync + admin DB health dashboard; suite 869 pass / 4 skip; tsc 46 = exact baseline; pending push)
 
 ---
 
 ## Current Project Status
 
-### v3.15.0 — Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible) (Aug 17 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
-**Branch**: `feat/closed-ipos-ttl-cleanup` (on top of main after PR #97 merge).
-**Why**: (1) Pipeline sent ALL screener results to AI (potentially 500+) — wasteful; no separation of BUY/SELL from HOLDs in UI. (2) IPO analysis cache hits (12h TTL) were invisible in monitoring. (3) No pre-warm for IPO analysis on market-sync. (4) Closed IPOs had no visibility into current prices/gain-loss. (5) No TTL cleanup for old IPO analysis rows.
-**Fix**: (1) `selectTopByMarketCap(results, 100)` ranks by market cap, sends top 100 to AI; `rankActionableByConfidence()` picks top 50 BUY/SELL; HOLDs stored but shown separately (`showHolds` toggle in `DailyPicksTab`). (2) `trackAiCall({action:"ipo_analysis_served", model:"cache"})` at memory + DB cache hit paths. (3) `executeIpoAnalysisPrewarm()` in market-sync (non-fatal) + standalone `ipo_analysis_prewarm` task type. (4) NEW `/api/recommendations/ipos/closed` endpoint (filters Closed + last 30 days, batch-fetches current prices, computes gain %). (5) `cleanStaleIpoAnalysisRows()` deletes `MarketCache` rows with `dataType="ipo_analysis"` + `lastSyncedAt < 90 days`; wired into market-sync + standalone `ipo_analysis_cleanup` task type. (6) `IposTab.tsx` rewritten: main table Active + Forthcoming only; separate collapsible "Recently Closed IPOs" section with current prices + gain/loss.
-**Tests**: NEW `closedIpoPrices.test.ts` (18 — gain calc, date filtering, price parsing); extended `ipoAnalysisService.test.ts` (+3 cleanup tests); extended `ipoAnalysisPrewarm.test.ts` (5 pre-warm tests); suite 787 pass / 4 skip (was 758/4, +29); tsc 46 = exact baseline, 0 new.
-**Live-verified**: pipeline 30 Total / 16 Buy / 5 Hold / 9 Sell, HOLDs collapsed, IPOs tab 4 Active + 1 Upcoming, AI Analysis modal opens, `ipo_analysis: 2 (29%)` in monitoring.
-- **Status**: docs updated (AGENTS.md v3.15.0 row, CHANGELOG index + versions-v3.15.md, TODO.md row, Primer, agent-memory, session-todos); **commit pending user; no push/deploy**.
+### v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, PENDING PUSH
+**Branch**: `feature/ai-intelligence` (on top of v3.19.1).
+**Why**: SQLite backup (v3.19.1) only covered recommendation/screener/corp-action tables — logs, auth, monitoring, and cron data were not backed up. No automatic recovery when Prisma comes back online. No admin visibility into DB health status.
+**Fix**: (1) Expanded schema — `lib/sqlite.ts` gains 6 new tables (`worker_status`, `server_log`, `audit_log`, `cron_job`, `cron_run`, `worker_task`) with query helpers + `getHealthStatus()`. (2) Recovery sync — background probe every 5 min when Prisma is down, auto-sync on recovery. (3) Admin DB health API — `GET/POST /api/admin/db-health`. (4) Admin DB health UI — `app/admin/utils/db-health/page.tsx` dashboard with status badges, stat cards, write budget bar, table comparison, sync history, 30s refresh. Nav entry in admin utils layout.
+**Tests**: 17 tests (+8 vs v3.19.1); suite 869 pass / 4 skip; tsc 46 = exact baseline.
+- **Status**: pending push; docs updated.
+
+### v3.19.1 — SQLite Backup Layer (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED, NO DEPLOY
+**Branch**: `feature/ai-intelligence` (on top of v3.19.0).
+**Why**: When Prisma DB ops budget is exceeded, all DB-dependent routes return 500 with no graceful fallback. Need a persistent in-memory SQLite layer seeded from Prisma on startup, so routes degrade gracefully.
+**Fix**: (1) `lib/sqlite.ts` — sql.js pure-JS in-memory SQLite singleton (globalThis pattern matching `lib/prisma.ts`), 5 tables (daily_recommendation_run/stock, corporate_action, chartink_screener, _backup_meta), `initSqliteBackup()` + `syncFromPrisma()` called from `instrumentation.ts`, `SqliteFallback` interface with query helpers (`getLatestRecommendations`, `getChartinkScreeners`, `getCorporateActions`). (2) Route fallback chains — `recommendations/route.ts` DB→SQLite→memory→500 with background SQLite sync after successful DB writes; `corporate-actions/combined/route.ts` + `screener/chartink/route.ts` SQLite fallback in catch blocks. (3) `lib/db-utils.ts` expanded `isDbUnavailableError()` for Accelerate proxy errors (ECONNREFUSED, ECONNRESET, etc.).
+**Tests**: 9 new tests (init, empty state, data roundtrip, Prisma failure handling); suite 861 pass / 4 skip (+9 from 852); tsc 46 = exact baseline, 0 new.
+- **Status**: committed `4f6ff89`; docs updated; no push/deploy (part of PR #101 on feature/ai-intelligence).
+
+### v3.19.0 — DB Plan Limit Resilience (Aug 19 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED, NO DEPLOY
+**Branch**: `feature/ai-intelligence` (on top of v3.18.0).
+**Why**: Prisma Postgres monthly plan limit (10K ops/day) exceeded on prod → all DB-dependent routes return 500.
+**Fix**: (1) Graceful degradation: `lib/db-utils.ts` (`isDbUnavailableError()`), fingerprint bypass on DB error, NodeCache fallbacks, events/IPOs graceful empty. (2) Op reduction: historical sync → NIFTY50 only, heartbeat 60s→300s, MarketCache TTLs doubled. (3) Write budget guard: `dbOpsCounter`, `isDbWriteBudgetExceeded()`, `$allOperations` extension. (4) Admin OTP fallback. (5) Admin DB usage dashboard. (6) `staticCache` key fix.
+**Tests**: 3 test fixes; suite 852 pass / 4 skip; tsc 46 = exact baseline.
+- **Status**: committed `552041d` (PR #101); docs updated; no push/deploy.
+
+### v3.18.0 — AI Investment Intelligence (Aug 19 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
+**Branch**: `feature/ai-intelligence`.
+**Why**: Company pages lack AI-powered investment analysis — users need a single-click "Investment Intelligence" report with technicals, fundamentals, valuation, news, risk matrix, and a fair-value gauge.
+**Fix**: 14 TypeScript interfaces, 2 TA extensions (`computeATR`/`findSupportResistance`), `IntelligenceCache` Prisma model, write-through dual-layer cache (memory + DB), 8 NSE data adapters, structured JSON prompt builder/parser, orchestrator (cache-first → parallel adapters → prompt → parse → cache → audit), `GET/POST /api/company/[ticker]/intelligence` (auth, Zod, audit), MCP `getInvestmentIntelligence` (29 functions), 14-file UI (CompanyIntelligence state machine, IntelligenceButton 5 states, IntelligencePanel expandable height animation, 11 section components).
+**Tests**: 38 new tests (16 TA + 10 cache + 18 prompt + 10 orchestrator); suite 852 pass / 4 skip; tsc 46 = exact baseline.
+- **Status**: committed to `feature/ai-intelligence` branch; docs updated; **commit pending user; no push/deploy**.
 
 ### v3.14.0 — Swing Signal Persistence + Performance Tracking + Spec-Driven Dev (Aug 17 2026) — ✅ CODE + TESTS VERIFIED, COMMIT PENDING USER, NO DEPLOY
 **Branch**: `feat/swing-signals` (on top of `docs-readme-refs-agentic-coding`).

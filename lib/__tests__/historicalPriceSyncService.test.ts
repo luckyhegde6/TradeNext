@@ -129,22 +129,20 @@ describe("resolveSyncScope", () => {
     expect(trackerFindMany).not.toHaveBeenCalled();
   });
 
-  it("merges NIFTY 50 constituents, recent trackers and live screener captures", async () => {
+  it("returns NIFTY 50 constituents only (v3.19.0 scope reduction)", async () => {
     indexMock.mockResolvedValue([{ symbol: "NIFTY50A" }, { symbol: "nifty50b" }]);
-    trackerFindMany.mockResolvedValue([{ symbol: "TRACKED" }, { symbol: "NIFTY50A" }]);
-    capturedFindMany.mockResolvedValue([{ symbol: "CAPTURED" }, { symbol: "tracked" }]);
+    trackerFindMany.mockResolvedValue([{ symbol: "TRACKED" }]); // no longer queried
+    capturedFindMany.mockResolvedValue([{ symbol: "CAPTURED" }]); // no longer queried
 
     const scope = await resolveSyncScope(undefined, 10);
-    expect(scope).toEqual(["NIFTY50A", "NIFTY50B", "TRACKED", "CAPTURED"]);
-    expect(trackerFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ distinct: ["symbol"], where: { createdAt: { gte: expect.any(Date) } } }),
-    );
-    expect(capturedFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ distinct: ["symbol"], where: { expiresAt: { gt: expect.any(Date) } } }),
-    );
+    // v3.19.0: scope reduced to NIFTY 50 only — no trackers/screener captures
+    expect(scope).toEqual(["NIFTY50A", "NIFTY50B"]);
+    // Tracker and screener DB queries are no longer made
+    expect(trackerFindMany).not.toHaveBeenCalled();
+    expect(capturedFindMany).not.toHaveBeenCalled();
   });
 
-  it("caps the merged scope and degrades gracefully when scope sources fail", async () => {
+  it("caps the scope and degrades gracefully when NIFTY 50 fetch fails", async () => {
     indexMock.mockRejectedValue(new Error("NSE down"));
     trackerFindMany.mockRejectedValue(new Error("db down"));
     capturedFindMany.mockResolvedValue(
@@ -152,8 +150,8 @@ describe("resolveSyncScope", () => {
     );
 
     const scope = await resolveSyncScope(undefined, 10);
-    expect(scope).toHaveLength(10);
-    expect(scope[0]).toBe("SYM0");
+    // NIFTY 50 failed → empty scope (trackers/screener no longer in default scope)
+    expect(scope).toHaveLength(0);
   });
 });
 

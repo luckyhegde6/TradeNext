@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestRecommendations } from "@/lib/services/dailyRecommendationService";
+import { recommendationsCache } from "@/lib/cache";
+import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -67,14 +70,48 @@ export async function GET(req: NextRequest) {
       createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : String(s.createdAt),
     }));
 
-    return NextResponse.json({
+    const responseBody = {
       success: true,
       run: serializedRun,
       latestRun: serializedLatestRun,
       stocks: serializedStocks,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Cache for SQLite fallback + in-memory
+    recommendationsCache.set("recommendations:latest", responseBody, 600);
+
+    // Background: sync to SQLite for future DB-outage fallback
+    const sqlite = getSqliteFallback();
+    if (sqlite?.isReady()) {
+      sqlite.syncFromPrisma().catch(() => {}); // non-blocking
+    }
+
+    return NextResponse.json(responseBody);
   } catch (error) {
+    // --- SQLite fallback ---
+    const sqlite = getSqliteFallback();
+    if (sqlite?.isReady()) {
+      try {
+        const cached = sqlite.getLatestRecommendations();
+        if (cached) {
+          logger.warn({ msg: "Recommendations: DB unavailable — serving SQLite backup" });
+          return NextResponse.json(cached);
+        }
+      } catch {
+        // SQLite fallback itself failed — fall through to memory cache
+      }
+    }
+
+    // --- Memory cache fallback (covers both DB + network errors) ---
+    if (isDbUnavailableError(error)) {
+      const memCached = recommendationsCache.get("recommendations:latest");
+      if (memCached) {
+        logger.warn({ msg: "Recommendations: DB unavailable — serving memory cache" });
+        return NextResponse.json(memCached);
+      }
+    }
+
     logger.error({
       msg: "Failed to fetch recommendations",
       error: error instanceof Error ? error.message : String(error),

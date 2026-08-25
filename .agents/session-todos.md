@@ -9,6 +9,8 @@
 - [x] Update AGENT-SKILL-MATRIX.md — DONE (14 agents, 8 skills, 6 commands)
 - [x] Update session-todos + agent-memory + Lessons — DONE
 - [x] v3.15.0 documentation updates — DONE (AGENTS.md row, CHANGELOG index + versions-v3.15.md, versions-v3.md index, Primer.md, agent-memory.md)
+- [x] v3.19.0 DB plan limit resilience — DONE (Phase 1a-1d + 2a/2b/2d + 3a+4a + 4b, 15 files modified, 2 created, 3 test fixes; suite 852 pass / 4 skip = baseline; tsc 46 = baseline)
+- [x] v3.19.0 documentation updates — DONE (AGENTS.md row, CHANGELOG index + versions-v3.19.md, versions-v3.md index, TODO.md marked done, Primer.md, agent-memory.md, Lessons #85)
 - [ ] Commit + push — PENDING user request
 
 ## Completed This Session

@@ -12,15 +12,8 @@ interface TelegramStats {
   recentSubscribers: { id: string; userId: number; chatId: string; isActive: boolean; createdAt: string }[];
 }
 
-interface BroadcastCount {
-  total: number;
-  verified: number;
-  blocked: number;
-}
-
 export default function TelegramOverviewPage() {
   const [stats, setStats] = useState<TelegramStats | null>(null);
-  const [subscriberInfo, setSubscriberInfo] = useState<BroadcastCount | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,13 +23,8 @@ export default function TelegramOverviewPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [statsRes, subsRes] = await Promise.all([
-        fetch("/api/admin/alerts/telegram?section=stats"),
-        fetch("/api/admin/telegram/subscribers"),
-      ]);
-
-      if (statsRes.ok) setStats(await statsRes.json());
-      if (subsRes.ok) setSubscriberInfo(await subsRes.json());
+      const res = await fetch("/api/admin/alerts/telegram?section=stats");
+      if (res.ok) setStats(await res.json());
     } catch (e) {
       console.error("Failed to fetch Telegram data:", e);
     } finally {
@@ -81,14 +69,14 @@ export default function TelegramOverviewPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+        <Link href="/admin/telegram/subscribers" className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5 hover:shadow-md transition-shadow">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Linked</p>
-          <p className="text-2xl font-black text-gray-900 dark:text-white mt-1">{subscriberInfo?.total || 0}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
+          <p className="text-2xl font-black text-gray-900 dark:text-white mt-1">{stats?.totalSubscribers || 0}</p>
+        </Link>
+        <Link href="/admin/telegram/subscribers" className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5 hover:shadow-md transition-shadow">
           <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Verified</p>
-          <p className="text-2xl font-black text-green-600 mt-1">{subscriberInfo?.verified || 0}</p>
-        </div>
+          <p className="text-2xl font-black text-green-600 mt-1">{stats?.activeSubscribers || 0}</p>
+        </Link>
         <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">Telegram Events</p>
           <p className="text-2xl font-black text-blue-600 mt-1">{stats?.totalTelegramEvents || 0}</p>
@@ -148,8 +136,13 @@ export default function TelegramOverviewPage() {
             { cmd: "/start", desc: "Get your Telegram Chat ID" },
             { cmd: "/chatid", desc: "Display your Chat ID" },
             { cmd: "/help", desc: "Show available commands" },
+            { cmd: "/daily-recommendations", desc: "Today's AI stock picks (public)" },
+            { cmd: "/swing", desc: "Swing trading signals (public)" },
+            { cmd: "/div", desc: "Dividend stocks this week (public)" },
             { cmd: "/recommendations", desc: "View latest AI recommendations" },
-            { cmd: "/daily-recommendations", desc: "Today's stock picks (public)" },
+            { cmd: "/ipo <SYM>", desc: "IPO issue details (public)" },
+            { cmd: "/ipo-analysis <SYM>", desc: "AI IPO report (public)" },
+            { cmd: "/events", desc: "NSE events feed (public)" },
             { cmd: "/alerts", desc: "View your triggered alerts" },
             { cmd: "/updates", desc: "View system announcements" },
           ].map((c) => (

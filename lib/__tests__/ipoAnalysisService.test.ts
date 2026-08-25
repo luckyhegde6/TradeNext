@@ -60,6 +60,8 @@ jest.mock("@/lib/services/ai/llm-provider", () => ({
   __esModule: true,
   directPrompt: jest.fn(),
   getPromptTimeoutMs: jest.fn(() => 120_000),
+  isQuotaExhausted: jest.fn(() => false),
+  QUOTA_EXHAUSTED_MESSAGE: "AI credits exhausted — try after 6 hours or wait for the daily reset.",
 }));
 
 jest.mock("@/lib/services/ai/ai-monitoring", () => ({

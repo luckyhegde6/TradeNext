@@ -5,7 +5,7 @@
  * Uses directPrompt() (no tool calling needed — stock data is pre-fetched).
  * Processes in batches of 5 to stay within token limits.
  */
-import { directPrompt, getPromptTimeoutMs } from "./llm-provider";
+import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
@@ -260,6 +260,32 @@ async function analyzeBatch(
 
       // Guard: mocks/network may yield non-string — treat as empty.
       const raw = typeof response === "string" ? response : "";
+
+      // 429/402 early-exit: daily quota exhausted — retries and fallbacks will
+      // also fail, so stop immediately to save requests.
+      if (isQuotaExhausted(raw)) {
+        lastError = QUOTA_EXHAUSTED_MESSAGE;
+        logger.warn({
+          msg: "Rate limited — stopping batch (quota exhausted)",
+          model,
+          attempt,
+          preview: raw.slice(0, 200),
+        });
+        // Track the 429 for monitoring visibility
+        await trackAiCall({
+          timestamp: new Date().toISOString(),
+          action: "recommendation_batch",
+          model,
+          status: "error",
+          tokensUsed: 0,
+          responseTimeMs: attemptMs,
+          analysisType: "recommendation",
+          error: lastError,
+          prompt: prompt.slice(0, 500),
+        });
+        // Throw to stop all remaining batches in analyzeStocks()
+        throw new Error(lastError);
+      }
 
       const recommendations = parseAIResponse(raw, stocks);
       if (!recommendations) {

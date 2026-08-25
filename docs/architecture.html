@@ -119,26 +119,28 @@
   <div class="toc">
     <ul>
       <li><a href="#overview">1. System Overview</a></li>
-      <li><a href="#chain">2. Backtest Data Chain</a></li>
-      <li><a href="#seq">3. Sequence Diagrams</a></li>
-      <li><a href="#er">4. ER Diagram</a></li>
-      <li><a href="#sync">5. Sync &amp; Lifecycle Flows</a></li>
-      <li><a href="#cache">6. Caching Strategy</a></li>
-      <li><a href="#mcp">7. MCP Integration</a></li>
-      <li><a href="#troubleshoot">8. Troubleshooting</a></li>
-      <li><a href="#agentic">9. Agentic Operating Model</a></li>
-      <li><a href="#improvements">10. Future Improvements</a></li>
+      <li><a href="#sqlite-backup">2. SQLite Backup Layer</a></li>
+      <li><a href="#chain">3. Backtest Data Chain</a></li>
+      <li><a href="#seq">4. Sequence Diagrams</a></li>
+      <li><a href="#er">5. ER Diagram</a></li>
+      <li><a href="#sync">6. Sync &amp; Lifecycle Flows</a></li>
+      <li><a href="#cache">7. Caching Strategy</a></li>
+      <li><a href="#mcp">8. MCP Integration</a></li>
+      <li><a href="#troubleshoot">9. Troubleshooting</a></li>
+      <li><a href="#agentic">10. Agentic Operating Model</a></li>
+      <li><a href="#improvements">11. Future Improvements</a></li>
     </ul>
   </div>
 </section>
 
 <section id="overview">
   <h2>1. System Overview</h2>
-  <p>TradeNext is a Next.js 16 + TypeScript + Prisma 7 + PostgreSQL (TimescaleDB) app serving NSE (India) market data. All NSE traffic flows through a <strong>server-side proxy only</strong> — the browser never calls NSE directly. Three cache tiers sit in front of the database and the NSE API:</p>
+  <p>TradeNext is a Next.js 16 + TypeScript + Prisma 7 + PostgreSQL (TimescaleDB) app serving NSE (India) market data. All NSE traffic flows through a <strong>server-side proxy only</strong> — the browser never calls NSE directly. Four cache tiers sit in front of the database and the NSE API, with an <strong>SQLite backup layer</strong> for DB outage resilience:</p>
   <ul>
     <li><span class="badge b-blue">Layer 1</span> <strong>In-memory NodeCache</strong> (<code>lib/market-cache.ts</code> — <code>mc:</code> keys, 300s/3600s TTL) and <code>historicalCache</code> (24h) for backtest bars.</li>
     <li><span class="badge b-blue">Layer 2</span> <strong>MarketCache DB</strong> (<code>market_cache</code> table) — persistent store.</li>
     <li><span class="badge b-blue">Layer 3</span> <strong>Main tables</strong> — <code>daily_prices</code> (read-only for backtests), <code>backtest_history</code> (temp, age-pruned).</li>
+    <li><span class="badge b-green">Backup</span> <strong>SQLite (sql.js)</strong> — in-memory backup of 10 tables, synced from Prisma, used when PostgreSQL is unavailable.</li>
     <li><span class="badge b-red">Source</span> <strong>NSE API</strong> (<code>lib/nse-client.ts</code> — cookies, retry, backoff).</li>
   </ul>
   <div class="mermaid">
@@ -147,6 +149,7 @@ graph LR
     N --> C1[In-memory NodeCache<br/>mc: 300s/3600s · historicalCache 24h]
     N --> C2[MarketCache DB<br/>market_cache table]
     N --> D[(PostgreSQL<br/>daily_prices · backtest_history<br/>symbols · backtestRun)]
+    D -->|unavailable?| SQLITE[(SQLite sql.js<br/>10 tables backup)]
     C1 --> C2
     C2 --> D
     D --> NSE[NSE API<br/>server-side proxy]
@@ -159,8 +162,67 @@ graph LR
   </div>
 </section>
 
+<section id="sqlite-backup">
+  <h2>2. SQLite Backup Layer (v3.19.1–v3.19.2)</h2>
+  <p>When the primary PostgreSQL database is unavailable (plan limit exceeded, network outage, Accelerate proxy errors), TradeNext falls back to an <strong>in-memory SQLite</strong> database powered by <code>sql.js</code> (pure-JS, no native compilation). This provides read access to critical data even when the main DB is completely down.</p>
+  <div class="mermaid">
+graph TD
+    subgraph "Primary DB"
+        PG[(PostgreSQL<br/>Prisma Cloud)]
+    end
+
+    subgraph "Backup Layer"
+        SQLITE[(SQLite sql.js<br/>in-memory, 10 tables)]
+    end
+
+    subgraph "Routes"
+        R1[GET /api/recommendations]
+        R2[GET /api/corporate-actions/combined]
+        R3[GET /api/screener/chartink]
+    end
+
+    subgraph "Admin"
+        HEALTH[GET /api/admin/db-health]
+        UI[/admin/utils/db-health]
+    end
+
+    PG -->|syncFromPrisma| SQLITE
+    R1 -->|DB down?| SQLITE
+    R2 -->|DB down?| SQLITE
+    R3 -->|DB down?| SQLITE
+    HEALTH -->|probe + stats| PG
+    HEALTH -->|sync trigger| SQLITE
+    UI --> HEALTH
+  </div>
+  <h3>Tables Backed Up (10 total)</h3>
+  <table>
+    <tr><th>Table</th><th>Purpose</th><th>Added</th></tr>
+    <tr><td><code>daily_recommendation_run</code></td><td>AI recommendation runs</td><td>v3.19.1</td></tr>
+    <tr><td><code>daily_recommendation_stock</code></td><td>Per-run stock picks</td><td>v3.19.1</td></tr>
+    <tr><td><code>corporate_action</code></td><td>Dividends, splits, bonus</td><td>v3.19.1</td></tr>
+    <tr><td><code>chartink_screener</code></td><td>Screener definitions</td><td>v3.19.1</td></tr>
+    <tr><td><code>worker_status</code></td><td>Worker liveness</td><td>v3.19.2</td></tr>
+    <tr><td><code>server_log</code></td><td>Application logs</td><td>v3.19.2</td></tr>
+    <tr><td><code>audit_log</code></td><td>Audit trail</td><td>v3.19.2</td></tr>
+    <tr><td><code>cron_job</code></td><td>Cron job definitions</td><td>v3.19.2</td></tr>
+    <tr><td><code>cron_run</code></td><td>Cron execution history</td><td>v3.19.2</td></tr>
+    <tr><td><code>worker_task</code></td><td>Background task queue</td><td>v3.19.2</td></tr>
+  </table>
+  <h3>Recovery Sync</h3>
+  <div class="callout green">
+    <strong>Auto-recovery:</strong> A background probe runs every 5 minutes when Prisma is detected as unavailable. When the probe succeeds, <code>syncFromPrisma()</code> is triggered automatically to refresh all 10 SQLite tables from the live database.
+  </div>
+  <h3>Route Fallback Chain</h3>
+  <table>
+    <tr><th>Route</th><th>Fallback Path</th></tr>
+    <tr><td><code>GET /api/recommendations</code></td><td>DB → SQLite → memory cache → 500</td></tr>
+    <tr><td><code>GET /api/corporate-actions/combined</code></td><td>DB → SQLite → NodeCache → 500</td></tr>
+    <tr><td><code>GET /api/screener/chartink</code></td><td>DB → SQLite → empty + warning</td></tr>
+  </table>
+</section>
+
 <section id="chain">
-  <h2>2. Backtest Data Chain</h2>
+  <h2>3. Backtest Data Chain</h2>
   <p><code>getBacktestData(symbol, from?, to?)</code> in <code>lib/services/backtestDataService.ts</code> resolves bars through a 4-step chain. It returns <code>dataSource</code> so callers (and tests) know where the data came from:</p>
   <table>
     <tr><th>Step</th><th>Source</th><th>dataSource</th><th>Notes</th></tr>
@@ -183,9 +245,9 @@ const { bars, ohlcv, barCount, source, rangeStart, rangeEnd, fetchedAt } =
 </section>
 
 <section id="seq">
-  <h2>3. Sequence Diagrams</h2>
+  <h2>4. Sequence Diagrams</h2>
 
-  <h3>3.1 Backtest API — data resolution</h3>
+  <h3>4.1 Backtest API — data resolution</h3>
   <div class="mermaid">
 sequenceDiagram
     autonumber
@@ -232,7 +294,7 @@ sequenceDiagram
     R-->>U: { success, metrics, trades, dataSource }
   </div>
 
-  <h3>3.2 MCP getHistoricalData</h3>
+  <h3>4.2 MCP getHistoricalData</h3>
   <div class="mermaid">
 sequenceDiagram
     autonumber
@@ -250,7 +312,7 @@ sequenceDiagram
     M-->>C: { success, function, data, timestamp }
   </div>
 
-  <h3>3.3 General NSE quote (widened-scope policy)</h3>
+  <h3>4.3 General NSE quote (widened-scope policy)</h3>
   <div class="mermaid">
 sequenceDiagram
     autonumber
@@ -279,7 +341,7 @@ sequenceDiagram
 </section>
 
 <section id="er">
-  <h2>4. ER Diagram</h2>
+  <h2>5. ER Diagram</h2>
   <p>Core tables involved in the historical-data path. <code>backtest_history</code> is the only write target for NSE-fetched bars; <code>daily_prices</code> is read-only from the backtest path.</p>
   <div class="mermaid">
 erDiagram
@@ -348,9 +410,9 @@ erDiagram
 </section>
 
 <section id="sync">
-  <h2>5. Sync &amp; Lifecycle Flows</h2>
+  <h2>6. Sync &amp; Lifecycle Flows</h2>
 
-  <h3>5.1 Temp table lifecycle (backtest_history)</h3>
+  <h3>6.1 Temp table lifecycle (backtest_history)</h3>
   <div class="mermaid">
 flowchart TD
     A[NSE fetch triggered] --> B[securityWiseBarsToOHLCV]
@@ -365,7 +427,7 @@ flowchart TD
     I --> K[Next request: chain restarts at memory]
   </div>
 
-  <h3>5.2 Market cache sync (widen-scope policy)</h3>
+  <h3>6.2 Market cache sync (widen-scope policy)</h3>
   <div class="mermaid">
 flowchart TD
     A[getOrFetchNseData] --> B{NodeCache mc: hit?}
@@ -381,7 +443,7 @@ flowchart TD
     I --> Z
   </div>
 
-  <h3>5.3 Worker / cron integration</h3>
+  <h3>6.3 Worker / cron integration</h3>
   <ul>
     <li><span class="badge b-blue">Recs engine</span> 10:00 AM IST generation, 3:30 PM IST performance tracking (UTC 04:30 / 10:00).</li>
     <li><span class="badge b-blue">Tasks &amp; workers</span> <code>lib/services/worker/worker-service.ts</code> — queue, priority, retries, <code>runInChunks()</code> bounded-concurrency for large batches (txn 5s limit).</li>
@@ -390,7 +452,7 @@ flowchart TD
 </section>
 
 <section id="cache">
-  <h2>6. Caching Strategy</h2>
+  <h2>7. Caching Strategy</h2>
   <table>
     <tr><th>Cache</th><th>Location</th><th>TTL</th><th>Key</th><th>Purpose</th></tr>
     <tr><td><code>historicalCache</code></td><td><code>lib/cache.ts</code></td><td>24h</td><td>symbol + range</td><td>Backtest bars in memory.</td></tr>
@@ -404,7 +466,7 @@ flowchart TD
 </section>
 
 <section id="mcp">
-  <h2>7. MCP Integration</h2>
+  <h2>8. MCP Integration</h2>
   <p>The MCP API (<code>POST /api/mcp</code> or <code>GET /api/mcp?function=...</code>) exposes 28 functions for external NSE data. <code>getHistoricalData</code> (added Aug 6, 2026) reuses <code>getBacktestData()</code> so MCP and the backtester share one data path. <code>getIpoAnalysis</code> / <code>getIpoIssueDetail</code> / <code>getNseEvents</code> (added Aug 12, 2026) expose the IPO report v2, IPO issue size, and the NSE events feed. <code>getOptionChain</code> / <code>getFoExpiries</code> (added Aug 13, 2026) expose the F&O option-chain-v3 data and expiry calendar.</p>
   <table>
     <tr><th>Function</th><th>Params</th><th>Returns</th></tr>
@@ -424,7 +486,7 @@ flowchart TD
 </section>
 
 <section id="troubleshoot">
-  <h2>8. Troubleshooting</h2>
+  <h2>9. Troubleshooting</h2>
   <table>
     <tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr>
     <tr>
@@ -471,7 +533,7 @@ flowchart TD
 </section>
 
 <section id="agentic">
-  <h2>9. Agentic Operating Model</h2>
+  <h2>10. Agentic Operating Model</h2>
   <p>Agents working in this repo follow a file-first memory model (no conversation-memory reliance):</p>
   <div class="mermaid">
 flowchart LR
@@ -492,7 +554,7 @@ flowchart LR
 </section>
 
 <section id="improvements">
-  <h2>10. Future Improvements</h2>
+  <h2>11. Future Improvements</h2>
   <ul>
     <li><span class="badge b-violet">Idea</span> <strong>Redis tier</strong> for <code>historicalCache</code> so bars survive process restarts (currently memory-only).</li>
     <li><span class="badge b-violet">Idea</span> <strong>Pre-seed temp table</strong> for the top-N symbols on a schedule, so backtests rarely hit NSE live.</li>

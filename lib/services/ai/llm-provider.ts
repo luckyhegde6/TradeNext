@@ -84,6 +84,31 @@ export const resetLLM = resetClient;
  *   recommendation agent's 5-minute cap) pass the remaining budget so a
  *   single attempt can never overrun it.
  */
+/**
+ * User-facing message when OpenRouter daily quota is exhausted.
+ * Displayed in UI, Telegram, and IPO analysis error responses.
+ */
+export const QUOTA_EXHAUSTED_MESSAGE =
+  "AI credits exhausted — try after 6 hours or wait for the daily reset.";
+
+/**
+ * Detect OpenRouter rate-limit (HTTP 429) or insufficient-credits (HTTP 402)
+ * in a directPrompt response string. Both mean the daily free-tier quota is
+ * gone — retries and model fallbacks will also fail.
+ *
+ * Use this in batch agents and analysis services to bail early instead of
+ * burning more requests on models that will all fail.
+ */
+export function isQuotaExhausted(response: string): boolean {
+  return (
+    response.includes("HTTP 429") ||
+    response.includes("HTTP 402") ||
+    response.includes("Rate limit") ||
+    response.includes("Rate limit exceeded") ||
+    response.includes("Insufficient credits")
+  );
+}
+
 export async function directPrompt(
   prompt: string,
   config?: AIConfig,

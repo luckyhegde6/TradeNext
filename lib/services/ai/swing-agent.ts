@@ -7,7 +7,7 @@
  * mirrors recommendation-agent's v3.8.0 hardening (retry on unusable responses,
  * fail fast, never accept an unparseable/truncated answer as a "successful" batch).
  */
-import { directPrompt, getPromptTimeoutMs } from "./llm-provider";
+import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
@@ -53,6 +53,13 @@ const RETRY_BASE_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 8000;
 const CONCURRENCY = 3;
 const BATCH_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Shared flag across all swing batches. When one batch hits 429 (quota
+ * exhausted), remaining batches skip immediately instead of also failing.
+ * Reset at the start of each analyzeSwingStocks() call.
+ */
+let swingQuotaExhausted = false;
 
 const SYSTEM_PROMPT_SWING = `You are a senior Indian swing trader specializing in NSE-listed stocks. Swing trading means holding positions from a few days to a few weeks, riding momentum and trend.
 
@@ -103,6 +110,9 @@ export async function analyzeSwingStocks(
     return stocks.map((s) => failedSwingResult(s, "AI is not configured"));
   }
 
+  // Reset shared flag for this run
+  swingQuotaExhausted = false;
+
   const results: SwingAnalysisResult[] = new Array(stocks.length);
   const totalBatches = Math.ceil(stocks.length / BATCH_SIZE);
   let nextIndex = 0;
@@ -113,6 +123,19 @@ export async function analyzeSwingStocks(
       nextIndex += BATCH_SIZE;
       const batch = stocks.slice(i, i + BATCH_SIZE);
       const batchIndex = Math.floor(i / BATCH_SIZE);
+
+      // Skip remaining batches if quota was exhausted by a concurrent batch
+      if (swingQuotaExhausted) {
+        logger.warn({
+          msg: "Skipping swing batch — quota exhausted",
+          batchIndex: batchIndex + 1,
+          symbols: batch.map((s) => s.symbol),
+        });
+        batch.forEach((stock, idx) => {
+          results[i + idx] = failedSwingResult(stock, "OpenRouter daily quota exhausted");
+        });
+        continue;
+      }
 
       logger.info({
         msg: "Analyzing swing batch",
@@ -212,6 +235,31 @@ async function analyzeSwingBatch(
       const attemptMs = Date.now() - attemptStart;
 
       const raw = typeof response === "string" ? response : "";
+
+      // 429/402 early-exit: daily quota exhausted — retries and fallbacks will
+      // also fail, so stop immediately to save requests.
+      if (isQuotaExhausted(raw)) {
+        lastError = QUOTA_EXHAUSTED_MESSAGE;
+        swingQuotaExhausted = true; // Stop all remaining batches
+        logger.warn({
+          msg: "Rate limited — stopping swing analysis (quota exhausted)",
+          model,
+          attempt,
+          preview: raw.slice(0, 200),
+        });
+        await trackAiCall({
+          timestamp: new Date().toISOString(),
+          action: "swing_analysis_batch",
+          model,
+          status: "error",
+          tokensUsed: 0,
+          responseTimeMs: attemptMs,
+          analysisType: "swing",
+          error: lastError,
+          prompt: prompt.slice(0, 500),
+        });
+        throw new Error(lastError);
+      }
 
       const analyses = parseSwingResponse(raw, stocks);
       if (!analyses) {

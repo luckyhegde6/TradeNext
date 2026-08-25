@@ -14,6 +14,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { getTelegramEnvConfig } from "@/lib/alerts/delivery/telegram-env";
 import { sendTelegramAlert } from "@/lib/alerts/delivery/telegram";
+import { createAuditLog } from "@/lib/audit";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -196,6 +197,8 @@ async function handleHelp(ctx: BotCommandContext): Promise<BotCommandResult> {
   const commands = user
     ? `📊 */daily-recommendations* — Today's AI-analyzed stock picks\n`
       + `📈 */recommendations* — Current stock recommendations & picks\n`
+      + `🌊 */swing* — Top swing trading signals with AI targets\n`
+      + `💰 */div* — Dividend stocks with ex-dates this week\n`
       + `🚀 */ipo <SYMBOL>* — IPO issue details (bid lot, price band)\n`
       + `🤖 */ipo-analysis <SYMBOL>* — AI IPO report (verdict + scores)\n`
       + `🎉 */events* — NSE events & notifications feed\n`
@@ -205,6 +208,8 @@ async function handleHelp(ctx: BotCommandContext): Promise<BotCommandResult> {
     : `📋 */start* — Welcome & subscription instructions\n`
       + `📋 */chatid* — Show your Chat ID\n`
       + `📊 */daily-recommendations* — Today's AI stock picks (no auth needed)\n`
+      + `🌊 */swing* — Swing trading signals (no auth needed)\n`
+      + `💰 */div* — Dividend stocks this week (no auth needed)\n`
       + `🚀 */ipo <SYMBOL>* — IPO issue details (no auth needed)\n`
       + `🤖 */ipo-analysis <SYMBOL>* — AI IPO report (cached output)\n`
       + `🎉 */events* — NSE events feed (no auth needed)\n`
@@ -591,6 +596,147 @@ async function handleNseEvents(): Promise<BotCommandResult> {
   }
 }
 
+// ─── Swing + Dividend Commands ───────────────────────────────────────────
+
+/**
+ * /swing — Top swing trading signals from the 34 swing screeners.
+ * Shows the latest picks with AI analysis (LONG/SHORT/OBSERVE) if available.
+ * Public data — no auth required.
+ */
+async function handleSwing(): Promise<BotCommandResult> {
+  try {
+    const { getSwingRecommendations } = await import("@/lib/services/swingRecommendationService");
+    const response = await getSwingRecommendations({ analyze: true });
+
+    if (!response.stocks || response.stocks.length === 0) {
+      return { ok: true, text: "🌊 *Swing Trading Signals*\n\nNo swing signals available right now. Try again after the next market scan." };
+    }
+
+    const fmtPct = (n: number) => (n >= 0 ? `+${n.toFixed(1)}%` : `${n.toFixed(1)}%`);
+
+    const lines = response.stocks.slice(0, 10).map((stock, i) => {
+      const analysis = stock.analysis;
+      const action = analysis?.action || "OBSERVE";
+      const emoji = action === "LONG" ? "🟢" : action === "SHORT" ? "🔴" : "🟡";
+      const conf = analysis ? ` ${analysis.confidence}%` : "";
+      const levels = analysis
+        ? `\n   Entry ₹${analysis.entryPrice.toFixed(0)} → Target ₹${analysis.targetPrice.toFixed(0)} / Stop ₹${analysis.stopLoss.toFixed(0)}`
+        : "";
+      const families = stock.families?.length ? ` _${stock.families.join(", ")}_` : "";
+
+      return `${i + 1}. ${emoji} *${stock.symbol}* — ₹${stock.price.toFixed(0)} (${fmtPct(stock.changePercent)})${conf}${levels}${families}`;
+    });
+
+    const status = response.analysisStatus === "done"
+      ? "✅ AI targets ready"
+      : response.analysisStatus === "pending"
+        ? "⏳ AI targets generating…"
+        : response.analysisStatus === "failed"
+          ? "⚠️ AI targets unavailable"
+          : "";
+
+    let text = `🌊 *Swing Trading Signals* — Top ${Math.min(response.stocks.length, 10)}\n\n`
+      + lines.join("\n\n")
+      + `\n\n_${response.totalRaw} stocks scanned from ${response.templateCount} screeners_`
+      + (status ? `\n${status}` : "")
+      + `\n_Full analysis on TradeNext → Recommendations → Swing_`;
+
+    if (text.length > 4000) {
+      text = text.slice(0, 3990) + "\n\n*(truncated — view full list on TradeNext)*";
+    }
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /swing failed", error: err });
+    return { ok: true, text: "⚠️ Could not fetch swing signals. Please try again later." };
+  }
+}
+
+/**
+ * /div — Dividend stocks with upcoming ex-dates this week.
+ * Shows stocks going ex-dividend in the current Mon–Sun window.
+ * Public data — no auth required.
+ */
+async function handleDiv(): Promise<BotCommandResult> {
+  try {
+    const { getUpcomingDividends } = await import("@/lib/services/dividendCalendarService");
+    const allDividends = await getUpcomingDividends(50);
+
+    if (!allDividends || allDividends.length === 0) {
+      return { ok: true, text: "💰 *Dividend Stocks*\n\nNo upcoming dividends found." };
+    }
+
+    // Filter to this week (Mon–Sun)
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ...
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7));
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    const thisWeek = allDividends.filter((d) => {
+      if (!d.exDate) return false;
+      const exDate = new Date(d.exDate);
+      return exDate >= monday && exDate <= sunday;
+    });
+
+    // Also show upcoming (next 7 days from today) if this week is empty or thin
+    const nextWeek = allDividends.filter((d) => {
+      if (!d.exDate) return false;
+      const exDate = new Date(d.exDate);
+      return exDate > sunday && exDate <= new Date(sunday.getTime() + 7 * 86400000);
+    });
+
+    const weekRange = `${monday.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${sunday.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+
+    if (thisWeek.length === 0 && nextWeek.length === 0) {
+      // Show next available dividend
+      const next = allDividends[0];
+      const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+      return {
+        ok: true,
+        text: `💰 *Dividend Stocks*\n\nNo ex-dates this week (${weekRange}).\n\n*Next up:* *${next.symbol}* — ₹${next.dividendPerShare || "—"} per share\nEx-Date: ${fmtDate(next.exDate)}${next.dividendYield ? `\nYield: ${next.dividendYield.toFixed(2)}%` : ""}`,
+      };
+    }
+
+    const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—";
+
+    const formatDiv = (d: typeof allDividends[0], idx: number) => {
+      const amount = d.dividendPerShare ? `₹${d.dividendPerShare}` : "—";
+      const yield_ = d.dividendYield ? ` (${d.dividendYield.toFixed(2)}% yield)` : "";
+      return `${idx + 1}. *${d.symbol}* — ${amount}${yield_}\n   Ex: ${fmtDate(d.exDate)} · ${d.companyName || ""}`;
+    };
+
+    let text = "";
+    if (thisWeek.length > 0) {
+      text += `💰 *Dividends This Week* (${weekRange})\n\n`
+        + thisWeek.slice(0, 8).map((d, i) => formatDiv(d, i)).join("\n\n");
+      if (thisWeek.length > 8) {
+        text += `\n\n_…and ${thisWeek.length - 8} more this week_`;
+      }
+    }
+
+    if (nextWeek.length > 0) {
+      if (text) text += "\n\n---\n\n";
+      text += `📅 *Next Week*\n\n`
+        + nextWeek.slice(0, 5).map((d, i) => formatDiv(d, thisWeek.length + i)).join("\n\n");
+    }
+
+    text += "\n\n_Full dividend calendar on TradeNext → Dividends_";
+
+    if (text.length > 4000) {
+      text = text.slice(0, 3990) + "\n\n*(truncated — view all on TradeNext)*";
+    }
+
+    return { ok: true, text };
+  } catch (err) {
+    logger.error({ msg: "Bot: /div failed", error: err });
+    return { ok: true, text: "⚠️ Could not fetch dividend data. Please try again later." };
+  }
+}
+
 // ─── Unknown Command ──────────────────────────────────────────────────────
 
 async function handleUnknown(ctx: BotCommandContext): Promise<BotCommandResult> {
@@ -616,6 +762,8 @@ const COMMAND_MAP: Record<string, (ctx: BotCommandContext) => Promise<BotCommand
   "/ipo": handleIpoDetail,
   "/ipo-analysis": handleIpoAnalysis,
   "/events": handleNseEvents,
+  "/swing": handleSwing,
+  "/div": handleDiv,
 };
 
 /**
@@ -653,7 +801,7 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   // set BEFORE any dynamic dispatch. This allowlist check is what
   // neutralizes the untrusted-method-name flow (CWE-470); a plain
   // hasOwnProperty/typeof guard on the resolved value does not.
-  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates", "/ipo", "/ipo-analysis", "/events"];
+  const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates", "/ipo", "/ipo-analysis", "/events", "/swing", "/div"];
   if (!KNOWN_COMMANDS.includes(command)) {
     const result = await handleUnknown(ctx);
     await sendBotMessage(chatId, result.text || "");
@@ -671,7 +819,7 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
     await sendBotMessage(chatId, result.text);
   }
 
-  // 6. Audit log
+  // 6. Audit log (file + DB for admin visibility)
   const user = await lookupUserByChatId(chatId).catch(() => null);
   logger.info({
     msg: "Telegram bot: command executed",
@@ -681,6 +829,21 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
     args: args.length > 0 ? args.join(" ") : undefined,
     success: result.ok,
   });
+
+  // Persist to AuditLog so admin Telegram Deliveries tab shows entries
+  createAuditLog({
+    action: "TELEGRAM_COMMAND",
+    resource: "telegram-bot",
+    userId: user?.id || undefined,
+    metadata: {
+      chatId,
+      command,
+      args: args.length > 0 ? args : undefined,
+      success: result.ok,
+      responsePreview: result.text?.slice(0, 200) || result.error?.slice(0, 200) || undefined,
+    },
+    errorMessage: result.ok ? undefined : result.error,
+  }).catch((e) => logger.warn({ msg: "Audit log for bot command failed", error: e }));
 
   return true;
 }
