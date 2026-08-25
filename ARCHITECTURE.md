@@ -36,6 +36,7 @@
 | **Frontend** | Next.js 16 (App Router), React 19, Tailwind CSS 4.x |
 | **Backend** | Next.js API Routes (Node.js) |
 | **Database** | PostgreSQL 14 + TimescaleDB |
+| **Backup DB** | SQLite (sql.js, in-memory, pure-JS) |
 | **ORM** | Prisma 7 |
 | **Authentication** | NextAuth.js (Credentials) |
 | **Caching** | Node-cache (in-memory), optional Redis |
@@ -194,11 +195,14 @@ GET   /api/admin/workers            - List worker tasks
 POST  /api/admin/workers            - Create ad-hoc task
 POST  /api/admin/workers/engine     - Start/Stop worker loops
 POST  /api/admin/workers/trigger    - Trigger linked cron job
+GET   /api/admin/db-usage           - DB ops counters + write budget
+GET   /api/admin/db-health          - Prisma connectivity + SQLite health + sync history
+POST  /api/admin/db-health          - Manual SQLite sync trigger
 ```
 
 ---
 
-## 5. Caching Strategy
+## 5. Caching & Backup Strategy
 
 ### Cache Layers
 
@@ -209,6 +213,47 @@ POST  /api/admin/workers/trigger    - Trigger linked cron job
 | Corporate Announcements | Medium cache | 5 min |
 | User Portfolios | No cache (DB) | - |
 | Market Breadth | Medium cache | 1 min |
+
+### SQLite Backup Layer (v3.19.1–v3.19.2)
+
+When the primary PostgreSQL database is unavailable (plan limit exceeded, network outage, Accelerate proxy errors), TradeNext falls back to an **in-memory SQLite** database powered by `sql.js` (pure-JS, no native compilation). This provides read access to critical data even when the main DB is completely down.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              SQLite Backup Architecture                   │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│  ┌──────────────┐     ┌──────────────┐                   │
+│  │  Prisma DB   │────▶│   SQLite     │                   │
+│  │ (PostgreSQL) │     │ (sql.js)     │                   │
+│  └──────────────┘     └──────────────┘                   │
+│         │                    ▲                            │
+│         │   syncFromPrisma() │                            │
+│         └────────────────────┘                            │
+│                                                           │
+│  Recovery: 5-min background probe when DB is down         │
+│  Auto-sync on Prisma recovery                             │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Tables backed up** (10 total, v3.19.2):
+- `daily_recommendation_run`, `daily_recommendation_stock` — AI recommendations
+- `corporate_action` — dividends, splits, bonus
+- `chartink_screener` — screener definitions
+- `worker_status` — worker liveness
+- `server_log` — application logs
+- `audit_log` — audit trail
+- `cron_job` — cron job definitions
+- `cron_run` — cron execution history
+- `worker_task` — background task queue
+- `_backup_meta` — sync metadata
+
+**Route fallback chain** (DB → SQLite → memory → 500):
+- `GET /api/recommendations` — recommendations with SQLite fallback
+- `GET /api/corporate-actions/combined` — corporate actions with SQLite fallback
+- `GET /api/screener/chartink` — screener results with SQLite fallback
+
+**Admin health dashboard**: `GET /api/admin/db-health` + UI at `/admin/utils/db-health` showing Prisma connectivity, ops counters, table row counts, write budget, and sync history.
 
 ### Cache Implementation
 
@@ -252,7 +297,8 @@ app/
 │   └── [ticker]/page.tsx  # Company detail
 ├── admin/
 │   ├── users/page.tsx     # User management
-│   └── utils/page.tsx    # Admin dashboard
+│   ├── utils/page.tsx    # Admin dashboard
+│   └── utils/db-health/page.tsx # DB health monitoring
 └── api/                   # API routes
 ```
 
@@ -307,10 +353,13 @@ localhost:3000 (Next.js)
   └── localhost:5432 (PostgreSQL via Docker)
 ```
 
-### Production (Netlify)
+### Production (Netlify — Persistent Server)
 ```
-Netlify Edge
-  └── PostgreSQL (Prisma Cloud/Timescale)
+Netlify Persistent Server
+  ├── Next.js (Node.js runtime)
+  ├── In-process cron daemon (instrumentation.ts)
+  ├── SQLite backup (sql.js, in-memory, synced from Prisma)
+  └── PostgreSQL (Prisma Cloud/TimescaleDB)
 ```
 
 ### Docker Compose (Optional)
@@ -339,6 +388,10 @@ services:
 - [x] SWR for data fetching with deduplication
 - [x] In-memory caching for market data
 - [x] Database indexes on frequently queried columns
+- [x] SQLite backup layer (sql.js) for DB outage resilience (v3.19.1)
+- [x] Write budget guard — reject non-critical writes when daily ops budget exceeded (v3.19.0)
+- [x] Automatic recovery sync — background probe detects Prisma recovery and re-syncs SQLite (v3.19.2)
+- [x] Admin DB health monitoring dashboard (v3.19.2)
 
 ### Planned
 - [ ] Redis for distributed caching
@@ -373,12 +426,15 @@ services:
 - Application: pino logger
 - Levels: debug, info, warn, error
 - Format: JSON with metadata
+- SQLite backup: server_log, audit_log tables synced from Prisma
 
 ### Metrics to Track
 - API response times
 - Page load times
 - Error rates
 - Active users
+- DB operations (reads/writes per IST day, budget guard)
+- SQLite backup health (Prisma connectivity, sync status)
 
 ---
 

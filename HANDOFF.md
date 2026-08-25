@@ -12,13 +12,13 @@ status: "ready"                   # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-17T19:30:00Z"
-feature: "v3.14.0-swing-signals-screener-fix-spec-driven-dev"
+last_updated: "2026-08-25T12:00:00Z"
+feature: "v3.19.2-sqlite-expanded-recovery-sync-admin-db-health"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Branch `docs-readme-refs-agentic-coding` (**COMMITTED + PUSHED**, `2ff33f9` v3.14.0 + `e77edcb` docs + `98b595b` screener fix — PR ready to open). Includes: (1) **v3.14.0 — Swing signal persistence + performance tracking**: `SwingSignal` model, `swingPerformanceService.ts`, worker task, admin trigger, audit tags, worker-logs tab; 758 pass/4 skip, tsc 46 baseline. (2) **Advanced screener fix — all 117 Chartink templates**: Fix A (Playwright capture 150/150 scanClause) + Fix D (TV fallback try/catch + UI warning); 143 chartink+screener tests pass. (3) **Spec-driven development workflow**: mandatory spec→plan→implement→verify. **Remaining: user requests PR creation.**
+**No active handoff.** Branch `feature/ai-intelligence` (**COMMITTED + PUSHED**, on top of v3.19.1). Includes: (1) **v3.19.2 — SQLite expanded + re-sync + admin DB health dashboard**: 6 new SQLite tables (worker_status, server_log, audit_log, cron_job, cron_run, worker_task) + recovery sync (5-min background probe) + `GET/POST /api/admin/db-health` + admin dashboard UI at `/admin/utils/db-health` + 17 tests (869 pass/4 skip), tsc 46 baseline. (2) **v3.19.1 — SQLite backup layer**: sql.js in-memory fallback with route fallback chains (recs, corp-actions, screener). (3) **v3.19.0 — DB plan limit resilience**: graceful degradation, op reduction, write budget guard, admin OTP fallback. **Next: user requests commit + push or deploy.**
 
 ---
 
@@ -83,3 +83,4 @@ No active handoff. See `.agents/session-todos.md` for the current session todo l
 | v1.6 | 2026-08-08 | Session v3.5.3 (Playwright e2e suite): state updated to e2e docs/commit phase; feature `playwright-e2e-suite` |
 | v1.7 | 2026-08-11 | Session v3.5.7 (auth join→approve→login fix + server logs `logs/` dir): state updated; feature `v3.5.7-auth-login-fix-logs-dir`; commit/PR pending, no deploy |
 | v1.8 | 2026-08-17 | Session v3.14.0 (swing signal persistence + advanced screener fix + spec-driven dev): state updated to `ready`; branch `docs-readme-refs-agentic-coding` committed + pushed |
+| v1.9 | 2026-08-25 | Session v3.19.2 (SQLite expanded + recovery sync + admin DB health dashboard): state updated to `ready`; branch `feature/ai-intelligence` committed + pushed |

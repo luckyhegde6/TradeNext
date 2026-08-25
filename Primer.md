@@ -5,11 +5,18 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-25 (v3.19.1 SQLite backup layer: sql.js in-memory fallback + route fallback chains; suite 861 pass / 4 skip; tsc 46 = exact baseline; commit `4f6ff89`)
+2026-08-25 (v3.19.2 SQLite expanded + re-sync + admin DB health dashboard; suite 869 pass / 4 skip; tsc 46 = exact baseline; pending push)
 
 ---
 
 ## Current Project Status
+
+### v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, PENDING PUSH
+**Branch**: `feature/ai-intelligence` (on top of v3.19.1).
+**Why**: SQLite backup (v3.19.1) only covered recommendation/screener/corp-action tables — logs, auth, monitoring, and cron data were not backed up. No automatic recovery when Prisma comes back online. No admin visibility into DB health status.
+**Fix**: (1) Expanded schema — `lib/sqlite.ts` gains 6 new tables (`worker_status`, `server_log`, `audit_log`, `cron_job`, `cron_run`, `worker_task`) with query helpers + `getHealthStatus()`. (2) Recovery sync — background probe every 5 min when Prisma is down, auto-sync on recovery. (3) Admin DB health API — `GET/POST /api/admin/db-health`. (4) Admin DB health UI — `app/admin/utils/db-health/page.tsx` dashboard with status badges, stat cards, write budget bar, table comparison, sync history, 30s refresh. Nav entry in admin utils layout.
+**Tests**: 17 tests (+8 vs v3.19.1); suite 869 pass / 4 skip; tsc 46 = exact baseline.
+- **Status**: pending push; docs updated.
 
 ### v3.19.1 — SQLite Backup Layer (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED, NO DEPLOY
 **Branch**: `feature/ai-intelligence` (on top of v3.19.0).

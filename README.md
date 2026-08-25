@@ -32,7 +32,7 @@ PostgreSQL/TimescaleDB and deployed on Netlify as a persistent server with an in
 | **AI Recommendations** | Daily picks from Chartink + TradingView hybrid scan, analyzed by an AI agent (OpenRouter) with confidence/target/SL, performance tracking + archival |
 | **IPOs & Events** | IPO issue details — **Issue Size: shares per lot + ₹ per lot** — plus AI IPO analysis rendered as a JSON report (GMP, peers, risk matrix, strategy) and an **NSE events feed** (listing ceremonies etc.) on the dashboard |
 | **Alerts & Telegram** | Price alerts, multi-condition rules, channels, event history, and **@tradenext6Bot** real-time delivery with rate limiting & user verification |
-| **Platform** | Role-based auth (join-request flow), admin console (users, cron, workers, monitoring, AI config), background jobs, audit logging, MCP API |
+| **Platform** | Role-based auth (join-request flow), admin console (users, cron, workers, monitoring, AI config, DB health), background jobs, audit logging, MCP API |
 
 ## Verified Features
 
@@ -100,6 +100,7 @@ Visit **http://localhost:3000**.
 | Language | TypeScript 5.9 (strict) |
 | Styling | Tailwind CSS 4.x |
 | Database | Prisma 7 + PostgreSQL / TimescaleDB |
+| Backup DB | SQLite (sql.js, in-memory, pure-JS) — DB outage resilience |
 | Auth | NextAuth.js (httpOnly cookies, RBAC) |
 | Testing | Jest 30 + Testing Library + Playwright (e2e) |
 | Logging | pino structured logs → `logs/` dir |

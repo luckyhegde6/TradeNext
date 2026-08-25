@@ -1303,6 +1303,33 @@ beforeEach(() => {
 ```
 
 - 2026-08-19: Added Lesson 85 (cache key must match source — `require()` test flush needs exact key)
+
+### 86. WASM-Based npm Packages Can't Load in Jest — Mock the Entire Module, Don't Try to Polyfill `WebAssembly`
+**Issue**: While testing `lib/sqlite.ts` (which uses `sql.js` — a pure-JS SQLite that loads a WASM binary), Jest threw `WebAssembly is not defined` at module load time. `sql.js` internally calls `initSqlite()` which compiles a `.wasm` binary — this is unavailable in Jest's jsdom/node environments without a WASM polyfill.
+
+**Root Cause**: `sql.js` is designed for browser/Node with WASM support. Jest's test environment (even `@jest-environment node`) doesn't provide a `WebAssembly` global by default. Trying to polyfill `WebAssembly` is fragile and version-dependent — the WASM binary path changes across `sql.js` versions.
+
+**Solution**: Mock `sql.js` entirely at the `jest.mock` level. The mock doesn't need to replicate SQLite — it just needs to provide the same API surface (`Database` constructor with `run()`, `exec()`, `prepare()`, `close()` methods). Use an in-memory object store inside the mock factory:
+```typescript
+jest.mock("sql.js", () => {
+  const store: Record<string, string[][]> = {};
+  return {
+    __esModule: true,
+    default: async () => ({
+      Database: class {
+        run(sql: string, ...params: unknown[]) { /* parse & store */ }
+        exec(sql: string) { /* return stored rows */ }
+        prepare(sql: string) { /* return bound stmt */ }
+        close() {}
+      }
+    }),
+    __store: store,  // test access
+  };
+});
+```
+The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 — SWC hoisting prevents referencing module-scope vars from factories).
+
+**Rule**: (1) When a dependency uses WASM, native binaries, or platform-specific APIs, mock the entire module — don't try to polyfill the runtime. (2) The mock factory's in-memory store should mirror the API contract enough for tests to verify the CALLER's logic (SQL generation, table names, parameter mapping) without needing actual database functionality. (3) Split multi-statement SQL on `;` when asserting — SQLite's `run()` executes all statements in one call.
 **Issue**: Agent profiles (`qa.md`, `e2e-agent.md`, `devops.md`) referenced `playwright-cli open`, `playwright-cli snapshot`, and Vercel deployment — all stale. The Playwright CLI tool was replaced by Playwright MCP tools + Chrome DevTools MCP. Vercel was never used (Netlify only).
 **Root Cause**: Agent profiles were created early and never updated when the tooling stack changed. The `playwright-cli` npm package was replaced by `@playwright/mcp` (MCP server) + `chrome-devtools-mcp`, but agent profiles still referenced the old CLI commands.
 **Rule**: (1) Agent profiles MUST reference the actual tooling in use — grep for stale tool names after any tooling change. (2) Every agent profile MUST have a `Skill` reference pointing to the machine-readable `.opencode/skills/<name>/SKILL.md` file. (3) The `opencode.json` `agent:` section MUST have entries for ALL agents that subagents can invoke.
@@ -1310,6 +1337,7 @@ beforeEach(() => {
 ---
 
 ## Update Log
+- 2026-08-25: Added Lesson 86 (WASM-based npm packages can't load in Jest — mock the entire module, don't polyfill WebAssembly; sql.js mock uses in-memory store inside factory closure; split multi-statement SQL on `;`); added v3.19.2 SQLite expanded + recovery sync + admin DB health dashboard entry (suite 869 pass / 4 skip, tsc 46 baseline)
 - 2026-08-18: Added Lesson 84 (agent profiles must reference correct tooling — stale playwright-cli refs break workflows; every profile needs Skill reference; opencode.json must have entries for ALL subagent-invocable agents); restructured `.agents/` — moved legacy changelog files to `.agents/docs/`, updated CHANGELOG index, wired 7 missing agents in opencode.json, updated AGENT-SKILL-MATRIX (14 agents, 8 skills, 6 commands)
 - 2026-08-17: Added Lesson 83 (advanced screener: empty scanClause = silent failure; templates MUST have scanClause; external fallback calls MUST be try/caught; empty results with no error is a UX anti-pattern); added v3.14.0 screener fix entry (Fix A: capture 150/150, Fix D: try/catch + warning UI; 143 chartink+screener tests pass)
 - 2026-08-17: Added Lesson 82 (spec-driven development — mandatory for all feature work; spec→plan→implement→verify workflow; checklist v1.3 enforces the spec gate); added v3.14.0 swing signal persistence + performance tracking + spec-driven dev entry (suite 758 pass / 4 skip, tsc 46 baseline)

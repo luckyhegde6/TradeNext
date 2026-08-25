@@ -23,6 +23,7 @@ const navItems = [
     { name: "Cron Config", href: "/admin/utils/cron" },
     { name: "Announcements", href: "/admin/utils/announcements" },
     { name: "NSE Sync", href: "/admin/utils/nse-sync" },
+    { name: "DB Health", href: "/admin/utils/db-health" },
     { name: "Ingest ZIP", href: "/admin/utils/ingest-zip" },
     { name: "Ingest CSV", href: "/admin/utils/ingest-csv" },
     { name: "Docs", href: "/docs" },
@@ -45,6 +46,7 @@ function getPageTitle(pathname: string): string {
         "/admin/utils/cron": "Cron Config",
         "/admin/utils/announcements": "Announcements",
         "/admin/utils/nse-sync": "NSE Sync",
+        "/admin/utils/db-health": "DB Health",
         "/admin/utils/tasks": "Tasks",
         "/admin/utils/monitoring": "Monitoring",
     };

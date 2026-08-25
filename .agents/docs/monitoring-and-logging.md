@@ -19,6 +19,7 @@ flowchart TD
     subgraph "Logging Layers"
         FILE[File logs<br/>.next/server_logs/<br/>worker_logs/]
         DBLOG[DB ServerLog<br/>lib/services/db-logger.ts]
+        SQLITE[SQLite backup<br/>sql.js in-memory<br/>server_log, audit_log]
         HTTP[APIRequestLog<br/>http-logger]
         EVENTS[UnifiedEvent<br/>event stream]
         HEALTH[SystemHealthLog<br/>metrics]
@@ -29,6 +30,7 @@ flowchart TD
         AIMON[/api/admin/ai/monitoring]
         EVAPI[/api/system/events]
         LOGS[/api/admin/logs]
+        DBHEALTH[/api/admin/db-health]
     end
 
     API --> HTTP
@@ -49,6 +51,8 @@ flowchart TD
     HEALTH --> MON
     MON --> LOGS
     AIMON --> DBLOG
+    DBLOG --> SQLITE
+    SQLITE --> DBHEALTH
 ```
 
 ### Layer summary
@@ -56,6 +60,7 @@ flowchart TD
 |-------|-------|---------|------------------|
 | **File logs** | `.next/server_logs/*.log`, `worker_logs/*.log` | Rich local detail (pino pretty) | ❌ No (read-only FS) |
 | **DB logs** | `ServerLog` table | Persistent logs on serverless; fallback for worker | ✅ Yes |
+| **SQLite backup** | `server_log` table (sql.js) | Read access to logs when PostgreSQL is unavailable | ✅ Yes (in-memory) |
 | **HTTP logs** | `APIRequestLog` table | Every request: method, path, status, speed | ✅ Yes |
 | **Unified events** | `UnifiedEvent` table | Domain events (telegram, ai_agent, screener, system_health, audit) | ✅ Yes |
 | **Health metrics** | `SystemHealthLog` table | Timed metrics (ai_response_time, screener_duration, …) | ✅ Yes |

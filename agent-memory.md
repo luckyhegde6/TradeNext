@@ -42,6 +42,14 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Suite**: 852 pass / 4 skip = exact baseline; tsc 46 = exact baseline, 0 new
 - **Status**: All code + tests verified, commit pending user, no push/deploy
 
+### 2026-08-25 | v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard
+- **Action**: Expanded the SQLite backup layer to cover all 10 tables (6 new: worker_status, server_log, audit_log, cron_job, cron_run, worker_task), added background recovery sync (5-min probe when Prisma is down, auto-sync on recovery), and built a full admin DB health monitoring dashboard.
+- **Files Created**: `app/api/admin/db-health/route.ts` (GET: Prisma probe + ops + table counts + SQLite health; POST: manual sync), `app/admin/utils/db-health/page.tsx` (dashboard: status badges, stat cards, write budget bar, table comparison, sync history, manual sync, 30s refresh)
+- **Files Modified**: `lib/sqlite.ts` (rewritten — 6 new tables, expanded `syncFromPrisma()` for all 10 tables, new query helpers `getServerLogs`/`getAuditLogs`/`getCronJobs`/`getCronRuns`/`getWorkerStatuses`/`getWorkerTasks`/`getHealthStatus`, `syncHistory` array, `startRecoveryProbe()` background interval, `lastProbeAt`), `app/admin/utils/layout.tsx` (DB Health nav entry), `lib/__tests__/sqlite.test.ts` (expanded 9 → 17 tests for new tables + health status + failure history)
+- **Tests**: Suite 869 pass / 4 skip (was 861/4, +8 new); tsc 46 = exact baseline, 0 new
+- **Docs updated**: AGENTS.md v3.19.2 row, CHANGELOG index + versions-v3.19.md, TODO.md, Primer.md, agent-memory (this entry), HANDOFF.md, ARCHITECTURE.md, docs/architecture.html, Lessons.md (Lesson 86), README.md, .agents/docs/monitoring-and-logging.md
+- **Status**: All code + tests verified + committed + pushed on `feature/ai-intelligence`
+
 The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 - Checks for `console.log` statements (should use logger)
 - Detects hardcoded secrets (passwords, API keys, tokens)

@@ -42,6 +42,16 @@ jest.mock("sql.js", () => {
     exec(sql: string, params: any[] = []) {
       const upper = sql.trim().toUpperCase();
       if (!upper.startsWith("SELECT")) return [];
+
+      // COUNT(*) handling
+      if (upper.includes("COUNT(*)")) {
+        const tableM = sql.match(/FROM (\w+)/i);
+        if (!tableM) return [];
+        const t = store[tableM[1]];
+        if (!t) return [{ columns: ["cnt"], values: [[0]] }];
+        return [{ columns: ["cnt"], values: [[t.rows.length]] }];
+      }
+
       const tableM = sql.match(/FROM (\w+)/i);
       if (!tableM) return [];
       const t = store[tableM[1]];
@@ -78,8 +88,6 @@ jest.mock("sql.js", () => {
     }
 
     prepare(sql: string) {
-      // Store the INSERT statement on the mock so run() can use it.
-      // The real sql.js prepare() returns a Statement; we model that simply.
       const self = this;
       return {
         run(params: any[]) { self.run(sql, params); },
@@ -106,7 +114,13 @@ jest.mock("@/lib/prisma", () => ({
     dailyRecommendationStock: { findMany: jest.fn().mockResolvedValue([]) },
     corporateAction: { findMany: jest.fn().mockResolvedValue([]) },
     chartinkScreener: { findMany: jest.fn().mockResolvedValue([]) },
+    workerStatus: { findMany: jest.fn().mockResolvedValue([]) },
+    serverLog: { findMany: jest.fn().mockResolvedValue([]) },
+    auditLog: { findMany: jest.fn().mockResolvedValue([]) },
+    cronJob: { findMany: jest.fn().mockResolvedValue([]) },
+    workerTask: { findMany: jest.fn().mockResolvedValue([]) },
   },
+  dbOpsCounter: { reads: 42, writes: 8, _day: "2026-08-25" },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -118,7 +132,16 @@ import { getSqliteFallback, syncFromPrisma } from "../sqlite";
 // ── Helpers ──────────────────────────────────────────────────────────────
 function resetState() {
   const g2 = globalThis as any;
-  g2.__sqliteBackup = { db: null, ready: false, syncing: false };
+  g2.__sqliteBackup = {
+    db: null,
+    ready: false,
+    syncing: false,
+    prismaAvailable: true,
+    lastSyncAt: null,
+    lastProbeAt: null,
+    syncHistory: [],
+    probeTimer: null,
+  };
 }
 
 describe("SQLite backup fallback", () => {
@@ -142,6 +165,12 @@ describe("SQLite backup fallback", () => {
       const fb = getSqliteFallback();
       expect(fb!.getChartinkScreeners()).toEqual([]);
       expect(fb!.getCorporateActions()).toEqual([]);
+      expect(fb!.getServerLogs()).toEqual([]);
+      expect(fb!.getAuditLogs()).toEqual([]);
+      expect(fb!.getCronJobs()).toEqual([]);
+      expect(fb!.getCronRuns()).toEqual([]);
+      expect(fb!.getWorkerStatuses()).toEqual([]);
+      expect(fb!.getWorkerTasks()).toEqual([]);
     });
   });
 
@@ -191,12 +220,86 @@ describe("SQLite backup fallback", () => {
       enabled: true, resultCount: 25, lastRunAt: new Date("2026-08-24"), nextRunAt: new Date("2026-08-27"),
     };
 
+    const mockWorker = {
+      workerId: "cron-daemon-host-123",
+      workerName: "cron-daemon",
+      status: "idle",
+      currentTaskId: null,
+      tasksCompleted: 15,
+      tasksFailed: 1,
+      lastHeartbeat: new Date("2026-08-25T10:00:00Z"),
+      cpuUsage: 23.5,
+      memoryUsage: 128_000_000,
+      createdAt: new Date("2026-08-25"),
+    };
+
+    const mockLog = {
+      id: "log-1",
+      level: "info",
+      message: "SQLite backup initialized",
+      source: "system",
+      taskId: null,
+      metadata: { pid: 1234 },
+      requestId: null,
+      createdAt: new Date("2026-08-25"),
+    };
+
+    const mockAudit = {
+      id: "audit-1",
+      userId: 1,
+      userEmail: "admin@test.com",
+      action: "LOGIN",
+      resource: "auth",
+      resourceId: null,
+      method: "POST",
+      path: "/api/auth/login",
+      responseStatus: 200,
+      responseTime: 150,
+      ipAddress: "127.0.0.1",
+      metadata: null,
+      errorMessage: null,
+      createdAt: new Date("2026-08-25"),
+    };
+
+    const mockCronJob = {
+      id: "cron-1",
+      name: "Daily Recommendations (System)",
+      description: "Generate daily stock recommendations",
+      taskType: "recommendations",
+      cronExpression: "0 4 * * 1-5",
+      isActive: true,
+      lastRun: new Date("2026-08-25"),
+      nextRun: new Date("2026-08-26"),
+      runCount: 30,
+      successCount: 28,
+      failureCount: 2,
+      createdAt: new Date("2026-08-01"),
+    };
+
+    const mockWorkerTask = {
+      id: "task-1",
+      name: "recommendation_run",
+      taskType: "recommendations",
+      status: "completed",
+      priority: 5,
+      startedAt: new Date("2026-08-25T10:00:00Z"),
+      completedAt: new Date("2026-08-25T10:05:00Z"),
+      error: null,
+      triggeredBy: "cron",
+      createdAt: new Date("2026-08-25"),
+    };
+
     beforeAll(async () => {
       mockPrisma.dailyRecommendationRun.findMany.mockResolvedValue([mockRun]);
       mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(mockRun);
       mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([mockStock]);
       mockPrisma.corporateAction.findMany.mockResolvedValue([mockCorpAction]);
       mockPrisma.chartinkScreener.findMany.mockResolvedValue([mockScreener]);
+      mockPrisma.workerStatus.findMany.mockResolvedValue([mockWorker]);
+      mockPrisma.serverLog.findMany.mockResolvedValue([mockLog]);
+      mockPrisma.auditLog.findMany.mockResolvedValue([mockAudit]);
+      mockPrisma.cronJob.findMany.mockResolvedValue([mockCronJob]);
+      mockPrisma.workerTask.findMany.mockResolvedValue([mockWorkerTask]);
 
       await syncFromPrisma();
     });
@@ -237,9 +340,75 @@ describe("SQLite backup fallback", () => {
       expect(screeners[0].enabled).toBe(true);
     });
 
+    it("syncs and retrieves worker statuses", () => {
+      const fb = getSqliteFallback()!;
+      const workers = fb.getWorkerStatuses();
+      expect(workers).toHaveLength(1);
+      expect(workers[0].worker_id).toBe("cron-daemon-host-123");
+      expect(workers[0].worker_name).toBe("cron-daemon");
+      expect(workers[0].status).toBe("idle");
+    });
+
+    it("syncs and retrieves server logs", () => {
+      const fb = getSqliteFallback()!;
+      const logs = fb.getServerLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0].level).toBe("info");
+      expect(logs[0].message).toBe("SQLite backup initialized");
+      expect(logs[0].source).toBe("system");
+    });
+
+    it("syncs and retrieves audit logs", () => {
+      const fb = getSqliteFallback()!;
+      const logs = fb.getAuditLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0].action).toBe("LOGIN");
+      expect(logs[0].user_email).toBe("admin@test.com");
+      expect(logs[0].response_status).toBe(200);
+    });
+
+    it("syncs and retrieves cron jobs", () => {
+      const fb = getSqliteFallback()!;
+      const jobs = fb.getCronJobs();
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].name).toBe("Daily Recommendations (System)");
+      expect(jobs[0].task_type).toBe("recommendations");
+      expect(jobs[0].is_active).toBe(true);
+    });
+
+    it("syncs and retrieves worker tasks", () => {
+      const fb = getSqliteFallback()!;
+      const tasks = fb.getWorkerTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].task_type).toBe("recommendations");
+      expect(tasks[0].status).toBe("completed");
+      expect(tasks[0].triggered_by).toBe("cron");
+    });
+
     it("respects corporate actions limit", () => {
       const fb = getSqliteFallback()!;
       expect(fb.getCorporateActions(1)).toHaveLength(1);
+    });
+
+    it("returns health status with all table counts", () => {
+      const fb = getSqliteFallback()!;
+      const health = fb.getHealthStatus();
+
+      expect(health.prisma).toBeDefined();
+      expect(health.prisma.reads).toBe(42);
+      expect(health.prisma.writes).toBe(8);
+      expect(health.prisma.writeBudget).toBeGreaterThan(0);
+
+      expect(health.sqlite.ready).toBe(true);
+      expect(health.sqlite.tables).toBeDefined();
+      expect(health.sqlite.tables.daily_recommendation_run).toBeGreaterThanOrEqual(1);
+      expect(health.sqlite.tables.worker_status).toBeGreaterThanOrEqual(1);
+      expect(health.sqlite.tables.server_log).toBeGreaterThanOrEqual(1);
+      expect(health.sqlite.tables.audit_log).toBeGreaterThanOrEqual(1);
+      expect(health.sqlite.tables.cron_job).toBeGreaterThanOrEqual(1);
+      expect(health.sqlite.tables.worker_task).toBeGreaterThanOrEqual(1);
+
+      expect(health.sqlite.recentSyncs.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -250,9 +419,34 @@ describe("SQLite backup fallback", () => {
       mockPrisma.dailyRecommendationStock.findMany.mockRejectedValue(new Error("DB down"));
       mockPrisma.corporateAction.findMany.mockRejectedValue(new Error("DB down"));
       mockPrisma.chartinkScreener.findMany.mockRejectedValue(new Error("DB down"));
+      mockPrisma.workerStatus.findMany.mockRejectedValue(new Error("DB down"));
+      mockPrisma.serverLog.findMany.mockRejectedValue(new Error("DB down"));
+      mockPrisma.auditLog.findMany.mockRejectedValue(new Error("DB down"));
+      mockPrisma.cronJob.findMany.mockRejectedValue(new Error("DB down"));
+      mockPrisma.workerTask.findMany.mockRejectedValue(new Error("DB down"));
 
       await expect(syncFromPrisma()).resolves.toBeUndefined();
       expect(getSqliteFallback()!.isReady()).toBe(true);
+    });
+
+    it("records partial failure as sync entry with 0 rows", () => {
+      const fb = getSqliteFallback()!;
+      const health = fb.getHealthStatus();
+      // After full-failure sync, recentSyncs[0] should be the last sync attempt
+      const lastSync = health.sqlite.recentSyncs[0];
+      expect(lastSync).toBeDefined();
+      expect(lastSync.rowsSynced).toBe(0);
+      // 0 rows because all tables failed to sync
+    });
+  });
+
+  describe("health status", () => {
+    it("returns correct prisma ops from mock", () => {
+      const fb = getSqliteFallback()!;
+      const health = fb.getHealthStatus();
+      expect(health.prisma.reads).toBe(42);
+      expect(health.prisma.writes).toBe(8);
+      expect(health.prisma.writeBudgetExceeded).toBe(false);
     });
   });
 });

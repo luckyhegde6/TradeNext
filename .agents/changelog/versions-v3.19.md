@@ -1,6 +1,6 @@
-# v3.19.0–v3.19.1 — DB Plan Limit Resilience + SQLite Backup Layer
+# v3.19.0–v3.19.2 — DB Plan Limit Resilience + SQLite Backup Layer
 
-> **Date**: Aug 19 2026 · **Branch**: `feature/ai-intelligence` (on top of v3.18.0) · **Suite**: 852 pass / 4 skip · **tsc**: 46 = exact baseline
+> **Date**: Aug 25 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 869 pass / 4 skip · **tsc**: 46 = exact baseline
 
 ## Problem
 
@@ -128,3 +128,64 @@ When Prisma DB ops budget is exceeded, all DB-dependent routes return 500 — no
 - **Suite**: 861 pass / 4 skip (+9 from v3.19.0's 852)
 - **tsc**: 46 = exact baseline (0 new)
 - **Commit**: `4f6ff89`
+
+---
+
+# v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard
+
+> **Date**: Aug 25 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 869 pass / 4 skip (+8 from v3.19.1) · **tsc**: 46 = exact baseline
+
+## Problem
+
+SQLite backup (v3.19.1) only covered recommendation/screener/corp-action tables — logs, auth, monitoring, and cron data were not backed up. No automatic recovery when Prisma comes back online. No admin visibility into DB health status.
+
+## Files Created
+
+| File | Purpose |
+|------|---------|
+| `app/api/admin/db-health/route.ts` | `GET/POST /api/admin/db-health` — Prisma connectivity probe, ops counters, table row counts, SQLite health status, manual sync trigger |
+| `app/admin/utils/db-health/page.tsx` | Admin DB health monitoring dashboard: status badges, stat cards, write budget progress bar, table row count comparison (Prisma vs SQLite), recent sync history table, manual "Sync Now" button, 30s auto-refresh |
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `lib/sqlite.ts` | Expanded schema: 6 new tables (`worker_status`, `server_log`, `audit_log`, `cron_job`, `cron_run`, `worker_task`); `syncFromPrisma()` covers all 10 tables; new query helpers (`getServerLogs`, `getAuditLogs`, `getCronJobs`, `getCronRuns`, `getWorkerStatuses`, `getWorkerTasks`); `getHealthStatus()` returns Prisma ops + SQLite table counts + sync history; `startRecoveryProbe()` background 5-min interval when Prisma is unavailable |
+| `app/admin/utils/layout.tsx` | Added "DB Health" nav entry under Admin Utils |
+| `lib/__tests__/sqlite.test.ts` | Expanded from 9 to 17 tests: new table roundtrips for all 6 expanded tables, health status with all table counts, failure history tracking |
+
+## SQLite Expanded Schema
+
+| Table | Source Prisma Model | Purpose |
+|-------|-------------------|---------|
+| `worker_status` | `WorkerStatus` | Worker heartbeat/liveness status |
+| `server_log` | `ServerLog` | Server-level structured logs |
+| `audit_log` | `AuditLog` | Audit trail (user actions, admin ops) |
+| `cron_job` | `CronJob` | Cron schedule definitions |
+| `cron_run` | (placeholder) | Cron execution history (no Prisma model yet) |
+| `worker_task` | `WorkerTask` | Background worker task history |
+
+## Recovery Sync
+
+When Prisma is down:
+1. Routes use existing SQLite fallback data
+2. `startRecoveryProbe()` polls Prisma every 5 minutes via `prisma.cronJob.findFirst()`
+3. When probe succeeds → full `syncFromPrisma()` refreshes all 10 tables
+4. Prisma availability flag resets
+
+## Admin DB Health Dashboard
+
+`/admin/utils/db-health` shows:
+- **Status badges**: Prisma Online/Offline, SQLite Ready, Write Budget Exceeded
+- **Stat cards**: Prisma latency, DB reads, DB writes, SQLite last sync time
+- **Write budget bar**: progress bar with percentage used
+- **Table row counts**: side-by-side Prisma vs SQLite for all 10 tables
+- **Recent sync history**: last 10 syncs with time, rows, duration, status
+- **Manual sync button**: triggers immediate SQLite re-sync from Prisma
+- **Auto-refresh**: every 30 seconds
+
+## Verification
+
+- **Suite**: 869 pass / 4 skip (+8 from v3.19.1's 861)
+- **tsc**: 46 = exact baseline (0 new)
+- **Commit**: pending push
