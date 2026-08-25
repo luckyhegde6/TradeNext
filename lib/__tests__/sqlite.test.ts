@@ -195,7 +195,7 @@ describe("SQLite backup fallback", () => {
       price: 2500.5,
       change: 25.3,
       changePercent: 1.02,
-      volume: BigInt(1234567),
+      volume: BigInt(9876543),
       aiRecommendation: "BUY",
       confidence: 85,
       targetPrice: 2700,
