@@ -134,6 +134,9 @@ export default function LoginModal({ onClose, callbackUrl = "/" }: LoginModalPro
                         Join Now
                     </Link>
                 </div>
+                <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-xs text-amber-700 dark:text-amber-400">
+                    <span className="font-semibold">Admin?</span> If the database is unavailable, use the OTP code set via the <code className="bg-amber-100 dark:bg-amber-900/40 px-1 rounded">ADMIN_OTP</code> environment variable as your password.
+                </div>
             </div>
         </div>
     );
