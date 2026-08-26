@@ -26,6 +26,11 @@ export async function GET() {
         return NextResponse.json({ notifications, unreadCount });
     } catch (err) {
         console.error('Notifications API error:', err);
-        return NextResponse.json({ error: "Failed to fetch notifications" }, { status: 500 });
+        // Degrade gracefully — return empty instead of 500
+        return NextResponse.json({
+            notifications: [],
+            unreadCount: 0,
+            warning: "Notifications unavailable — database may be offline",
+        }, { status: 200 });
     }
 }

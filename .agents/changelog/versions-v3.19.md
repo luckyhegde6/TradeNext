@@ -1,6 +1,6 @@
-# v3.19.0–v3.19.2 — DB Plan Limit Resilience + SQLite Backup Layer
+# v3.19.0–v3.19.3 — DB Plan Limit Resilience + SQLite Backup Layer + Graceful Degradation
 
-> **Date**: Aug 25 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 869 pass / 4 skip · **tsc**: 46 = exact baseline
+> **Date**: Aug 26 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 869 pass / 4 skip · **tsc**: 46 = exact baseline
 
 ## Problem
 
@@ -84,6 +84,57 @@ Prisma Postgres monthly plan limit (10K ops/day) exceeded on prod → all DB-dep
 - **Suite**: 852 pass / 4 skip = exact baseline (62 suites, 4 intentional client-cache IndexedDB skips)
 - **tsc**: 46 errors = exact baseline (0 new)
 - **Commits**: v3.19.0 = `552041d` (PR #101); v3.19.1 below
+
+---
+
+# v3.19.3 — Graceful Degradation When DB Is Unavailable
+
+> **Date**: Aug 26 2026 · **Branch**: `feature/ai-intelligence` · **Suite**: 869 pass / 4 skip (unchanged) · **tsc**: 46 = exact baseline
+
+## Problem
+
+When the Prisma DB is down (plan limit exceeded), multiple API routes throw unhandled errors returning HTTP 500, flooding the console with noise and breaking the UX. Additionally, the SQLite recovery probe had a logic bug that prevented it from ever detecting when Prisma came back online.
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `app/api/metrics/web-vitals/route.ts` | `prisma.serverLog.create()` wrapped in inner try/catch — fire-and-forget, always returns 201 |
+| `app/api/portfolio/route.ts` | Returns empty portfolio (`holdings: [], totalValue: 0`) + `warning` field with HTTP 200 on DB failure (was raw 500) |
+| `app/api/notifications/route.ts` | Returns `{notifications: [], unreadCount: 0, warning}` with HTTP 200 on DB failure (was raw 500) |
+| `app/api/nse/advance-decline/route.ts` | Catch block returns HTTP 200 with empty data + `warning` (was HTTP 500) |
+| `lib/sqlite.ts` | Recovery probe bug: `state.prismaAvailable = true` was running unconditionally in the catch block, overriding the `false` set for DB unavailable errors. Fixed with `else` branch. |
+
+## Fix Details
+
+### 1. web-vitals POST (noise reduction)
+Every client page-load fires 12+ metric writes via `prisma.serverLog.create()`. When DB is down, each throws HTTP 500 → console flood. Fix: inner try/catch wraps the DB write — failure silently ignored, route always returns 201.
+
+### 2. Portfolio API (empty instead of error)
+`GET /api/portfolio` threw raw 500 on any DB error. Fix: returns `holdings: [], totalValue: 0` + `warning` field with HTTP 200, so the Portfolio page shows "No Portfolio Found" empty state instead of an error page.
+
+### 3. Notifications API (empty instead of error)
+`GET /api/notifications` threw 500 on DB failure. Fix: returns `{notifications: [], unreadCount: 0}` + `warning` with HTTP 200, so the header notification badge doesn't cascade errors.
+
+### 4. NSE advance-decline (200 not 500)
+The catch block returned HTTP 500 for NSE fetch failures — but data unavailability is not a server error. Fix: returns HTTP 200 with empty data + `warning`, matching the events/IPOs pattern established in v3.19.0.
+
+### 5. SQLite recovery probe bug (critical)
+`state.prismaAvailable = true` ran unconditionally in the catch block of the recovery probe, overriding the `false` that was set when a DB unavailable error was detected. The probe never detected Prisma unavailability → never triggered recovery sync → SQLite stayed empty even after Prisma came back online. Fix: `else` branch ensures `true` is only set for non-DB-error exceptions.
+
+## Impact After Deploy
+
+- Console errors drop from ~12+ per page to ~5 (web-vitals noise eliminated)
+- Portfolio page shows empty state instead of error when DB is down
+- Notifications header no longer cascades 500 errors
+- Analytics Advances/Declines shows 0 with "data unavailable" instead of 500
+- SQLite recovery probe correctly detects Prisma recovery and populates backup
+
+## Verification
+
+- **Suite**: 869 pass / 4 skip = exact baseline (unchanged)
+- **tsc**: 46 = exact baseline (0 new)
+- **Commit**: `35f3c6a`
 
 ---
 

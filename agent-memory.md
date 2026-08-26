@@ -15,6 +15,13 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-08-26 | v3.19.3 — Graceful Degradation When DB Is Unavailable
+- **Action**: Fixed 5 graceful degradation issues + SQLite recovery probe bug found during comprehensive live site analysis.
+- **Files Modified**: `app/api/metrics/web-vitals/route.ts` (fire-and-forget DB write with try/catch), `app/api/portfolio/route.ts` (empty portfolio + warning on DB failure), `app/api/notifications/route.ts` (empty + warning on DB failure), `app/api/nse/advance-decline/route.ts` (200 not 500 on NSE failure), `lib/sqlite.ts` (recovery probe `else` branch fix).
+- **Tests**: Suite 869 pass / 4 skip (unchanged); tsc 46 = exact baseline.
+- **Docs Updated**: AGENTS.md v3.19.3 row, CHANGELOG versions-v3.19.md, Lessons.md #87, Primer.md, agent-memory.md, HANDOFF.md.
+- **Status**: Committed `35f3c6a` + pushed; PR pending.
+
 ### 2026-08-17 | v3.15.0 — Closed IPOs with current prices + IPO analysis TTL cleanup + pipeline redesign (HOLDs collapsible)
 - **Action**: Implemented closed IPOs section with current prices, IPO analysis TTL cleanup, and pipeline redesign (top-100 market cap → AI → top-50 actionable + collapsible HOLDs).
 - **Files Created**: `app/api/recommendations/ipos/closed/route.ts` (batch price endpoint), `lib/__tests__/closedIpoPrices.test.ts` (18 tests), `.agents/specs/closed-ipos-ttl-cleanup.md`, `.agents/plans/closed-ipos-ttl-cleanup.md`, `.agents/changelog/versions-v3.15.md`

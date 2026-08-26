@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getPortfolioData } from '@/lib/services/portfolioService';
 import { auth } from '@/lib/auth';
 import { enhancedCache } from '@/lib/enhanced-cache';
+import logger from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,10 +32,20 @@ export async function GET(req: Request) {
     const data = await getPortfolioData(targetUserId);
     return NextResponse.json(data);
   } catch (err: unknown) {
-    console.error('Portfolio API error:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ msg: "Portfolio API error", error: msg });
+    // Degrade gracefully — return empty portfolio instead of 500
     return NextResponse.json(
-      { error: String(err instanceof Error ? err.message : err) },
-      { status: 500 }
+      {
+        holdings: [],
+        transactions: [],
+        totalValue: 0,
+        totalInvested: 0,
+        totalGainLoss: 0,
+        totalGainLossPercent: 0,
+        warning: "Portfolio data unavailable — database may be offline",
+      },
+      { status: 200 }
     );
   }
 }

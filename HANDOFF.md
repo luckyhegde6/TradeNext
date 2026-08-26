@@ -12,13 +12,13 @@ status: "ready"                   # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-25T12:00:00Z"
-feature: "v3.19.2-sqlite-expanded-recovery-sync-admin-db-health"
+last_updated: "2026-08-26T12:00:00Z"
+feature: "v3.19.3-graceful-degradation"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Branch `feature/ai-intelligence` (**COMMITTED + PUSHED**, on top of v3.19.1). Includes: (1) **v3.19.2 — SQLite expanded + re-sync + admin DB health dashboard**: 6 new SQLite tables (worker_status, server_log, audit_log, cron_job, cron_run, worker_task) + recovery sync (5-min background probe) + `GET/POST /api/admin/db-health` + admin dashboard UI at `/admin/utils/db-health` + 17 tests (869 pass/4 skip), tsc 46 baseline. (2) **v3.19.1 — SQLite backup layer**: sql.js in-memory fallback with route fallback chains (recs, corp-actions, screener). (3) **v3.19.0 — DB plan limit resilience**: graceful degradation, op reduction, write budget guard, admin OTP fallback. **Next: user requests commit + push or deploy.**
+**No active handoff.** Branch `feature/ai-intelligence` (**COMMITTED + PUSHED**). Includes: (1) **v3.19.3 — Graceful degradation when DB is unavailable**: web-vitals fire-and-forget, portfolio/notifications empty-with-warning, advance-decline 200-not-500, SQLite recovery probe `else` branch fix. (2) **v3.19.2 — SQLite expanded + re-sync + admin DB health dashboard**. (3) **v3.19.1 — SQLite backup layer**. (4) **v3.19.0 — DB plan limit resilience**. **Next: create PR to main → merge → Netlify rebuild/deploy.**
 
 ---
 
