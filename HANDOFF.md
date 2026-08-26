@@ -12,13 +12,13 @@ status: "ready"                   # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-26T12:00:00Z"
-feature: "v3.19.3-graceful-degradation"
+last_updated: "2026-08-26T16:00:00Z"
+feature: "v3.20.0-nse-resilience"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Branch `feature/ai-intelligence` (**COMMITTED + PUSHED**). Includes: (1) **v3.19.3 — Graceful degradation when DB is unavailable**: web-vitals fire-and-forget, portfolio/notifications empty-with-warning, advance-decline 200-not-500, SQLite recovery probe `else` branch fix. (2) **v3.19.2 — SQLite expanded + re-sync + admin DB health dashboard**. (3) **v3.19.1 — SQLite backup layer**. (4) **v3.19.0 — DB plan limit resilience**. **Next: create PR to main → merge → Netlify rebuild/deploy.**
+**No active handoff.** Branch `fix/nse-resilience` — **v3.20.0 NSE resilience docs updated, ready to commit**. Includes: (1) **v3.20.0 — NSE resilience**: 22+ NSE routes hardened (graceful empty/null), MCP GET fixed + MCP graceful empty, corp-actions graceful empty + NSE decoupled, /api/news/market Prisma fix, NIFTY_50 constants consolidated, 2026 market holidays, netlify.toml extension removed; DB-down test verified. (2) **v3.19.3 — Graceful degradation when DB unavailable** (committed `35f3c6a`). (3) **v3.19.2 — SQLite expanded + admin DB health**. (4) **v3.19.1 — SQLite backup layer**. (5) **v3.19.0 — DB plan limit resilience**. **Next: commit on user request → create PR to main → merge → Netlify rebuild/deploy.**
 
 ---
 

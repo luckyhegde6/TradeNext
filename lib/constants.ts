@@ -13,22 +13,31 @@ export const MAJOR_INDICES = [
   { key: "NIFTY PHARMA", name: "NIFTY PHARMA" }
 ];
 
-export const INITIAL_SYMBOLS = [
+/**
+ * Canonical NIFTY 50 constituents (as of 2026).
+ * Single source of truth — import from here everywhere.
+ * Updated after each quarterly rebalance.
+ */
+export const NIFTY_50: string[] = [
   "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
   "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL",
-  "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB", "DRREDDY",
-  "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE",
-  "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC",
-  "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT",
-  "LTIM", "M&M", "MARUTI", "NESTLEIND", "NTPC",
-  "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SBIN",
-  "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL",
-  "TECHM", "TITAN", "ULTRACEMCO", "UPL", "WIPRO"
+  "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT",
+  "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO",
+  "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK", "INFY",
+  "ITC", "JSWSTEEL", "KOTAKBANK", "LTIM", "LT",
+  "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC",
+  "POWERGRID", "RELIANCE", "SBILIFE", "SBIN", "SUNPHARMA",
+  "TATAMOTORS", "TATASTEEL", "TCS", "TECHM", "TITAN",
+  "TRENT", "ULTRACEMCO", "WIPRO", "SHRIRAMFIN", "HDFCAMC",
 ];
 
-// NSE Holidays 2025
-// Format: YYYY-MM-DD
+/** @deprecated Use NIFTY_50 instead */
+export const INITIAL_SYMBOLS = [...NIFTY_50];
+
+// NSE Market Holidays (2025 + 2026)
+// Format: YYYY-MM-DD — union of both years so isMarketOpen() is correct across years
 export const MARKET_HOLIDAYS = [
+  // 2025
   "2025-02-26", // Mahashivratri
   "2025-03-14", // Holi
   "2025-03-31", // Id-Ul-Fitr (Ramadan Eid)
@@ -43,6 +52,21 @@ export const MARKET_HOLIDAYS = [
   "2025-10-22", // Balipratipada
   "2025-11-05", // Prakash Gurpurb Sri Guru Nanak Dev
   "2025-12-25", // Christmas
+  // 2026 (NSE published list)
+  "2026-01-26", // Republic Day
+  "2026-03-10", // Holi
+  "2026-03-20", // Id-Ul-Fitr
+  "2026-04-02", // Shri Mahavir Jayanti
+  "2026-04-14", // Dr. Baba Saheb Ambedkar Jayanti
+  "2026-04-03", // Good Friday
+  "2026-05-01", // Maharashtra Day
+  "2026-08-15", // Independence Day
+  "2026-08-26", // Shri Ganesh Chaturthi
+  "2026-10-02", // Mahatma Gandhi Jayanti
+  "2026-11-08", // Diwali Laxmi Pujan
+  "2026-11-09", // Balipratipada
+  "2026-11-24", // Prakash Gurpurb Sri Guru Nanak Dev
+  "2026-12-25", // Christmas
 ];
 
 export const MARKET_TIMINGS = {

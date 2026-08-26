@@ -28,8 +28,11 @@ export async function GET() {
       headers: { 'Cache-Control': HTTP_CACHE_CONTROL }
     });
   } catch (e: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    console.error("nse:indexes error", (e as any)?.message ?? e);
-    return NextResponse.json({ error: "failed" }, { status: 502 });
+    // Serve stale cache if available
+    const stale = cache.get(CACHE_KEY);
+    if (stale) {
+      return NextResponse.json(stale, { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } });
+    }
+    return NextResponse.json({ data: [], source: "unavailable" }, { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } });
   }
 }

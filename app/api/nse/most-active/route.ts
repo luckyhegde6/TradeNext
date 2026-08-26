@@ -50,7 +50,7 @@ export async function GET(req: Request) {
       }
     );
   } catch (error) {
-    logger.error({ msg: "Most Active API error", error });
-    return NextResponse.json({ error: "Failed to fetch most active data" }, { status: 500 });
+    logger.warn({ msg: "Most Active API: NSE fetch failed, returning empty", error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json({ data: [], timestamp: new Date().toISOString() });
   }
 }

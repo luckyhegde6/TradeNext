@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { nseFetch } from "@/lib/nse-client";
+import logger from "@/lib/logger";
 
 export async function GET() {
   try {
@@ -20,7 +21,7 @@ export async function GET() {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Corporate news API error:", error);
-    return NextResponse.json({ error: "Failed to fetch corporate news" }, { status: 500 });
+    logger.warn({ msg: "CorporateNews: NSE fetch failed, returning empty", error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json([]);
   }
 }

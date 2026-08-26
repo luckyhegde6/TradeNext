@@ -800,12 +800,91 @@ function handleHelp(): object {
 }
 
 // ============================================================================
-// Main Request Handler
+// Shared Handler — used by both POST and GET
+// ============================================================================
+
+async function handleMcpRequest(mcpFunction: McpFunction, parameters: Record<string, unknown>): Promise<unknown> {
+  switch (mcpFunction) {
+    case "listFunctions":
+      return getFunctionList();
+    case "describe":
+      return {
+        function: parameters.functionName,
+        description: getFunctionDescription(parameters.functionName as string),
+      };
+    case "schema":
+      return {
+        function: parameters.functionName,
+        schema: getFunctionSchema(parameters.functionName as string),
+      };
+    case "help":
+      return handleHelp();
+    case "getIndexData":
+      return handleGetIndexData();
+    case "getMarketIndices":
+      return handleGetMarketIndices(parameters);
+    case "getStockQuote":
+      return handleGetStockQuote(parameters);
+    case "getStockChart":
+      return handleGetStockChart(parameters);
+    case "getHistoricalData":
+      return handleGetHistoricalData(parameters);
+    case "getGainers":
+      return handleGetGainers(parameters);
+    case "getLosers":
+      return handleGetLosers(parameters);
+    case "getMostActive":
+      return handleGetMostActive(parameters);
+    case "getAdvanceDecline":
+      return handleGetAdvanceDecline(parameters);
+    case "getCorporateActions":
+    case "getCorpActions":
+      return handleGetCorporateActions(parameters);
+    case "getCorporateInfo":
+      return handleGetCorporateInfo(parameters);
+    case "getMarquee":
+      return handleGetMarquee();
+    case "getDeals":
+      return handleGetDeals(parameters);
+    case "getAnnouncements":
+      return handleGetAnnouncements(parameters);
+    case "getInsiderTrading":
+      return handleGetInsiderTrading();
+    case "getEvents":
+      return handleGetEvents();
+    case "getHeatmap":
+      return handleGetHeatmap(parameters);
+    case "getSymbols":
+      return handleGetSymbols(parameters);
+    case "getTrends":
+      return handleGetTrends(parameters);
+    case "getAnnouncementsByIndex":
+      return handleGetAnnouncementsByIndex(parameters);
+    case "getStockCorporate":
+      return handleGetStockCorporate(parameters);
+    case "getIpoAnalysis":
+      return handleGetIpoAnalysis(parameters);
+    case "getIpoIssueDetail":
+      return handleGetIpoIssueDetail(parameters);
+    case "getNseEvents":
+      return handleGetNseEvents();
+    case "getOptionChain":
+      return handleGetOptionChain(parameters);
+    case "getFoExpiries":
+      return handleGetFoExpiries(parameters);
+    case "getInvestmentIntelligence":
+      return handleGetInvestmentIntelligence(parameters);
+    default:
+      throw new Error(`Unknown function: ${mcpFunction}`);
+  }
+}
+
+// ============================================================================
+// POST Handler
 // ============================================================================
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate API key
     if (!validateApiKey(request)) {
       return NextResponse.json(
         { error: "Unauthorized", message: "Invalid or missing API key" },
@@ -813,26 +892,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse request body
     let body: McpRequest;
     const contentType = request.headers.get("content-type") || "";
     
     if (contentType.includes("application/json")) {
       body = await request.json();
     } else {
-      // Try to parse as form data
       const formData = await request.formData();
       const data: Record<string, unknown> = {};
       formData.forEach((value, key) => {
         if (key === "parameters" && typeof value === "string") {
-          try {
-            data[key] = JSON.parse(value);
-          } catch {
-            data[key] = value;
-          }
-        } else if (key === "parameters") {
-          // Already an object from formData
-        } else {
+          try { data[key] = JSON.parse(value); } catch { data[key] = value; }
+        } else if (key !== "parameters") {
           data[key] = value;
         }
       });
@@ -843,7 +914,6 @@ export async function POST(request: NextRequest) {
     }
 
     const { function: mcpFunction, parameters = {} } = body;
-
     if (!mcpFunction) {
       return NextResponse.json(
         { error: "Bad Request", message: "Missing 'function' parameter" },
@@ -851,140 +921,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Route to appropriate handler
-    let result: unknown;
-
-    switch (mcpFunction) {
-      case "listFunctions":
-        result = getFunctionList();
-        break;
-      case "describe":
-        result = {
-          function: parameters.functionName,
-          description: getFunctionDescription(parameters.functionName as string),
-        };
-        break;
-      case "schema":
-        result = {
-          function: parameters.functionName,
-          schema: getFunctionSchema(parameters.functionName as string),
-        };
-        break;
-      case "help":
-        result = handleHelp();
-        break;
-      case "getIndexData":
-        result = await handleGetIndexData();
-        break;
-      case "getMarketIndices":
-        result = await handleGetMarketIndices(parameters);
-        break;
-      case "getStockQuote":
-        result = await handleGetStockQuote(parameters);
-        break;
-      case "getStockChart":
-        result = await handleGetStockChart(parameters);
-        break;
-      case "getHistoricalData":
-        result = await handleGetHistoricalData(parameters);
-        break;
-      case "getGainers":
-        result = await handleGetGainers(parameters);
-        break;
-      case "getLosers":
-        result = await handleGetLosers(parameters);
-        break;
-      case "getMostActive":
-        result = await handleGetMostActive(parameters);
-        break;
-      case "getAdvanceDecline":
-        result = await handleGetAdvanceDecline(parameters);
-        break;
-      case "getCorporateActions":
-      case "getCorpActions":
-        result = await handleGetCorporateActions(parameters);
-        break;
-      case "getCorporateInfo":
-        result = await handleGetCorporateInfo(parameters);
-        break;
-      case "getMarquee":
-        result = await handleGetMarquee();
-        break;
-      case "getDeals":
-        result = await handleGetDeals(parameters);
-        break;
-      case "getAnnouncements":
-        result = await handleGetAnnouncements(parameters);
-        break;
-      case "getInsiderTrading":
-        result = await handleGetInsiderTrading();
-        break;
-      case "getEvents":
-        result = await handleGetEvents();
-        break;
-      case "getHeatmap":
-        result = await handleGetHeatmap(parameters);
-        break;
-      case "getSymbols":
-        result = await handleGetSymbols(parameters);
-        break;
-      case "getTrends":
-        result = await handleGetTrends(parameters);
-        break;
-      case "getAnnouncementsByIndex":
-        result = await handleGetAnnouncementsByIndex(parameters);
-        break;
-      case "getStockCorporate":
-        result = await handleGetStockCorporate(parameters);
-        break;
-      case "getIpoAnalysis":
-        result = await handleGetIpoAnalysis(parameters);
-        break;
-      case "getIpoIssueDetail":
-        result = await handleGetIpoIssueDetail(parameters);
-        break;
-      case "getNseEvents":
-        result = await handleGetNseEvents();
-        break;
-      case "getOptionChain":
-        result = await handleGetOptionChain(parameters);
-        break;
-      case "getFoExpiries":
-        result = await handleGetFoExpiries(parameters);
-        break;
-      case "getInvestmentIntelligence":
-        result = await handleGetInvestmentIntelligence(parameters);
-        break;
-      default:
-        return NextResponse.json(
-          { 
-            error: "Bad Request", 
-            message: `Unknown function: ${mcpFunction}`,
-            availableFunctions: getFunctionList().map(f => f.name),
-          },
-          { status: 400 }
-        );
-    }
-
+    const result = await handleMcpRequest(mcpFunction, parameters);
     return NextResponse.json(
-      { 
-        success: true, 
-        function: mcpFunction,
-        data: result,
-        timestamp: new Date().toISOString(),
-      },
+      { success: true, function: mcpFunction, data: result, timestamp: new Date().toISOString() },
       { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } }
     );
   } catch (e: unknown) {
     const error = e as Error;
     console.error("[MCP Error]", error.message);
+    // Return graceful empty instead of 500 — data unavailability ≠ server error
     return NextResponse.json(
-      { 
-        error: "Internal Server Error", 
-        message: error.message,
-        function: "unknown",
-      },
-      { status: 500 }
+      { success: true, function: "unknown", data: null, timestamp: new Date().toISOString(), warning: error.message },
+      { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } }
     );
   }
 }
@@ -995,7 +943,6 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Validate API key
     if (!validateApiKey(request)) {
       return NextResponse.json(
         { error: "Unauthorized", message: "Invalid or missing API key" },
@@ -1006,7 +953,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const mcpFunction = searchParams.get("function") as McpFunction;
     
-    // If no function, return help/info
     if (!mcpFunction) {
       return NextResponse.json({
         message: "TradeNext MCP API",
@@ -1016,83 +962,22 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Build parameters from query string
     const parameters: Record<string, unknown> = {};
     for (const [key, value] of searchParams.entries()) {
-      if (key !== "function") {
-        parameters[key] = value;
-      }
+      if (key !== "function") parameters[key] = value;
     }
 
-    // Create request body for handler
-    const body: McpRequest = {
-      function: mcpFunction,
-      parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
-    };
-
-    // Reuse POST logic by calling it as a sub-request
-    // But since we can't call ourselves, handle directly
-    let result: unknown;
-
-    switch (mcpFunction) {
-      case "listFunctions":
-        result = getFunctionList();
-        break;
-      case "help":
-        result = handleHelp();
-        break;
-      case "getIndexData":
-        result = await handleGetIndexData();
-        break;
-      case "getStockQuote":
-        result = await handleGetStockQuote(parameters);
-        break;
-      case "getHistoricalData":
-        result = await handleGetHistoricalData(parameters);
-        break;
-      case "getIpoAnalysis":
-        result = await handleGetIpoAnalysis(parameters);
-        break;
-      case "getIpoIssueDetail":
-        result = await handleGetIpoIssueDetail(parameters);
-        break;
-      case "getNseEvents":
-        result = await handleGetNseEvents();
-        break;
-      case "getOptionChain":
-        result = await handleGetOptionChain(parameters);
-        break;
-      case "getFoExpiries":
-        result = await handleGetFoExpiries(parameters);
-        break;
-      case "getMarquee":
-        result = await handleGetMarquee();
-        break;
-      case "getInvestmentIntelligence":
-        result = await handleGetInvestmentIntelligence(parameters);
-        break;
-      default:
-        // For other functions, suggest using POST
-        return NextResponse.json({
-          message: `Use POST for function: ${mcpFunction}`,
-          example: `curl -X POST -H "Content-Type: application/json" -d '{"function":"${mcpFunction}"}' /api/mcp`,
-        });
-    }
-
+    const result = await handleMcpRequest(mcpFunction, parameters);
     return NextResponse.json(
-      { 
-        success: true, 
-        function: mcpFunction,
-        data: result,
-        timestamp: new Date().toISOString(),
-      },
+      { success: true, function: mcpFunction, data: result, timestamp: new Date().toISOString() },
       { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } }
     );
   } catch (e: unknown) {
     const error = e as Error;
+    // Return graceful empty instead of 500 — data unavailability ≠ server error
     return NextResponse.json(
-      { error: "Error", message: error.message },
-      { status: 500 }
+      { success: true, function: "unknown", data: null, timestamp: new Date().toISOString(), warning: error.message },
+      { headers: { 'Cache-Control': HTTP_CACHE_CONTROL } }
     );
   }
 }

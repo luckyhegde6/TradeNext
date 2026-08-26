@@ -158,10 +158,7 @@ export async function GET(req: Request) {
       { headers: { "Cache-Control": "public, max-age=60" } }
     );
   } catch (e) {
-    logger.error({ msg: "Failed to fetch large deals", error: e });
-    return NextResponse.json(
-      { error: "Failed to fetch deals data", data: [] },
-      { status: 502 }
-    );
+    logger.warn({ msg: "Deals: fetch failed, returning empty", error: e instanceof Error ? e.message : String(e) });
+    return NextResponse.json({ data: [], meta: {}, source: "unavailable" });
   }
 }

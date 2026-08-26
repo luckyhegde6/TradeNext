@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-26 (v3.19.3 graceful degradation when DB unavailable; suite 869 pass / 4 skip; tsc 46 = exact baseline; committed + pushed)
+2026-08-26 (v3.20.0 NSE resilience — MCP/corp-actions graceful empty + DB-down test verified; suite 869 pass / 4 skip; tsc 57 baseline; ready to commit)
 
 ---
 
 ## Current Project Status
+
+### v3.20.0 — NSE Resilience: All NSE Routes Return Graceful Empty (Aug 26 2026) — ✅ CODE + TESTS VERIFIED, DB-DOWN TESTED, READY TO COMMIT
+**Branch**: `fix/nse-resilience` (created from latest main).
+**Why**: NSE API endpoints block cloud IPs (Netlify, Prisma Accelerate) with 403/429. All NSE-dependent routes threw unhandled 500/502 errors. MCP GET endpoint was POST-only. MCP and corporate-actions routes returned 500 on data unavailability. Constants duplicated across files. `netlify.toml` had a stale Prisma Postgres extension.
+**Fix**: (1) MCP GET fix — extracted shared `handleMcpRequest()`, both POST and GET reuse it. (2) **MCP graceful empty** — POST+GET catch blocks return `{success:true, data:null, warning}` instead of 500. (3) **Corp-actions graceful empty** — outer catch returns `{data:[], warning}` instead of 500. (4) Corporate actions NSE decoupling — `triggerNseRefresh()` fire-and-forget. (5) `/api/news/market` — Prisma import fix + DB error catching + memory cache fallback. (6) **22+ NSE routes hardened** — every route returns graceful empty/null on failure. (7) `lib/constants.ts` — canonical `NIFTY_50` (50 symbols), `INITIAL_SYMBOLS` alias, `MARKET_HOLIDAYS` 2026. (8) `netlify.toml` — removed stale `prisma-postgres` extension.
+**DB-down test**: Stopped Docker PG, hit all routes — ALL returned HTTP 200 (graceful empty). Restarted PG → full data recovery confirmed.
+**Tests**: Suite 869 pass / 4 skip (unchanged); tsc 57 baseline (0 production errors).
+- **Status**: ready to commit on `fix/nse-resilience`.
 
 ### v3.19.3 — Graceful Degradation When DB Is Unavailable (Aug 26 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED + PUSHED
 **Branch**: `feature/ai-intelligence` (on top of v3.19.2).

@@ -15,6 +15,13 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-08-26 | v3.20.0 — NSE Resilience: All NSE Routes Return Graceful Empty + MCP GET Fix + Constants Consolidation
+- **Action**: Hardened all 17 NSE-dependent API routes to return graceful empty/null instead of 500/502 on failure. Fixed MCP GET endpoint (shared handler). Decoupled corporate actions from NSE blocking. Fixed `/api/news/market` Prisma import + error handling. Consolidated NIFTY_50 constants to `lib/constants.ts`. Added 2026 market holidays. Removed stale Prisma Postgres extension from netlify.toml.
+- **Files Modified**: `app/api/mcp/route.ts` (shared `handleMcpRequest()`), `app/api/corporate-actions/combined/route.ts` (NSE decoupling via `triggerNseRefresh()`), `app/api/news/market/route.ts` (fixed import, DB catching, memory fallback), `app/api/nse/gainers/route.ts`, `app/api/nse/losers/route.ts`, `app/api/nse/most-active/route.ts`, `app/api/nse/corporate-announcements/route.ts`, `app/api/nse/corporate-events/route.ts`, `app/api/nse/corporate-info/route.ts`, `app/api/nse/corporate-news/route.ts`, `app/api/nse/deals/route.ts`, `app/api/nse/insider-trading/route.ts`, `app/api/nse/marquee/route.ts`, `app/api/nse/indexes/route.ts`, `app/api/nse/index/[index]/route.ts`, `app/api/nse/index/[index]/heatmap/route.ts`, `app/api/nse/index/[index]/advance-decline/route.ts`, `app/api/nse/index/[index]/announcements/route.ts`, `app/api/nse/index/[index]/corp-actions/route.ts`, `app/api/nse/index/[index]/chart/route.ts`, `app/api/nse/index/[index]/symbols/route.ts`, `app/api/nse/stock/[symbol]/quote/route.ts`, `app/api/nse/stock/[symbol]/chart/route.ts`, `app/api/nse/stock/[symbol]/trends/route.ts`, `app/api/nse/stock/[symbol]/corporate/route.ts`, `lib/constants.ts` (NIFTY_50, MARKET_HOLIDAYS), `lib/services/marketCapClassification.ts` (imports from constants), `netlify.toml` (removed stale extension).
+- **Tests**: Suite 869 pass / 4 skip (unchanged); tsc 46 = exact baseline.
+- **Docs Updated**: AGENTS.md v3.20.0 row, CHANGELOG new versions-v3.20.md, TODO.md, Primer.md, agent-memory.md.
+- **Status**: Code verified, uncommitted.
+
 ### 2026-08-26 | v3.19.3 — Graceful Degradation When DB Is Unavailable
 - **Action**: Fixed 5 graceful degradation issues + SQLite recovery probe bug found during comprehensive live site analysis.
 - **Files Modified**: `app/api/metrics/web-vitals/route.ts` (fire-and-forget DB write with try/catch), `app/api/portfolio/route.ts` (empty portfolio + warning on DB failure), `app/api/notifications/route.ts` (empty + warning on DB failure), `app/api/nse/advance-decline/route.ts` (200 not 500 on NSE failure), `lib/sqlite.ts` (recovery probe `else` branch fix).
@@ -776,6 +783,17 @@ echo "" >> agent-memory.md
 - **Tests**: updated stale catalog-only test (was asserting a real template was catalog-only → now uses a mock template). 143 chartink+screener tests pass.
 - **Files**: lib/services/chartinkUnifiedScreenerService.ts (Fix D), app/api/screener/chartink/route.ts (warning), app/components/screener/TemplatesPanel.tsx (warning UI), lib/services/chartink-scans/*.json (8 files populated), lib/__tests__/chartinkTemplateServices.test.ts (updated)
 - **Committed + pushed**: `98b595b` (12 files, +592/-134) on `docs-readme-refs-agentic-coding`
+
+---
+
+### 2026-08-26 — v3.20.0 NSE Resilience (DB-down test + MCP/corp-actions graceful empty)
+
+- **Branch**: `fix/nse-resilience` (created from latest main after PR #104 merged)
+- **What**: Completed NSE resilience — all NSE-dependent routes return graceful empty on failure (never 500/502). Additionally fixed: (1) MCP POST+GET catch blocks now return `{success:true, data:null, warning}` instead of 500; (2) corporate-actions outer catch returns `{data:[], warning}` instead of 500; (3) NIFTY_50 constants consolidated to `lib/constants.ts` with 2026 market holidays; (4) stale `prisma-postgres` extension removed from `netlify.toml`.
+- **DB-down test (verified)**: Stopped Docker PG container → hit 22+ NSE routes + MCP + corporate-actions → ALL returned HTTP 200 with graceful empty data. Restarted PG → corporate-actions returned full data from DB. Confirmed the resilience architecture works end-to-end.
+- **Files**: 27 route files edited, `lib/constants.ts`, `netlify.toml`
+- **Tests**: Suite 869 pass / 4 skip = exact baseline; tsc 57 baseline (0 production errors)
+- **Status**: Documentation updated, ready to commit on `fix/nse-resilience`
 
 ---
 

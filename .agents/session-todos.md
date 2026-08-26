@@ -1,12 +1,19 @@
 # Session Todos
 
 ## Current
-- [x] v3.19.3 graceful degradation fixes — DONE (5 files: web-vitals, portfolio, notifications, advance-decline, SQLite recovery probe)
-- [x] v3.19.3 documentation updates — DONE (AGENTS.md row, CHANGELOG versions-v3.19.md, Lessons #87, Primer.md, agent-memory.md, HANDOFF.md)
-- [x] Commit + push — DONE (`35f3c6a` on `feature/ai-intelligence`)
+- [ ] Commit on fix/nse-resilience — READY (all docs updated, code verified, tsc clean)
 - [ ] Create PR to main — PENDING user request
 
 ## Completed This Session
-- v3.19.3 graceful degradation — committed + pushed (`35f3c6a`)
-- Live site comprehensive analysis — 22+ pages checked, root cause diagnosed
-- 5 code fixes applied for DB-down resilience
+- [x] Verify test suite baseline (869 pass / 4 skip, tsc 57)
+- [x] MCP GET endpoint fix — DONE (shared `handleMcpRequest()`)
+- [x] MCP graceful empty — DONE (POST+GET catch return `{data:null, warning}` not 500)
+- [x] Corporate actions NSE decoupling — DONE (`triggerNseRefresh()` fire-and-forget)
+- [x] Corporate actions graceful empty — DONE (outer catch returns `{data:[], warning}` not 500)
+- [x] `/api/news/market` Prisma fix + DB error catching — DONE
+- [x] 17+ NSE routes hardened (graceful empty/null) — DONE
+- [x] NIFTY_50 constants consolidated + 2026 holidays — DONE
+- [x] `netlify.toml` stale extension removed — DONE
+- [x] DB-down testing — DONE (stopped Docker PG, all routes HTTP 200; PG restart recovery confirmed)
+- [x] Documentation updates (AGENTS.md, versions-v3.20.md, CHANGELOG, TODO, Primer, agent-memory, HANDOFF) — DONE
+- [x] Lesson 88 added (graceful degradation pattern for API routes) — DONE

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import prisma from '@/lib/prisma';
 import { nseFetch } from '@/lib/nse-client';
-import { prisma } from '@/lib/prisma';
+import { isDbUnavailableError } from '@/lib/db-utils';
+import cache from '@/lib/cache';
+import logger from '@/lib/logger';
 
 interface NewsItem {
   id: string;
@@ -202,6 +205,7 @@ export const dynamic = 'force-dynamic';
 
 // Cache for 5 minutes, stale allowed until 1 hour
 const CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=3600';
+const MEMORY_CACHE_KEY = 'market_news_all';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -212,82 +216,80 @@ export async function GET(req: Request) {
     let indiaNews: NewsItem[] = [];
     let globalNews: NewsItem[] = [];
 
-    const cachedIndia = await prisma.marketSnapshot.findFirst({
-      where: { type: 'news_india' },
-      orderBy: { capturedAt: 'desc' },
-    });
-
-    const cachedGlobal = await prisma.marketSnapshot.findFirst({
-      where: { type: 'news_global' },
-      orderBy: { capturedAt: 'desc' },
-    });
+    // Try DB cache — gracefully skip if DB unavailable
+    let dbAvailable = true;
+    let cachedIndia: { payload: unknown; capturedAt: Date; id: string } | null = null;
+    let cachedGlobal: { payload: unknown; capturedAt: Date; id: string } | null = null;
+    try {
+      [cachedIndia, cachedGlobal] = await Promise.all([
+        prisma.marketSnapshot.findFirst({ where: { type: 'news_india' }, orderBy: { capturedAt: 'desc' } }),
+        prisma.marketSnapshot.findFirst({ where: { type: 'news_global' }, orderBy: { capturedAt: 'desc' } }),
+      ]);
+    } catch (dbErr) {
+      dbAvailable = false;
+      logger.warn({ msg: 'NewsMarket: DB unavailable, fetching fresh', error: dbErr instanceof Error ? dbErr.message : String(dbErr) });
+    }
 
     const now = new Date().getTime();
     const oneHourAgo = now - (60 * 60 * 1000);
 
-    const shouldFetchIndia = force || !cachedIndia || 
+    const shouldFetchIndia = force || !cachedIndia ||
       new Date(cachedIndia.capturedAt).getTime() < oneHourAgo;
-    const shouldFetchGlobal = force || !cachedGlobal || 
+    const shouldFetchGlobal = force || !cachedGlobal ||
       new Date(cachedGlobal.capturedAt).getTime() < oneHourAgo;
 
     if (shouldFetchIndia) {
       indiaNews = await getIndiaNews();
-      await prisma.marketSnapshot.upsert({
-        where: { id: cachedIndia?.id || 'news_india' },
-        update: { 
-          payload: JSON.parse(JSON.stringify({ news: indiaNews })),
-          capturedAt: new Date(),
-        },
-        create: {
-          id: 'news_india',
-          type: 'news_india',
-          payload: JSON.parse(JSON.stringify({ news: indiaNews })),
-        },
-      });
+      // Fire-and-forget DB write
+      if (dbAvailable) {
+        prisma.marketSnapshot.upsert({
+          where: { id: cachedIndia?.id || 'news_india' },
+          update: { payload: JSON.parse(JSON.stringify({ news: indiaNews })), capturedAt: new Date() },
+          create: { id: 'news_india', type: 'news_india', payload: JSON.parse(JSON.stringify({ news: indiaNews })) },
+        }).catch(() => {});
+      }
     } else if (cachedIndia?.payload) {
       indiaNews = (cachedIndia.payload as { news?: NewsItem[] })?.news || [];
     }
 
     if (shouldFetchGlobal) {
       globalNews = await getGlobalNews();
-      await prisma.marketSnapshot.upsert({
-        where: { id: cachedGlobal?.id || 'news_global' },
-        update: { 
-          payload: JSON.parse(JSON.stringify({ news: globalNews })),
-          capturedAt: new Date(),
-        },
-        create: {
-          id: 'news_global',
-          type: 'news_global',
-          payload: JSON.parse(JSON.stringify({ news: globalNews })),
-        },
-      });
+      if (dbAvailable) {
+        prisma.marketSnapshot.upsert({
+          where: { id: cachedGlobal?.id || 'news_global' },
+          update: { payload: JSON.parse(JSON.stringify({ news: globalNews })), capturedAt: new Date() },
+          create: { id: 'news_global', type: 'news_global', payload: JSON.parse(JSON.stringify({ news: globalNews })) },
+        }).catch(() => {});
+      }
     } else if (cachedGlobal?.payload) {
       globalNews = (cachedGlobal.payload as { news?: NewsItem[] })?.news || [];
     }
 
+    // Store in memory cache for fallback
+    const result = { india: indiaNews, global: globalNews };
+    cache.set(MEMORY_CACHE_KEY, result, 300);
+
     if (type === 'india') {
-      return NextResponse.json({ news: indiaNews }, {
-        headers: { 'Cache-Control': CACHE_CONTROL },
-      });
+      return NextResponse.json({ news: indiaNews }, { headers: { 'Cache-Control': CACHE_CONTROL } });
     }
     if (type === 'global') {
-      return NextResponse.json({ news: globalNews }, {
-        headers: { 'Cache-Control': CACHE_CONTROL },
-      });
+      return NextResponse.json({ news: globalNews }, { headers: { 'Cache-Control': CACHE_CONTROL } });
     }
 
-    return NextResponse.json({
-      india: indiaNews,
-      global: globalNews,
-    }, {
-      headers: { 'Cache-Control': CACHE_CONTROL },
-    });
+    return NextResponse.json(result, { headers: { 'Cache-Control': CACHE_CONTROL } });
   } catch (error) {
-    console.error('Error fetching market news:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch market news' },
-      { status: 500 }
-    );
+    // Graceful fallback: memory cache → empty
+    const cached = cache.get<{ india: NewsItem[]; global: NewsItem[] }>(MEMORY_CACHE_KEY);
+    if (cached) {
+      logger.warn({ msg: 'NewsMarket: serving from memory cache after error' });
+      if (type === 'india') return NextResponse.json({ news: cached.india }, { headers: { 'Cache-Control': CACHE_CONTROL } });
+      if (type === 'global') return NextResponse.json({ news: cached.global }, { headers: { 'Cache-Control': CACHE_CONTROL } });
+      return NextResponse.json(cached, { headers: { 'Cache-Control': CACHE_CONTROL } });
+    }
+    logger.error({ msg: 'NewsMarket: total failure', error: error instanceof Error ? error.message : String(error) });
+    const empty = { india: [], global: [] };
+    if (type === 'india') return NextResponse.json({ news: [] }, { headers: { 'Cache-Control': CACHE_CONTROL } });
+    if (type === 'global') return NextResponse.json({ news: [] }, { headers: { 'Cache-Control': CACHE_CONTROL } });
+    return NextResponse.json(empty, { headers: { 'Cache-Control': CACHE_CONTROL } });
   }
 }
