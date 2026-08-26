@@ -160,6 +160,7 @@ export async function GET(req: Request) {
     });
   } catch (e) {
     logger.error({ msg: "Failed to fetch advance-decline", error: e });
+    // Return 200 with empty data + warning — data unavailable is not a server error
     return NextResponse.json(
       {
         data: [],
@@ -167,9 +168,10 @@ export async function GET(req: Request) {
         total: 0,
         page: 1,
         totalPages: 0,
-        error: "Failed to fetch data",
+        error: "Advance-decline data unavailable from NSE",
+        warning: "NSE data source unavailable — try again later",
       },
-      { status: 500 }
+      { status: 200 }
     );
   }
 }

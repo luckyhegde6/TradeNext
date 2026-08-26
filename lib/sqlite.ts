@@ -346,9 +346,10 @@ function startRecoveryProbe(): void {
       if (isDbUnavailableError(err)) {
         state.prismaAvailable = false;
         logger.debug({ msg: "SQLite: Prisma probe still unavailable" });
+      } else {
+        // Non-DB errors (e.g. model not found) mean the connection works
+        state.prismaAvailable = true;
       }
-      // Non-DB errors (e.g. model not found) mean the connection works
-      state.prismaAvailable = true;
     }
 
     state.lastProbeAt = new Date().toISOString();

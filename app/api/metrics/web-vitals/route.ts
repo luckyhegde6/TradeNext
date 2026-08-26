@@ -51,23 +51,26 @@ export async function POST(req: Request) {
     const forwardedFor = req.headers.get("x-forwarded-for");
     const ip = forwardedFor ? forwardedFor.split(",")[0] : "unknown";
 
-    // Store in database via prisma
-    // Note: We'd need a WebVitals model in schema - for now we log
+    // Log the metric
     logger.info({
       msg: "Web Vitals metric received",
       source: "web-vitals",
       metric: { name, value, delta, id, rating, url, timestamp, ip },
     });
 
-    // Optionally store in ServerLog for persistence
-    await prisma.serverLog.create({
-      data: {
-        level: "info",
-        message: `Web Vitals: ${name}=${value.toFixed(2)} (${rating})`,
-        source: "analytics",
-        metadata: { name, value, delta, id, rating, url, timestamp, ip },
-      },
-    });
+    // Best-effort DB persistence — never let a DB failure break the client
+    try {
+      await prisma.serverLog.create({
+        data: {
+          level: "info",
+          message: `Web Vitals: ${name}=${value.toFixed(2)} (${rating})`,
+          source: "analytics",
+          metadata: { name, value, delta, id, rating, url, timestamp, ip },
+        },
+      });
+    } catch {
+      // DB unavailable — metric already logged above, safe to ignore
+    }
 
     return NextResponse.json(
       { success: true, message: "Metric received" },
