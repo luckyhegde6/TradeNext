@@ -5,13 +5,20 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-25 (v3.19.2 SQLite expanded + re-sync + admin DB health dashboard; suite 869 pass / 4 skip; tsc 46 = exact baseline; pending push)
+2026-08-26 (v3.19.3 graceful degradation when DB unavailable; suite 869 pass / 4 skip; tsc 46 = exact baseline; committed + pushed)
 
 ---
 
 ## Current Project Status
 
-### v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, PENDING PUSH
+### v3.19.3 — Graceful Degradation When DB Is Unavailable (Aug 26 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED + PUSHED
+**Branch**: `feature/ai-intelligence` (on top of v3.19.2).
+**Why**: When Prisma DB is down, multiple API routes throw unhandled HTTP 500 errors (web-vitals, portfolio, notifications, advance-decline), flooding the console and breaking UX. SQLite recovery probe had a logic bug preventing it from detecting Prisma recovery.
+**Fix**: (1) web-vitals POST — fire-and-forget DB write with try/catch, always 201. (2) Portfolio API — empty portfolio + warning on DB failure (200). (3) Notifications API — empty + warning on DB failure (200). (4) NSE advance-decline — 200 with empty data on NSE failure (was 500). (5) SQLite recovery probe — `else` branch fix so `state.prismaAvailable = true` doesn't overwrite `false` on DB unavailable errors.
+**Tests**: Suite 869 pass / 4 skip (unchanged); tsc 46 = exact baseline.
+- **Status**: committed `35f3c6a` + pushed; PR pending.
+
+### v3.19.2 — SQLite Expanded + Re-sync + Admin DB Health Dashboard (Aug 25 2026) — ✅ CODE + TESTS VERIFIED, COMMITTED + PUSHED
 **Branch**: `feature/ai-intelligence` (on top of v3.19.1).
 **Why**: SQLite backup (v3.19.1) only covered recommendation/screener/corp-action tables — logs, auth, monitoring, and cron data were not backed up. No automatic recovery when Prisma comes back online. No admin visibility into DB health status.
 **Fix**: (1) Expanded schema — `lib/sqlite.ts` gains 6 new tables (`worker_status`, `server_log`, `audit_log`, `cron_job`, `cron_run`, `worker_task`) with query helpers + `getHealthStatus()`. (2) Recovery sync — background probe every 5 min when Prisma is down, auto-sync on recovery. (3) Admin DB health API — `GET/POST /api/admin/db-health`. (4) Admin DB health UI — `app/admin/utils/db-health/page.tsx` dashboard with status badges, stat cards, write budget bar, table comparison, sync history, 30s refresh. Nav entry in admin utils layout.

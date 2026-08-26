@@ -1330,6 +1330,16 @@ jest.mock("sql.js", () => {
 The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 — SWC hoisting prevents referencing module-scope vars from factories).
 
 **Rule**: (1) When a dependency uses WASM, native binaries, or platform-specific APIs, mock the entire module — don't try to polyfill the runtime. (2) The mock factory's in-memory store should mirror the API contract enough for tests to verify the CALLER's logic (SQL generation, table names, parameter mapping) without needing actual database functionality. (3) Split multi-statement SQL on `;` when asserting — SQLite's `run()` executes all statements in one call.
+
+### 87. Recovery Probe Bug — Unconditional Assignment in Catch Block Overrides Error State
+**Issue**: SQLite recovery probe never detected Prisma unavailability → never triggered recovery sync → SQLite stayed empty even after Prisma came back online.
+
+**Root Cause**: In `startRecoveryProbe()`, the catch block had `state.prismaAvailable = true` running unconditionally — it was the "probe succeeded" path, but it was inside the catch block (for non-DB errors). When a DB unavailable error occurred, `state.prismaAvailable` was first set to `false`, then immediately overwritten by `true` in the same catch block — the `false` never stuck.
+
+**Solution**: Added `else` so `state.prismaAvailable = true` only runs for non-DB-error exceptions (e.g. network timeout), while DB unavailable errors correctly leave the flag as `false`.
+
+**Rule**: In try/catch blocks that set state based on error type, always use `if/else` branches — never let a catch block unconditionally overwrite state that was set earlier in the same block. When debugging state bugs, trace every assignment to the same variable in the same scope.
+
 **Issue**: Agent profiles (`qa.md`, `e2e-agent.md`, `devops.md`) referenced `playwright-cli open`, `playwright-cli snapshot`, and Vercel deployment — all stale. The Playwright CLI tool was replaced by Playwright MCP tools + Chrome DevTools MCP. Vercel was never used (Netlify only).
 **Root Cause**: Agent profiles were created early and never updated when the tooling stack changed. The `playwright-cli` npm package was replaced by `@playwright/mcp` (MCP server) + `chrome-devtools-mcp`, but agent profiles still referenced the old CLI commands.
 **Rule**: (1) Agent profiles MUST reference the actual tooling in use — grep for stale tool names after any tooling change. (2) Every agent profile MUST have a `Skill` reference pointing to the machine-readable `.opencode/skills/<name>/SKILL.md` file. (3) The `opencode.json` `agent:` section MUST have entries for ALL agents that subagents can invoke.
@@ -1357,6 +1367,8 @@ The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 —
 - 2026-08-11: Added Lesson 60 (credentials env-var-only — no literals in code/docs/commit messages; `DEFAULT_PASSWORD` env + `.githooks/commit-msg` + pre-commit #6/#7; redact literals to `********`; public sandbox demo creds exempt); added v3.5.7 credential-hygiene + llms.txt/robots discovery entry
 - 2026-08-11: Added Lessons 58-59 (auth gate ordering — password compare must be the final gate, never early-throw on status flags, surface system-issued credentials in the admin flow; log viewer symmetry — write path and read path must construct the same dir/date/blob-store key); added v3.5.7 auth join→approve→login + server logs `logs/` dir entry
 - 2026-08-11: Added Lessons 56-57 (serverless cron ledger must be written by the scheduled-function/admin call sites — `recordCronRun`; AI config must flow to `analyzeStocks` via shared `loadConfig` — env-only defaults + nonexistent free-model IDs caused prod all-HOLD runs)
+- 2026-08-26: Added Lesson 87 (recovery probe bug — unconditional assignment in catch block overrides error state; `state.prismaAvailable = true` in catch overwrites the `false` set for DB unavailable errors; fix = `else` branch); added v3.19.3 graceful degradation entry (suite 869 pass / 4 skip, tsc 46 baseline)
+
 - 2026-08-08: Added Lesson 55 (Playwright e2e flakiness on live-data apps: Firefox xl-nav viewport 1440×900, WebKit controlled number-input keystrokes, single-threaded dev-server nav starvation → serial + noWaitAfter + retries, live NSE values never asserted); added v3.5.3 e2e suite entry
 - 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)
 - 2026-08-07: Added Lessons 52-53 (React hook caller-array refs → infinite rerender loop, stabilize via refs + primitive key; AI fallback values must be price-based, never literal zeros — prod target/SL ₹0.00 bug)

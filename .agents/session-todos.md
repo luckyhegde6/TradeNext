@@ -1,24 +1,12 @@
 # Session Todos
 
 ## Current
-- [x] Move legacy changelog files to `.agents/docs/` — DONE (screener.md, corp-actions.md, security-workers.md, serverless-logging.md)
-- [x] Update `.agents/CHANGELOG.md` index — DONE
-- [x] Update agent profiles (qa.md, e2e-agent.md, devops.md) — DONE (Playwright CLI → MCP, wired skills)
-- [x] Update AGENTS.md — DONE (skills table, artifact table, stale CLI refs)
-- [x] Update `.opencode/opencode.json` — DONE (7 agents added: qa, e2e-agent, devops, code-reviewer, integrator, observability, nse-integration command)
-- [x] Update AGENT-SKILL-MATRIX.md — DONE (14 agents, 8 skills, 6 commands)
-- [x] Update session-todos + agent-memory + Lessons — DONE
-- [x] v3.15.0 documentation updates — DONE (AGENTS.md row, CHANGELOG index + versions-v3.15.md, versions-v3.md index, Primer.md, agent-memory.md)
-- [x] v3.19.0 DB plan limit resilience — DONE (Phase 1a-1d + 2a/2b/2d + 3a+4a + 4b, 15 files modified, 2 created, 3 test fixes; suite 852 pass / 4 skip = baseline; tsc 46 = baseline)
-- [x] v3.19.0 documentation updates — DONE (AGENTS.md row, CHANGELOG index + versions-v3.19.md, versions-v3.md index, TODO.md marked done, Primer.md, agent-memory.md, Lessons #85)
-- [ ] Commit + push — PENDING user request
+- [x] v3.19.3 graceful degradation fixes — DONE (5 files: web-vitals, portfolio, notifications, advance-decline, SQLite recovery probe)
+- [x] v3.19.3 documentation updates — DONE (AGENTS.md row, CHANGELOG versions-v3.19.md, Lessons #87, Primer.md, agent-memory.md, HANDOFF.md)
+- [x] Commit + push — DONE (`35f3c6a` on `feature/ai-intelligence`)
+- [ ] Create PR to main — PENDING user request
 
 ## Completed This Session
-- v3.14.0 swing signals — committed + pushed (`2ff33f9`)
-- Advanced screener Fix A + Fix D — committed + pushed (`98b595b`)
-- Prod DB fetch failures investigation — complete, LOW severity
-- AGENTS.md v3.14.0 entry + screener fix — committed + pushed (`7bb8057`)
-- HANDOFF.md updated for v3.14.0 + screener fix
-- Lesson #83 added (screener silent failure)
-- Agent profiles restructuring — DONE (all files updated, commit pending)
-- v3.15.0 pipeline redesign + Closed IPOs + TTL cleanup — DONE (code + tests + docs, commit pending)
+- v3.19.3 graceful degradation — committed + pushed (`35f3c6a`)
+- Live site comprehensive analysis — 22+ pages checked, root cause diagnosed
+- 5 code fixes applied for DB-down resilience
