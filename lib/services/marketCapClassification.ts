@@ -11,21 +11,12 @@
  * @version 3.3.0
  */
 
-// ─── NIFTY 50 Constituents (as of 2026) ──────────────────────────────────
+// ─── NIFTY 50 Constituents (canonical source: lib/constants.ts) ──────────
+
+import { NIFTY_50 } from "@/lib/constants";
 
 /** Known NIFTY 50 stock symbols. Used for Bluechip and NIFTY50 classification. */
-const NIFTY_50_SYMBOLS = new Set([
-  "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
-  "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL",
-  "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT",
-  "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO",
-  "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK", "INFY",
-  "ITC", "JSWSTEEL", "KOTAKBANK", "LTIM", "LT",
-  "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC",
-  "POWERGRID", "RELIANCE", "SBILIFE", "SBIN", "SUNPHARMA",
-  "TATAMOTORS", "TATASTEEL", "TCS", "TECHM", "TITAN",
-  "TRENT", "ULTRACEMCO", "WIPRO", "SHRIRAMFIN", "HDFCAMC",
-]);
+const NIFTY_50_SYMBOLS = new Set(NIFTY_50);
 
 /** Set of well-known Large Cap NSE stocks (top ~150 by market cap). */
 const LARGE_CAP_SYMBOLS = new Set([

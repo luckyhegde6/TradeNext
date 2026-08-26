@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getFinancialStatus, getCorpEvents, getCorporateAnnouncements, getCorpActions } from "@/lib/stock-service";
+import logger from "@/lib/logger";
 
 export async function GET(req: Request, { params }: { params: Promise<{ symbol: string }> }) {
     const { symbol } = await params;
@@ -20,8 +21,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ symbol: 
             const data = await getCorpActions(symbol);
             return NextResponse.json(data);
         } else {
-            // Fetch everything in parallel
-            const [financials, events, announcements, actions] = await Promise.all([
+            const [financials, events, announcements, actions] = await Promise.allSettled([
                 getFinancialStatus(symbol),
                 getCorpEvents(symbol),
                 getCorporateAnnouncements(symbol),
@@ -29,14 +29,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ symbol: 
             ]);
 
             return NextResponse.json({
-                financials,
-                events,
-                announcements,
-                actions
+                financials: financials.status === "fulfilled" ? financials.value : null,
+                events: events.status === "fulfilled" ? events.value : null,
+                announcements: announcements.status === "fulfilled" ? announcements.value : null,
+                actions: actions.status === "fulfilled" ? actions.value : null,
             });
         }
     } catch (e) {
-        console.error("Stock Corporate API Error:", e);
-        return NextResponse.json({ error: "Failed to fetch corporate data" }, { status: 502 });
+        logger.warn({ msg: "Stock Corporate: fetch failed", symbol, error: e instanceof Error ? e.message : String(e) });
+        return NextResponse.json({ financials: null, events: null, announcements: null, actions: null });
     }
 }

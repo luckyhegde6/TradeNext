@@ -1331,7 +1331,15 @@ The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 —
 
 **Rule**: (1) When a dependency uses WASM, native binaries, or platform-specific APIs, mock the entire module — don't try to polyfill the runtime. (2) The mock factory's in-memory store should mirror the API contract enough for tests to verify the CALLER's logic (SQL generation, table names, parameter mapping) without needing actual database functionality. (3) Split multi-statement SQL on `;` when asserting — SQLite's `run()` executes all statements in one call.
 
-### 87. Recovery Probe Bug — Unconditional Assignment in Catch Block Overrides Error State
+### 88. Data-Unavailable ≠ Server Error: Catch Blocks Return HTTP 200 with Graceful Empty
+
+**Issue**: MCP POST+GET catch blocks threw HTTP 500 when NSE was unreachable or DB was down. Corporate-actions outer catch also returned 500 when DB + SQLite + stale cache were all exhausted.
+
+**Root Cause**: Routes treated external-data failures (NSE 403/429, DB down) as server errors. A data-fetching failure is not the same as a server malfunction — the server is working correctly, it just can't reach the data source.
+
+**Solution**: Both MCP catch blocks now return `{success:true, data:null, warning:<message>}` with HTTP 200. Corporate-actions outer catch returns `{data:[], warning:<message>}` with HTTP 200. `logger.error` downgraded to `logger.warn` — a data-availability failure is not a server error. The frontend already handles empty/null gracefully via existing `if (!data || ...length === 0)` guards.
+
+**Rule**: When an API route fetches external data (NSE, third-party APIs), failure to fetch is NOT a 500. Return 200 + empty data + `warning` field. The caller decides if empty data is acceptable for their use case. This is distinct from a genuine server error (e.g., unhandled exception, missing env var) which SHOULD return 500.
 **Issue**: SQLite recovery probe never detected Prisma unavailability → never triggered recovery sync → SQLite stayed empty even after Prisma came back online.
 
 **Root Cause**: In `startRecoveryProbe()`, the catch block had `state.prismaAvailable = true` running unconditionally — it was the "probe succeeded" path, but it was inside the catch block (for non-DB errors). When a DB unavailable error occurred, `state.prismaAvailable` was first set to `false`, then immediately overwritten by `true` in the same catch block — the `false` never stuck.
@@ -1367,7 +1375,7 @@ The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 —
 - 2026-08-11: Added Lesson 60 (credentials env-var-only — no literals in code/docs/commit messages; `DEFAULT_PASSWORD` env + `.githooks/commit-msg` + pre-commit #6/#7; redact literals to `********`; public sandbox demo creds exempt); added v3.5.7 credential-hygiene + llms.txt/robots discovery entry
 - 2026-08-11: Added Lessons 58-59 (auth gate ordering — password compare must be the final gate, never early-throw on status flags, surface system-issued credentials in the admin flow; log viewer symmetry — write path and read path must construct the same dir/date/blob-store key); added v3.5.7 auth join→approve→login + server logs `logs/` dir entry
 - 2026-08-11: Added Lessons 56-57 (serverless cron ledger must be written by the scheduled-function/admin call sites — `recordCronRun`; AI config must flow to `analyzeStocks` via shared `loadConfig` — env-only defaults + nonexistent free-model IDs caused prod all-HOLD runs)
-- 2026-08-26: Added Lesson 87 (recovery probe bug — unconditional assignment in catch block overrides error state; `state.prismaAvailable = true` in catch overwrites the `false` set for DB unavailable errors; fix = `else` branch); added v3.19.3 graceful degradation entry (suite 869 pass / 4 skip, tsc 46 baseline)
+- 2026-08-26: Added Lesson 88 (data-unavailable ≠ server error: catch blocks return HTTP 200 + graceful empty, never 500 — MCP + corp-actions fix pattern); added Lesson 87 (recovery probe bug — unconditional assignment in catch block overrides error state; `state.prismaAvailable = true` in catch overwrites the `false` set for DB unavailable errors; fix = `else` branch); added v3.19.3 graceful degradation entry (suite 869 pass / 4 skip, tsc 46 baseline)
 
 - 2026-08-08: Added Lesson 55 (Playwright e2e flakiness on live-data apps: Firefox xl-nav viewport 1440×900, WebKit controlled number-input keystrokes, single-threaded dev-server nav starvation → serial + noWaitAfter + retries, live NSE values never asserted); added v3.5.3 e2e suite entry
 - 2026-08-08: Added Lesson 54 (TradingView `change` = % on NSE; `change_percent` null/unsupported → 57 templates mass-fixed, Short Term Breakouts 0→250 via `change>0, relative_volume_10d_calc>1, Perf.5D>3`)

@@ -11,7 +11,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ index: s
         const data = await getIndexCorporateActions(indexName);
         return NextResponse.json(data);
     } catch (e) {
-        console.error("Corp Actions API Error:", e);
-        return NextResponse.json({ error: "Failed to fetch corp actions" }, { status: 502 });
+        return NextResponse.json([]);
     }
 }

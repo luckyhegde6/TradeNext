@@ -53,7 +53,7 @@ export async function GET(req: Request) {
       }
     );
   } catch (error) {
-    logger.error({ msg: "Corporate events API error", error });
-    return NextResponse.json({ error: "Failed to fetch corporate events" }, { status: 500 });
+    logger.warn({ msg: "Corporate events: fetch failed, returning empty", error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json([]);
   }
 }

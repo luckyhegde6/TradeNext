@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ index: s
     } catch (e) {
         const duration = Date.now() - startTime;
         const errorMessage = e instanceof Error ? e.message : String(e);
-        logger.error({ msg: 'Heatmap API Error', indexName, error: errorMessage, duration });
-        return NextResponse.json({ error: "Failed to fetch heatmap" }, { status: 502 });
+        logger.warn({ msg: 'Heatmap: fetch failed', indexName, error: errorMessage, duration });
+        return NextResponse.json([]);
     }
 }

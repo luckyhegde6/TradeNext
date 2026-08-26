@@ -11,7 +11,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ index: s
         const data = await getAdvanceDecline(indexName);
         return NextResponse.json(data);
     } catch (e) {
-        console.error("Advance/Decline API Error:", e);
-        return NextResponse.json({ error: "Failed to fetch advance/decline data" }, { status: 502 });
+        return NextResponse.json({ advances: [], declines: [], unchanged: [] });
     }
 }

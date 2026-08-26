@@ -7,6 +7,9 @@ import cache from "@/lib/cache";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { getSqliteFallback } from "@/lib/sqlite";
 
+/** Module-level guard: prevent overlapping NSE refreshes. */
+let nseRefreshInFlight: Promise<void> | null = null;
+
 function parseNseDate(dateStr: string): string | null {
   if (!dateStr || dateStr === "-") return null;
   try {
@@ -205,6 +208,50 @@ async function hydrateCorporateActionsToDb(actions: any[]): Promise<number> {
   return hydrated;
 }
 
+/**
+ * Background NSE refresh — non-blocking, fire-and-forget.
+ * Fetches from NSE, updates memory cache + MarketCache DB, hydrates corporate_action table.
+ * Module-guarded: only one refresh runs at a time.
+ */
+function triggerNseRefresh(force: boolean) {
+  if (nseRefreshInFlight) {
+    logger.debug({ msg: "CorporateActions: NSE refresh already in progress, skipping" });
+    return;
+  }
+
+  nseRefreshInFlight = (async () => {
+    try {
+      let cacheResult;
+      const dataType: DataType = "corporate_actions";
+
+      if (force) {
+        cacheResult = await forceRefreshCache(fetchCorporateActionsFromNse, dataType);
+      } else {
+        cacheResult = await getOrFetchNseData(fetchCorporateActionsFromNse, {
+          dataType,
+          ttlSecondsOpen: 300,   // 5 minutes when market is open
+          ttlSecondsClosed: 3600 // 1 hour when market is closed
+        });
+      }
+
+      // Hydrate to corporate_action table in background
+      if (cacheResult.source === "nse") {
+        hydrateCorporateActionsToDb(cacheResult.data as any[]).then(count => {
+          logger.info({ msg: "CorporateActions: Hydrated to DB from NSE", count });
+        }).catch(err => {
+          logger.error({ msg: "CorporateActions: DB hydration error", error: err });
+        });
+      }
+
+      logger.info({ msg: "CorporateActions: NSE refresh completed", source: cacheResult.source });
+    } catch (err) {
+      logger.warn({ msg: "CorporateActions: NSE refresh failed (non-blocking)", error: err });
+    } finally {
+      nseRefreshInFlight = null;
+    }
+  })();
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const actionType = url.searchParams.get("type");
@@ -218,43 +265,22 @@ export async function GET(req: Request) {
   const CORP_CACHE_KEY = "corp-actions:combined:default";
   const CORP_CACHE_TTL = 5 * 60;
 
+  const page = pageParam ? parseInt(pageParam, 10) : undefined;
+  const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+
+  // --- FAST PATH: memory cache for the default unfiltered query ---
+  if (isDefaultQuery && !forceRefresh) {
+    const cached = cache.get(CORP_CACHE_KEY);
+    if (cached) {
+      // Still trigger background NSE refresh (non-blocking, guarded)
+      triggerNseRefresh(false);
+      logger.debug({ msg: "CorporateActions: Serving from memory cache" });
+      return NextResponse.json(cached);
+    }
+  }
+
+  // --- PRIMARY PATH: DB query (always runs, regardless of NSE status) ---
   try {
-    const sourceParam = url.searchParams.get("source") || "all";
-    const page = pageParam ? parseInt(pageParam, 10) : undefined;
-    const limit = limitParam ? parseInt(limitParam, 10) : undefined;
-
-    // Check if we should force refresh
-    let cacheResult;
-    const dataType: DataType = "corporate_actions";
-    
-    if (forceRefresh) {
-      logger.info({ msg: "CorporateActions: Force refresh requested" });
-      cacheResult = await forceRefreshCache(
-        fetchCorporateActionsFromNse,
-        dataType
-      );
-    } else {
-      // Use smart caching - fetch from NSE only if needed
-      cacheResult = await getOrFetchNseData(
-        fetchCorporateActionsFromNse,
-        {
-          dataType,
-          ttlSecondsOpen: 300,   // 5 minutes when market is open
-          ttlSecondsClosed: 3600 // 1 hour when market is closed
-        }
-      );
-    }
-    
-    // Hydrate to database in background (fire and forget)
-    if (cacheResult.source === "nse") {
-      hydrateCorporateActionsToDb(cacheResult.data as any[]).then(count => {
-        logger.info({ msg: "CorporateActions: Hydrated to DB", count });
-      }).catch(err => {
-        logger.error({ msg: "CorporateActions: DB hydration error", error: err });
-      });
-    }
-
-    // Build where clause for DB query
     const where: any = {};
     if (actionType) where.actionType = actionType;
     if (symbol) where.symbol = { contains: symbol.toUpperCase() };
@@ -268,15 +294,6 @@ export async function GET(req: Request) {
       }
     }
 
-    if (isDefaultQuery && !forceRefresh) {
-      const cached = cache.get(CORP_CACHE_KEY);
-      if (cached) {
-        logger.debug({ msg: "CorporateActions: Serving from memory cache" });
-        return NextResponse.json(cached);
-      }
-    }
-
-    // Always serve from DB for queryable results
     const actions = await prisma.corporateAction.findMany({
       where,
       orderBy: [
@@ -315,7 +332,6 @@ export async function GET(req: Request) {
       bookClosureStartDate: a.bookClosureStartDate?.toISOString(),
       bookClosureEndDate: a.bookClosureEndDate?.toISOString(),
       announcementDate: a.announcementDate?.toISOString(),
-      // Convert Decimal to number
       dividendPerShare: a.dividendPerShare ? Number(a.dividendPerShare) : null,
       dividendYield: a.dividendYield ? Number(a.dividendYield) : null,
     }));
@@ -346,13 +362,17 @@ export async function GET(req: Request) {
       return {
         ...a,
         currentPrice,
-        // Recompute dividend yield using current price (correct formula)
-        // instead of the stored value which was incorrectly computed against face value
         dividendYield: a.dividendPerShare && currentPrice && currentPrice > 0
           ? (a.dividendPerShare / currentPrice) * 100
           : null,
       };
     });
+
+    // Determine source for response metadata
+    const memKey = `mc:corporate_actions`;
+    const memCached = cache.get<{ source: string; lastSyncedAt: Date }>(memKey);
+    const source = memCached?.source ?? "db";
+    const lastSyncedAt = memCached?.lastSyncedAt ?? null;
 
     // Apply pagination if requested
     if (page !== undefined && limit !== undefined) {
@@ -360,30 +380,34 @@ export async function GET(req: Request) {
       const totalPages = Math.ceil(total / limit);
       const offset = (page - 1) * limit;
       const paginated = enriched.slice(offset, offset + limit);
-      
-      return NextResponse.json({ 
-        data: paginated, 
-        total, 
-        page, 
-        totalPages, 
+
+      // Trigger background NSE refresh (non-blocking)
+      triggerNseRefresh(forceRefresh);
+
+      return NextResponse.json({
+        data: paginated,
+        total,
+        page,
+        totalPages,
         limit,
-        source: cacheResult.source,
-        lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
-        cached: !cacheResult.needsRefresh
+        source,
+        lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
       });
     }
 
-    const responseBody = { 
-      data: enriched, 
-      source: cacheResult.source,
-      lastSyncedAt: cacheResult.lastSyncedAt?.toISOString(),
-      cached: !cacheResult.needsRefresh
+    const responseBody = {
+      data: enriched,
+      source,
+      lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
     };
 
-    // Cache the default unfiltered response (most common path).
+    // Cache the default unfiltered response (most common path)
     if (isDefaultQuery) {
       cache.set(CORP_CACHE_KEY, responseBody, CORP_CACHE_TTL);
     }
+
+    // Trigger background NSE refresh (non-blocking)
+    triggerNseRefresh(forceRefresh);
 
     return NextResponse.json(responseBody);
 
@@ -402,15 +426,16 @@ export async function GET(req: Request) {
       }
     }
 
-    // DB unavailable — try serving stale cache before 500.
+    // DB unavailable — try serving stale memory cache before 500
     if (isDbUnavailableError(e)) {
-      const stale = cache.get("corp-actions:combined:default");
+      const stale = cache.get(CORP_CACHE_KEY);
       if (stale) {
-        logger.warn({ msg: "CorporateActions: DB unavailable — serving stale cache" });
+        logger.warn({ msg: "CorporateActions: DB unavailable — serving stale memory cache" });
         return NextResponse.json(stale);
       }
     }
-    logger.error({ msg: "Failed to fetch combined corporate actions", error: e });
-    return NextResponse.json({ error: "Failed to fetch corporate actions" }, { status: 500 });
+
+    logger.warn({ msg: "CorporateActions: all sources failed — returning empty", error: e instanceof Error ? e.message : String(e) });
+    return NextResponse.json({ data: [], warning: "Corporate actions data unavailable" });
   }
 }

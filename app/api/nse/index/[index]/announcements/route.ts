@@ -9,7 +9,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ index: s
         const data = await getIndexAnnouncements(indexName);
         return NextResponse.json(data);
     } catch (e) {
-        console.error("Announcements API Error:", e);
-        return NextResponse.json({ error: "Failed to fetch announcements" }, { status: 502 });
+        return NextResponse.json([]);
     }
 }

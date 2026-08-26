@@ -3,15 +3,15 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { nseFetch } from "@/lib/nse-client";
 import cache from "@/lib/cache";
+import logger from "@/lib/logger";
 
 export async function GET(req: Request, { params }: { params: Promise<{ index: string }> }) {
   const { index } = await params;
   const indexName = decodeURIComponent(index);
   const cacheKey = `nse:index:${indexName}:symbols`;
-  const CACHE_TTL = 300; // 5 minutes
+  const CACHE_TTL = 300;
 
   try {
-    // Check server cache first
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       return NextResponse.json(cachedData);
@@ -19,13 +19,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ index: s
 
     const qs = `?functionName=getAllIndicesSymbols&&index=${encodeURIComponent(indexName)}`;
     const data = await nseFetch("/api/NextApi/apiClient/indexTrackerApi", qs);
-
-    // Cache the result
     cache.set(cacheKey, data, CACHE_TTL);
 
     return NextResponse.json(data);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "failed" }, { status: 502 });
+    const stale = cache.get(cacheKey);
+    if (stale) return NextResponse.json(stale);
+    logger.warn({ msg: "Index symbols: fetch failed", indexName, error: e instanceof Error ? e.message : String(e) });
+    return NextResponse.json({ symbols: [] });
   }
 }
