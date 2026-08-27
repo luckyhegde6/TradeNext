@@ -13,7 +13,7 @@
 import { EventEmitter } from "events";
 import logger from "@/lib/logger";
 import { getStockQuote } from "@/lib/stock-service";
-import { priceCache } from "./priceCache";
+import { priceCache, cacheDailyPrice } from "./priceCache";
 import { isMarketOpen } from "@/lib/market-hours";
 
 /* ─── Types ─── */
@@ -169,6 +169,15 @@ class PriceEventBus extends EventEmitter {
         change: event.change,
         changePercent: event.changePercent,
         timestamp: Date.now(),
+      });
+
+      // Also cache for daily batch write (avoids individual DB writes during market hours)
+      cacheDailyPrice(symbol, {
+        open: event.open,
+        high: event.dayHigh,
+        low: event.dayLow,
+        close: event.price,
+        volume: event.volume,
       });
 
       // Emit to SSE clients

@@ -1,45 +1,45 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260816-swing-async-prod-stability"
+session_id: "sess-20260827-db-health-price-cache"
 agent: "system"
-timestamp: "2026-08-16T17:10:00Z"
+timestamp: "2026-08-27T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260815-serverless-purge"
+parent_session: "sess-20260826-nse-resilience"
 child_sessions: []
-checkpoint: "v3.12.0-committed-pushed-pr95-open-merge-pending"
+checkpoint: "v3.20.2-committed-branch-feat/db-health-price-cache-push-pr-pending"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.12.0 on branch `fix/swing-async-analysis` — (1) fix the Swing tab prod failure (`GET /api/recommendations/swing` ran the FULL pipeline synchronously → Netlify 30s wall killed it; split the AI analysis into a background task); (2) prod-stability batch: perf-check live-price fallback + prod `daily_prices` backfill (user-approved) + heartbeat-aware worker reaper + Prisma per-query timeout + worker-logger `resolveLogsDir()` + error serialization + swing-script import fix.
-- **Branch**: `fix/swing-async-analysis`. **COMMITTED (`f1f5a91` code + `7910ed0` docs) + PUSHED — PR #95 OPEN, merge pending** (user merges → Netlify rebuild = deploy). No deploy without the merge.
+- **Task**: v3.20.1 + v3.20.2 on branch `feat/db-health-price-cache` — (1) v3.20.1 DB ops reduction (~22K→~4.2K ops/day) committed `5156eb3`; (2) v3.20.2 DB failure ring buffer + Daily Price Cache batch writer + DB Health API/UI enhancements.
+- **Branch**: `feat/db-health-price-cache`. **User requested: "yes commit and push and create PR"** — commit + push main (includes unpushed `5156eb3`) + create PR targeting main.
 
 ## Progress
-- [x] **Swing async split**: `getSwingRecommendations({analyze:true})` returns the fast screener feed instantly with `analysisStatus:"pending"` + kicks `runSwingAnalysisInBackground()` (module-guarded fire-and-forget, `swingAnalysisInFlight` dedupe, `flushSwingAnalysis()` test hook) → AI batches (4 × 5, concurrency 3, retry×2), patches `analysis`/`analysisError`, honest `analysisStatusAfterBatch`, persists swing trackers (non-fatal), audits START/COMPLETE|FAILED + RUN_COMPLETE, re-sets the SAME 30-min cache key (pending self-expires at 10-min `SWING_PENDING_TTL`). `SwingResponse.analysisStatus` union + `"pending"`; `SwingTab` pulsing sky-blue "AI targets generating…" badge + SWR function-form `refreshInterval` (10s pending / 60s after).
-- [x] **Perf-check live-price fallback**: `checkRecommendationPerformance` bridges trackers with no `daily_prices` rows (cap 50, chunked 10-batch `Promise.allSettled` via `getStockQuote`, `lastPrice ?? closePrice`, never throws) → Current/Return % never blank (4 new tests; file suite 33/33).
-- [x] **Prod `daily_prices` backfill APPLIED (user-approved)**: 3 passes — run 1 default `--days 120` (300 scoped / 246 fetched / 15,226 bars) → coverage check showed 107/130 tracking trackers still missing (default scope = NIFTY 50 ∪ 30-day trackers ∪ live screener misses July trackers); run 2 explicit `--symbols` (107 → 85 fetched / 5,596 bars); run 3 explicit `--symbols` (22 → 7 fetched / 373 bars). **Total 21,195 bars, 0 errors**. Final: **115/130 tracking trackers (88%)**, prod **37,387 rows / 602 distinct tickers**. 15 stragglers (BAGMANE.RR, SIGACHI, DIGIKORE, ALPEXSOLAR, ELGNZ, GSMFOILS, JAINIK, UCL, BEACON, MAHICKRA, SUNLITE, VHLTD, CURRENT, TUNWAL, NEUEON) = NSE returns HTTP 200 with EMPTY data (probed 4 — SIGACHI/DIGIKORE/BAGMANE.RR/UCL) — data availability, not a bug; covered by the live fallback.
-- [x] **Worker reaper heartbeat-aware rewrite**: `reapStaleWorkerTasks` fails safe `{0,0}` when the liveness lookup errors → transient DB failure can't sweep RUNNING tasks to `failed` (worker-engine.test.ts 11/11).
-- [x] **Prisma per-query timeout**: `lib/prisma.ts` `$extends({query:{$allOperations}})` + `Promise.race` (default 120s, `PRISMA_QUERY_TIMEOUT_MS` env, `.finally(clearTimeout)`) + stage logs added in `runDailyRecommendations`.
-- [x] **Worker-logger `resolveLogsDir()`**: memoized `cwd/.next/server_logs` → `os.tmpdir()/tradenext-logs` → `""` fallback, wired into 5 worker-logger sites + worker-engine startup (Netlify read-only FS can't crash file logging).
-- [x] **Error serialization** (`error instanceof Error ? error.message : String(error)`) in worker-engine.ts + cron-daemon.ts (pino drops non-enumerable Error props — prod logs showed `error={}`).
-- [x] `scripts/fetch-swing-prices-to-prod.ts` dangling import fixed; `DailyRecommendationStock` verdict writes verified pipeline-only at runtime (read-only elsewhere).
-- [x] **Verification**: **suite 722 pass / 4 skip** (was 711/4 — +11: 4 perf-fallback, 4 reaper-sweep, 1 stage-log, 2 swing-orchestration additions; 4 skips = intentional client-cache). `npx tsc --noEmit` **46 errors = exact baseline, 0 new**. Live-verified :3000 — `force=1` → 6s pending (real AI calls 38–53s responseTimeMs each — sync path could never work) → 225ms cached `done` with 20/20 AI targets, 0 console errors. Temp files cleaned (`prod-diagnostic.tmp.*`, `scripts/.tmp-verify-backfill.ts`, `scripts/.tmp-probe-symbol.ts` deleted).
-- [x] **Docs updated (all)**: AGENTS.md v3.12.0 row (amended — 722 pass + stability batch + backfill results), `.agents/CHANGELOG.md` index + `changelog/versions-v3.md` v3.12.0 entry (amended), TODO.md v3.12.0 rows, Primer.md (Session 19 + status), agent-memory.md entry, Lessons.md #78–80 + update log, session-todos.md, HANDOFF.md, handoff `latest.md` (this file), session `decisions.md` + `flow.md` (`2026-08-16-a6d2f41`).
+- [x] **DB ops reduction (v3.20.1, `5156eb3`)**: worker poll 5s→30s, cron-daemon resync 60s→5min, legacy scheduler removed, web-vitals DB writes removed (pino only), cron heartbeat 5min→15min → ~17.7K ops/day saved, now ~4.2K/day (10K plan limit).
+- [x] **DB failure ring buffer (`lib/prisma.ts`)**: `recordDbError()`/`getDbErrorLog()` — last 50 DB query failures (time/model/op/message) auto-recorded in `$allOperations` extension (timeout, write-budget, connection); `WRITE_BUDGET_CONFIG` exported.
+- [x] **Daily Price Cache batch writer (`lib/services/priceCache.ts`)**: market-hours in-memory accumulation via `cacheDailyPrice()`, single bulk `$executeRawUnsafe` upsert (`ON CONFLICT (ticker,"tradeDate") DO UPDATE`, chunk 200) after 4 PM IST → ~1 write/day; `flushDailyPricesToDb()`/`getDailyPriceCacheStatus()`/`startDailyPriceFlushTimer()` (5-min check)/`stopDailyPriceFlushTimer()`/`isPostMarket()`/`isMarketAccumulationWindow()`; wired into `priceSyncService.ts` `fetchAndEmit()` + `instrumentation.ts`.
+- [x] **DB Health API (`app/api/admin/db-health/route.ts`)**: GET returns direct `dbOpsCounter` (reads/writes/budget/exceeded/remaining/dayKey) + `dailyPriceCache` + `dbErrors`; POST `{action:"flush_prices"}` added (default `sync_sqlite`).
+- [x] **DB Health UI (`app/admin/utils/db-health/page.tsx`)**: 5th "Cached Prices" stat card, Daily Price Cache section, Recent DB Errors table (scrollable/clear), Flush Prices button, day key in write-budget header.
+- [x] **Verification**: **suite 869 pass / 4 skip = baseline**; `npx tsc --noEmit` **57 = baseline (0 production errors; all test-only)**. No schema change → no migration.
+- [x] **Docs updated (all)**: AGENTS.md v3.20.2 row, `.agents/changelog/versions-v3.20.md` (v3.20.2 section), `.agents/CHANGELOG.md` index, TODO.md, Primer.md, agent-memory.md, Lessons.md #89 + update log, session-todos.md, session `decisions.md` + `flow.md` (`2026-08-27-db-health-price-cache`), handoff `latest.md` (this file).
 
 ## Decisions
-- Request-time split (async AI analysis) is the correct fix for the 30s request wall in a persistent-server deployment — background work belongs off the request path (same reality as the v3.11.x daemon). Pending feed self-expires at a short TTL so a dead process degrades to failed state, never hangs.
-- Prod backfill: use explicit `--symbols` from a consumer-coverage query (tracking trackers), not just the script default scope (which missed >30-day trackers). 0 errors ≠ solved — measure coverage against consumers.
-- NSE 200-with-empty-data for 15 symbols = data availability, NOT a code bug — do not retry-loop; cover at consumption time (live-price fallback).
-- Reaper: fail-safe on liveness-lookup failure — a transient DB error must never sweep RUNNING tasks; swallowing a sweep is strictly safer than a false one.
-- Per-query Prisma timeout: a hung query must not wedge a run forever — timeout + clear, per query.
-- No deploy this session (user explicit hold; Netlify rebuild = deploy happens on PR merge).
+- Keep the SSE `PriceCache` class untouched; add a SEPARATE `DailyPriceAccumulator` in the same file (merged module).
+- Failure ring buffer on `globalThis` = free admin visibility (no extra DB ops); recorded fire-and-forget via `.catch`.
+- Use `$executeRawUnsafe` for the accumulator flush — never blocked by the write-budget guard.
+- Auto-flush timer lazy-guarded: only fires when `isPostMarket() && prices.size > 0`.
+- No schema change this session → no migration needed.
+- Commit/push/PR per user explicit request.
 
 ## Blockers
-- **PR #95 merge pending (user)** — Netlify rebuild = deploy; post-deploy smoke follows.
+- **Prisma Postgres `planLimitReached`**: prod writes on hold until Sep 1 — corporate-actions backfill deferred to Sep 1 (script ready: `scripts/backfill-corporate-actions-prod.ts`, 2,053 records).
+- **Netlify deploy blocked** until Prisma Postgres extension removed from Netlify Dashboard.
+- **NSE cloud IP blocking (403/429)**: mitigated by the v3.20.0 resilience architecture (PR #105).
 
-## Next Steps
-1. ✅ Done: diff reviewed → pre-commit hygiene → commits `f1f5a91` (code) + `7910ed0` (docs) → pushed → **PR #95 open** (https://github.com/luckyhegde6/TradeNext/pull/95). Also deleted fully-merged branch `feat/v3.6.1-recs-defaults-bridge-context` (local + remote) at user request.
-2. NO deploy (user merges PR → Netlify rebuild).
-3. Post-deploy smoke: `/api/recommendations` `latestRun` healthy (was `failed` 08-15), Performance check shows Current/Return % for the 130 trackers, Swing tab loads instantly + targets within ~2–3 min, monitoring DB logs + ai-monitoring rows OK, remove Netlify cron UI entries.
+## Next Move
+1. Stage + commit v3.20.2 code + docs on `feat/db-health-price-cache`.
+2. Push `main` (includes unpushed `5156eb3`) + push branch.
+3. Create PR targeting `main`.
+4. Sep 1: run corporate-actions backfill; remove Prisma Postgres extension from Netlify Dashboard then deploy.

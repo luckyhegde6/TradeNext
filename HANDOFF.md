@@ -8,17 +8,23 @@
 ## Current State
 
 ```yaml
-status: "ready"                   # ready | in_progress | handoff_required | recovery
+status: "in_progress"             # ready | in_progress | handoff_required | recovery
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-08-26T16:00:00Z"
-feature: "v3.20.0-nse-resilience"
+last_updated: "2026-08-27T00:00:00Z"
+feature: "v3.20.2-db-health-price-cache"
 ```
 
 ## Handoff Required?
 
-**No active handoff.** Branch `fix/nse-resilience` — **v3.20.0 NSE resilience docs updated, ready to commit**. Includes: (1) **v3.20.0 — NSE resilience**: 22+ NSE routes hardened (graceful empty/null), MCP GET fixed + MCP graceful empty, corp-actions graceful empty + NSE decoupled, /api/news/market Prisma fix, NIFTY_50 constants consolidated, 2026 market holidays, netlify.toml extension removed; DB-down test verified. (2) **v3.19.3 — Graceful degradation when DB unavailable** (committed `35f3c6a`). (3) **v3.19.2 — SQLite expanded + admin DB health**. (4) **v3.19.1 — SQLite backup layer**. (5) **v3.19.0 — DB plan limit resilience**. **Next: commit on user request → create PR to main → merge → Netlify rebuild/deploy.**
+**Yes — commit/push/PR in progress (user requested: "yes commit and push and create PR").** Branch `feat/db-health-price-cache` (v3.20.1 + v3.20.2):
+- **v3.20.1 — DB ops reduction** (committed `5156eb3`, NOT yet pushed): worker poll 5s→30s, cron resync 60s→5min, legacy scheduler removed, web-vitals DB writes removed, heartbeat 5min→15min → ~22K→~4.2K ops/day.
+- **v3.20.2 — DB Health + price cache**: DB failure ring buffer (`recordDbError()`/`getDbErrorLog()`, last 50 in `$allOperations`), Daily Price Cache batch writer (`cacheDailyPrice()` in-memory accumulate → single 4pm IST `$executeRawUnsafe` bulk upsert to `daily_prices`), DB Health API (`flush_prices` POST) + UI (Cached Prices card, Daily Price Cache section, DB Errors table, Flush button).
+- **Docs updated (all)**: AGENTS.md v3.20.2, versions-v3.20.md, CHANGELOG index, TODO, Primer, agent-memory, Lessons #89, session-todos, session memory, handoff latest.md.
+- **Verification**: suite 869 pass / 4 skip = baseline; tsc 57 = baseline (0 production errors). No schema change → no migration.
+- **Next**: stage + commit → push main (includes `5156eb3`) + push branch → create PR to main.
+- **Later (Sep 1)**: corporate-actions backfill script (2,053 records); remove Prisma Postgres extension from Netlify Dashboard → deploy.
 
 ---
 
@@ -84,3 +90,4 @@ No active handoff. See `.agents/session-todos.md` for the current session todo l
 | v1.7 | 2026-08-11 | Session v3.5.7 (auth join→approve→login fix + server logs `logs/` dir): state updated; feature `v3.5.7-auth-login-fix-logs-dir`; commit/PR pending, no deploy |
 | v1.8 | 2026-08-17 | Session v3.14.0 (swing signal persistence + advanced screener fix + spec-driven dev): state updated to `ready`; branch `docs-readme-refs-agentic-coding` committed + pushed |
 | v1.9 | 2026-08-25 | Session v3.19.2 (SQLite expanded + recovery sync + admin DB health dashboard): state updated to `ready`; branch `feature/ai-intelligence` committed + pushed |
+| v1.10 | 2026-08-27 | Session v3.20.1 + v3.20.2 (DB ops optimization + DB Health enhancements + Daily Price Cache batch writer): state `in_progress`; branch `feat/db-health-price-cache`; commit/push/PR in progress |

@@ -10,7 +10,16 @@ import {
   CircleStackIcon,
   ClockIcon,
   ExclamationTriangleIcon,
+  BoltIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
+
+interface DbErrorEntry {
+  at: string;
+  model: string;
+  operation: string;
+  message: string;
+}
 
 interface DbHealthData {
   timestamp: string;
@@ -26,6 +35,7 @@ interface DbHealthData {
       writeBudget: number;
       writeBudgetExceeded: boolean;
       writeBudgetRemaining: number;
+      dayKey: string;
     };
   };
   sqlite: {
@@ -40,6 +50,17 @@ interface DbHealthData {
       error?: string;
     }>;
   };
+  dailyPriceCache: {
+    cachedSymbols: number;
+    flushCount: number;
+    lastFlushAt: string | null;
+    lastFlushRows: number;
+    totalRowsWritten: number;
+    lastError: string | null;
+    isAccumulationWindow: boolean;
+    isPostMarket: boolean;
+  };
+  dbErrors: DbErrorEntry[];
 }
 
 function formatTimeAgo(dateStr: string | null): string {
@@ -108,6 +129,7 @@ export default function DbHealthPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [flushingPrices, setFlushingPrices] = useState(false);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -125,7 +147,7 @@ export default function DbHealthPage() {
   useEffect(() => {
     if (status === "authenticated") {
       fetchHealth();
-      const interval = setInterval(fetchHealth, 30_000); // refresh every 30s
+      const interval = setInterval(fetchHealth, 30_000);
       return () => clearInterval(interval);
     }
   }, [status, fetchHealth]);
@@ -134,10 +156,14 @@ export default function DbHealthPage() {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const res = await fetch("/api/admin/db-health", { method: "POST" });
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync_sqlite" }),
+      });
       const body = await res.json();
       if (res.ok) {
-        setSyncMsg(`Sync completed: ${body.sqlite?.lastSyncAt ? "last sync " + body.sqlite.lastSyncAt : "done"}`);
+        setSyncMsg(`SQLite sync completed`);
         await fetchHealth();
       } else {
         setSyncMsg(`Sync failed: ${body.error}`);
@@ -146,6 +172,29 @@ export default function DbHealthPage() {
       setSyncMsg(`Sync error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const triggerFlushPrices = async () => {
+    setFlushingPrices(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "flush_prices" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setSyncMsg(body.message ?? `Flushed ${body.rows} rows`);
+        await fetchHealth();
+      } else {
+        setSyncMsg(`Flush failed: ${body.error}`);
+      }
+    } catch (e) {
+      setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setFlushingPrices(false);
     }
   };
 
@@ -165,7 +214,7 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors } = data;
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
     : 0;
@@ -179,7 +228,7 @@ export default function DbHealthPage() {
             Database Health
           </h1>
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
-            Prisma + SQLite backup status, ops monitoring, sync management
+            Prisma + SQLite backup status, ops monitoring, price cache, error log
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -195,7 +244,15 @@ export default function DbHealthPage() {
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <ArrowPathIcon className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync Now"}
+            {syncing ? "Syncing..." : "Sync SQLite"}
+          </button>
+          <button
+            onClick={triggerFlushPrices}
+            disabled={flushingPrices}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <BoltIcon className={`w-4 h-4 ${flushingPrices ? "animate-spin" : ""}`} />
+            {flushingPrices ? "Flushing..." : "Flush Prices"}
           </button>
         </div>
       </div>
@@ -217,10 +274,14 @@ export default function DbHealthPage() {
             Write Budget Exceeded
           </span>
         )}
+        <StatusBadge
+          ok={!dailyPriceCache.lastError}
+          label={dailyPriceCache.lastError ? "Price Cache Error" : "Price Cache OK"}
+        />
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           label="Prisma Latency"
           value={prisma.healthy ? `${prisma.latencyMs}ms` : "N/A"}
@@ -243,6 +304,13 @@ export default function DbHealthPage() {
           color={prisma.ops.writeBudgetExceeded ? "bg-red-500" : "bg-blue-500"}
         />
         <StatCard
+          label="Cached Prices"
+          value={dailyPriceCache.cachedSymbols}
+          sub={dailyPriceCache.isAccumulationWindow ? "Market hours (accumulating)" : dailyPriceCache.isPostMarket ? "Post-market (ready to flush)" : "Outside hours"}
+          icon={BoltIcon}
+          color="bg-amber-500"
+        />
+        <StatCard
           label="SQLite Last Sync"
           value={formatTimeAgo(sqlite.lastSyncAt)}
           sub={`${Object.values(sqlite.tables).reduce((a, b) => a + b, 0)} total rows`}
@@ -254,7 +322,7 @@ export default function DbHealthPage() {
       {/* Write budget bar */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-3">
-          Write Budget Usage (IST Day)
+          Write Budget Usage (IST Day — {prisma.ops.dayKey})
         </h3>
         <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
           <div
@@ -276,6 +344,90 @@ export default function DbHealthPage() {
         </div>
       </div>
 
+      {/* Daily Price Cache */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-4">
+          Daily Price Cache (Batch Writer)
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p className="text-gray-500 dark:text-slate-400">Flushes</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">{dailyPriceCache.flushCount}</p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-slate-400">Last Flush</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">{formatTimeAgo(dailyPriceCache.lastFlushAt)}</p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-slate-400">Rows Written (Total)</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">{dailyPriceCache.totalRowsWritten.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-slate-400">Last Flush Rows</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">{dailyPriceCache.lastFlushRows}</p>
+          </div>
+        </div>
+        {dailyPriceCache.lastError && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+            Last error: {dailyPriceCache.lastError}
+          </p>
+        )}
+      </div>
+
+      {/* Recent DB Errors */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+            Recent DB Errors ({dbErrors.length})
+          </h3>
+          {dbErrors.length > 0 && (
+            <button
+              onClick={() => setData({ ...data, dbErrors: [] })}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 flex items-center gap-1"
+            >
+              <TrashIcon className="w-3 h-3" /> Clear
+            </button>
+          )}
+        </div>
+        {dbErrors.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-slate-400">No DB errors recorded this session.</p>
+        ) : (
+          <div className="overflow-x-auto max-h-64 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white dark:bg-slate-900">
+                <tr className="border-b border-gray-200 dark:border-slate-700">
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Time</th>
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Model</th>
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Operation</th>
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dbErrors.slice().reverse().map((err, i) => (
+                  <tr
+                    key={`${err.at}-${i}`}
+                    className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                  >
+                    <td className="py-2 px-3 text-gray-900 dark:text-white whitespace-nowrap">
+                      {formatTimeAgo(err.at)}
+                    </td>
+                    <td className="py-2 px-3 text-gray-600 dark:text-slate-400 font-mono text-xs">
+                      {err.model}
+                    </td>
+                    <td className="py-2 px-3 text-gray-600 dark:text-slate-400">
+                      {err.operation}
+                    </td>
+                    <td className="py-2 px-3 text-red-600 dark:text-red-400 text-xs max-w-xs truncate">
+                      {err.message}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Table row counts — Prisma vs SQLite */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-4">
@@ -293,7 +445,6 @@ export default function DbHealthPage() {
             </thead>
             <tbody>
               {Object.keys(sqlite.tables).map((table) => {
-                // Map Prisma model name to SQLite table name
                 const prismaKey = table
                   .replace(/_/g, " ")
                   .replace(/\b\w/g, (c) => c.toUpperCase())
@@ -384,7 +535,7 @@ export default function DbHealthPage() {
       {/* Footer info */}
       <div className="text-xs text-gray-400 dark:text-slate-500">
         Auto-refresh every 30 seconds. Background recovery probe runs every 5 minutes when Prisma is unavailable.
-        Last probe: {formatTimeAgo(prisma.lastProbeAt ?? null)}
+        Price cache auto-flushes daily_prices after 4 PM IST.
       </div>
     </div>
   );
