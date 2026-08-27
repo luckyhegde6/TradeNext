@@ -204,6 +204,7 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `ux-enhancer` | ux-designer | `/ux-audit` | UI/UX audit (states/responsive/dark-mode) + enhancement |
 | `nse-integration` | — | — | NSE API integration patterns (nseFetch, caching, cookie handling) |
 | `playwright-e2e` | e2e-agent | — | committed e2e suite (`e2e/`, `npm run test:e2e`): regression guards, cross-browser + mobile |
+| `playwright-debug` | qa / e2e-agent / bug-hunter / ux-designer / code-reviewer / tdd | — | Playwright developer debug toolkit (Inspector `--debug`, UI Mode, Codegen, Trace Viewer, HTML report) — diagnose failing/flaky tests + generate stable role/text locators |
 | `playwright-cli` | — | — | exploratory browser testing via Playwright MCP tools (not committed) |
 
 **Adding a new skill**: create `.opencode/skills/<name>/SKILL.md` → mirror `.agents/skills/<name>.md` → profile + command → wire `opencode.json` → update matrix + this table.

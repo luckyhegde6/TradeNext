@@ -11,6 +11,17 @@
 
 ## Current Project Status
 
+### playwright-debug skill + agent wiring (Aug 28 2026) — ✅ DONE (tooling/docs only, no code change), UNCOMMITTED
+**Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 and the committed Playwright-docs commit `e2c5607`).
+**What**: Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation) and wired it into every coding/verification agent. No new dependency (ships in installed `@playwright/test`).
+**Delivered**:
+- NEW machine skill `.opencode/skills/playwright-debug/SKILL.md` + human mirror `.agents/skills/playwright-debug/SKILL.md` + deep-dive `.agents/docs/playwright-debug.md`.
+- 6 agent profiles updated (`qa`, `e2e-agent`, `bug-hunter`, `ux-designer`, `code-reviewer`, `tdd-guide`) + `.opencode/opencode.json` prompts wired for all 6 + the build agent's UI/UX-testing step.
+- `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table updated.
+**Tests**: N/A — tooling/docs-only (no code/test/API/behavior change).
+**Lesson 91**: editing `opencode.json` prompts = single-line JSON strings — escape inline quotes as `\"` or JSON breaks; validate with `node -e "JSON.parse(...)"`.
+**Status**: Uncommitted on `feat/plan-limit-resilience`. Commit only on explicit user request. PR #107 still open (pending user decision).
+
 ### v3.20.1 + v3.20.2 — DB Ops Optimization + DB Health Enhancements + Daily Price Cache Batch Writer (Aug 27 2026) — ✅ CODE + TESTS VERIFIED, READY TO COMMIT/PUSH/PR
 **Branch**: `feat/db-health-price-cache`.
 **Why**: Prisma Postgres has a hard 10K ops/day plan limit; prod exceeded it (22K/day → whole account on hold until Sep 1). Infra polling (worker 5s poll, 60s resync, 5min heartbeat) + per-page-load web-vitals DB writes were the biggest cost. Additionally, price data could be written per-poll instead of batched.

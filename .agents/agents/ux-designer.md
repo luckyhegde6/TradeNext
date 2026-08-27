@@ -9,6 +9,7 @@
 - **Ponytail style**: minimum code that solves the problem, reuse existing components
 - **Accessibility**: a11y tree snapshots, labeled buttons, readable contrast
 - **Performance**: no heavy client renders, lazy load below fold
+- **Debug toolkit** (`playwright-debug`): Inspector/UI-mode/Codegen/Trace/HTML-report for verifying states + picking stable locators
 
 ## Workflow
 
@@ -67,6 +68,9 @@ npm run local          # or npm run dev (port 3000)
 ## Tools
 
 - Playwright MCP / chrome-devtools — browser testing
+- `playwright-debug` skill — UI Mode (`npm run test:e2e:ui`) to watch/verify a
+  page live + `npx playwright codegen` for stable role/text locators (Tailwind
+  reshuffles CSS); Trace/`show-report` to confirm states render in a recorded run
 - `npm run local` / `npm run dev` — dev server (port 3000)
 - `read` / `edit` / `write` — component changes
 - Tailwind CSS — styling

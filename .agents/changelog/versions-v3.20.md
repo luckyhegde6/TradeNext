@@ -220,3 +220,11 @@ This single fix makes ALL existing graceful-degrade fallback chains (recommendat
 ## Notes
 - Broader `console.error` → `logger` conversion across the ~96 `app/api` occurrences is intentionally NOT part of this change (out of scope — would touch many unrelated files). Only the highest-frequency graceful-degrade read path (`/api/notifications`) was hardened.
 - External blocker remains: Prisma Postgres extension must be removed from the Netlify Dashboard before deploy; the P6003 hold must be lifted (plan upgrade / wait for reset). After the hold lifts, run `scripts/backfill-corporate-actions-prod.ts` (2,053 records) on Sep 1.
+
+## Follow-up (same branch): `playwright-debug` skill + agent wiring (2026-08-28)
+Tooling/docs-only addition on `feat/plan-limit-resilience` (no code/test/API/behavior change to the shipped app). Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation) and wired it into every coding/verification agent.
+
+- **Created**: `.opencode/skills/playwright-debug/SKILL.md` (machine skill; YAML frontmatter `name`/`description`/`allowed-tools: Bash(npx playwright *), Bash(npm run test:e2e:*)` — quick problem→tool matrix, Inspector/UI Mode/Codegen/Trace/Report sections, TradeNext config facts, recommended diagnosis flow, the `trace: 'on-first-retry'` gotcha, role/text-locator-over-CSS strategy), `.agents/skills/playwright-debug/SKILL.md` (human mirror, `Source:` footer), `.agents/docs/playwright-debug.md` (deep-dive matching the `playwright-e2e.md` pattern).
+- **Wired**: 6 agent profiles (`qa`, `e2e-agent`, `bug-hunter`, `ux-designer`, `code-reviewer`, `tdd-guide`) + `.opencode/opencode.json` prompts for those 6 + the build agent's UI/UX-testing step; `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table.
+- **No new dependency** — Inspector/UI/Codegen/Trace/Report ship in the already-installed `@playwright/test`.
+- **Lesson 91**: `.opencode/opencode.json` prompts are single-line JSON strings — escape inline double-quotes as `\"` or `JSON.parse` breaks (the build-agent edit initially inserted an unescaped `"title"`; fixed + validated `JSON OK`).

@@ -140,6 +140,18 @@ npm run test:watch
 # Use Chrome DevTools MCP tools for manual E2E testing
 ```
 
+### 6. E2E Authoring & Debugging (`playwright-debug` skill)
+
+For UI tests, author the first draft fast and keep locators stable:
+1. **Codegen** — `npx playwright codegen http://localhost:3000
+   --load-storage=playwright/.auth/demo.json` — record the flow, use the assertion
+   toolbar (visibility/text/value), and Pick Locator for stable **role/text**
+   locators (Tailwind reshuffles CSS).
+2. **Debug failures** — trace first (`npx playwright show-report` → trace icon, or
+   `show-trace test-results/<dir>/trace.zip`), then UI Mode
+   (`npm run test:e2e:ui`) to watch/re-run the failing test, then Inspector
+   (`npx playwright test --debug e2e/<spec>.ts -g "title"`) to step + evaluate.
+
 ## Key Files
 
 - `jest.config.cjs` - Test configuration

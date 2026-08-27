@@ -56,6 +56,8 @@
 - [ ] No broken tests from changes
 - [ ] Tests are deterministic (no flakiness)
 - [ ] Coverage is maintained or improved
+- [ ] New/changed UI is covered by a stable role/text locator (see
+  `playwright-debug` skill — Codegen/Pick Locator), not brittle raw CSS
 
 ## Review Process
 
@@ -110,6 +112,9 @@ Output a structured review:
 - Bash - Run tests, lint, type check
 - gh - GitHub PR review
 - Context7 - Library docs lookup
+- `playwright-debug` skill — Trace/UI Mode/`show-report` to validate that a
+  reviewer's failing/flaky e2e test has a real reproducibility path and a clear
+  root cause before approving
 
 ## Handoff Triggers
 
