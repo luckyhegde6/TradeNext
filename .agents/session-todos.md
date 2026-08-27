@@ -1,8 +1,14 @@
 # Session Todos
 
 ## Current
-- [ ] Commit on fix/nse-resilience — READY (all docs updated, code verified, tsc clean)
-- [ ] Create PR to main — PENDING user request
+- [x] DB ops optimization (v3.20.1) — committed `5156eb3`
+- [x] DB failure ring buffer (`lib/prisma.ts`) — DONE
+- [x] Daily Price Cache batch writer (`lib/services/priceCache.ts`) — DONE
+- [x] DB Health API + UI (ops, price cache, errors, flush) — DONE
+- [x] Docs updated (AGENTS.md v3.20.2, versions-v3.20.md, TODO, Primer, agent-memory) — DONE
+- [ ] Commit v3.20.2 code on feat/db-health-price-cache — IN PROGRESS
+- [ ] Push main + branch to origin
+- [ ] Create PR to main
 
 ## Completed This Session
 - [x] Verify test suite baseline (869 pass / 4 skip, tsc 57)

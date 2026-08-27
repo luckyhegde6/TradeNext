@@ -11,6 +11,13 @@
 
 ## Current Project Status
 
+### v3.20.1 + v3.20.2 — DB Ops Optimization + DB Health Enhancements + Daily Price Cache Batch Writer (Aug 27 2026) — ✅ CODE + TESTS VERIFIED, READY TO COMMIT/PUSH/PR
+**Branch**: `feat/db-health-price-cache`.
+**Why**: Prisma Postgres has a hard 10K ops/day plan limit; prod exceeded it (22K/day → whole account on hold until Sep 1). Infra polling (worker 5s poll, 60s resync, 5min heartbeat) + per-page-load web-vitals DB writes were the biggest cost. Additionally, price data could be written per-poll instead of batched.
+**Fix**: (1) **DB ops reduction (v3.20.1)** — worker poll 5s→30s, cron resync 60s→5min, legacy scheduler removed, web-vitals DB writes removed (pino only), heartbeat 5min→15min → ~17.7K ops/day saved, now ~4.2K/day. (2) **DB failure ring buffer** — `recordDbError()`/`getDbErrorLog()` in `lib/prisma.ts`, last 50 failures auto-recorded in `$allOperations`. (3) **Daily Price Cache batch writer** — `cacheDailyPrice()` accumulates SSE prices in memory during market hours; after 4 PM IST a single bulk `$executeRawUnsafe` upsert flushes all OHLCV to `daily_prices` → ~1 write/day. (4) **DB Health API/UI** — ops counter (reads/writes/budget/exceeded/remaining/dayKey), price cache section, DB errors table, Flush Prices button.
+**Tests**: Suite 869 pass / 4 skip = baseline; tsc 57 = baseline (0 production errors).
+- **Status**: v3.20.1 committed `5156eb3`; v3.20.2 code on `feat/db-health-price-cache`, docs updated, ready to commit + push + PR.
+
 ### v3.20.0 — NSE Resilience: All NSE Routes Return Graceful Empty (Aug 26 2026) — ✅ CODE + TESTS VERIFIED, DB-DOWN TESTED, READY TO COMMIT
 **Branch**: `fix/nse-resilience` (created from latest main).
 **Why**: NSE API endpoints block cloud IPs (Netlify, Prisma Accelerate) with 403/429. All NSE-dependent routes threw unhandled 500/502 errors. MCP GET endpoint was POST-only. MCP and corporate-actions routes returned 500 on data unavailability. Constants duplicated across files. `netlify.toml` had a stale Prisma Postgres extension.

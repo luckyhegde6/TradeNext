@@ -120,6 +120,35 @@ export function isDbWriteBudgetExceeded(): boolean {
   return dbOpsCounter.writes >= WRITE_BUDGET;
 }
 
+// ─── DB failure ring buffer (v3.20.1) ─────────────────────────────────────
+// In-memory ring buffer of recent DB errors for the admin Health tab.
+// Keeps the last 50 errors with timestamp, model, operation, and message.
+interface DbErrorEntry {
+  at: string;
+  model: string;
+  operation: string;
+  message: string;
+}
+const DB_ERROR_BUFFER_SIZE = 50;
+if (!g.__dbErrorLog) g.__dbErrorLog = [] as DbErrorEntry[];
+const dbErrorLog: DbErrorEntry[] = g.__dbErrorLog;
+
+export function recordDbError(model: string, operation: string, error: unknown): void {
+  dbErrorLog.push({
+    at: new Date().toISOString(),
+    model,
+    operation,
+    message: error instanceof Error ? error.message : String(error),
+  });
+  if (dbErrorLog.length > DB_ERROR_BUFFER_SIZE) dbErrorLog.shift();
+}
+
+export function getDbErrorLog(): DbErrorEntry[] {
+  return [...dbErrorLog];
+}
+
+export const WRITE_BUDGET_CONFIG = WRITE_BUDGET;
+
 // ─── Per-query timeout (v3.12.0) ───────────────────────────────────────────
 // Prod Accelerate queries had NO timeout — a stalled proxy connection hung a
 // healthy daily run for 16+ min with ZERO logs (run 8715fd51, 2026-08-16:
@@ -174,17 +203,23 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
       // (raw/exec operations are never blocked — they're used by critical infra)
       if (isWrite && !operation.startsWith("executeRaw") && dbOpsCounter.writes > WRITE_BUDGET) {
         logger.warn({ msg: "DB write budget exceeded", writes: dbOpsCounter.writes, budget: WRITE_BUDGET, model, operation });
+        recordDbError(model ?? "?", operation, new Error(`write budget exceeded (${dbOpsCounter.writes}/${WRITE_BUDGET})`));
         return Promise.reject(new Error(`DB write budget exceeded (${dbOpsCounter.writes}/${WRITE_BUDGET} writes today). Try again tomorrow or set DB_WRITE_BUDGET env.`)) as ReturnType<typeof query>;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const result = query(args);
       if (typeof (result as Promise<unknown> | undefined)?.then === "function") {
-        return withQueryTimeout(
+        const awaited = withQueryTimeout(
           result as Promise<unknown>,
           model ?? "?",
           operation,
         );
+        // Record failures in the ring buffer (fire-and-forget, non-blocking)
+        return awaited.catch((err: unknown) => {
+          recordDbError(model ?? "?", operation, err);
+          throw err;
+        }) as ReturnType<typeof query>;
       }
       // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return result;
