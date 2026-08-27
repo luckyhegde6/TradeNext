@@ -1,6 +1,6 @@
 // app/api/admin/workers/engine/route.ts
 import { NextResponse } from "next/server";
-import { startWorker, startScheduler, stopWorkerEngine } from "@/lib/services/worker/worker-engine";
+import { startWorker, stopWorkerEngine } from "@/lib/services/worker/worker-engine";
 import { startCronDaemon, stopCronDaemon } from "@/lib/services/worker/cron-daemon";
 import logger from "@/lib/logger";
 import { auth } from "@/lib/auth";
@@ -16,10 +16,9 @@ function autoStartEngine() {
     if (autoStarted) return;
     
     try {
-        startWorker(5000); // 5s polling for tasks
-        startScheduler(60000); // 1m check for cron jobs
-        // v3.11.0: also start the in-process node-cron daemon so schedules
-        // fire on time (not just within the 1m poll window).
+        startWorker(30_000); // v3.20.1: 30s polling (was 5s — saves ~14,400 DB reads/day)
+        // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
+        // (avoids duplicate cronJob.findMany queries every 60s).
         startCronDaemon().catch((error) => logger.error({ msg: "Failed to auto-start cron daemon", error }));
         logger.info({ msg: "Worker engine auto-started on first request" });
         autoStarted = true;
@@ -38,8 +37,8 @@ export async function POST(req: Request) {
         const { action } = await req.json();
 
         if (action === "start") {
-            startWorker(5000); // 5s polling
-            startScheduler(60000); // 1m check
+            startWorker(30_000); // v3.20.1: 30s polling (was 5s)
+            // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
             await startCronDaemon(); // v3.11.0: node-cron scheduler daemon
             logger.info({ msg: "Background services started via API" });
             return NextResponse.json({ success: true, message: "Services started" });

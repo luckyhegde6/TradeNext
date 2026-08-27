@@ -57,12 +57,13 @@ const DEDUP_WINDOW_MS = 90 * 60_000;
 
 /**
  * Start the background worker polling loop
- * NOTE: Task polling runs every 5s for responsiveness, but DB heartbeat
- * is separated into a 60s interval to reduce monthly query count by ~98%.
- * Previously: ~1,036,800 queries/month from heartbeat alone.
- * Now: ~17,280 queries/month (heartbeat) + 5s poll only queries DB when tasks exist.
+ *
+ * v3.20.1: Polling interval raised from 5s → 30s to cut DB reads from
+ * ~17,280/day to ~2,880/day. 30s is still fast enough for admin-triggered
+ * tasks and cron spawns. Combined with the 5-min heartbeat, total worker
+ * DB ops drop from ~17,856/day to ~3,456/day.
  */
-export function startWorker(pollingIntervalMs = 5000) {
+export function startWorker(pollingIntervalMs = 30_000) {
     if (workerInterval) {
         logger.info({ msg: "Worker engine already running", workerId: WORKER_ID });
         return;

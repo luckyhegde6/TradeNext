@@ -311,10 +311,11 @@ describe("isDaemonHeartbeatFresh", () => {
 
   it("true within the window, false beyond it", () => {
     const now = Date.UTC(2026, 7, 15, 12, 0, 0);
+    // v3.20.1: DAEMON_HEARTBEAT_WINDOW_MS = 2 × 900s = 1800s
     expect(isDaemonHeartbeatFresh(new Date(now - 60_000), now)).toBe(true);
     expect(isDaemonHeartbeatFresh(new Date(now - 120_000), now)).toBe(true);
-    expect(isDaemonHeartbeatFresh(new Date(now - 599_000), now)).toBe(true); // just within 600s window
-    expect(isDaemonHeartbeatFresh(new Date(now - 601_000), now)).toBe(false); // just beyond 600s window
+    expect(isDaemonHeartbeatFresh(new Date(now - 1799_000), now)).toBe(true); // just within 1800s window
+    expect(isDaemonHeartbeatFresh(new Date(now - 1801_000), now)).toBe(false); // just beyond 1800s window
     expect(isDaemonHeartbeatFresh(new Date(now + 60_000), now)).toBe(true); // future clock skew tolerated
   });
 });

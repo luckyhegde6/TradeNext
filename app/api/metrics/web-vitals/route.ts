@@ -1,6 +1,5 @@
 // app/api/metrics/web-vitals/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import logger from "@/lib/logger";
 
 // Cache-Control: don't cache, this is metrics data
@@ -51,26 +50,14 @@ export async function POST(req: Request) {
     const forwardedFor = req.headers.get("x-forwarded-for");
     const ip = forwardedFor ? forwardedFor.split(",")[0] : "unknown";
 
-    // Log the metric
+    // Log the metric — pino log is sufficient for analysis; DB write
+    // removed in v3.20.1 to save ~500-1,500 serverLog writes/day (scales
+    // with traffic; 5 metrics × N page loads). GA4 handles client-side.
     logger.info({
       msg: "Web Vitals metric received",
       source: "web-vitals",
       metric: { name, value, delta, id, rating, url, timestamp, ip },
     });
-
-    // Best-effort DB persistence — never let a DB failure break the client
-    try {
-      await prisma.serverLog.create({
-        data: {
-          level: "info",
-          message: `Web Vitals: ${name}=${value.toFixed(2)} (${rating})`,
-          source: "analytics",
-          metadata: { name, value, delta, id, rating, url, timestamp, ip },
-        },
-      });
-    } catch {
-      // DB unavailable — metric already logged above, safe to ignore
-    }
 
     return NextResponse.json(
       { success: true, message: "Metric received" },
