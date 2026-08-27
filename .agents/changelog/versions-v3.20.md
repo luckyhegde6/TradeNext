@@ -146,3 +146,77 @@ During market hours (9:15 AM – 3:30 PM IST) SSE prices accumulate in memory in
 - **Tests**: 869 pass / 4 skip = exact baseline (no new tests added this session — service follows existing `$executeRawUnsafe`/batch patterns already covered)
 - **DB ops**: reduced from ~22K to ~4.2K ops/day (v3.20.1) — comfortably under the 10K plan limit
 - **Price cache**: no live market-hours test possible (feature is deterministic — accumulates in memory, flushes post-4pm; logic verified by existing SSE + cache test patterns)
+
+---
+
+# v3.20.3 — Plan-Limit Hold Resilience: Prisma P6003 recognition + circuit breaker + non-blocking audit/log + worker/cron backoff
+
+> **Date**: Aug 28 2026 · **Branch**: `feat/plan-limit-resilience` · **Suite**: **883 pass / 4 skip** (was 869/4, +14 db-utils tests) · **tsc**: 57 = baseline (0 new production errors; remaining non-`.next` errors are pre-existing test-file typing only)
+
+## Problem
+
+The Prisma Postgres account hit its **10K ops/day plan-limit hold** (code `P6003`, message `"There is a hold on your account. Reason: planLimitReached."`). Every DB operation failed, and the existing `isDbUnavailableError()` **did NOT recognize the hold error** — so all 18+ graceful-degradation fallback chains never triggered. Worse, each blocked query hung for the full **120s per-query timeout**, then threw `PrismaQueryTimeoutError` on `AuditLog.create`/`APIRequestLog` (which themselves block until timeout), the worker poll failed every 30s, and the cron daemon's boot-time `syncCronJobs()` threw out of `startCronDaemon()`. With ≥3 Netlify instances each starting a worker + daemon, the hold produced a storm of 120s-stalled queries and unhandled errors.
+
+## Fixes
+
+### 1. `isDbUnavailableError()` — recognize the real hold error (`lib/db-utils.ts`)
+Added matching for the actual prod failure modes:
+- message includes `"hold on your account"` / `"planlimitreached"` / `"plan limit reached"`
+- Prisma error code `P6003`
+- error `name` is `PrismaQueryTimeoutError` or `PlanLimitOpenError`
+
+This single fix makes ALL existing graceful-degrade fallback chains (recommendations, corp-actions, chartink screener, portfolio, notifications, events, NSE routes, SQLite fallback, etc.) actually trigger on the real prod error instead of treating it as a hard 500.
+
+### 2. Plan-limit circuit breaker (`lib/db-utils.ts` + `lib/prisma.ts`)
+- `PlanLimitOpenError` + helpers `isPlanLimitHoldError()`, `isPlanLimitBreakerOpen()`, `openPlanLimitBreaker()`, `closePlanLimitBreaker()`, `getPlanLimitBreakerStatus()`, `resetPlanLimitBreaker()` (test hook).
+- Wired into the `$allOperations` extension in `lib/prisma.ts`:
+  - **fail-fast** — when the breaker is open, every query rejects immediately with `PlanLimitOpenError` (no 120s proxy wait).
+  - **open** on a plan-limit hold / DB timeout / unavailable error.
+  - **close** on a successful query while a probe was pending (half-open probe semantics) — the hold lifting auto-recovers.
+- Cooldown `PLAN_LIMIT_COOLDOWN_MS = 5 * 60_000` (env-overridable); after cooldown one probe is allowed, success closes the breaker, hold-failure re-opens.
+- `isDbUnavailableError()` also recognizes `PlanLimitOpenError` by name so fallback chains keep degrading.
+- Helpers live in `lib/db-utils.ts` (Prisma-free, testable); `lib/prisma.ts` only wires them in (no circular import).
+
+### 3. Non-blocking audit / API logging (`lib/audit.ts` + `lib/rate-limit.ts`)
+- `createAuditLog()` resolves immediately; the `prisma.auditLog.create` is **fire-and-forget** (`.catch(console.error)`) instead of awaited — all ~50+ `await createAuditLog(...)` call sites no longer block on a stalled DB.
+- `logAPIRequest()` resolves immediately; the `prisma.aPIRequestLog.upsert` is **fire-and-forget** (`.catch(logger.error)`).
+- Return value is `null`/void (no caller uses the created row), so no callers change behavior.
+
+### 4. Worker engine DB backoff (`lib/services/worker/worker-engine.ts`)
+- Poll loop refactored from `setInterval` to self-rescheduling `setTimeout`.
+- On `isDbUnavailableError` the poll delay grows `30s → 5min` cap (`WORKER_POLL_BACKOFF_MAX_MS`), reset to `WORKER_POLL_BASE_MS` on first success; `warn` log includes `nextPollMs` while backing off.
+- Added `workerStopped` flag honored by `stopWorkerEngine()`/`startWorker()`.
+
+### 5. Cron daemon DB-unavailable guard (`lib/services/worker/cron-daemon.ts`)
+- Boot-time `await syncCronJobs()` wrapped in try/catch → `warn` ("Cron daemon initial sync deferred (DB unavailable)") instead of throwing out of `startCronDaemon()`; the periodic resync tick retries automatically.
+- Per-tick `resyncInterval` catch downgrades to a `warn` when `isDbUnavailableError(error)` (hold is expected/handled — no stack-trace flood).
+
+### 6. Log-noise on graceful-degrade route (`app/api/notifications/route.ts`)
+- The catch block `console.error` (full stack per request on every page load during a hold) downgraded to `logger.warn` that **silently skips DB-unavailable errors** (already recorded by the breaker ring buffer). Still returns the graceful 200 empty + `warning`.
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `lib/db-utils.ts` | `isDbUnavailableError()` P6003/hold/planLimitReached/PrismaQueryTimeoutError/PlanLimitOpenError + NEW plan-limit circuit breaker helpers |
+| `lib/prisma.ts` | Breaker fail-fast/open/close wired into `$allOperations` (refactored to null-safe `.then`/`.catch` chain) |
+| `lib/audit.ts` | `createAuditLog()` fire-and-forget |
+| `lib/rate-limit.ts` | `logAPIRequest()` fire-and-forget |
+| `lib/services/worker/worker-engine.ts` | setTimeout-based poll loop + DB backoff + `workerStopped` flag |
+| `lib/services/worker/cron-daemon.ts` | Boot + per-tick DB-unavailable guard/downgrade |
+| `app/api/notifications/route.ts` | Skip DB-unavailable console.error spam |
+
+## Files Created
+
+| File | Change |
+|------|--------|
+| `lib/__tests__/db-utils.test.ts` | NEW — 14 tests (`isDbUnavailableError` P6003/hold/timeout/PlanLimitOpenError matrix + breaker open/close/cooldown via fake timers) |
+
+## Verification
+- **Tests**: **883 pass / 4 skip** (was 869/4; +14 db-utils). Full suite 64/64 suites green.
+- **tsc**: 57 = baseline (0 new production errors; remaining non-`.next` output is the documented pre-existing test-file typing noise, none in touched files).
+- **Fixes 1–5 unit-verified**; Fix 6 is a cosmetic log-downgrade (behavior unchanged — still returns 200 empty).
+
+## Notes
+- Broader `console.error` → `logger` conversion across the ~96 `app/api` occurrences is intentionally NOT part of this change (out of scope — would touch many unrelated files). Only the highest-frequency graceful-degrade read path (`/api/notifications`) was hardened.
+- External blocker remains: Prisma Postgres extension must be removed from the Netlify Dashboard before deploy; the P6003 hold must be lifted (plan upgrade / wait for reset). After the hold lifts, run `scripts/backfill-corporate-actions-prod.ts` (2,053 records) on Sep 1.

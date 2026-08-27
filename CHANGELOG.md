@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Summary | Detail |
 |---------|---------|--------|
+| **v3.20.3** · Aug 28 | Plan-limit hold resilience — Prisma P6003/`planLimitReached` recognition in `isDbUnavailableError`, plan-limit circuit breaker (fail-fast + half-open auto-recovery), fire-and-forget `createAuditLog`/`logAPIRequest` (non-blocking), worker `setTimeout` DB backoff (30s→5min), cron-daemon boot/per-tick DB guard, notifications log-noise downgrade; 14 new db-utils tests → suite 883/4 | [versions-v3.20.md](./.agents/changelog/versions-v3.20.md) |
 | **v3.19.0–v3.19.1** · Aug 19/25 | DB plan limit resilience (graceful degradation, op reduction, write budget guard, admin OTP, staticCache key fix) + SQLite backup layer (sql.js in-memory fallback, route fallback chains, `isDbUnavailableError` for Accelerate proxy) | [versions-v3.19.md](./.agents/changelog/versions-v3.19.md) |
 | **v3.18.0** · Aug 19 | AI Investment Intelligence — company-level analysis (14 interfaces, TA extensions, IntelligenceCache, dual-layer cache, 8 NSE adapters, structured JSON prompt, orchestrator, API + MCP, 14-file UI) | [versions-v3.18.md](./.agents/changelog/versions-v3.18.md) |
 | **v3.13.0** · Aug 16 | DB-backed Swing AI analysis job — durable `SwingAnalysisJob` replaces the volatile cache-only fire-and-forget (pre-scan DB lookup, atomic claim + supersede-abort, stale recovery 45 min / 2 attempts, cron-daemon drain) | [versions-v3.13.md](./.agents/changelog/versions-v3.13.md) |

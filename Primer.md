@@ -504,6 +504,18 @@
 
 ## Current Project Status
 
+### Plan-Limit Hold Resilience (v3.20.3)
+**Issue**: Prisma Postgres hit its **10K ops/day plan-limit hold** (code `P6003`, `"There is a hold on your account. Reason: planLimitReached."`). Every DB op failed, but `isDbUnavailableError()` **did NOT recognize the hold error** → all 18+ graceful-degrade fallback chains treated it as a hard 500 instead of degrading. Each blocked query hung the full **120s per-query timeout** (incl. `AuditLog.create`/`APIRequestLog` which also block), worker poll failed every 30s, cron daemon boot `syncCronJobs()` threw out of `startCronDaemon()` — with ≥3 Netlify instances this was a storm of 120s-stalled queries.
+**Fix Applied** (branch `feat/plan-limit-resilience`, option A — code fixes):
+- **`isDbUnavailableError()` P6003 fix** (`lib/db-utils.ts`): now matches `"hold on your account"` / `"planlimitreached"` / `"plan limit reached"`, Prisma code `P6003`, names `PrismaQueryTimeoutError`/`PlanLimitOpenError` → all 18+ graceful-degrade chains now trigger on the real hold.
+- **Plan-limit circuit breaker** (`lib/db-utils.ts` + `lib/prisma.ts`): `PlanLimitOpenError` + helpers; `$allOperations` **fail-fast** when open (no 120s proxy wait), opens on P6003/hold/timeout/unavailable, **closes on a successful half-open probe** (auto-recovery when hold lifts); `PLAN_LIMIT_COOLDOWN_MS` 5min env-overridable.
+- **Non-blocking audit/API logging**: `createAuditLog()` (`lib/audit.ts`) + `logAPIRequest()` (`lib/rate-limit.ts`) are now **fire-and-forget** (resolve immediately) — ~50+ `await` sites never stall on a held DB.
+- **Worker DB backoff** (`worker-engine.ts`): `setInterval`→self-rescheduling `setTimeout`; delay grows 30s→5min on `isDbUnavailableError`, resets on first success; `workerStopped` flag.
+- **Cron daemon DB guard** (`cron-daemon.ts`): boot `syncCronJobs()` try/catch warn (no throw); per-tick resync downgraded to warn on DB-unavailable.
+- **Log-noise** (`app/api/notifications/route.ts`): skip DB-unavailable `console.error` spam (still graceful 200 empty).
+- **Tests**: NEW `lib/__tests__/db-utils.test.ts` (14) → **suite 883 pass / 4 skip** (was 869/4); tsc 57 = baseline (0 new production errors).
+**Status**: RESOLVED in v3.20.3 — code committed to `feat/plan-limit-resilience`, commit/push/PR pending user. External blocker remains: Prisma Postgres extension must be removed from the Netlify Dashboard before deploy; hold must be lifted (plan upgrade / wait for reset), then run `scripts/backfill-corporate-actions-prod.ts` (2,053 records) Sep 1.
+
 ### Swing Tab Prod Failure FIX — Request-Time Split (v3.12.0)
 **Issue**: Swing tab could NEVER load on prod — `GET /api/recommendations/swing` ran the FULL pipeline synchronously: 34 Chartink templates (HTTP 419 → TV fallback) then the AI analysis of the top-20 (4 batches × 5, concurrency 3, retry×2) at 38–52s/batch → Netlify's 30s request wall killed the request mid-batch-3 (`Duration: 30000 ms` in prod logs).
 **Fix Applied** (branch `fix/swing-async-analysis`):
