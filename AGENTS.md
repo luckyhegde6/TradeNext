@@ -99,7 +99,8 @@ npm run quickbuild       # Next.js build only
 npm run test             # Jest — RUN ALONE, never chained with ';' (Windows quirk)
 npm run test:watch       # Watch mode
 npm run test:e2e         # Playwright e2e — full suite (all browsers/projects) against dev server on :3000
-npm run test:e2e:ui      # Playwright UI mode (watch/filter/step)
+npm run test:e2e:ui      # Playwright UI mode (watch/filter/step) — `npx playwright test --ui`
+npx playwright test --headed   # Run tests in a visible browser window (watch Playwright drive the site)
 npx playwright show-report   # Open last Playwright HTML report
 npx playwright show-trace test-results/<dir>/trace.zip   # View a trace
 npm run lint             # ESLint
@@ -284,8 +285,9 @@ syncService.syncFinancials(symbol, data).catch(err =>
 1. Start dev server (`npm run local`); test login (demo credentials); verify UI renders; check responsive (375/768/1920); check console errors; **cleanup dev server** (port 3000/3001) after.
 2. **Never kill port 4096 (OpenCode web UI)** or DB ports.
 3. `npx playwright-cli snapshot --filename=.playwright-cli/snapshots/test.yaml` — ALWAYS use `--filename` to avoid root junk.
-4. **Committed e2e suite** (`e2e/`, `npm run test:e2e`) is the regression guard — run it after UI/UX/screener/auth changes and before merge/PR. Deep-dive: `.agents/docs/playwright-e2e.md`.
-5. **Browser quirks** (all captured in the config/specs — don't regress):
+4. **Debugging an error/issue → run the Playwright UI**: `npm run test:e2e:ui` (`npx playwright test --ui`) to **visually verify** the fix, reproduce the flow, step/re-run specs, and **enhance the UX**. For a one-off visible run, `npx playwright test --headed`. After any run, `npx playwright show-report` opens the HTML report (traces, console + network, per-step screenshots) to diagnose failures.
+5. **Committed e2e suite** (`e2e/`, `npm run test:e2e`) is the regression guard — run it after UI/UX/screener/auth changes and before merge/PR. Deep-dive: `.agents/docs/playwright-e2e.md`.
+6. **Browser quirks** (all captured in the config/specs — don't regress):
    - Desktop viewport **1440×900** — Firefox's `hidden xl:flex` header nav needs ≥1280px but Firefox measures scrollbar-inclusive, so the default 1280×720 hides it.
    - **WebKit drops `fill()` on controlled `<input type="number">`** (React restores the old value) — use click → `ControlOrMeta+a` → `Delete` → `pressSequentially()` and verify with `toHaveValue`.
    - The Next dev server is **single-threaded** — heavy TradingView scans starve parallel SSR navigations. `navigation.spec.ts` is serial with `waitForURL` + `noWaitAfter`; `retries: CI ? 2 : 1`, `workers: CI ? 1 : 2`.

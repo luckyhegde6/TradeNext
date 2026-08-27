@@ -22,7 +22,8 @@ tests; guards UI/regression contracts (v3.5.2 screener fix, nav, auth flows, mob
 
 ```bash
 npm run test:e2e                  # full suite (all projects)
-npm run test:e2e:ui               # Playwright UI mode (watch/filter/step)
+npm run test:e2e:ui               # Playwright UI mode — `npx playwright test --ui` (watch/filter/step/re-run)
+npx playwright test --headed      # run in a visible browser window (watch Playwright drive the site)
 npx playwright test e2e/<spec>.ts --project=chromium     # one file, one browser
 npx playwright test e2e/advanced-screener.spec.ts --grep "empty"   # one test
 npx playwright show-report        # open last HTML report
@@ -43,6 +44,14 @@ Credentials (env-overridable): demo `demo@tradenext6.app`/`demo123`
    encode real behavior; loosening a regression guard needs justification.
 4. Full run: `npm run test:e2e -- --reporter=line`. `flaky` (retried-then-passed)
    under full load is expected; the same test failing twice = real bug.
+5. **Debugging an error/issue?** Start `npm run test:e2e:ui` (`npx playwright test --ui`)
+   and use the interactive UI to **visually verify** the fix, reproduce the flow, step
+   through specs, and test edge cases — this is also the way to **enhance the user
+   experience** (states, responsiveness, dark mode) before committing. For a one-off
+   visual check of a single spec, `npx playwright test e2e/<spec>.ts --headed` runs it
+   in a visible browser. After any run, `npx playwright show-report` opens the HTML
+   report (results, traces, console + network, per-step screenshots) to diagnose why a
+   spec failed.
 
 ## Authoring rules
 

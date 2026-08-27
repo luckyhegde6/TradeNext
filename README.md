@@ -121,8 +121,9 @@ npm run quickbuild       # Next.js build only
 npm run test             # Jest unit/component tests
 npm run test:watch       # Watch mode
 npm run test:e2e         # Playwright full suite (Chromium/Firefox/WebKit + Mobile)
-npm run test:e2e:ui      # Playwright UI mode
-npx playwright show-report   # Open last Playwright HTML report
+npm run test:e2e:ui      # Playwright interactive UI mode — `npx playwright test --ui` (watch/filter/step/re-run)
+npx playwright test --headed    # Run tests in a visible browser window (watch Playwright drive the site)
+npx playwright show-report   # Open last Playwright HTML report (results + traces)
 
 # Database
 npm run db:up / npm run db:down   # Docker Postgres/TimescaleDB
@@ -148,6 +149,12 @@ node scripts/dev-checks/test-auth.js
   (TimescaleDB service, migrate + seed, HTML report artifact 30 days).
 - **Live Playwright report**: [Latest report on GitHub Pages](https://luckyhegde6.github.io/TradeNext/) —
   auto-published on every green `main` push (results + trace viewer).
+- **Debugging with the Playwright UI** — whenever an error/issue surfaces, run the suite in **interactive UI mode**
+  (`npm run test:e2e:ui`, which maps to `npx playwright test --ui`) to watch, filter, step through, and re-run
+  individual specs while the dev server is up. This is the recommended way to **visually verify** a fix, reproduce a
+  failing flow, test edge cases, and **enhance the user experience** before committing. After any run, open the HTML
+  **report** (`npx playwright show-report`) to inspect the results, trace viewer, console logs, network calls, and
+  per-step screenshots — use the trace to diagnose why a spec failed. See the [playwright-e2e skill](../../.opencode/skills/playwright-e2e/SKILL.md) for the full run/debug/author workflow.
 - Details + troubleshooting playbook: `.agents/docs/playwright-e2e.md`.
 
 ---
