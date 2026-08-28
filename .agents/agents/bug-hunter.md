@@ -70,6 +70,21 @@ curl "http://localhost:3000/api/recommendations/performance?limit=25&offset=0&so
 - Playwright / chrome-devtools — browser path confirmation
 - Browser console + network tab — error detection
 
+## Browser reproduction & diagnosis (`playwright-debug` skill)
+
+When a bug manifests in the browser (not just the API), use the debug toolkit:
+1. **Trace** — reproduce on the app then inspect the failing action's DOM
+   snapshot, network (4xx/5xx from a zod/sort mismatch), and console. Often the
+   layer-contract root cause is visible in the network tab alone.
+2. **Inspector** — `npx playwright test --debug e2e/<spec>.ts -g "title"` to step
+   through the exact flow + evaluate the DOM.
+3. **UI Mode** — `npm run test:e2e:ui` to watch/re-run a failing spec live.
+4. **Codegen** — `npx playwright codegen http://localhost:3000
+   --load-storage=playwright/.auth/demo.json` to reproduce a UI-only bug as a
+   recorded set of actions / get a stable locator.
+
+See `.opencode/skills/playwright-debug/SKILL.md` for the full toolkit.
+
 ## Handoff Triggers
 
 | Condition | Handoff To | Reason |

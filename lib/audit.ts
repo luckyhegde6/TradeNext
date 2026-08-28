@@ -148,24 +148,35 @@ export async function createAuditLog(params: AuditLogParams) {
       }
     }
 
-    return await prisma.auditLog.create({
-      data: {
-        userId,
-        userEmail,
-        action: params.action as any,
-        resource: params.resource,
-        resourceId: params.resourceId,
-        method: params.method,
-        path: params.path,
-        responseStatus: params.responseStatus,
-        responseTime: params.responseTime,
-        nseEndpoint: params.nseEndpoint,
-        metadata: params.metadata,
-        errorMessage: params.errorMessage,
-      },
-    });
+    // FIRE-AND-FORGET (v3.20.3): never let a slow/stalled DB block the request
+    // path. Audit logging is best-effort — when Prisma is unavailable (e.g.
+    // account hold) the write used to wait the full 120s timeout even though
+    // this function catches it. The caller still `await`s us, so we resolve
+    // immediately here and kick the DB write off without awaiting it.
+    void prisma.auditLog
+      .create({
+        data: {
+          userId,
+          userEmail,
+          action: params.action as any,
+          resource: params.resource,
+          resourceId: params.resourceId,
+          method: params.method,
+          path: params.path,
+          responseStatus: params.responseStatus,
+          responseTime: params.responseTime,
+          nseEndpoint: params.nseEndpoint,
+          metadata: params.metadata,
+          errorMessage: params.errorMessage,
+        },
+      })
+      .catch((error) => {
+        console.error("Failed to create audit log:", error instanceof Error ? error.message : error);
+      });
+
+    return null;
   } catch (error) {
-    console.error("Failed to create audit log:", error);
+    console.error("Failed to create audit log:", error instanceof Error ? error.message : error);
     return null;
   }
 }

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { auth } from '@/lib/auth';
+import logger from '@/lib/logger';
+import { isDbUnavailableError } from '@/lib/db-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +27,12 @@ export async function GET() {
 
         return NextResponse.json({ notifications, unreadCount });
     } catch (err) {
-        console.error('Notifications API error:', err);
+        // v3.20.3: a DB-unavailable error (plan-limit hold / breaker open) is an
+        // EXPECTED, already-handled condition — don't spam a stack trace on every
+        // request. The circuit breaker + dbErrors ring buffer already record it.
+        if (!isDbUnavailableError(err)) {
+            logger.warn({ msg: 'Notifications API error', error: err instanceof Error ? err.message : String(err) });
+        }
         // Degrade gracefully — return empty instead of 500
         return NextResponse.json({
             notifications: [],

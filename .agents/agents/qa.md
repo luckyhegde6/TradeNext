@@ -3,6 +3,7 @@
 > Quality Assurance specialist: writes and executes comprehensive tests, validates entire workflows.
 
 **Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
+**Skill**: `playwright-debug` (`.opencode/skills/playwright-debug/SKILL.md`) — Inspector/UI-mode/Codegen/Trace/HTML-report for diagnosing failures
 **Command**: none (invoked via `npm run test:e2e` or ad-hoc)
 
 ## Expertise
@@ -55,6 +56,19 @@ npm run test:e2e:ui             # UI mode (watch/filter/step)
 # Specific test files
 npm run test -- lib/__tests__/specific-test.test.ts
 ```
+
+### 2b. Debugging failures (`playwright-debug` skill)
+
+When an e2e test fails or flakes, diagnose in this order:
+1. **Trace** — `npx playwright show-report` → failed test → trace icon, or
+   `npx playwright show-trace test-results/<dir>/trace.zip` — inspect the failing
+   action's DOM snapshot, network, and console.
+2. **UI Mode** — `npm run test:e2e:ui` — watch/re-run just the failing test live.
+3. **Inspector** — `npx playwright test --debug e2e/<spec>.ts -g "test title"` —
+   step line-by-line + evaluate.
+4. **Codegen** — `npx playwright codegen http://localhost:3000
+   --load-storage=playwright/.auth/demo.json` — generate a stable role/text
+   locator or a new test. Prefer role/text locators over raw CSS.
 
 ### 3. E2E Test Scenarios
 

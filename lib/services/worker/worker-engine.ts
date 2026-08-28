@@ -4,6 +4,7 @@ import logger from "@/lib/logger";
 import { executeTask } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
+import { isDbUnavailableError } from "@/lib/db-utils";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
@@ -11,6 +12,14 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 let schedulerInterval: NodeJS.Timeout | null = null;
 const WORKER_ID = `worker-${os.hostname()}-${process.pid}`;
 const HEARTBEAT_INTERVAL_MS = 300_000; // 5 min — reduces DB ops from ~1,440/day to ~288/day
+// ─── DB-unavailable backoff (v3.20.3) ───────────────────────────────────────
+// On a plan-limit hold (P6003) the DB rejects every call. Instead of failing
+// the poll every 30s and flooding logs, grow the poll delay up to a cap; reset
+// to the base interval after the first successful poll back.
+const WORKER_POLL_BASE_MS = 30_000;
+const WORKER_POLL_BACKOFF_MAX_MS = 300_000; // 5 min cap while DB is down
+let workerCurrentIntervalMs = WORKER_POLL_BASE_MS;
+let workerStopped = false;
 let lastHeartbeatStatus: "idle" | "busy" = "idle";
 let lastHeartbeatTaskId: string | undefined;
 
@@ -71,6 +80,9 @@ export function startWorker(pollingIntervalMs = 30_000) {
 
     logger.info({ msg: "Starting background worker engine", workerId: WORKER_ID, interval: pollingIntervalMs, heartbeatInterval: HEARTBEAT_INTERVAL_MS });
 
+    workerCurrentIntervalMs = WORKER_POLL_BASE_MS;
+    workerStopped = false;
+
     // Ensure a writable logs directory exists at startup — cwd/.next/server_logs
     // on local, os.tmpdir()/tradenext-logs on Netlify's read-only FS (v3.12.0;
     // the old mkdir of `.next/server_logs` threw ENOENT on every prod boot and
@@ -81,17 +93,43 @@ export function startWorker(pollingIntervalMs = 30_000) {
         logger.warn({ msg: "Failed to initialize logs directory at startup", error: e instanceof Error ? e.message : String(e) });
     }
 
-    // Task polling — only queries DB when there might be pending tasks
-    workerInterval = setInterval(async () => {
-        try {
-            await pollAndExecute();
-        } catch (error) {
-            // v3.12.0: pass the MESSAGE, not the raw object — pino's serializer
-            // drops non-enumerable Error props (prod logged `{"clientVersion":"7.9.1"}`
-            // for a Prisma engine error, losing the actual message).
-            logger.error({ msg: "Worker loop error", error: error instanceof Error ? error.message : String(error) });
+    // Task polling — self-rescheduling setTimeout so the delay can back off
+    // when the DB is unavailable (plan-limit hold) and recover automatically.
+    const pollOnce = async () => {
+      try {
+        await pollAndExecute();
+        // Success → reset backoff to the base interval.
+        if (workerCurrentIntervalMs !== WORKER_POLL_BASE_MS) {
+          logger.info({ msg: "Worker DB recovered, resuming normal poll interval", workerId: WORKER_ID });
+          workerCurrentIntervalMs = WORKER_POLL_BASE_MS;
         }
-    }, pollingIntervalMs);
+      } catch (error) {
+        const dbDown = isDbUnavailableError(error);
+        if (dbDown) {
+          // Extend the backoff (up to the cap) and lower the log volume — the
+          // DB being down is expected, not an anomaly to re-log every interval.
+          workerCurrentIntervalMs = Math.min(
+            Math.max(workerCurrentIntervalMs * 2, WORKER_POLL_BASE_MS * 2),
+            WORKER_POLL_BACKOFF_MAX_MS,
+          );
+          logger.warn({
+            msg: "Worker DB unavailable — backing off poll",
+            workerId: WORKER_ID,
+            nextPollMs: workerCurrentIntervalMs,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } else {
+          // Non-DB error — keep base interval and log at error level.
+          logger.error({ msg: "Worker loop error", error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      // Reschedule ourselves; workerInterval holds the next timeout handle.
+      if (!workerStopped) {
+        workerInterval = setTimeout(pollOnce, workerCurrentIntervalMs);
+      }
+    };
+
+    workerInterval = setTimeout(pollOnce, WORKER_POLL_BASE_MS);
 
     // Initial reaping pass — clear anything stuck from a previous process
     // (e.g. an admin runNow killed by the sync-function timeout yesterday).
@@ -140,6 +178,7 @@ export function startScheduler(checkIntervalMs = 60000) {
  * Stop all loops
  */
 export function stopWorkerEngine() {
+    workerStopped = true;
     if (workerInterval) {
         clearInterval(workerInterval);
         workerInterval = null;

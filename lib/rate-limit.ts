@@ -350,16 +350,25 @@ export async function logAPIRequest(data: {
       anomalyType: data.anomalyType
     };
 
-    await prisma.aPIRequestLog.upsert({
-      where: { requestId: data.requestId },
-      create: {
-        requestId: data.requestId,
-        ...logData
-      },
-      update: logData
-    });
+    // FIRE-AND-FORGET (v3.20.3): never let a slow/stalled DB block the request
+    // path. This runs on every API request; when Prisma is unavailable (e.g.
+    // account hold) the upsert used to wait the full 120s timeout even though
+    // this function catches it. Callers `await` us for API stability, but we
+    // resolve immediately and write in the background.
+    void prisma.aPIRequestLog
+      .upsert({
+        where: { requestId: data.requestId },
+        create: {
+          requestId: data.requestId,
+          ...logData
+        },
+        update: logData
+      })
+      .catch((error) => {
+        logger.error({ msg: "Failed to log API request", error: error instanceof Error ? error.message : String(error) });
+      });
   } catch (error) {
-    logger.error({ msg: "Failed to log API request", error });
+    logger.error({ msg: "Failed to log API request", error: error instanceof Error ? error.message : String(error) });
   }
 }
 

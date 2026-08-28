@@ -5,11 +5,39 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-26 (v3.20.0 NSE resilience — MCP/corp-actions graceful empty + DB-down test verified; suite 869 pass / 4 skip; tsc 57 baseline; ready to commit)
+2026-08-28 (v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration — suite 917 pass / 4 skip; tsc 46 = baseline; docs updated, commit pending user)
 
 ---
 
 ## Current Project Status
+
+### v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration (Aug 28 2026) — ✅ CODE + TESTS + DOCS VERIFIED, READY TO COMMIT
+**Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 + playwright-debug + v3.21.0 on PR #107).
+**Why**: Playwright CI turned RED on auth/login ("Plan limit circuit breaker open"). Investigation proved it was NOT the external prod hold — CI runs a fresh local TimescaleDB — but TWO code defects:
+- **Defect A (v3.20.3 regression, PRIMARY)**: `isDbUnavailableError()` blanket `name.includes("prismaclient") && name.includes("request")` classified EVERY `PrismaClientKnownRequestError` (benign P2021/P2002/P2025) as "DB unavailable" → `$allOperations` opened the global plan-limit breaker on the FIRST benign error → 5-min full DB freeze → auth failed.
+- **Defect B (v3.18.0 gap, trigger)**: `intelligence_cache` had NO migration (applied only via local `db push`) → `migrate deploy` (CI/prod) never created the table → `restoreIntelligenceCacheFromDB()` P2021 tripped Defect A's breaker.
+**Fix**: (A) Removed the blanket catch-all + redundant bare `"exceeded"` match → the breaker now trips only on REAL hold/unavailability (P6003/connection/timeout/hold-message), never on benign request errors. (B) NEW `prisma/migrations/20260828000000_add_intelligence_cache` — validated column/index-for-index identical to Prisma's `db push` output.
+**Tests**: `db-utils.test.ts` +4 real-shape regression tests (benign P2021/P2002/P2025 → false; connectivity P1001/P2024/P6003 → true). Suite **917 pass / 4 skip** (was 915/4); tsc 46 = exact baseline (0 new).
+**Docs**: versions-v3.20.md (v3.20.4), `.agents/CHANGELOG.md`, root CHANGELOG.md, AGENTS.md, Lessons.md (#94), this Primer, agent-memory updated.
+**Status**: Code ready; **commit/push pending user** (no auto-commit). After push, re-run CI to confirm PR #107 goes green, then merge with approval.
+
+### v3.21.0 — Professional Equity Research Decision Engine (Aug 28 2026) — ✅ CODE + TESTS VERIFIED, READY TO COMMIT
+**Branch**: `feat/stock-analysis-skill` (off `main`).
+**What**: Deep upgrade of the v3.18.0 AI Investment Intelligence pipeline into an institutional equity-research decision engine: 8-level verdict (STRONG_BUY/BUY/ACCUMULATE/HOLD/REDUCE/SELL/STRONG_SELL/AVOID) + conviction /10 + confidence /100; 12-section memo (thesis, fundamental score with evidence labels, management DNA, valuation zones, technical structure incl. marketPhase, shareholding analysis, risk matrix, catalysts, bull/base/bear scenarios, contrarian view + what-would-change-my-mind, portfolio action with positionSizing, invalidation zones); honest data-gap banner; optional raw-text document ingestion (annual report / concall, 50KB cap). Backward-compatible — no DB migration (all new `IntelligenceAnalysis` fields optional; legacy prompt/parser kept).
+**Files**: `intelligenceTypes.ts` (+Verdict, EvidenceLabel, MarketPhase, EvidencePoint, ManagementDna, ValuationZones, RiskItem, ContrarianView, PortfolioAction); NEW `lib/services/document/normalize.ts`; `intelligence-prompt.ts` (+`buildStockAnalysisPrompt`/`parseStockAnalysisResponse`); `intelligence.ts` orchestrator (documents path + audit metadata); `adapters.ts` (sma200 280-day best-effort); `app/api/company/[ticker]/intelligence` (POST Zod documents schema); UI — `VerdictCard` (8-verdict + conviction bar) + 11 new sections + rewritten `IntelligencePanel`/`CompanyIntelligence`/`RiskCatalystMatrix`; tests `stock-analysis-prompt` (21) + `document-normalize` (9) + `intelligence` +3.
+**Tests**: Suite **915 pass / 4 skip** (+32); tsc **46 = baseline** (0 new production errors).
+**Status**: Docs updated (AGENTS.md, CHANGELOG index + versions-v3.21.md, TODO.md, Primer, agent-memory); **commit/push/PR pending user** (no auto-commit).
+
+### playwright-debug skill + agent wiring (Aug 28 2026) — ✅ DONE (tooling/docs only, no code change), UNCOMMITTED
+**Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 and the committed Playwright-docs commit `e2c5607`).
+**What**: Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation) and wired it into every coding/verification agent. No new dependency (ships in installed `@playwright/test`).
+**Delivered**:
+- NEW machine skill `.opencode/skills/playwright-debug/SKILL.md` + human mirror `.agents/skills/playwright-debug/SKILL.md` + deep-dive `.agents/docs/playwright-debug.md`.
+- 6 agent profiles updated (`qa`, `e2e-agent`, `bug-hunter`, `ux-designer`, `code-reviewer`, `tdd-guide`) + `.opencode/opencode.json` prompts wired for all 6 + the build agent's UI/UX-testing step.
+- `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table updated.
+**Tests**: N/A — tooling/docs-only (no code/test/API/behavior change).
+**Lesson 91**: editing `opencode.json` prompts = single-line JSON strings — escape inline quotes as `\"` or JSON breaks; validate with `node -e "JSON.parse(...)"`.
+**Status**: Uncommitted on `feat/plan-limit-resilience`. Commit only on explicit user request. PR #107 still open (pending user decision).
 
 ### v3.20.1 + v3.20.2 — DB Ops Optimization + DB Health Enhancements + Daily Price Cache Batch Writer (Aug 27 2026) — ✅ CODE + TESTS VERIFIED, READY TO COMMIT/PUSH/PR
 **Branch**: `feat/db-health-price-cache`.
@@ -504,6 +532,18 @@
 
 ## Current Project Status
 
+### Plan-Limit Hold Resilience (v3.20.3)
+**Issue**: Prisma Postgres hit its **10K ops/day plan-limit hold** (code `P6003`, `"There is a hold on your account. Reason: planLimitReached."`). Every DB op failed, but `isDbUnavailableError()` **did NOT recognize the hold error** → all 18+ graceful-degrade fallback chains treated it as a hard 500 instead of degrading. Each blocked query hung the full **120s per-query timeout** (incl. `AuditLog.create`/`APIRequestLog` which also block), worker poll failed every 30s, cron daemon boot `syncCronJobs()` threw out of `startCronDaemon()` — with ≥3 Netlify instances this was a storm of 120s-stalled queries.
+**Fix Applied** (branch `feat/plan-limit-resilience`, option A — code fixes):
+- **`isDbUnavailableError()` P6003 fix** (`lib/db-utils.ts`): now matches `"hold on your account"` / `"planlimitreached"` / `"plan limit reached"`, Prisma code `P6003`, names `PrismaQueryTimeoutError`/`PlanLimitOpenError` → all 18+ graceful-degrade chains now trigger on the real hold.
+- **Plan-limit circuit breaker** (`lib/db-utils.ts` + `lib/prisma.ts`): `PlanLimitOpenError` + helpers; `$allOperations` **fail-fast** when open (no 120s proxy wait), opens on P6003/hold/timeout/unavailable, **closes on a successful half-open probe** (auto-recovery when hold lifts); `PLAN_LIMIT_COOLDOWN_MS` 5min env-overridable.
+- **Non-blocking audit/API logging**: `createAuditLog()` (`lib/audit.ts`) + `logAPIRequest()` (`lib/rate-limit.ts`) are now **fire-and-forget** (resolve immediately) — ~50+ `await` sites never stall on a held DB.
+- **Worker DB backoff** (`worker-engine.ts`): `setInterval`→self-rescheduling `setTimeout`; delay grows 30s→5min on `isDbUnavailableError`, resets on first success; `workerStopped` flag.
+- **Cron daemon DB guard** (`cron-daemon.ts`): boot `syncCronJobs()` try/catch warn (no throw); per-tick resync downgraded to warn on DB-unavailable.
+- **Log-noise** (`app/api/notifications/route.ts`): skip DB-unavailable `console.error` spam (still graceful 200 empty).
+- **Tests**: NEW `lib/__tests__/db-utils.test.ts` (14) → **suite 883 pass / 4 skip** (was 869/4); tsc 57 = baseline (0 new production errors).
+**Status**: RESOLVED in v3.20.3 — code committed to `feat/plan-limit-resilience`, commit/push/PR pending user. External blocker remains: Prisma Postgres extension must be removed from the Netlify Dashboard before deploy; hold must be lifted (plan upgrade / wait for reset), then run `scripts/backfill-corporate-actions-prod.ts` (2,053 records) Sep 1.
+
 ### Swing Tab Prod Failure FIX — Request-Time Split (v3.12.0)
 **Issue**: Swing tab could NEVER load on prod — `GET /api/recommendations/swing` ran the FULL pipeline synchronously: 34 Chartink templates (HTTP 419 → TV fallback) then the AI analysis of the top-20 (4 batches × 5, concurrency 3, retry×2) at 38–52s/batch → Netlify's 30s request wall killed the request mid-batch-3 (`Duration: 30000 ms` in prod logs).
 **Fix Applied** (branch `fix/swing-async-analysis`):
@@ -554,6 +594,14 @@
 ---
 
 ## Session History
+
+### Session 20 (August 28, 2026) — Professional Equity Research Decision Engine (v3.21.0, branch `feat/stock-analysis-skill`, session `2026-08-28-stock-analysis-skill`)
+- **8-level verdict + conviction**: STRONG_BUY/BUY/ACCUMULATE/HOLD/REDUCE/SELL/STRONG_SELL/AVOID + `conviction` /10 + `confidence` /100 (new `Verdict` enum in `intelligenceTypes.ts`).
+- **12-section institutional memo**: executive thesis, fundamental score with evidence labels, management DNA, valuation zones (with current-price marker), technical structure incl. marketPhase, shareholding analysis, risk matrix, catalysts, bull/base/bear scenario, contrarian view + what-would-change-my-mind, portfolio action (positionSizing), invalidation zones.
+- **Honest data gaps**: `dataGaps` + DataGapsBanner (never fabricated). **Document ingestion**: annual-report/concall pasted into company-page textareas (50KB cap) → appended to prompt as secondary-unverified sections.
+- **Backward compat, no DB migration**: legacy 3-verdict prompt/parser kept; all new `IntelligenceAnalysis` fields optional `?`; legacy JSON parses onto the 8-level enum.
+- **Files**: `intelligenceTypes.ts`; NEW `lib/services/document/normalize.ts`; `intelligence-prompt.ts` (+`buildStockAnalysisPrompt`/`parseStockAnalysisResponse`); `intelligence.ts` orchestrator (documents path + audit metadata); `adapters.ts` (sma200 280-day best-effort); POST route Zod documents schema; UI — `VerdictCard` (8-verdict) + 11 new sections + rewritten `IntelligencePanel`/`CompanyIntelligence`/`RiskCatalystMatrix`.
+- **Verification**: suite **915 pass / 4 skip** (+32, was 883/4); tsc **46 = baseline** (0 new production errors). Docs: AGENTS.md v3.21.0 row, CHANGELOG index + versions-v3.21.md, TODO.md row, Primer, agent-memory, session `2026-08-28-stock-analysis-skill/`. **Commit/push/PR pending user** (no auto-commit).
 
 ### Session 19 (August 16, 2026) — Swing tab prod failure FIX (request-time split, async AI analysis) + prod-stability batch + prod `daily_prices` backfill (v3.12.0, branch `fix/swing-async-analysis`, session `2026-08-16-a6d2f41`)
 - **Swing async split**: `getSwingRecommendations({analyze:true})` returns the fast screener feed instantly with `analysisStatus:"pending"`; AI analysis (4 batches × 5, 38–52s/batch — Netlify's 30s wall killed the old sync pipeline) runs in `runSwingAnalysisInBackground()` (module-guarded, `swingAnalysisInFlight` dedupe, `flushSwingAnalysis()` test hook), patches analysis, re-sets the same 30-min cache key (pending self-expires at 10-min `SWING_PENDING_TTL`). `SwingTab` gains the pulsing "AI targets generating…" badge + SWR function-form `refreshInterval` (10s/60s).

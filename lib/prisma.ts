@@ -3,6 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
+import {
+  isDbUnavailableError,
+  isPlanLimitBreakerOpen,
+  isPlanLimitHoldError,
+  openPlanLimitBreaker,
+  closePlanLimitBreaker,
+  PlanLimitOpenError,
+} from './db-utils';
 
 // Determine environment from ENVIRONMENT env var (defaults to 'development')
 // Options: local, development, production
@@ -149,6 +157,11 @@ export function getDbErrorLog(): DbErrorEntry[] {
 
 export const WRITE_BUDGET_CONFIG = WRITE_BUDGET;
 
+// ─── Plan-limit circuit breaker (v3.20.3) ──────────────────────────────────
+// The breaker STATE + helpers live in lib/db-utils.ts (Prisma-free, testable).
+// This file only wires them into the $allOperations extension below.
+// (Import declared at the top with the other imports.)
+
 // ─── Per-query timeout (v3.12.0) ───────────────────────────────────────────
 // Prod Accelerate queries had NO timeout — a stalled proxy connection hung a
 // healthy daily run for 16+ min with ZERO logs (run 8715fd51, 2026-08-16:
@@ -186,6 +199,14 @@ function withQueryTimeout<T>(promise: Promise<T>, model: string, operation: stri
 const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
   query: {
     $allOperations({ model, operation, args, query }) {
+      // Plan-limit circuit breaker — if open, fail fast WITHOUT hitting the
+      // proxy (avoids the 120s per-query timeout during an account hold).
+      if (isPlanLimitBreakerOpen()) {
+        return Promise.reject(
+          new PlanLimitOpenError(),
+        ) as ReturnType<typeof query>;
+      }
+
       // Track ops counter (refresh day key on rollover)
       if (dbOpsCounter._day !== todayKey()) {
         dbOpsCounter.reads = 0;
@@ -215,11 +236,24 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
           model ?? "?",
           operation,
         );
-        // Record failures in the ring buffer (fire-and-forget, non-blocking)
-        return awaited.catch((err: unknown) => {
-          recordDbError(model ?? "?", operation, err);
-          throw err;
-        }) as ReturnType<typeof query>;
+        return awaited
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+          .then((val) => {
+            // A probe that succeeded while the breaker was half-open means the
+            // hold has lifted — close the breaker so normal ops resume.
+            if (typeof g.__planLimitOpenAt === "number") closePlanLimitBreaker();
+            return val;
+          })
+          .catch((err: unknown) => {
+            // Record failures in the ring buffer (fire-and-forget, non-blocking)
+            recordDbError(model ?? "?", operation, err);
+            // If this is a plan-limit hold / DB timeout, open the breaker so
+            // subsequent calls fail fast instead of waiting 120s each.
+            if (isPlanLimitHoldError(err) || isDbUnavailableError(err)) {
+              openPlanLimitBreaker();
+            }
+            throw err;
+          }) as ReturnType<typeof query>;
       }
       // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return result;

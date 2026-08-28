@@ -3,6 +3,7 @@
 > End-to-End testing specialist for complete user flow validation.
 
 **Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
+**Skill**: `playwright-debug` (`.opencode/skills/playwright-debug/SKILL.md`) — Inspector/UI-mode/Codegen/Trace/HTML-report for diagnosing failures
 **MCP**: `playwright` (browser automation), `chrome-devtools` (performance/network)
 
 ## Expertise
@@ -71,6 +72,13 @@ npm run test:e2e          # Full suite (Chromium/Firefox/WebKit + Mobile Chrome)
 npm run test:e2e:ui       # UI mode (watch/filter/step)
 npx playwright show-report  # Open HTML report
 ```
+
+**Debugging a failing test** (`playwright-debug` skill): trace first
+(`show-report` → trace icon, or `show-trace test-results/<dir>/trace.zip`), then
+UI Mode (`npm run test:e2e:ui`) to watch/re-run the failing test live, then
+Inspector (`npx playwright test --debug e2e/<spec>.ts -g "title"`) to step +
+evaluate. Generate stable role/text locators with
+`npx playwright codegen http://localhost:3000 --load-storage=playwright/.auth/demo.json`.
 
 CI runs on every push via `.github/workflows/playwright.yml`.
 

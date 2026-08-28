@@ -17,6 +17,7 @@ import cron from "node-cron";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import os from "os";
+import { isDbUnavailableError } from "@/lib/db-utils";
 import { spawnDueCronJob } from "./worker-engine";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
@@ -60,10 +61,27 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     logger.warn({ msg: "Failed to ensure recommendation crons", error: error instanceof Error ? error.message : String(error) });
   }
 
-  await syncCronJobs();
+  // Initial registration of the loaded cron rows. If the DB is unavailable
+  // (plan-limit hold etc.), degrade gracefully — the periodic resync tick
+  // below retries automatically once the DB recovers.
+  try {
+    await syncCronJobs();
+  } catch (error) {
+    logger.warn({
+      msg: "Cron daemon initial sync deferred (DB unavailable)",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   resyncInterval = setInterval(() => {
-    syncCronJobs().catch((error) => logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) }));
+    syncCronJobs().catch((error) => {
+      if (isDbUnavailableError(error)) {
+        // DB down — expected while on a plan-limit hold; keep noise low.
+        logger.warn({ msg: "Cron daemon resync deferred (DB unavailable)", error: error instanceof Error ? error.message : String(error) });
+      } else {
+        logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) });
+      }
+    });
     // v3.13.0: drain the swing analysis job queue every tick. The DB-backed
     // job survives instance recycle — when the process that created it dies
     // mid-analysis, the stale-running recovery + claim here picks it back up

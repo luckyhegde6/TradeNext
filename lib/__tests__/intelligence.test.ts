@@ -234,4 +234,49 @@ describe("getInvestmentIntelligence", () => {
     expect(result.status).toBe("generated");
     expect(result.report).not.toBeNull();
   });
+
+  it("passes supplied documents into the AI prompt", async () => {
+    mockDirectPrompt.mockResolvedValue(validAiResponse);
+
+    await getInvestmentIntelligence("RELIANCE", {
+      documents: { annualReport: "FY26 annual report…", concall: "Q1 earnings call…" },
+    });
+
+    // The full prompt built by buildStockAnalysisPrompt should include the doc text
+    const promptArg = mockDirectPrompt.mock.calls[0][0] as string;
+    expect(promptArg).toContain("FY26 annual report");
+    expect(promptArg).toContain("Q1 earnings call");
+  });
+
+  it("audits hasDocuments=true when documents supplied", async () => {
+    mockDirectPrompt.mockResolvedValue(validAiResponse);
+
+    await getInvestmentIntelligence("RELIANCE", {
+      userId: 5,
+      documents: { concall: "concall transcript text" },
+    });
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "INTELLIGENCE_GENERATED",
+        userId: 5,
+        metadata: expect.objectContaining({ hasDocuments: true }),
+      })
+    );
+  });
+
+  it("treats whitespace-only documents as not provided", async () => {
+    mockDirectPrompt.mockResolvedValue(validAiResponse);
+
+    await getInvestmentIntelligence("RELIANCE", {
+      userId: 6,
+      documents: { annualReport: "   ", concall: "" },
+    });
+
+    const auditCall = mockAuditLog.mock.calls.find(
+      (c) => c[0].action === "INTELLIGENCE_GENERATED" && c[0].userId === 6
+    );
+    expect(auditCall).toBeDefined();
+    expect((auditCall![0].metadata as Record<string, unknown>).hasDocuments).toBe(false);
+  });
 });

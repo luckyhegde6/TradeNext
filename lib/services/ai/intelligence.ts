@@ -6,7 +6,12 @@ import { createAuditLog } from "@/lib/audit";
 import { directPrompt, isQuotaExhausted } from "./llm-provider";
 import { getDefaultConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
-import { buildIntelligencePrompt, parseIntelligenceResponse } from "./intelligence-prompt";
+import {
+  buildStockAnalysisPrompt,
+  parseStockAnalysisResponse,
+  type StockAnalysisDocuments,
+} from "./intelligence-prompt";
+import { normalizeDocumentText } from "../document/normalize";
 import {
   fetchQuoteData,
   fetchTechnicalsData,
@@ -33,6 +38,8 @@ import { QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 export interface IntelligenceOptions {
   force?: boolean;
   userId?: number;
+  /** Optional raw-text documents (annual report / concall transcript) supplied by the caller. */
+  documents?: StockAnalysisDocuments;
 }
 
 export interface IntelligenceResult {
@@ -51,8 +58,18 @@ export async function getInvestmentIntelligence(
   symbol: string,
   options: IntelligenceOptions = {}
 ): Promise<IntelligenceResult> {
-  const { force = false, userId } = options;
+  const { force = false, userId, documents } = options;
   const upperSymbol = symbol.toUpperCase();
+
+  // Normalize optional documents (empty strings treated as "not provided")
+  const rawDocs = documents && (documents.annualReport || documents.concall)
+    ? {
+        annualReport: normalizeDocumentText(documents.annualReport),
+        concall: normalizeDocumentText(documents.concall),
+      }
+    : undefined;
+  const normalizedDocs: StockAnalysisDocuments | undefined =
+    rawDocs && (rawDocs.annualReport || rawDocs.concall) ? rawDocs : undefined;
 
   // 1. Cache check (skip if force refresh)
   if (!force) {
@@ -106,8 +123,8 @@ export async function getInvestmentIntelligence(
     return { report: null, status: "failed", error: "No data available for this symbol" };
   }
 
-  // 3. Build prompt
-  const prompt = buildIntelligencePrompt(input);
+  // 3. Build prompt (full stock-analysis decision engine)
+  const prompt = buildStockAnalysisPrompt(input, normalizedDocs);
 
   // 4. AI call with model fallback
   let aiResponse: string | null = null;
@@ -139,16 +156,16 @@ export async function getInvestmentIntelligence(
   }
 
   // 5. Parse response
-  let analysis = parseIntelligenceResponse(aiResponse);
+  let analysis = parseStockAnalysisResponse(aiResponse);
 
   // Retry once with simplified prompt on parse failure
   if (!analysis) {
     logger.warn({ msg: "Intelligence parse failed, retrying with simplified prompt", symbol: upperSymbol });
     try {
-      const simplifiedPrompt = `Analyze ${upperSymbol} and return ONLY a JSON object with fields: verdict (BUY/HOLD/SELL), confidence (0-100), summary (string). No markdown.`;
+      const simplifiedPrompt = `Analyze ${upperSymbol} and return ONLY a JSON object with fields: verdict (STRONG_BUY/BUY/ACCUMULATE/HOLD/REDUCE/SELL/STRONG_SELL/AVOID), conviction (0-10), confidence (0-100), summary (string). No markdown.`;
       const retryResponse = await directPrompt(simplifiedPrompt);
       if (retryResponse && !isQuotaExhausted(retryResponse)) {
-        analysis = parseIntelligenceResponse(retryResponse);
+        analysis = parseStockAnalysisResponse(retryResponse);
       }
     } catch {
       // ignore retry failure
@@ -178,7 +195,9 @@ export async function getInvestmentIntelligence(
   await auditLog("INTELLIGENCE_GENERATED", upperSymbol, userId, {
     modelUsed,
     verdict: analysis.verdict,
+    conviction: analysis.conviction ?? null,
     confidence: analysis.confidence,
+    hasDocuments: Boolean(normalizedDocs),
     partialData: !input.quote || !input.technicals,
   });
 

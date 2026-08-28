@@ -146,16 +146,189 @@ export interface IntelligenceInput {
   symbol: string;
 }
 
+// ─── Stock Analysis (equity research decision engine) types ──────────────────
+
+/** Eight-level investment verdict (professional equity-research stance). */
+export type Verdict =
+  | "STRONG_BUY"
+  | "BUY"
+  | "ACCUMULATE"
+  | "HOLD"
+  | "REDUCE"
+  | "SELL"
+  | "STRONG_SELL"
+  | "AVOID";
+
+/** Evidence discipline — every conclusion is tagged so facts are never passed off as opinions. */
+export type EvidenceLabel =
+  | "VERIFIED_FACT"
+  | "CALCULATED_METRIC"
+  | "ANALYST_INTERPRETATION"
+  | "INVESTMENT_INFERENCE";
+
+/** Wyckoff-style market phase of the technical structure. */
+export type MarketPhase =
+  | "ACCUMULATION"
+  | "MARKUP"
+  | "DISTRIBUTION"
+  | "MARKDOWN"
+  | "BASE"
+  | "UNKNOWN";
+
+export interface EvidencePoint {
+  label: EvidenceLabel;
+  text: string;
+  period?: string; // reporting period / time context (e.g. "FY25", "Q1FY26", "2026-08-28")
+  source?: string; // where the fact came from (e.g. "NSE quote", "User annual report", "Concall")
+}
+
+export interface ManagementDna {
+  score: number; // 0-10
+  positives: string[];
+  concerns: string[];
+  guidanceCredibility: "conservative" | "reliable" | "promotional" | "unclear" | "unknown";
+  capitalAllocation: string;
+  promoterBehavior: string; // includes pledge status
+  verdict: string;
+}
+
+export interface ValuationZones {
+  attractiveLow?: number;
+  attractiveHigh?: number;
+  fairLow?: number;
+  fairHigh?: number;
+  overLow?: number;
+  overHigh?: number;
+  assumptions: string[];
+}
+
+export interface RiskItem {
+  risk: string;
+  category: "COMPANY" | "SECTOR" | "MACRO";
+  probability: string; // qualitative (low/medium/high) or %
+  impact: string;      // qualitative
+  earlyWarning: string;
+  pricedIn: boolean;
+}
+
+export interface ContrarianView {
+  marketBelief: string;
+  whatIfWrong: string;
+  supporting: string[];
+  contradicting: string[];
+}
+
+export interface PortfolioAction {
+  existingHolder: string; // hold / add gradually / trim / exit
+  newInvestor: string;    // initiate now / buy gradually / wait / avoid
+  positionSizing: "CORE" | "SATELLITE" | "SPECULATIVE" | "WATCHLIST" | "NONE";
+}
+
 // ─── AI Analysis Response ─────────────────────────────────────────────────────
 
+/**
+ * The full institutional investment-memorandum analysis produced by the LLM.
+ * Backward-compatible: legacy 3-verdict reports parse into this shape via
+ * defaults (verdict BUY/HOLD/SELL map onto the 8-level enum; new fields defaulted).
+ *
+ * NOTE: the "new framework" fields below are OPTIONAL (`?`) so that legacy rows
+ * already persisted in `IntelligenceCache` (which lack them) remain valid at
+ * runtime without a schema migration. The parser always populates them for NEW
+ * reports, and the UI null-coalesces for legacy rows.
+ */
 export interface IntelligenceAnalysis {
-  verdict: "BUY" | "HOLD" | "SELL";
-  confidence: number;
+  // ── Decision ──────────────────────────────────────────────────────────────
+  verdict: Verdict;
+  conviction?: number; // 0-10 (new)
+  confidence: number; // 0-100 (kept for continuity, derived from conviction)
   fairValue: {
     low: number;
     mid: number;
     high: number;
   };
+  valuationZones?: ValuationZones; // (new)
+
+  // ── Executive summary (new) ───────────────────────────────────────────────
+  executiveSummary?: {
+    oneSentenceThesis: string;
+    threeBiggestReasons: string[];
+  };
+
+  // ── Pillar 1: Fundamentals (new) ──────────────────────────────────────────
+  fundamentalScore?: {
+    score: number; // 0-10
+    revenue: string;
+    profit: string;
+    margins: string;
+    cashFlow: string;
+    balanceSheet: string;
+    roe: string;
+    accountingQuality: string;
+    verdict: string;
+    evidence: EvidencePoint[];
+  };
+
+  // ── Pillar 2: Management DNA (new) ────────────────────────────────────────
+  managementDna?: ManagementDna;
+
+  // ── Pillar 3: Valuation reality (new) ─────────────────────────────────────
+  valuationReality?: {
+    current: string;
+    historical: string;
+    peer: string;
+    growthAdjusted: string;
+    conclusion: string; // CHEAP | FAIRLY VALUED | EXPENSIVE | EXTREMELY EXPENSIVE
+  };
+
+  // ── Pillar 4: Technical structure (new) ───────────────────────────────────
+  technicalStructure?: {
+    trend: string;
+    priceVs50: string;
+    priceVs200: string;
+    rsi: string;
+    volume: string;
+    support: number | null;
+    resistance: number | null;
+    marketPhase: MarketPhase;
+    verdict: string;
+  };
+
+  // ── Pillar 5: Shareholding (new) ──────────────────────────────────────────
+  shareholdingAnalysis?: {
+    promoter: string;
+    promoterPledge: string;
+    fii: string;
+    dii: string;
+    interpretation: string;
+  };
+
+  // ── Pillar 6: Risks + catalysts ───────────────────────────────────────────
+  riskFactors: RiskItem[];
+  catalysts: string[];
+
+  // ── Scenarios (new) ───────────────────────────────────────────────────────
+  scenarioAnalysis: {
+    bull: string;
+    base: string;
+    bear: string;
+  };
+  contrarian?: ContrarianView;
+  whatWouldChangeMyMind?: string[];
+
+  // ── Portfolio action + invalidation (new) ─────────────────────────────────
+  portfolioAction?: PortfolioAction;
+  invalidation?: {
+    thesisInvalidation: string;
+    entryZone: string;
+    fairZone: string;
+    overZone: string;
+    holdingHorizon: string;
+  };
+
+  // ── Honesty / gaps (new) ──────────────────────────────────────────────────
+  dataGaps?: string[];
+
+  // ── Legacy / compatible ───────────────────────────────────────────────────
   technicalAnalysis: {
     trend: string;
     support: number | null;
@@ -177,13 +350,6 @@ export interface IntelligenceAnalysis {
   };
   shareholdingTrend: {
     summary: string;
-  };
-  riskFactors: string[];
-  catalysts: string[];
-  scenarioAnalysis: {
-    bull: string;
-    base: string;
-    bear: string;
   };
   summary: string;
 }

@@ -1,45 +1,46 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260827-db-health-price-cache"
+session_id: "sess-20260828-stock-analysis-skill"
 agent: "system"
-timestamp: "2026-08-27T00:00:00Z"
+timestamp: "2026-08-28T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260826-nse-resilience"
+parent_session: "sess-20260827-db-health-price-cache"
 child_sessions: []
-checkpoint: "v3.20.2-committed-branch-feat/db-health-price-cache-push-pr-pending"
+checkpoint: "v3.21.0-implemented-915-pass-tsc-46-baseline-code-ready-commit-pr-pending-user"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.20.1 + v3.20.2 on branch `feat/db-health-price-cache` — (1) v3.20.1 DB ops reduction (~22K→~4.2K ops/day) committed `5156eb3`; (2) v3.20.2 DB failure ring buffer + Daily Price Cache batch writer + DB Health API/UI enhancements.
-- **Branch**: `feat/db-health-price-cache`. **User requested: "yes commit and push and create PR"** — commit + push main (includes unpushed `5156eb3`) + create PR targeting main.
+- **Task**: v3.21.0 Professional Equity Research Decision Engine on branch `feat/stock-analysis-skill` — deep upgrade of v3.18.0 AI Investment Intelligence: 8-level verdict + conviction/10 + 12-section institutional memo + evidence discipline + management DNA + valuation zones + bull/base/bear + contrarian test + portfolio action + honest data gaps + optional raw-text document ingestion (annual-report/concall textareas, 50KB cap). Backward compatible (no DB migration).
+- **Branch**: `feat/stock-analysis-skill` (off `main`, clean). PR #107 on `feat/plan-limit-resilience` is a SEPARATE open workstream (playwright-debug) — unrelated.
 
 ## Progress
-- [x] **DB ops reduction (v3.20.1, `5156eb3`)**: worker poll 5s→30s, cron-daemon resync 60s→5min, legacy scheduler removed, web-vitals DB writes removed (pino only), cron heartbeat 5min→15min → ~17.7K ops/day saved, now ~4.2K/day (10K plan limit).
-- [x] **DB failure ring buffer (`lib/prisma.ts`)**: `recordDbError()`/`getDbErrorLog()` — last 50 DB query failures (time/model/op/message) auto-recorded in `$allOperations` extension (timeout, write-budget, connection); `WRITE_BUDGET_CONFIG` exported.
-- [x] **Daily Price Cache batch writer (`lib/services/priceCache.ts`)**: market-hours in-memory accumulation via `cacheDailyPrice()`, single bulk `$executeRawUnsafe` upsert (`ON CONFLICT (ticker,"tradeDate") DO UPDATE`, chunk 200) after 4 PM IST → ~1 write/day; `flushDailyPricesToDb()`/`getDailyPriceCacheStatus()`/`startDailyPriceFlushTimer()` (5-min check)/`stopDailyPriceFlushTimer()`/`isPostMarket()`/`isMarketAccumulationWindow()`; wired into `priceSyncService.ts` `fetchAndEmit()` + `instrumentation.ts`.
-- [x] **DB Health API (`app/api/admin/db-health/route.ts`)**: GET returns direct `dbOpsCounter` (reads/writes/budget/exceeded/remaining/dayKey) + `dailyPriceCache` + `dbErrors`; POST `{action:"flush_prices"}` added (default `sync_sqlite`).
-- [x] **DB Health UI (`app/admin/utils/db-health/page.tsx`)**: 5th "Cached Prices" stat card, Daily Price Cache section, Recent DB Errors table (scrollable/clear), Flush Prices button, day key in write-budget header.
-- [x] **Verification**: **suite 869 pass / 4 skip = baseline**; `npx tsc --noEmit` **57 = baseline (0 production errors; all test-only)**. No schema change → no migration.
-- [x] **Docs updated (all)**: AGENTS.md v3.20.2 row, `.agents/changelog/versions-v3.20.md` (v3.20.2 section), `.agents/CHANGELOG.md` index, TODO.md, Primer.md, agent-memory.md, Lessons.md #89 + update log, session-todos.md, session `decisions.md` + `flow.md` (`2026-08-27-db-health-price-cache`), handoff `latest.md` (this file).
+- [x] Phase 1 types: `lib/services/intelligenceTypes.ts` — `Verdict` (8 levels), `EvidenceLabel`, `MarketPhase`, `EvidencePoint`, `ManagementDna`, `ValuationZones`, `RiskItem`, `ContrarianView`, `PortfolioAction`; expanded `IntelligenceAnalysis` with all new fields OPTIONAL `?`; `ShareholdingData.others` required. Legacy rows + test literals stay type-valid.
+- [x] Phase 2: NEW `lib/services/document/normalize.ts` — `normalizeDocumentText(content, maxLen=50_000)`, `DOCUMENT_MAX_LEN = 50_000`, truncation suffix, whitespace collapse, never throws. NO `import "server-only"` (not a declared dependency — resolves up to gardenVerse's throwing copy and breaks Jest; Lesson 92).
+- [x] Phase 3: `lib/services/ai/intelligence-prompt.ts` — legacy `buildIntelligencePrompt`/`parseIntelligenceResponse` KEPT unchanged (18 legacy tests pass); added `StockAnalysisDocuments` + `buildStockAnalysisPrompt(input, documents?)` + `parseStockAnalysisResponse(raw)` (8-verdict, full memo, legacy BUY→BUY/HOLD/SELL collapse, confidence derived from conviction×10 when missing, clamps).
+- [x] Phase 4: orchestrator `lib/services/ai/intelligence.ts` — documents path + audit metadata `modelUsed/verdict/conviction/confidence/hasDocuments/partialData`; whitespace-only docs → `hasDocuments:false` + no prompt block (Lesson 93).
+- [x] Phase 5: `lib/services/intelligence/adapters.ts` — `fetchTechnicalsData` window 90→280 days for `sma200` best-effort ("needs 250+ bars").
+- [x] Phase 6: `app/api/company/[ticker]/intelligence/route.ts` — POST Zod `{ force?, documents?: { annualReport?, concall? } }` (each max 50_000, 400 invalid); audit `hasDocuments`.
+- [x] Phase 7 UI: `VerdictCard` (8-verdict color/emoji + conviction bar), 11 new section components (ExecutiveThesis, FundamentalScore, ManagementDna, TechnicalStructure, ValuationZones, ShareholdingAnalysis, Contrarian, PortfolioAction, DataGapsBanner, + rewritten RiskCatalystMatrix RiskItem[]); rewritten `IntelligencePanel` (legacy fallbacks) + `CompanyIntelligence` (doc textareas). Kept: TechnicalSummary/FundamentalInsights/ValuationView/NewsCatalystList/ShareholdingTrend/CorporateActionsSummary/ScenarioAnalysis/ExecutiveSummary.
+- [x] Phase 8 tests: NEW `stock-analysis-prompt.test.ts` (21) + `document-normalize.test.ts` (9) + `intelligence.test.ts` +3 (13 total). Targeted run `npx jest document-normalize stock-analysis-prompt intelligence-prompt intelligence --silent` → **57/57 PASS**. Full suite → **66 suites, 915 pass / 4 skip** (+32, was 883/4). tsc → **46 = baseline** (0 new production errors).
+- [x] Phase 9 docs: `.agents/sessions/2026-08-28-stock-analysis-skill/decisions.md` + `flow.md`; `.agents/changelog/versions-v3.21.md` (created); `.agents/CHANGELOG.md` + root `CHANGELOG.md` + `AGENTS.md` + `TODO.md` v3.21.0 rows; `Primer.md` status + Session 20 entry; `agent-memory.md` entry; `Lessons.md` #92 + #93 + update log; `session-todos.md` (this session).
 
 ## Decisions
-- Keep the SSE `PriceCache` class untouched; add a SEPARATE `DailyPriceAccumulator` in the same file (merged module).
-- Failure ring buffer on `globalThis` = free admin visibility (no extra DB ops); recorded fire-and-forget via `.catch`.
-- Use `$executeRawUnsafe` for the accumulator flush — never blocked by the write-budget guard.
-- Auto-flush timer lazy-guarded: only fires when `isPostMarket() && prices.size > 0`.
-- No schema change this session → no migration needed.
-- Commit/push/PR per user explicit request.
+- Deep IN-PLACE upgrade of the v3.18.0 pipeline (no duplicate pipeline), per user.
+- Backward compatible, NO DB migration: legacy prompt/parser kept; all new `IntelligenceAnalysis` fields optional `?`; legacy JSON parses onto the 8-level enum (BUY/SELL/HOLD valid members); `riskFactors` now `RiskItem[]`; `confidence = conviction*10` when missing.
+- `normalize.ts` does NOT `import "server-only"` (non-dependency → parent-path throw → Jest breaks); convention-comment only.
+- `hasDocuments` derived from NORMALIZED content, not object existence (whitespace-only → false).
+- Evidence labels & dataGaps: never fabricate; missing data surfaced in `dataGaps` + DataGapsBanner.
+- Docs (pre-pasted `.md`/`.txt`) only, 50KB cap each, appended as secondary-unverified prompt sections — no MarkItDown/PDF.
+- No auto commit/push/merge without explicit user say-so. Version = v3.21.0.
 
 ## Blockers
-- **Prisma Postgres `planLimitReached`**: prod writes on hold until Sep 1 — corporate-actions backfill deferred to Sep 1 (script ready: `scripts/backfill-corporate-actions-prod.ts`, 2,053 records).
-- **Netlify deploy blocked** until Prisma Postgres extension removed from Netlify Dashboard.
-- **NSE cloud IP blocking (403/429)**: mitigated by the v3.20.0 resilience architecture (PR #105).
+- (none) — code + tests + docs complete. Awaiting user commit/PR decision (no auto-commit).
+- Separate workstream (unrelated): PR #107 (https://github.com/luckyhegde6/TradeNext/pull/107) open on `feat/plan-limit-resilience`; `feat/db-health-price-cache` v3.20.2 commit/push/PR pending.
+- External (prod, not this session): Prisma Postgres hold until Sep 1; Netlify deploy blocked until Prisma Postgres extension removed.
 
 ## Next Move
-1. Stage + commit v3.20.2 code + docs on `feat/db-health-price-cache`.
-2. Push `main` (includes unpushed `5156eb3`) + push branch.
-3. Create PR targeting `main`.
-4. Sep 1: run corporate-actions backfill; remove Prisma Postgres extension from Netlify Dashboard then deploy.
+1. Present to user: implementation + tests complete (915 pass / 4 skip, tsc 0 new), docs done, ready for commit/PR decision.
+2. On user approval: commit v3.21.0 on `feat/stock-analysis-skill` (no push/merge unless asked).

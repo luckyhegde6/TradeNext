@@ -91,24 +91,46 @@ export async function POST(
 
   const symbol = ticker.toUpperCase();
 
-  let body: { force?: boolean } = {};
+  // POST body: { force?, documents?: { annualReport?, concall? } }
+  // Documents are optional raw-text (.md/.txt) up to ~50KB each; oversized → 400.
+  const postSchema = z.object({
+    force: z.boolean().optional(),
+    documents: z
+      .object({
+        annualReport: z.string().max(50_000).optional(),
+        concall: z.string().max(50_000).optional(),
+      })
+      .optional(),
+  });
+
+  let body: z.infer<typeof postSchema> = {};
   try {
-    body = await req.json();
+    const json = await req.json();
+    const parsedBody = postSchema.safeParse(json);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: "Invalid body", message: parsedBody.error.issues[0]?.message ?? "Bad request body" },
+        { status: 400 },
+      );
+    }
+    body = parsedBody.data;
   } catch {
-    // Empty body is fine — defaults to force=false
+    // Empty body is fine — defaults to force=false, no documents
   }
 
   const force = body.force === true;
+  const hasDocs = Boolean(body.documents?.annualReport || body.documents?.concall);
 
   await createAuditLog({
     action: "INTELLIGENCE_REQUESTED",
     userId: Number(session.user.id),
-    metadata: { symbol, force, method: "POST" },
+    metadata: { symbol, force, method: "POST", hasDocuments: hasDocs },
   });
 
   const result = await getInvestmentIntelligence(symbol, {
     force,
     userId: Number(session.user.id),
+    documents: body.documents,
   });
 
   const statusMap: Record<string, number> = {

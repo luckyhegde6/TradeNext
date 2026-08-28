@@ -15,16 +15,16 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 |-------|--------------|----------------|------------|---------|
 | **build** (primary) | — | all | — | main work |
 | **plan** | docs-workflow | docs-updater | `/plan` | before features |
-| **review** | bug-finder | — | `/code-review` | pre-commit / PR |
-| **tdd** | bug-finder | ux-enhancer | `/tdd` | test-first features |
+| **review** | bug-finder | playwright-debug | `/code-review` | pre-commit / PR |
+| **tdd** | bug-finder | ux-enhancer, playwright-debug | `/tdd` | test-first features |
 | **explore** | — | — | — | codebase questions |
 | **doc-writer** | docs-updater | docs-workflow | `/docs-update` | after every implementation |
 | **wiki-publisher** | wiki-creator | docs-updater | `/wiki-publish` | docs changed → wiki sync |
-| **bug-hunter** | bug-finder | docs-updater | `/find-bugs` | bugs/contract audits |
-| **ux-designer** | ux-enhancer | bug-finder | `/ux-audit` | UI/UX audit/enhance |
-| **qa** | playwright-e2e | — | — | test execution, cross-browser validation |
-| **e2e-agent** | playwright-e2e | playwright (MCP) | — | user flow validation, responsive |
-| **code-reviewer** | — | bug-finder | — | code quality + security review |
+| **bug-hunter** | bug-finder | docs-updater, playwright-debug | `/find-bugs` | bugs/contract audits |
+| **ux-designer** | ux-enhancer | bug-finder, playwright-debug | `/ux-audit` | UI/UX audit/enhance |
+| **qa** | playwright-e2e | playwright-debug | — | test execution, cross-browser validation |
+| **e2e-agent** | playwright-e2e | playwright-debug, playwright (MCP) | — | user flow validation, responsive |
+| **code-reviewer** | — | bug-finder, playwright-debug | — | code quality + security review |
 | **devops** | — | — | — | deployment, CI/CD, infra |
 | **integrator** | — | — | — | API contracts, cross-module wiring |
 | **observability** | — | — | — | monitoring, logging, health, perf |
@@ -38,6 +38,7 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | wiki-creator | `.opencode/skills/wiki-creator/` | `.agents/skills/wiki-creator.md` | publish GitHub wiki pages |
 | bug-finder | `.opencode/skills/bug-finder/` | `.agents/skills/bug-finder.md` | hunt/reproduce/verify bugs |
 | ux-enhancer | `.opencode/skills/ux-enhancer/` | `.agents/skills/ux-enhancer.md` | UI/UX audit + enhancement |
+| playwright-debug | `.opencode/skills/playwright-debug/` | `.agents/skills/playwright-debug/` | Playwright developer debug toolkit — Inspector (`--debug`), UI Mode, Codegen, Trace Viewer, HTML report |
 | nse-integration | `.opencode/skills/nse-integration/` | `.agents/skills/nse-integration.md` | NSE API integration (nseFetch, caching, cookies) |
 | playwright-e2e | `.opencode/skills/playwright-e2e/` | `.agents/skills/playwright-e2e/` | committed e2e suite (`e2e/`, `npm run test:e2e`) — regression guards, cross-browser + mobile |
 | playwright-cli | `.opencode/skills/playwright-cli/` | — | exploratory browser testing via Playwright MCP (not committed) |
