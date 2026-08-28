@@ -168,7 +168,7 @@ describe("parseIntelligenceResponse", () => {
     valuationAssessment: { assessment: "Fairly valued", relativeValue: "In line with peers" },
     newsCatalysts: { positive: ["New refinery"], negative: [], neutral: [] },
     shareholdingTrend: { summary: "FII increasing" },
-    riskFactors: ["Oil price volatility"],
+    riskFactors: [{ risk: "Oil price volatility", category: "COMPANY", probability: "medium", impact: "medium", earlyWarning: "", pricedIn: false }],
     catalysts: ["Jio IPO"],
     scenarioAnalysis: { bull: "3200", base: "2900", bear: "2500" },
     summary: "Reliance is well-positioned for growth.",

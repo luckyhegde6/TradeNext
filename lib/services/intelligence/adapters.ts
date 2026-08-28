@@ -53,10 +53,10 @@ export async function fetchQuoteData(symbol: string): Promise<QuoteData | null> 
 
 export async function fetchTechnicalsData(symbol: string): Promise<TechnicalsData | null> {
   try {
-    // Fetch 90-day bars for indicator computation
+    // Fetch ~280-day bars so SMA200 (250+ bars) can be computed when enough history exists.
     const to = new Date();
     const from = new Date();
-    from.setDate(from.getDate() - 90);
+    from.setDate(from.getDate() - 280);
 
     const rawBars = await fetchSecurityWiseHistoricalData(
       symbol,
@@ -74,6 +74,7 @@ export async function fetchTechnicalsData(symbol: string): Promise<TechnicalsDat
     // Compute indicators
     const sma20 = computeSMA(closes, 20);
     const sma50 = computeSMA(closes, 50);
+    const sma200 = computeSMA(closes, 200);
     const ema12 = computeEMA(closes, 12);
     const ema26 = computeEMA(closes, 26);
     const rsi = computeRSI(closes, 14);
@@ -82,7 +83,7 @@ export async function fetchTechnicalsData(symbol: string): Promise<TechnicalsDat
     const atr = computeATR(bars, 14);
     const sr = findSupportResistance(bars, 5);
 
-    // Trend determination
+    // Trend determination (SMA20/SMA50)
     const sma20Val = lastOrUndefined(sma20);
     const sma50Val = lastOrUndefined(sma50);
     const currentTrend: TechnicalsData["currentTrend"] =
@@ -121,7 +122,7 @@ export async function fetchTechnicalsData(symbol: string): Promise<TechnicalsDat
       currentTrend,
       sma20: sma20Val ?? null,
       sma50: sma50Val ?? null,
-      sma200: null, // need 250+ bars for SMA200
+      sma200: lastOrUndefined(sma200) ?? null, // best-effort (needs 250+ bars)
       ema12: lastOrUndefined(ema12) ?? null,
       ema26: lastOrUndefined(ema26) ?? null,
       rsi14: rsiVal ?? null,
