@@ -228,3 +228,68 @@ Tooling/docs-only addition on `feat/plan-limit-resilience` (no code/test/API/beh
 - **Wired**: 6 agent profiles (`qa`, `e2e-agent`, `bug-hunter`, `ux-designer`, `code-reviewer`, `tdd-guide`) + `.opencode/opencode.json` prompts for those 6 + the build agent's UI/UX-testing step; `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table.
 - **No new dependency** — Inspector/UI/Codegen/Trace/Report ship in the already-installed `@playwright/test`.
 - **Lesson 91**: `.opencode/opencode.json` prompts are single-line JSON strings — escape inline double-quotes as `\"` or `JSON.parse` breaks (the build-agent edit initially inserted an unescaped `"title"`; fixed + validated `JSON OK`).
+
+---
+
+## v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration
+
+> **Date**: Aug 28 2026 · **Branch**: `feat/plan-limit-resilience` · **Suite**: 917 pass / 4 skip · **tsc**: 46 = exact baseline (0 new)
+
+## Problem — Playwright CI turned RED
+
+`npx playwright test` on GitHub Actions (which runs against a **fresh local TimescaleDB** at `postgresql://postgres:postgres@localhost:5432/tradenext`, migrated + seeded) failed on auth/login with:
+
+```
+Plan limit circuit breaker open — Prisma account likely on hold; failing fast
+```
+
+…on EVERY login → `expect(page).toHaveURL(/\/$/)` got `http://localhost:3000/auth/signin` → 2 failed setup/login tests, 85 did not run.
+
+The user hypothesized an external Prisma Postgres plan-limit hold. **Investigation proved otherwise**: the CI DB is local and healthy — the failures were a **self-inflicted code regression**, not an external hold.
+
+## Root Cause (TWO defects that combined)
+
+### Defect A — `isDbUnavailableError()` false-positived on benign `PrismaClientKnownRequestError` (v3.20.3 regression, PRIMARY)
+
+`lib/db-utils.ts` had a blanket catch-all:
+
+```ts
+if (name.includes("prismaclient") && name.includes("request")) return true;
+```
+
+Every `PrismaClientKnownRequestError` has `name === "PrismaClientKnownRequestError"` (contains "prismaclient" + "request") — so **ANY** benign request error (**P2021** table-does-not-exist, **P2002** unique constraint, **P2025** record-not-found, etc.) was classified as "DB unavailable". Because `$allOperations` opens the plan-limit breaker via `isPlanLimitHoldError(err) || isDbUnavailableError(err)`, the FIRST benign Prisma error **opened the global circuit breaker** → all subsequent ops (incl. auth `user.findFirst`) failed fast for the full 5-min `PLAN_LIMIT_COOLDOWN_MS` → CI auth/login fails.
+
+The existing `P2002 → false` unit test passed only because it built `Object.assign(new Error("…"), {code:"P2002"})` whose `name` stays `"Error"` — it never exercised the real `PrismaClientKnownRequestError` shape.
+
+### Defect B — `intelligence_cache` migration missing (latent, v3.18.0, Lesson-71 pattern, TRIGGER)
+
+- v3.18.0 added the `IntelligenceCache` Prisma model (`@@map("intelligence_cache")`) but the migration was applied **only via `db push` on the local dev DB** (which has no `_prisma_migrations` ledger) — **no migration folder exists** (`grep` proved zero `intelligence_cache` in `prisma/migrations/**/*.sql`).
+- CI/prod use `prisma migrate deploy` (only applies migration folders) → table never created there.
+- `instrumentation.ts` → `restoreIntelligenceCacheFromDB()` → `prisma.intelligenceCache.findMany()` → **P2021 "table does not exist"** → routed through `$allOperations` → Defect A opened the breaker. **P2021 was the exact false-positive that tripped the breaker in CI.**
+
+## Fixes
+
+### Fix A — `lib/db-utils.ts`
+- **Removed** the blanket `name.includes("prismaclient") && name.includes("request")` catch-all entirely. Genuine unavailability is still fully detected by the explicit connectivity codes (P1000–P1018, P2024 timeout, P6003 hold), ECONN* / ETIMEDOUT codes, and the specific hold/connection/proxy/fetch-failed messages.
+- **Removed** the redundant + dangerous bare `msg.includes("exceeded")` (would also match benign data errors like value-out-of-range "exceeds max"); plan-limit wording is already covered by the specific `"plan limit"` / `"planlimitreached"` matches.
+- `isDbUnavailableError()` now returns **false** for benign `PrismaClientKnownRequestError` P2xxx (P2021/P2002/P2025) → **the breaker only trips on REAL hold/unavailability** (P6003, connection refused/timeout, hold message, genuine timeouts), never on app-level request errors.
+
+### Fix B — `prisma/migrations/20260828000000_add_intelligence_cache/migration.sql` (NEW)
+- `CREATE TABLE "intelligence_cache"` + `intelligence_cache_pkey` + `intelligence_cache_symbol_key` (unique) + `intelligence_cache_symbol_expiresAt_idx`.
+- **Validated**: diffed the DDL against the actual table Prisma created via `db push` on the local Docker Postgres (`information_schema.columns` + `pg_indexes`) — **column-for-column and index-for-index identical** (id/symbol text NOT NULL, version integer default 1, data jsonb NOT NULL, modelUsed text null, generatedAt/createdAt timestamp default CURRENT_TIMESTAMP, expiresAt timestamp NOT NULL). So `prisma migrate deploy` (CI + prod) now creates the table exactly as the model expects.
+- Non-destructive: on a DB that already has the table (local via `db push`), the migration is a no-op the ledger will track going forward.
+
+## Tests
+
+`lib/__tests__/db-utils.test.ts` **+4** (was 12 → **16**):
+- `returns false for REAL PrismaClientKnownRequestError with benign codes (P2021/P2002/P2025) — regression: must NOT trip the plan-limit breaker` — builds errors with the **real** `name: "PrismaClientKnownRequestError"` shape (which the old code falsely matched).
+- `returns true for REAL PrismaClientKnownRequestError with connectivity codes (P1001/P2024/P6003)` — confirms genuine unavailability still trips.
+
+## Verification
+- **Jest**: **917 pass / 4 skip**, 66/66 suites green (was 915/4). The 4 skips are the intentional client-cache IndexedDB tests.
+- **tsc**: `--noEmit` = **46 errors — exact baseline, 0 in `db-utils.ts`, 0 in the migration** (remaining are the documented pre-existing test-file jest-mock noise).
+- **Migration**: validated against the live local table definition (above).
+
+## Notes
+- The external **prod** Prisma Postgres hold (if still active) is a separate concern that affects only the Accelerate path; Fix A means a transient/benign error on a **healthy** prod DB no longer freezes it for 5 minutes (previous false-positive risk now eliminated). After any hold lifts, still run `scripts/backfill-corporate-actions-prod.ts` (2,053 records).
+- No DB `migrate dev` run locally (the local DB has no ledger — destructive); the migration folder ships so **CI + prod `migrate deploy`** will create the table. Prod still needs the migration applied on next deploy.

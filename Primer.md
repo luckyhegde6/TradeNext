@@ -5,11 +5,21 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-28 (v3.21.0 Professional Equity Research Decision Engine — suite 915 pass / 4 skip; tsc 46 = baseline; ready to commit)
+2026-08-28 (v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration — suite 917 pass / 4 skip; tsc 46 = baseline; docs updated, commit pending user)
 
 ---
 
 ## Current Project Status
+
+### v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration (Aug 28 2026) — ✅ CODE + TESTS + DOCS VERIFIED, READY TO COMMIT
+**Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 + playwright-debug + v3.21.0 on PR #107).
+**Why**: Playwright CI turned RED on auth/login ("Plan limit circuit breaker open"). Investigation proved it was NOT the external prod hold — CI runs a fresh local TimescaleDB — but TWO code defects:
+- **Defect A (v3.20.3 regression, PRIMARY)**: `isDbUnavailableError()` blanket `name.includes("prismaclient") && name.includes("request")` classified EVERY `PrismaClientKnownRequestError` (benign P2021/P2002/P2025) as "DB unavailable" → `$allOperations` opened the global plan-limit breaker on the FIRST benign error → 5-min full DB freeze → auth failed.
+- **Defect B (v3.18.0 gap, trigger)**: `intelligence_cache` had NO migration (applied only via local `db push`) → `migrate deploy` (CI/prod) never created the table → `restoreIntelligenceCacheFromDB()` P2021 tripped Defect A's breaker.
+**Fix**: (A) Removed the blanket catch-all + redundant bare `"exceeded"` match → the breaker now trips only on REAL hold/unavailability (P6003/connection/timeout/hold-message), never on benign request errors. (B) NEW `prisma/migrations/20260828000000_add_intelligence_cache` — validated column/index-for-index identical to Prisma's `db push` output.
+**Tests**: `db-utils.test.ts` +4 real-shape regression tests (benign P2021/P2002/P2025 → false; connectivity P1001/P2024/P6003 → true). Suite **917 pass / 4 skip** (was 915/4); tsc 46 = exact baseline (0 new).
+**Docs**: versions-v3.20.md (v3.20.4), `.agents/CHANGELOG.md`, root CHANGELOG.md, AGENTS.md, Lessons.md (#94), this Primer, agent-memory updated.
+**Status**: Code ready; **commit/push pending user** (no auto-commit). After push, re-run CI to confirm PR #107 goes green, then merge with approval.
 
 ### v3.21.0 — Professional Equity Research Decision Engine (Aug 28 2026) — ✅ CODE + TESTS VERIFIED, READY TO COMMIT
 **Branch**: `feat/stock-analysis-skill` (off `main`).

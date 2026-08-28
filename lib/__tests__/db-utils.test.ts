@@ -71,6 +71,39 @@ describe("isDbUnavailableError", () => {
     expect(isDbUnavailableError(p2002)).toBe(false);
   });
 
+  it("returns false for REAL PrismaClientKnownRequestError with benign codes (P2021/P2002/P2025) — regression: must NOT trip the plan-limit breaker", () => {
+    // The v3.20.3 breaker used to match ANY PrismaClientKnownRequestError
+    // (name = "PrismaClientKnownRequestError" contains "prismaclient"+"request"),
+    // so benign request errors like P2021 (table missing), P2002 (unique
+    // constraint) and P2025 (record not found) opened the global plan-limit
+    // breaker for 5 minutes — freezing ALL DB access (incl. auth) in CI.
+    const shape = (message: string, code: string) =>
+      Object.assign(new Error(message), { code, name: "PrismaClientKnownRequestError" });
+
+    // P2021 — table does not exist (the CI intelligence_cache gap)
+    const p2021 = shape("The table `public.intelligence_cache` does not exist in the current database.", "P2021");
+    expect(isDbUnavailableError(p2021)).toBe(false);
+
+    // P2002 — unique constraint violation
+    const p2002 = shape("Unique constraint failed on the fields: (`symbol`)", "P2002");
+    expect(isDbUnavailableError(p2002)).toBe(false);
+
+    // P2025 — record not found
+    const p2025 = shape("An operation failed because it depends on one or more records that were required but not found.", "P2025");
+    expect(isDbUnavailableError(p2025)).toBe(false);
+  });
+
+  it("returns true for REAL PrismaClientKnownRequestError with connectivity codes (P1001/P2024)", () => {
+    const shape = (message: string, code: string) =>
+      Object.assign(new Error(message), { code, name: "PrismaClientKnownRequestError" });
+    expect(isDbUnavailableError(shape("Can't reach database server", "P1001"))).toBe(true);
+    expect(isDbUnavailableError(shape("Timed out during query execution", "P2024"))).toBe(true);
+    // P6003 hold still trips even with the real PrismaClientKnownRequestError name
+    expect(
+      isDbUnavailableError(shape("There is a hold on your account. Reason: planLimitReached.", "P6003")),
+    ).toBe(true);
+  });
+
   it("recognizes the exact PrismaQueryTimeoutError class instance", () => {
     const err = Object.assign(new Error("Prisma query Notification.findMany timed out after 120000ms"), {
       name: "PrismaQueryTimeoutError",

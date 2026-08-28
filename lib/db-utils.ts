@@ -25,7 +25,10 @@ export function isDbUnavailableError(error: unknown): boolean {
     msg.includes("planlimitreached") ||
     msg.includes("plan limit reached") ||
     msg.includes("plan limit") ||
-    msg.includes("exceeded") ||
+    // NOTE: no bare `msg.includes("exceeded")` — too broad; would match benign
+    // constraint/data errors (e.g. value-out-of-range "exceeds max") and
+    // wrongly trip the plan-limit breaker. The plan-limit wording is covered
+    // by the specific "plan limit" matches above.
     msg.includes("connection refused") ||
     msg.includes("connection timeout") ||
     msg.includes("too many connections") ||
@@ -75,12 +78,6 @@ export function isDbUnavailableError(error: unknown): boolean {
     code === "ECONNRESET" ||
     code === "ETIMEDOUT"
   ) {
-    return true;
-  }
-
-  // --- PrismaClientKnownRequestError name check ---
-  if (name.includes("prismaclient") && name.includes("request")) {
-    // Known request error with no matching code — still likely a connectivity issue
     return true;
   }
 
