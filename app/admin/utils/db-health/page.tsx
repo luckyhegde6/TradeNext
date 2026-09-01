@@ -12,6 +12,7 @@ import {
   ExclamationTriangleIcon,
   BoltIcon,
   TrashIcon,
+  ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 
 interface DbErrorEntry {
@@ -155,6 +156,10 @@ export default function DbHealthPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [flushingPrices, setFlushingPrices] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -220,6 +225,72 @@ export default function DbHealthPage() {
       setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setFlushingPrices(false);
+    }
+  };
+
+  const triggerBackup = async () => {
+    setBackingUp(true);
+    setBackupMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "backup" }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.data) {
+        setBackupMsg(`Backup failed: ${body.error ?? "no data"}`);
+        return;
+      }
+      const bin = atob(body.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: body.mime ?? "application/x-sqlite3" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = body.filename ?? "tradenext-sqlite-backup.sqlite";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setBackupMsg(`Backup downloaded (${body.size} bytes)`);
+    } catch (e) {
+      setBackupMsg(`Backup error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const triggerRestore = async () => {
+    if (!restoreFile) {
+      setBackupMsg("Select a backup file first.");
+      return;
+    }
+    setRestoring(true);
+    setBackupMsg(null);
+    try {
+      const fileBytes = new Uint8Array(await restoreFile.arrayBuffer());
+      let b64 = "";
+      for (const b of fileBytes) b64 += String.fromCharCode(b);
+      b64 = btoa(b64);
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore", data: b64 }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setBackupMsg(body.message ?? "SQLite backup restored");
+        setRestoreFile(null);
+        await fetchHealth();
+      } else {
+        setBackupMsg(`Restore failed: ${body.detail ?? body.error}`);
+      }
+    } catch (e) {
+      setBackupMsg(`Restore error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -634,6 +705,60 @@ export default function DbHealthPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* SQLite backup / restore */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
+          SQLite Backup &amp; Restore
+        </h3>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          The SQLite backup layer is an in-memory sql.js database (no physical file). Download exports
+          the current in-memory snapshot as a .sqlite blob; restore uploads a prior backup and swaps it
+          in as the active fallback (validated for the core tables before apply).
+        </p>
+
+        {backupMsg && (
+          <div className="mb-4 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            {backupMsg}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+          <div>
+            <button
+              onClick={triggerBackup}
+              disabled={backingUp || !sqlite.ready}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <ArrowDownTrayIcon className={`w-4 h-4 ${backingUp ? "animate-pulse" : ""}`} />
+              {backingUp ? "Exporting..." : "Download Latest Backup"}
+            </button>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">
+              Restore from uploaded .sqlite file
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept=".sqlite,.db,application/x-sqlite3,application/octet-stream"
+                onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
+                disabled={restoring}
+                className="block w-full text-sm text-gray-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 dark:file:bg-slate-800 file:text-gray-700 dark:file:text-slate-300 hover:file:bg-slate-200 dark:hover:file:bg-slate-700"
+              />
+              <button
+                onClick={triggerRestore}
+                disabled={restoring || !restoreFile}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+              >
+                <ArrowPathIcon className={`w-4 h-4 ${restoring ? "animate-spin" : ""}`} />
+                {restoring ? "Restoring..." : "Apply Restore"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Footer info */}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
-import { ensureSqliteBackup, getSqliteFallback } from "@/lib/sqlite";
+import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup } from "@/lib/sqlite";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
 
@@ -19,6 +19,24 @@ export async function GET() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Refresh the day key first (rollover resets counts to the new IST day),
+  // then snapshot the ops counter BEFORE the probe + table counts below, so
+  // the displayed total does not grow on every refresh (each refresh adds ~11
+  // reads via its own probe). The Prisma dashboard remains authoritative; this
+  // snapshot reflects the state right after the rollover check.
+  const planLimit = Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000;
+  const currentDay = getIstDayKey();
+  if (dbOpsCounter._day !== currentDay) {
+    dbOpsCounter.reads = 0;
+    dbOpsCounter.writes = 0;
+    dbOpsCounter._day = currentDay;
+  }
+  const opsSnapshot = {
+    reads: dbOpsCounter.reads,
+    writes: dbOpsCounter.writes,
+    day: dbOpsCounter._day,
+  };
 
   // Probe Prisma connectivity
   let prismaHealthy = false;
@@ -71,14 +89,6 @@ export async function GET() {
     }
   }
 
-  // Refresh day key if rollover happened
-  const currentDay = getIstDayKey();
-  if (dbOpsCounter._day !== currentDay) {
-    dbOpsCounter.reads = 0;
-    dbOpsCounter.writes = 0;
-    dbOpsCounter._day = currentDay;
-  }
-
   // Recent DB errors from ring buffer
   const dbErrors = getDbErrorLog();
 
@@ -97,15 +107,15 @@ export async function GET() {
       lastProbeAt: new Date().toISOString(),
       tableCounts: prismaTableCounts,
       ops: {
-        reads: dbOpsCounter.reads,
-        writes: dbOpsCounter.writes,
-        totalOperations: dbOpsCounter.reads + dbOpsCounter.writes,
-        planLimit: Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000,
-        planOperationsRemaining: Math.max(0, (Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000) - dbOpsCounter.reads - dbOpsCounter.writes),
+        reads: opsSnapshot.reads,
+        writes: opsSnapshot.writes,
+        totalOperations: opsSnapshot.reads + opsSnapshot.writes,
+        planLimit,
+        planOperationsRemaining: Math.max(0, planLimit - opsSnapshot.reads - opsSnapshot.writes),
         writeBudget: WRITE_BUDGET_CONFIG,
         writeBudgetExceeded: isDbWriteBudgetExceeded(),
-        writeBudgetRemaining: Math.max(0, WRITE_BUDGET_CONFIG - dbOpsCounter.writes),
-        dayKey: dbOpsCounter._day,
+        writeBudgetRemaining: Math.max(0, WRITE_BUDGET_CONFIG - opsSnapshot.writes),
+        dayKey: opsSnapshot.day,
       },
     },
     sqlite: sqliteHealth?.sqlite ?? {
@@ -123,9 +133,12 @@ export async function GET() {
 
 /**
  * POST /api/admin/db-health
- * Trigger a manual SQLite sync from Prisma or flush daily prices.
+ * Trigger a manual SQLite sync from Prisma, flush daily prices, or perform an
+ * admin backup / restore of the in-memory SQLite backup layer.
  *
- * Body: { action?: "sync_sqlite" | "flush_prices" }
+ * Body: { action?: "sync_sqlite" | "flush_prices" | "backup" | "restore" }
+ *  - backup:  returns { data: base64 } of the exported .sqlite blob
+ *  - restore: { data: <base64 sqlite> } applies the uploaded backup
  */
 export async function POST(req: Request) {
   const session = await auth();
@@ -139,6 +152,52 @@ export async function POST(req: Request) {
     if (body?.action) action = body.action;
   } catch {
     // default to sync_sqlite
+  }
+
+  if (action === "backup") {
+    const bytes = exportSqliteBackup();
+    if (!bytes) {
+      return NextResponse.json({ error: "SQLite backup not initialized" }, { status: 503 });
+    }
+    const base64 = Buffer.from(bytes).toString("base64");
+    const filename = `tradenext-sqlite-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`;
+    return NextResponse.json({
+      success: true,
+      filename,
+      size: bytes.byteLength,
+      mime: "application/x-sqlite3",
+      data: base64,
+    });
+  }
+
+  if (action === "restore") {
+    let body: { data?: string; file?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid restore payload" }, { status: 400 });
+    }
+    const b64 = body?.data || body?.file;
+    if (!b64 || typeof b64 !== "string") {
+      return NextResponse.json({ error: "Missing base64 sqlite data" }, { status: 400 });
+    }
+    try {
+      const bytes = Buffer.from(b64, "base64");
+      const result = await restoreSqliteBackup(new Uint8Array(bytes));
+      // Persist snapshots from the restored DB so ops/error counts survive.
+      getSqliteFallback()?.persistOpsCounter();
+      getSqliteFallback()?.persistDbErrorCounts();
+      return NextResponse.json({
+        success: true,
+        message: `SQLite backup restored (${result.db} tables)`,
+        tables: result.db,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Restore failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
   }
 
   if (action === "flush_prices") {

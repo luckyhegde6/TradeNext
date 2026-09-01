@@ -46,9 +46,14 @@ class EnhancedCacheManager {
     const data = await fetchFn();
 
     // Cache the result with market-aware TTL
-    const recommendedTtl = getRecommendedTTL(ttl);
-    cacheInstance.set(key, data, recommendedTtl);
-    logger.debug({ msg: 'Data cached', key, ttl: recommendedTtl, marketOpen: isMarketOpen() });
+    // NOTE: NodeCache.set() expects SECONDS, but getRecommendedTTL() returns
+    // MILLISECONDS — convert so entries don't live ~1000× too long (which
+    // previously let a quote cache expire ~33h after market open and defeat
+    // the "cache until next open" intent for closed-market reads).
+    const recommendedTtlMs = getRecommendedTTL(ttl);
+    const recommendedTtlSec = Math.ceil(recommendedTtlMs / 1000);
+    cacheInstance.set(key, data, recommendedTtlSec);
+    logger.debug({ msg: 'Data cached', key, ttlSec: recommendedTtlSec, marketOpen: isMarketOpen() });
 
     // Set up polling if configured
     if (pollingConfig) {
@@ -95,8 +100,9 @@ class EnhancedCacheManager {
         logger.debug({ msg: 'Polling refresh', key });
         const data = await this.fetchWithRetry(fetchFn, config.retryAttempts, config.backoffMultiplier);
 
-        const recommendedTtl = getRecommendedTTL(cacheConfig.ttl);
-        cacheConfig.cacheInstance?.set(key, data, recommendedTtl);
+        // Same ms→s conversion as getWithCache (NodeCache.set expects seconds).
+        const recommendedTtlMs = getRecommendedTTL(cacheConfig.ttl);
+        cacheConfig.cacheInstance?.set(key, data, Math.ceil(recommendedTtlMs / 1000));
         this.updateCacheTimestamp(key);
 
       } catch (error) {

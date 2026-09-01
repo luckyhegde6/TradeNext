@@ -116,6 +116,18 @@ export interface SqliteFallback {
   getLatestRecommendations(): Record<string, unknown> | null;
   /** Get chartink screener definitions. */
   getChartinkScreeners(): Array<Record<string, unknown>>;
+  /** Get latest daily price snapshot for a symbol (tier-2 quote read). */
+  getDailyPriceSnapshot(symbol: string): Record<string, unknown> | null;
+  /** Write a daily price snapshot in-process (zero Prisma ops). */
+  setDailyPriceSnapshot(rec: {
+    symbol: string;
+    tradeDate: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }): void;
   /** Get corporate actions (recent). */
   getCorporateActions(limit?: number): Array<Record<string, unknown>>;
   /** Get recent server logs. */
@@ -145,6 +157,23 @@ export interface SqliteFallback {
 }
 
 let _instance: SqliteFallback | null = null;
+
+// Cache of the resolved sql.js module so admin backup/restore can construct a
+// fresh in-memory DB from exported bytes without re-running initSqlJs.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _SQL: any = null;
+
+/**
+ * Get the resolved sql.js module (initSqlJs). Cached after the first call.
+ * Returns null if WASM resolution failed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getSqlJs(): Promise<any> {
+  if (_SQL) return _SQL;
+  const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
+  _SQL = SQL;
+  return SQL;
+}
 
 /**
  * Get (or create) the SQLite fallback singleton.
@@ -190,6 +219,122 @@ export async function ensureSqliteBackup(): Promise<SqliteFallback | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Daily price snapshot tier (cache → SQLite → Prisma)
+// ---------------------------------------------------------------------------
+// Closed-market / after-hours quote reads resolve from the in-process SQLite
+// snapshot WITHOUT hitting Prisma/Accelerate, then fall through to Prisma only
+// when the snapshot is missing. Writes go to SQLite only (zero Prisma ops).
+
+export interface DailyPriceSnapshot {
+  symbol: string;
+  tradeDate: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** Read the latest daily price snapshot for a symbol from SQLite (or null). */
+export function getSqliteDailyPriceSnapshot(symbol: string): DailyPriceSnapshot | null {
+  const s = getSqliteFallback();
+  if (!s) return null;
+  const raw = s.getDailyPriceSnapshot(symbol);
+  if (!raw) return null;
+  return {
+    symbol: raw.symbol as string,
+    tradeDate: raw.tradeDate as string,
+    open: raw.open as number,
+    high: raw.high as number,
+    low: raw.low as number,
+    close: raw.close as number,
+    volume: raw.volume as number,
+  };
+}
+
+/** Cache a daily price snapshot into SQLite in-process (zero Prisma ops). */
+export function cacheDailyPriceSnapshot(rec: DailyPriceSnapshot): void {
+  // Lazy-init so the quote path can warm this tier even before the full
+  // background sync completes (never throws, retries on next call).
+  if (!getSqliteFallback()) {
+    ensureSqliteBackup().then((s) => s?.setDailyPriceSnapshot(rec)).catch(() => {});
+    return;
+  }
+  getSqliteFallback()?.setDailyPriceSnapshot(rec);
+}
+
+// ---------------------------------------------------------------------------
+// Backup / restore (admin DB-health)
+// ---------------------------------------------------------------------------
+// The SQLite backup is an IN-MEMORY sql.js database — there is no physical
+// file to copy. "Download latest backup" exports the in-memory DB to a binary
+// .sqlite blob (db.export()); "Upload + apply restore" parses an uploaded blob
+// into a fresh in-memory DB and swaps it in as the active fallback. Restores
+// are validated (correct header + expected core tables) before swap.
+
+const MAX_RESTORE_BYTES = 50 * 1024 * 1024; // 50 MB upload cap
+
+/** Export the in-memory SQLite backup as a binary .sqlite Uint8Array (or null). */
+export function exportSqliteBackup(): Uint8Array | null {
+  if (!state.db) return null;
+  try {
+    return state.db.export();
+  } catch (err) {
+    logger.error({ msg: "SQLite: export backup failed", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * Apply a restored SQLite backup: validate + parse the uploaded bytes into a
+ * fresh in-memory DB and swap it in as the active fallback. The new DB must
+ * contain the core snapshot tables; otherwise the restore is rejected.
+ *
+ * @param bytes uploaded .sqlite blob
+ * @returns { db, tables } count of tables found for reporting
+ */
+export async function restoreSqliteBackup(bytes: Uint8Array): Promise<{ db: number; missing: string[] }> {
+  if (bytes.byteLength > MAX_RESTORE_BYTES) {
+    throw new Error(`Restore file too large (max ${Math.floor(MAX_RESTORE_BYTES / 1024 / 1024)} MB)`);
+  }
+  // Validate: SQLite files start with the "SQLite format 3\0" magic header.
+  const magic = [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00];
+  for (let i = 0; i < magic.length; i++) {
+    if (bytes[i] !== magic[i]) {
+      throw new Error("Invalid SQLite file (missing SQLite header)");
+    }
+  }
+
+  const SQL = await getSqlJs();
+  const candidate = new SQL.Database(bytes);
+  const tables = candidate.exec("SELECT name FROM sqlite_master WHERE type='table'");
+  const tableNames: string[] = [];
+  if (tables.length) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tableNames.push(...(tables[0].values as any[]).map((row: any) => String(row[0])));
+  }
+  // Require the core fallback tables so we never swap in an empty/foreign DB.
+  const required = ["_backup_meta", "daily_recommendation_run"];
+  const missing = required.filter((t) => !tableNames.includes(t));
+  if (missing.length) {
+    candidate.close();
+    throw new Error(`Restore rejected: backup missing table(s): ${missing.join(", ")}`);
+  }
+
+  // Swap: close the old in-memory DB and rebind the fallback to the restored one.
+  try {
+    state.db?.close();
+  } catch {
+    // ignore close errors on the old DB
+  }
+  state.db = candidate;
+  state.ready = true;
+  _instance = createFallback(candidate);
+  logger.info({ msg: "SQLite restored from backup", tables: tableNames.length });
+  return { db: tableNames.length, missing };
+}
+
+// ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
 
@@ -229,6 +374,23 @@ const SCHEMA_SQL = `
     screener_attribution TEXT,
     screener_count    INTEGER,
     created_at        TEXT
+  );
+
+  -- Daily price snapshots (v3.21.x quote tiering: cache → SQLite → Prisma).
+  -- In-process read store so closed-market quote lookups (SSE poll, portfolio,
+  -- alerts) can resolve from sql.js without hitting Prisma/Accelerate. Seeded
+  -- during syncFromPrisma from the latest daily_prices row per ticker and
+  -- written in-process by the quote path (cacheDailyPriceSnapshot). Zero Prisma
+  -- ops in the read path.
+  CREATE TABLE IF NOT EXISTS daily_price_snapshot (
+    symbol     TEXT PRIMARY KEY,
+    trade_date TEXT,
+    open       REAL,
+    high       REAL,
+    low        REAL,
+    close      REAL,
+    volume     INTEGER,
+    updated_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS corporate_action (
@@ -353,7 +515,7 @@ export async function initSqliteBackup(): Promise<void> {
   if (state.db) return;
 
   try {
-    const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
+    const SQL = await getSqlJs();
     const db = new SQL.Database();
     state.db = db;
 
@@ -619,6 +781,37 @@ export async function syncFromPrisma(): Promise<void> {
   try {
     const db = state.db;
     const syncErr: string[] = [];
+
+    // --- Sync daily price snapshots (latest row per ticker) ---
+    totalRows += await syncTable(db, "daily_price_snapshot", async () => {
+      const rows = await prisma.$queryRaw<Array<{
+        ticker: string;
+        tradeDate: Date;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number | null;
+      }>>`
+        SELECT DISTINCT ON (ticker) ticker, "tradeDate", open, high, low, close, volume
+        FROM daily_prices
+        ORDER BY ticker, "tradeDate" DESC
+      `;
+      return {
+        columns: "symbol, trade_date, open, high, low, close, volume, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?",
+        rows: rows.map((r) => [
+          r.ticker.toUpperCase(),
+          r.tradeDate.toISOString().split("T")[0],
+          Number(r.open ?? 0),
+          Number(r.high ?? 0),
+          Number(r.low ?? 0),
+          Number(r.close ?? 0),
+          r.volume != null ? Number(r.volume) : 0,
+          new Date().toISOString(),
+        ]),
+      };
+    });
 
     // --- Sync latest recommendation runs (last 30 days) ---
     totalRows += await syncTable(db, "daily_recommendation_run", async () => {
@@ -1027,6 +1220,63 @@ function createFallback(db: Database): SqliteFallback {
         });
       } catch {
         return [];
+      }
+    },
+
+    // --- Daily price snapshot (tier-2 quote read; zero Prisma ops) ---
+    getDailyPriceSnapshot(symbol: string): Record<string, unknown> | null {
+      try {
+        const rows = db.exec(
+          "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_price_snapshot WHERE symbol = ? LIMIT 1",
+          [symbol.toUpperCase()],
+        );
+        if (!rows.length || !rows[0].values.length) return null;
+        const cols = rows[0].columns;
+        const vals = rows[0].values[0];
+        const r: Record<string, unknown> = {};
+        cols.forEach((c, i) => (r[c] = vals[i]));
+        return {
+          symbol: r.symbol as string,
+          tradeDate: r.trade_date as string,
+          open: Number(r.open ?? 0),
+          high: Number(r.high ?? 0),
+          low: Number(r.low ?? 0),
+          close: Number(r.close ?? 0),
+          volume: Number(r.volume ?? 0),
+        };
+      } catch (err) {
+        logger.error({ msg: "SQLite: getDailyPriceSnapshot failed", symbol, error: err instanceof Error ? err.message : String(err) });
+        return null;
+      }
+    },
+
+    setDailyPriceSnapshot(rec): void {
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO daily_price_snapshot (symbol, trade_date, open, high, low, close, volume, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol) DO UPDATE SET
+             trade_date = excluded.trade_date,
+             open = excluded.open,
+             high = excluded.high,
+             low = excluded.low,
+             close = excluded.close,
+             volume = excluded.volume,
+             updated_at = excluded.updated_at`,
+        );
+        stmt.run([
+          rec.symbol.toUpperCase(),
+          rec.tradeDate,
+          rec.open,
+          rec.high,
+          rec.low,
+          rec.close,
+          rec.volume,
+          new Date().toISOString(),
+        ]);
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: setDailyPriceSnapshot failed", symbol: rec.symbol, error: err instanceof Error ? err.message : String(err) });
       }
     },
 

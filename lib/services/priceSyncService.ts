@@ -13,7 +13,8 @@
 import { EventEmitter } from "events";
 import logger from "@/lib/logger";
 import { getStockQuote } from "@/lib/stock-service";
-import { priceCache, cacheDailyPrice } from "./priceCache";
+import { priceCache, cacheDailyPrice, isMarketAccumulationWindow } from "./priceCache";
+import { cacheDailyPriceSnapshot } from "@/lib/sqlite";
 import { isMarketOpen } from "@/lib/market-hours";
 
 /* ─── Types ─── */
@@ -171,13 +172,29 @@ class PriceEventBus extends EventEmitter {
         timestamp: Date.now(),
       });
 
-      // Also cache for daily batch write (avoids individual DB writes during market hours)
-      cacheDailyPrice(symbol, {
+      // Also cache for daily batch write (avoids individual DB writes during
+      // market hours). Only accumulate during the market-hours window — post-4PM
+      // the accumulator is drained by its 5-min flush and must not be refilled.
+      if (isMarketAccumulationWindow()) {
+        cacheDailyPrice(symbol, {
+          open: event.open,
+          high: event.dayHigh,
+          low: event.dayLow,
+          close: event.price,
+          volume: event.volume,
+        });
+      }
+
+      // Warm the SQLite snapshot tier so closed-market quote reads (SSE poll,
+      // portfolio, alerts) resolve from cache → SQLite without hitting Prisma.
+      cacheDailyPriceSnapshot({
+        symbol,
+        tradeDate: new Date().toISOString().split("T")[0],
         open: event.open,
         high: event.dayHigh,
         low: event.dayLow,
         close: event.price,
-        volume: event.volume,
+        volume: event.volume || 0,
       });
 
       // Emit to SSE clients

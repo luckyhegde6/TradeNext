@@ -5,7 +5,11 @@ import logger from "@/lib/logger";
 import { FinancialStatusDTO, CorpEventDTO, CorporateAnnouncementDTO, CorpActionDTO } from "@/lib/nse/dto";
 import * as syncService from "@/lib/services/sync-service";
 import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
-import prisma from "@/lib/prisma";
+import prisma, { getIstDayKey } from "@/lib/prisma";
+import {
+  getSqliteDailyPriceSnapshot,
+  cacheDailyPriceSnapshot,
+} from "@/lib/sqlite";
 
 // Type definitions
 interface StockQuote {
@@ -34,6 +38,81 @@ interface StockQuote {
     closePrice: number;
 }
 
+// ─── Daily price snapshot → partial quote (tier-2 SQLite read) ─────────────
+// Builds a partial StockQuote from a cached daily price snapshot (open/high/
+// low/close/volume only). Used when market is closed to avoid the 3-read
+// Prisma bundle for every symbol on every SSE poll.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildQuoteFromSnapshot(symbol: string, snap: { open: number; high: number; low: number; close: number; volume: number }): Partial<StockQuote> {
+    const dailyClose = snap.close || 0;
+    const dailyVolume = snap.volume || 0;
+    return {
+        symbol: symbol.toUpperCase(),
+        lastPrice: dailyClose,
+        open: snap.open || 0,
+        dayHigh: snap.high || 0,
+        dayLow: snap.low || 0,
+        closePrice: dailyClose,
+        previousClose: dailyClose,
+        change: 0,
+        pChange: 0,
+        totalTradedVolume: dailyVolume > 0 ? dailyVolume : undefined,
+        totalTradedValue: dailyVolume > 0 ? dailyVolume * dailyClose : undefined,
+        // Use last-known close as a floor for year high/low until Prisma fills in
+        yearHigh: snap.high || undefined,
+        yearLow: snap.low || undefined,
+    };
+}
+
+// ─── Sync daily price once per symbol per IST trading day ───────────────────
+// User directive: "do not do a db write for every NSE fetch during after
+// market hours ... only sync if DB is out of sync during the market open
+// status." Implemented as a globalThis Set keyed `${IST day}:${symbol}` — the
+// NSE-fetched upsert to `daily_prices` runs at most ONCE per symbol per trading
+// day, and only while the market is open (zero Prisma writes after hours). If
+// the upsert fails the key is removed so a later fetch retries.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const g = globalThis as any;
+if (!g.__dailyPriceSynced) g.__dailyPriceSynced = new Set<string>();
+const dailyPriceSynced: Set<string> = g.__dailyPriceSynced;
+
+async function syncDailyPriceOnce(symbol: string, quote: StockQuote): Promise<void> {
+    const day = getIstDayKey();
+    const key = `${day}:${symbol.toUpperCase()}`;
+    if (!isMarketOpen()) return; // no DB write after hours — cache/SQLite only
+    if (dailyPriceSynced.has(key)) return; // already seeded this trading day
+    try {
+        await prisma.dailyPrice.upsert({
+            where: {
+                ticker_tradeDate: {
+                    ticker: symbol.toUpperCase(),
+                    tradeDate: new Date(new Date().setHours(0, 0, 0, 0))
+                }
+            },
+            update: {
+                open: quote.open,
+                high: quote.dayHigh,
+                low: quote.dayLow,
+                close: quote.lastPrice,
+            },
+            create: {
+                ticker: symbol.toUpperCase(),
+                tradeDate: new Date(new Date().setHours(0, 0, 0, 0)),
+                open: quote.open,
+                high: quote.dayHigh,
+                low: quote.dayLow,
+                close: quote.lastPrice,
+            }
+        });
+        dailyPriceSynced.add(key);
+    } catch (e) {
+        // Remove so a later fetch retries — don't silently lose the sync
+        dailyPriceSynced.delete(key);
+        logger.error({ msg: "DailyPrice sync failed", symbol: quote.symbol, error: e });
+    }
+}
+
 /**
  * Get stock quote data from NSE
  * API: /api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=SBIN
@@ -41,10 +120,18 @@ interface StockQuote {
 export async function getStockQuote(symbol: string, enablePolling: boolean = false): Promise<StockQuote> {
     const cacheConfig = nseCache.stockQuote(symbol);
 
-    // If market is closed, try DB first to avoid unnecessary NSE calls
+    // If market is closed, try cache → SQLite → Prisma to avoid unnecessary NSE calls
     if (!isMarketOpen()) {
         const cachedInCache = cacheConfig.cacheInstance?.get(cacheConfig.key);
         if (cachedInCache) return cachedInCache as StockQuote;
+
+        // Tier 2: SQLite snapshot (zero Prisma ops — v3.21.x quote tiering)
+        const snapshot = getSqliteDailyPriceSnapshot(symbol);
+        if (snapshot) {
+            const quote = buildQuoteFromSnapshot(symbol, snapshot);
+            cacheConfig.cacheInstance?.set(cacheConfig.key, quote as StockQuote, Math.floor(getRecommendedTTL(120000) / 1000));
+            return quote as StockQuote;
+        }
 
         try {
             // Get the latest price
@@ -181,35 +268,20 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
 
         logger.info({ msg: 'Stock quote mapped successfully', symbol, lastPrice: quote.lastPrice });
 
-        // Background sync to DB for DailyPrice
-        (async () => {
-            try {
-                await prisma.dailyPrice.upsert({
-                    where: {
-                        ticker_tradeDate: {
-                            ticker: quote.symbol,
-                            tradeDate: new Date(new Date().setHours(0, 0, 0, 0))
-                        }
-                    },
-                    update: {
-                        open: quote.open,
-                        high: quote.dayHigh,
-                        low: quote.dayLow,
-                        close: quote.lastPrice,
-                    },
-                    create: {
-                        ticker: quote.symbol,
-                        tradeDate: new Date(new Date().setHours(0, 0, 0, 0)),
-                        open: quote.open,
-                        high: quote.dayHigh,
-                        low: quote.dayLow,
-                        close: quote.lastPrice,
-                    }
-                });
-            } catch (e) {
-                logger.error({ msg: "DailyPrice sync failed", symbol: quote.symbol, error: e });
-            }
-        })();
+        // Sync to DB only once per symbol per IST trading day AND only during
+        // market hours (v3.21.x — no per-fetch write flood, no after-hours writes).
+        // Also warm the SQLite snapshot tier so closed-market reads resolve
+        // from cache → SQLite without hitting Prisma.
+        syncDailyPriceOnce(quote.symbol, quote).catch(() => {});
+        cacheDailyPriceSnapshot({
+            symbol: quote.symbol,
+            tradeDate: new Date().toISOString().split("T")[0],
+            open: quote.open,
+            high: quote.dayHigh,
+            low: quote.dayLow,
+            close: quote.lastPrice,
+            volume: quote.totalTradedVolume || 0,
+        });
 
         return quote;
     };
