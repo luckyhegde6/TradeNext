@@ -99,6 +99,99 @@ export function isDbUnavailableError(error: unknown): boolean {
   return false;
 }
 
+// ─── DB error classifier (v3.21.1) ──────────────────────────────────────────
+// Maps an arbitrary thrown error to a coarse "type" used by the DB Health
+// dashboard's per-type summary. Unlike isDbUnavailableError (a boolean gate),
+// this is a full partition — EVERY error lands in exactly one bucket so the
+// day-scoped counts are exhaustive. Pure + Prisma-free (unit-testable).
+export type DbErrorType =
+  | "plan_limit" // Prisma Postgres account hold (P6003 / planLimitReached)
+  | "timeout" // per-query timeout, ETIMEDOUT, request/gateway timeout
+  | "accelerate_proxy" // Accelerate proxy <-> Query Engine comms failures
+  | "connection" // connection refused/reset, DNS, TLS, socket, fetch failed
+  | "write_budget" // our own DB_WRITE_BUDGET guard rejection
+  | "other"; // everything else (constraint violations, zod, plain errors)
+
+export function classifyDbError(error: unknown): DbErrorType {
+  if (!(error instanceof Error)) return "other";
+  const msg = error.message.toLowerCase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const code = (error as any)?.code;
+  const name = error.name?.toLowerCase() ?? "";
+
+  // Prisma Postgres account hold — plan limit reached
+  if (
+    code === "P6003" ||
+    msg.includes("hold on your account") ||
+    msg.includes("planlimitreached") ||
+    msg.includes("plan limit")
+  ) {
+    return "plan_limit";
+  }
+
+  // Our own write-budget guard rejection (lib/prisma.ts $allOperations).
+  // Checked before timeout/connection so the message isn't mis-bucketed.
+  if (msg.includes("write budget exceeded")) return "write_budget";
+
+  // Timeouts (per-query PrismaQueryTimeoutError, P2024/P1008, ETIMEDOUT…)
+  if (
+    code === "P2024" ||
+    code === "P1008" ||
+    code === "ETIMEDOUT" ||
+    name.includes("timeout") ||
+    msg.includes("request timeout") ||
+    msg.includes("gateway timeout")
+  ) {
+    return "timeout";
+  }
+
+  // Prisma Accelerate proxy <-> Query Engine comms failure
+  // (the exact message seen on prod: "Accelerate experienced an error
+  //  communicating with your Query Engine. Please contact Prisma support…")
+  if (
+    msg.includes("accelerate") ||
+    msg.includes("invalid invocation") ||
+    msg.includes("bad gateway") ||
+    msg.includes("service unavailable") ||
+    msg.includes("engine is not ready") ||
+    msg.includes("query engine")
+  ) {
+    return "accelerate_proxy";
+  }
+
+  // Connection-level failures (refused/reset/aborted, DNS, TLS, socket…)
+  if (
+    code === "P1001" ||
+    code === "P1002" ||
+    code === "P1017" ||
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "ECONNABORTED" ||
+    msg.includes("connection refused") ||
+    msg.includes("connection timeout") ||
+    msg.includes("too many connections") ||
+    msg.includes("database does not exist") ||
+    msg.includes("econnrefused") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnaborted") ||
+    msg.includes("socket hang up") ||
+    msg.includes("prepared statement") ||
+    msg.includes("operational") ||
+    msg.includes("enotfound") ||
+    msg.includes("getaddrinfo") ||
+    msg.includes("tls") ||
+    msg.includes("certificate") ||
+    msg.includes("network") ||
+    msg.includes("fetch failed")
+  ) {
+    return "connection";
+  }
+
+  // Benign app-level errors (constraint violations, validation, business
+  // logic) belong to "other" — never a DB-outage bucket.
+  return "other";
+}
+
 // ─── Plan-limit circuit breaker (v3.20.3) ────────────────────────────────────
 // When the Prisma Postgres account is on HOLD (code P6003 / "planLimitReached"),
 // EVERY operation blocks at the proxy until the per-query timeout — even reads

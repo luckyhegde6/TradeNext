@@ -12,6 +12,7 @@ import {
   ExclamationTriangleIcon,
   BoltIcon,
   TrashIcon,
+  ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 
 interface DbErrorEntry {
@@ -32,6 +33,9 @@ interface DbHealthData {
     ops: {
       reads: number;
       writes: number;
+      totalOperations: number;
+      planLimit: number;
+      planOperationsRemaining: number;
       writeBudget: number;
       writeBudgetExceeded: boolean;
       writeBudgetRemaining: number;
@@ -61,7 +65,29 @@ interface DbHealthData {
     isPostMarket: boolean;
   };
   dbErrors: DbErrorEntry[];
+  dbErrorSummary: {
+    day: string;
+    counts: {
+      plan_limit: number;
+      timeout: number;
+      accelerate_proxy: number;
+      connection: number;
+      write_budget: number;
+      other: number;
+    };
+  };
 }
+
+type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
+
+const DB_ERROR_META: Record<DbErrorKey, { label: string; chip: string }> = {
+  plan_limit: { label: "Plan Limit Hold", chip: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
+  timeout: { label: "Timeout", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  accelerate_proxy: { label: "Accelerate Proxy", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  connection: { label: "Connection", chip: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
+  write_budget: { label: "Write Budget", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  other: { label: "Other", chip: "bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-slate-300" },
+};
 
 function formatTimeAgo(dateStr: string | null): string {
   if (!dateStr) return "Never";
@@ -130,6 +156,10 @@ export default function DbHealthPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [flushingPrices, setFlushingPrices] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -198,6 +228,72 @@ export default function DbHealthPage() {
     }
   };
 
+  const triggerBackup = async () => {
+    setBackingUp(true);
+    setBackupMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "backup" }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.data) {
+        setBackupMsg(`Backup failed: ${body.error ?? "no data"}`);
+        return;
+      }
+      const bin = atob(body.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: body.mime ?? "application/x-sqlite3" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = body.filename ?? "tradenext-sqlite-backup.sqlite";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setBackupMsg(`Backup downloaded (${body.size} bytes)`);
+    } catch (e) {
+      setBackupMsg(`Backup error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const triggerRestore = async () => {
+    if (!restoreFile) {
+      setBackupMsg("Select a backup file first.");
+      return;
+    }
+    setRestoring(true);
+    setBackupMsg(null);
+    try {
+      const fileBytes = new Uint8Array(await restoreFile.arrayBuffer());
+      let b64 = "";
+      for (const b of fileBytes) b64 += String.fromCharCode(b);
+      b64 = btoa(b64);
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore", data: b64 }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setBackupMsg(body.message ?? "SQLite backup restored");
+        setRestoreFile(null);
+        await fetchHealth();
+      } else {
+        setBackupMsg(`Restore failed: ${body.detail ?? body.error}`);
+      }
+    } catch (e) {
+      setBackupMsg(`Restore error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   if (status === "loading" || loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -214,9 +310,13 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary } = data;
+  const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
+    : 0;
+  const planOpsPercent = prisma.ops.planLimit > 0
+    ? Math.round((prisma.ops.totalOperations / prisma.ops.planLimit) * 100)
     : 0;
 
   return (
@@ -274,6 +374,12 @@ export default function DbHealthPage() {
             Write Budget Exceeded
           </span>
         )}
+        {planOpsPercent > 80 && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            <ExclamationTriangleIcon className="w-4 h-4" />
+            Plan Ops {planOpsPercent}% Used
+          </span>
+        )}
         <StatusBadge
           ok={!dailyPriceCache.lastError}
           label={dailyPriceCache.lastError ? "Price Cache Error" : "Price Cache OK"}
@@ -281,7 +387,7 @@ export default function DbHealthPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <StatCard
           label="Prisma Latency"
           value={prisma.healthy ? `${prisma.latencyMs}ms` : "N/A"}
@@ -302,6 +408,13 @@ export default function DbHealthPage() {
           sub={`${budgetPercent}% of budget used`}
           icon={CircleStackIcon}
           color={prisma.ops.writeBudgetExceeded ? "bg-red-500" : "bg-blue-500"}
+        />
+        <StatCard
+          label="Total Ops Today"
+          value={prisma.ops.totalOperations.toLocaleString()}
+          sub={`${prisma.ops.planLimit.toLocaleString()} plan limit · ${planOpsPercent}%`}
+          icon={CircleStackIcon}
+          color={planOpsPercent > 90 ? "bg-red-500" : planOpsPercent > 70 ? "bg-amber-500" : "bg-indigo-500"}
         />
         <StatCard
           label="Cached Prices"
@@ -342,6 +455,35 @@ export default function DbHealthPage() {
           </span>
           <span>{prisma.ops.writeBudgetRemaining.toLocaleString()} remaining</span>
         </div>
+      </div>
+
+      {/* Plan ops bar — reads + writes vs Prisma plan limit */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-3">
+          Plan Operations Usage (Reads + Writes — {prisma.ops.dayKey})
+        </h3>
+        <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+          <div
+            className={`h-4 rounded-full transition-all duration-500 ${
+              planOpsPercent > 90
+                ? "bg-red-500"
+                : planOpsPercent > 70
+                  ? "bg-amber-500"
+                  : "bg-emerald-500"
+            }`}
+            style={{ width: `${Math.min(planOpsPercent, 100)}%` }}
+          />
+        </div>
+        <div className="flex justify-between mt-2 text-xs text-gray-500 dark:text-slate-400">
+          <span>
+            {prisma.ops.totalOperations.toLocaleString()} / {prisma.ops.planLimit.toLocaleString()} ops
+            <span className="ml-2 text-gray-400">({prisma.ops.reads.toLocaleString()} reads · {prisma.ops.writes.toLocaleString()} writes)</span>
+          </span>
+          <span>{prisma.ops.planOperationsRemaining.toLocaleString()} remaining</span>
+        </div>
+        <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+          Prisma dashboard is authoritative. This counter is restored from a persisted SQLite snapshot on boot (60s interval) — resets on every deploy.
+        </p>
       </div>
 
       {/* Daily Price Cache */}
@@ -389,6 +531,39 @@ export default function DbHealthPage() {
             </button>
           )}
         </div>
+
+        {/* Per-type day summary (v3.21.1) */}
+        <div className="mb-4">
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">
+            Errors today ({dbErrorSummary.day}) — {errorTotal.toLocaleString()} total
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(DB_ERROR_META) as DbErrorKey[]).map((key) => {
+              const count = dbErrorSummary.counts[key] ?? 0;
+              const meta = DB_ERROR_META[key];
+              const highlighted = key === "plan_limit" || key === "connection";
+              return (
+                <span
+                  key={key}
+                  title={`${meta.label} DB failures today`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${meta.chip} ${
+                    count > 0 && highlighted ? "ring-2 ring-red-400 dark:ring-red-500" : ""
+                  }`}
+                >
+                  {meta.label}
+                  <span className={`px-1.5 py-0.5 rounded-full text-xs ${count > 0 ? "bg-white/70 dark:bg-slate-900/70" : ""}`}>
+                    {count.toLocaleString()}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+            Day-scoped counts, persisted to the SQLite backup every 60s and restored on boot (IST day).
+            Clearing the ring buffer below does not reset these counts.
+          </p>
+        </div>
+
         {dbErrors.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-slate-400">No DB errors recorded this session.</p>
         ) : (
@@ -530,6 +705,60 @@ export default function DbHealthPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* SQLite backup / restore */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
+          SQLite Backup &amp; Restore
+        </h3>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          The SQLite backup layer is an in-memory sql.js database (no physical file). Download exports
+          the current in-memory snapshot as a .sqlite blob; restore uploads a prior backup and swaps it
+          in as the active fallback (validated for the core tables before apply).
+        </p>
+
+        {backupMsg && (
+          <div className="mb-4 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            {backupMsg}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+          <div>
+            <button
+              onClick={triggerBackup}
+              disabled={backingUp || !sqlite.ready}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <ArrowDownTrayIcon className={`w-4 h-4 ${backingUp ? "animate-pulse" : ""}`} />
+              {backingUp ? "Exporting..." : "Download Latest Backup"}
+            </button>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">
+              Restore from uploaded .sqlite file
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept=".sqlite,.db,application/x-sqlite3,application/octet-stream"
+                onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
+                disabled={restoring}
+                className="block w-full text-sm text-gray-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 dark:file:bg-slate-800 file:text-gray-700 dark:file:text-slate-300 hover:file:bg-slate-200 dark:hover:file:bg-slate-700"
+              />
+              <button
+                onClick={triggerRestore}
+                disabled={restoring || !restoreFile}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+              >
+                <ArrowPathIcon className={`w-4 h-4 ${restoring ? "animate-spin" : ""}`} />
+                {restoring ? "Restoring..." : "Apply Restore"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Footer info */}

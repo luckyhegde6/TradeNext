@@ -16,7 +16,14 @@ const nextConfig: NextConfig = {
     'fetch-cookie',
     'pg',
     'pg-native',
-    'pgpass'
+    'pgpass',
+    // sql.js ships a WASM binary (sql-wasm.wasm) that its own loader must
+    // read from disk at runtime. Bundling it into .next/server breaks the
+    // default locateFile resolution (__dirname points at the bundle, not the
+    // package), which made the DB-health SQLite backup show "Not Ready" in
+    // production while working in dev/tests. Keep it external so the WASM
+    // is resolvable from node_modules/sql.js/dist on the runtime server.
+    'sql.js'
   ],
   // Ensure proper headers for production
   async headers() {

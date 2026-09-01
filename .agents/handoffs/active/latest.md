@@ -1,46 +1,38 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260828-stock-analysis-skill"
+session_id: "sess-20260902-db-health-ops-visibility"
 agent: "system"
-timestamp: "2026-08-28T00:00:00Z"
+timestamp: "2026-09-02T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260827-db-health-price-cache"
+parent_session: "sess-20260828-stock-analysis-skill"
 child_sessions: []
-checkpoint: "v3.21.0-implemented-915-pass-tsc-46-baseline-code-ready-commit-pr-pending-user"
+checkpoint: "v3.21.2-committed-7409616 + v3.21.3-otel+p1001-diagnosis-docs-verified-commit-pending-user"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.21.0 Professional Equity Research Decision Engine on branch `feat/stock-analysis-skill` — deep upgrade of v3.18.0 AI Investment Intelligence: 8-level verdict + conviction/10 + 12-section institutional memo + evidence discipline + management DNA + valuation zones + bull/base/bear + contrarian test + portfolio action + honest data gaps + optional raw-text document ingestion (annual-report/concall textareas, 50KB cap). Backward compatible (no DB migration).
-- **Branch**: `feat/stock-analysis-skill` (off `main`, clean). PR #107 on `feat/plan-limit-resilience` is a SEPARATE open workstream (playwright-debug) — unrelated.
+- **Task**: DB-health ops-visibility + DB-op-tiering workstream on branch `feat/db-health-ops-visibility`. Now THREE increments are on the branch (in commit order): **v3.21.1** (base `4c47348` + docs `47e6677` — SQLite ops-counter persistence + Total Ops/Plan Usage UI + sql.js WASM fix + per-type DB-error summary + lazy SQLite re-init), **v3.21.2** (committed `7409616` + pushed — stock-quote tiering cache→SQLite→Prisma + TTL ms→s fix + SQLite backup/restore), **v3.21.3** (UNCOMMITTED — Prisma OTel tracing opt-in + Prisma Compute P1001 false-alarm diagnosis). No schema change → no migration. Commit/push pending user for v3.21.3.
+- **Branch**: `feat/db-health-ops-visibility`. v3.21.0 (`feat/stock-analysis-skill`) is a SEPARATE workstream awaiting user commit/PR decision; 2 Dependabot high-severity advisories pending user.
 
 ## Progress
-- [x] Phase 1 types: `lib/services/intelligenceTypes.ts` — `Verdict` (8 levels), `EvidenceLabel`, `MarketPhase`, `EvidencePoint`, `ManagementDna`, `ValuationZones`, `RiskItem`, `ContrarianView`, `PortfolioAction`; expanded `IntelligenceAnalysis` with all new fields OPTIONAL `?`; `ShareholdingData.others` required. Legacy rows + test literals stay type-valid.
-- [x] Phase 2: NEW `lib/services/document/normalize.ts` — `normalizeDocumentText(content, maxLen=50_000)`, `DOCUMENT_MAX_LEN = 50_000`, truncation suffix, whitespace collapse, never throws. NO `import "server-only"` (not a declared dependency — resolves up to gardenVerse's throwing copy and breaks Jest; Lesson 92).
-- [x] Phase 3: `lib/services/ai/intelligence-prompt.ts` — legacy `buildIntelligencePrompt`/`parseIntelligenceResponse` KEPT unchanged (18 legacy tests pass); added `StockAnalysisDocuments` + `buildStockAnalysisPrompt(input, documents?)` + `parseStockAnalysisResponse(raw)` (8-verdict, full memo, legacy BUY→BUY/HOLD/SELL collapse, confidence derived from conviction×10 when missing, clamps).
-- [x] Phase 4: orchestrator `lib/services/ai/intelligence.ts` — documents path + audit metadata `modelUsed/verdict/conviction/confidence/hasDocuments/partialData`; whitespace-only docs → `hasDocuments:false` + no prompt block (Lesson 93).
-- [x] Phase 5: `lib/services/intelligence/adapters.ts` — `fetchTechnicalsData` window 90→280 days for `sma200` best-effort ("needs 250+ bars").
-- [x] Phase 6: `app/api/company/[ticker]/intelligence/route.ts` — POST Zod `{ force?, documents?: { annualReport?, concall? } }` (each max 50_000, 400 invalid); audit `hasDocuments`.
-- [x] Phase 7 UI: `VerdictCard` (8-verdict color/emoji + conviction bar), 11 new section components (ExecutiveThesis, FundamentalScore, ManagementDna, TechnicalStructure, ValuationZones, ShareholdingAnalysis, Contrarian, PortfolioAction, DataGapsBanner, + rewritten RiskCatalystMatrix RiskItem[]); rewritten `IntelligencePanel` (legacy fallbacks) + `CompanyIntelligence` (doc textareas). Kept: TechnicalSummary/FundamentalInsights/ValuationView/NewsCatalystList/ShareholdingTrend/CorporateActionsSummary/ScenarioAnalysis/ExecutiveSummary.
-- [x] Phase 8 tests: NEW `stock-analysis-prompt.test.ts` (21) + `document-normalize.test.ts` (9) + `intelligence.test.ts` +3 (13 total). Targeted run `npx jest document-normalize stock-analysis-prompt intelligence-prompt intelligence --silent` → **57/57 PASS**. Full suite → **66 suites, 915 pass / 4 skip** (+32, was 883/4). tsc → **46 = baseline** (0 new production errors).
-- [x] Phase 9 docs: `.agents/sessions/2026-08-28-stock-analysis-skill/decisions.md` + `flow.md`; `.agents/changelog/versions-v3.21.md` (created); `.agents/CHANGELOG.md` + root `CHANGELOG.md` + `AGENTS.md` + `TODO.md` v3.21.0 rows; `Primer.md` status + Session 20 entry; `agent-memory.md` entry; `Lessons.md` #92 + #93 + update log; `session-todos.md` (this session).
+- [x] **v3.21.1** (committed `4c47348` + docs `47e6677`, pushed): SQLite WASM fix (serverExternalPackages + resolveSqlWasm), ops-counter persistence (`ops_counter`, IST-day + Math.max), `/api/admin/db-health` Total Operations/Plan usage, per-type DB-error summary (`classifyDbError` + `db_error_counts`), `ensureSqliteBackup()` lazy init + `resetSqliteStateForTests()`. Suite **932 pass / 4 skip**.
+- [x] **v3.21.2** (committed `7409616` + pushed): Fix A `stock-service.ts` `syncDailyPriceOnce` (market-open + seed-once/IST-day via globalThis Set); Fix B `lib/sqlite.ts` `daily_price_snapshot` table + snapshot get/set + DISTINCT ON seed, closed-market hotCache→SQLite (zero Prisma) → on miss 2-3 reads; Fix C `enhanced-cache.ts` TTL ms→s (`Math.ceil(ms/1000)`); Fix D `priceSyncService.ts` gate by `isMarketAccumulationWindow()` + snapshot warm; Fix E db-health `opsSnapshot` before probe; SQLite backup/restore (`exportSqliteBackup`/`restoreSqliteBackup`: 50MB cap + magic header + required tables + live swap) + POST `backup`/`restore` + Backup & Restore card. NEW `dbOpTiering.test.ts` (9). Suite **941 pass / 4 skip**; tsc 46 = baseline.
+- [x] **v3.21.3 (UNCOMMITTED)**: installed `@prisma/instrumentation` (7.10.0) + 8 `@opentelemetry/*` (25 pkgs). NEW `lib/otel.ts` `otelSetup()` — strictly opt-in (`PRISMA_OTEL_ENABLED=1` else no-op), AsyncHooksContextManager + NodeTracerProvider + PrismaInstrumentation via registerInstrumentations + SimpleSpanProcessor → OTLP/HTTP exporter (console fallback), idempotent `__tnPrismaOtelReady`, try/catch never crashes. Wired `lib/prisma.ts` module-top BEFORE singleton. `.env.example` docs. NEW `otel.test.ts` (4 no-op guards). Suite **945 pass / 4 skip**; tsc **46 = baseline**; no errors in `lib/otel.ts`/`lib/prisma.ts`. **P1001 diagnosis (no code fix — user applies Console toggle)**: Netlify healthy (latest `main` deploy ready; build = prisma generate + quickbuild, no migrate deploy); the "Prisma Compute Deploy failed P1001" (#21) = auto-schema-apply sandbox running `migrate deploy` in a network-isolated sandbox that can't reach direct-TCP `db.prisma.io:5432`; verified `migrate status` = 36 migrations up to date, **ZERO pending** → false alarm. FIX (user-approved): Prisma Console → DB → toggle OFF "apply schema changes automatically"; future migrations via v3.20.5 runbook (`prisma migrate deploy` + DIRECT_URL from an env with egress). **BUGS.md #13**.
+- [x] **Docs (v3.21.2 + v3.21.3)**: AGENTS.md version table (v3.21.2/v3.21.3 rows), `.agents/CHANGELOG.md` index + `.agents/changelog/versions-v3.21.md` (v3.21.2 + v3.21.3 sections), `.env.example`, `BUGS.md` (#13), plan doc `04-db-op-tiering-cache-sqlite-prisma.md` (q4), Primer.md (status sections + Last Updated), agent-memory.md (v3.21.2 + v3.21.3 entries), Lessons.md (#97, #98 + update log), session `2026-09-02-db-health-ops-visibility/` (decisions + flow).
 
 ## Decisions
-- Deep IN-PLACE upgrade of the v3.18.0 pipeline (no duplicate pipeline), per user.
-- Backward compatible, NO DB migration: legacy prompt/parser kept; all new `IntelligenceAnalysis` fields optional `?`; legacy JSON parses onto the 8-level enum (BUY/SELL/HOLD valid members); `riskFactors` now `RiskItem[]`; `confidence = conviction*10` when missing.
-- `normalize.ts` does NOT `import "server-only"` (non-dependency → parent-path throw → Jest breaks); convention-comment only.
-- `hasDocuments` derived from NORMALIZED content, not object existence (whitespace-only → false).
-- Evidence labels & dataGaps: never fabricate; missing data surfaced in `dataGaps` + DataGapsBanner.
-- Docs (pre-pasted `.md`/`.txt`) only, 50KB cap each, appended as secondary-unverified prompt sections — no MarkItDown/PDF.
-- No auto commit/push/merge without explicit user say-so. Version = v3.21.0.
+- v3.21.2 in ONE increment (Fix A–E + backup/restore) per user directive — committed `7409616` + pushed (no PR).
+- v3.21.3 = OTel tracing (user-approved "Full OTel set + OTLP exporter" question) → `lib/otel.ts` opt-in `otelSetup()`; strictly env-gated so prod/test unchanged when `PRISMA_OTEL_ENABLED` unset.
+- P1001: diagnosed as FALSE ALARM — Prisma Compute auto-schema-apply sandbox can't reach direct-TCP host; user applies the Console "apply schema changes automatically" OFF toggle (user-side action, no repo change). BUGS.md #13.
+- No auto commit/push/merge/deploy without explicit user say-so. Version = v3.21.3 (commit pending).
 
 ## Blockers
-- (none) — code + tests + docs complete. Awaiting user commit/PR decision (no auto-commit).
-- Separate workstream (unrelated): PR #107 (https://github.com/luckyhegde6/TradeNext/pull/107) open on `feat/plan-limit-resilience`; `feat/db-health-price-cache` v3.20.2 commit/push/PR pending.
-- External (prod, not this session): Prisma Postgres hold until Sep 1; Netlify deploy blocked until Prisma Postgres extension removed.
+- (none for v3.21.2 — committed + pushed). **v3.21.3 commit + push await explicit user approval.** P1001 fix requires USER to toggle Prisma Console "apply schema changes automatically" OFF (cannot be done from terminal).
+- Separate workstream (unrelated): v3.21.0 (`feat/stock-analysis-skill`) awaiting user commit/PR decision; 2 Dependabot high-severity advisories pending user.
 
 ## Next Move
-1. Present to user: implementation + tests complete (915 pass / 4 skip, tsc 0 new), docs done, ready for commit/PR decision.
-2. On user approval: commit v3.21.0 on `feat/stock-analysis-skill` (no push/merge unless asked).
+1. Finishing docs for v3.21.2 + v3.21.3 (AGENTS.md/CHANGELOG/Primer/agent-memory/Lessons/handoff — all done above; TODO.md v3.21.2 row noted in plan doc but NOT yet in the top-level TODO Quick Reference — verify/add if needed).
+2. Present to user: v3.21.2 committed `7409616` (941 pass, tsc 46); v3.21.3 OTel + P1001 diagnosis code+tests+docs verified (945 pass, tsc 46). **Request explicit approval to commit + push the v3.21.3 increment** (`lib/otel.ts`, `lib/prisma.ts`, `.env.example`, `otel.test.ts`, `BUGS.md`, plan doc, AGENTS.md, CHANGELOG, Primer, agent-memory, Lessons, handoff) on `feat/db-health-ops-visibility`.
+3. Remind user re: P1001 Console toggle (BUGS.md #13), v3.21.0 `feat/stock-analysis-skill` PR, and 2 Dependabot advisories.

@@ -75,3 +75,203 @@ Company page (CompanyIntelligence.tsx)
 ## Note
 
 There is no `v3.21.0` deploy gate note beyond "user merges PR so Netlify rebuilds". Document ingestion is currently **raw-text only**; MarkItDown/PDF and chart-vision remain future enhancements.
+
+---
+
+# v3.21.1 — DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix
+
+> **Date**: Sep 02 2026 · **Branch**: `main` (direct, no branch) · **Suite**: 920 pass / 4 skip (+3 vs 917) · **tsc**: 46 = baseline (0 production errors)
+
+## Follow-up increment (same version): per-type DB-error summary + lazy SQLite re-init
+
+> **Suite**: 932 pass / 4 skip (+12 vs 920) · **tsc**: 46 = baseline (0 new production errors) · committed `4c47348` + docs `47e6677`, pushed `origin/feat/db-health-ops-visibility` (increment uncommitted)
+
+### Problem
+
+The ops-counter work showed "total operations" but gave no visibility into **what kind of DB errors** the app is hitting. The ring-buffer `getDbErrorLog()` (v3.20.2) lists individual failures, but there was no rolled-up per-type summary (plan-limit vs timeout vs Accelerate-proxy vs connection vs write-budget) that survives process restarts — the DB Health page couldn't answer "how many of today's failures were plan-limit holds vs transient network blips?". Separately, `initSqliteBackup()` ran only once at boot — if the WASM resolve or initial Prisma sync failed *once* (temp hiccup), SQLite stayed **"Not Ready" forever** with no retry path.
+
+### Solution
+
+**(1) Error classifier** — `lib/db-utils.ts` gains `classifyDbError(error)` returning a `DbErrorType` union (`plan_limit` | `timeout` | `accelerate_proxy` | `connection` | `write_budget` | `other`) with ordered checks (non-Error→other; P6003/hold/plan-limit→plan_limit; "write budget exceeded"→write_budget; P2024/P1008/ETIMEDOUT/name-timeout/request|gateway timeout→timeout; Accelerate proxy messages/"Invalid invocation"/"Bad Gateway"/"Service Unavailable"/"engine is not ready"/"query engine"→accelerate_proxy; P1001/P1002/P1017/ECONN*/refused/reset/aborted/socket/prepared-statement/operational/enotfound/getaddrinfo/tls/certificate/network/"fetch failed"→connection; else other). **Latest-first order matters** — an unreadable connection error must not be swallowed by an earlier generic bucket.
+
+**(2) Per-type counts** — `lib/prisma.ts` adds a globalThis `dbErrorCounts` (`__dbErrorCounts` = `{_day, counts}` with lazy IST-day rollover — bump clears `_day`, `getDbErrorCounts()` reseeds lazily). `recordDbError()` now classifies every recorded failure and bumps its bucket; `getDbErrorCounts()` returns a copy (callers can't mutate the singleton).
+
+**(3) SQLite persistence (same pattern as the ops counter)** — `lib/sqlite.ts`: `persistDbErrorCounts()`/`restoreDbErrorCounts()` store key `db_error_counts` in `_backup_meta` tagged with the IST day key; restore ignores snapshots from a different day and merges per-key with `Math.max`; the **same 60s timer** as `persistOpsCounter()` persists both snapshots; restore runs at init + after initial sync.
+
+**(4) Lazy on-demand init** — NEW `ensureSqliteBackup()`: module-level `_initPromise` with `.finally` reset — a failed/first init is **re-tried on the next call**, never throws, so SQLite can never be permanently stuck "Not Ready" after a temp WASM/DB hiccup. `/api/admin/db-health` GET + POST call it first.
+
+**(5) Test hook** — `resetSqliteStateForTests()` stops both timers and nulls `state` fields **IN PLACE** (replacing the `g.__sqliteBackup` global would orphan the module's captured `state` binding) plus re-nulls `_instance`/`_initPromise`.
+
+**(6) UI** — per-type summary chips strip on `db-health/page.tsx` above the Recent DB Errors table: "plan_limit" + "connection" red with ring when >0, "timeout"/"accelerate_proxy"/"write_budget" amber, "other" gray; an error total; IST-day footnote.
+
+### Files Modified (increment)
+
+| File | Change |
+|------|--------|
+| `lib/db-utils.ts` | NEW `DbErrorType` + `classifyDbError()` (ordered checks); imports extended |
+| `lib/prisma.ts` | globalThis `dbErrorCounts` (`__dbErrorCounts`), `seedErrorCounts()`, lazy IST-day rollover, `recordDbError()` classifies + bumps, exports `getDbErrorCounts()` |
+| `lib/sqlite.ts` | `persistDbErrorCounts()`/`restoreDbErrorCounts()` (key `db_error_counts`, IST-day guard + per-key `Math.max` merge, same 60s tick); NEW `ensureSqliteBackup()`; `resetSqliteStateForTests()`; interface + `createFallback` wiring |
+| `app/api/admin/db-health/route.ts` | GET + POST call `ensureSqliteBackup()` first; GET returns `dbErrorSummary {day, counts}` |
+| `app/admin/utils/db-health/page.tsx` | per-type chips strip (`DB_ERROR_META`) + error total + IST-day footnote above Recent DB Errors |
+| `lib/__tests__/db-utils.test.ts` | NEW `classifyDbError` describe (7 cases incl. real prod Accelerate message, benign P2021/P2002/P2025→other, non-Error→other) |
+| `lib/__tests__/sqlite.test.ts` | prisma mock gains `dbErrorCounts`; +5 tests (error-count roundtrip, stale-day via mocked `getIstDayKey`, Math.max merge, ensure-ready, re-init after reset) |
+
+### Key Design Decisions
+
+1. **Classifier ordered checks, latest-first**: an invalid-invocation that ALSO contains a timeout keyword must land in the narrower `accelerate_proxy` bucket.
+2. **Per-key `Math.max` restore merge**: mirrors the ops counter — a newer snapshot never reduces any bucket.
+3. **`resetSqliteStateForTests()` mutates in place**: module owns a captured `state` binding; reassigning `g.__sqliteBackup` breaks it — null fields, don't replace the object.
+4. **Lazy re-init via `_initPromise` finally-reset**: failed init is retryable by the next caller — resilience without a background reaper.
+
+### Verification (increment)
+
+- `npx jest lib/__tests__/db-utils.test.ts lib/__tests__/sqlite.test.ts` → both files pass (48 tests).
+- Full `npx jest` → **932 pass / 4 skip** (was 920/4, +12; 4 skips = pre-existing client-cache IndexedDB tests).
+- `npx tsc --noEmit` → **46 errors, ALL pre-existing** test-file typing noise; **0 new production errors**.
+
+---
+
+## Problem
+
+Two live-site/perspective gaps on the DB Health dashboard (`/admin/utils/db-health`):
+
+1. **"SQLite Not Ready" on the live site** — the SQLite backup layer (v3.19.1–v3.19.2) showed Not Ready because `sql.js` is a **native/WebAssembly module**: its `sql-wasm.wasm` asset was never located. `initSqlJs()` without a `locateFile` resolver cannot find the WASM binary at runtime (bundler attempts may 404 / throw), so `initSqliteBackup()` never completed → the whole SQLite fallback layer (recs/corp-actions/screener fallback chains + recovery probe) was silently dead on Netlify.
+2. **IO-count gap** — Prisma dashboard shows an authoritative "Total Operations" count (every read+writes through the Accelerate proxy, against the 10K ops/day plan limit), while the app's in-memory `dbOpsCounter` (v3.19.0/v3.20.2) resets to zero on **every deploy** and only counts what the process itself saw. The numbers diverged (dashboard 5,071 vs in-memory few hundred), so the dashboard under-reported or confused. User approved the **"Display + persist"** approach: show the authoritative Total Operations + Plan Usage in the app AND persist the in-memory counter so it survives deploys.
+
+## Solution
+
+**(1) WASM fix** — `next.config.ts` adds `'sql.js'` to `serverExternalPackages` (native/WASM module must be excluded from webpack bundling) and `lib/sqlite.ts` gains `resolveSqlWasm(file)` — searches `node_modules/sql.js/dist` then `public/`, defaulting to `sql-wasm.wasm` — wired into `initSqlJs({ locateFile: resolveSqlWasm })`. Netlify ships node_modules at runtime and publishes `public/`, so the WASM resolves correctly in both local and prod.
+
+**(2) Ops-counter persistence** — the in-memory counter now snapshots to the SQLite `_backup_meta` table every 60 seconds and restores on boot:
+
+- `lib/prisma.ts` exports `getIstDayKey` (the existing `todayKey` IST-day-key function) — single source of truth shared with sqlite so both layers agree on the "day" boundary used for auto-reset.
+- `lib/sqlite.ts`: `persistOpsCounter()` (reads/writes JSON → `_backup_meta` key `ops_counter`, tagged with the IST day key), `restoreOpsCounter()` (reads back, **ignores any snapshot from a different IST day** — counter must reset each day, not replay yesterday's counts, and merges with `Math.max` so a newer snapshot never *reduces* the restored count), `startOpsCounterPersistence()` (60s interval on globalThis state — same singleton pattern as `lib/prisma.ts`/`lib/cache.ts`, so instrumentation and routes share one instance), `stopOpsCounterPersistence()` (test hook). Restore runs at init (before first sync) and again after the initial `syncFromPrisma()`; `instrumentation.ts` boots the 60s timer after the price-flush timer.
+- `/api/admin/db-health` GET now returns `totalOperations` / `planLimit` (env `DB_PLAN_LIMIT_OPS`, default **10,000**) / `planOperationsRemaining` on the ops block, and calls `sqlite.persistOpsCounter()` on every GET (read-only dashboard keeps the snapshot fresh); the POST sync handler persists after `syncFromPrisma()`.
+- **UI** (`db-health/page.tsx`): stat grid grows to **6 cards** — new "Total Ops Today" (reads+writes sum) with threshold colors (>90% red, >70% amber); new **"Plan Operations Usage"** bar below the write-budget bar — reads vs writes stacked against the plan limit with remaining count and an italic footnote ("Prisma dashboard authoritative · counter restored from SQLite snapshot · resets on deploy"); new **"Plan Ops {n}% Used"** amber warning badge when usage > 80%.
+
+**(3) Test-infra mock fixes** (`lib/__tests__/sqlite.test.ts`) — the sql.js mock needed two real-semantics fixes before the new tests could pass:
+
+- `exec()` now projects **only the requested SELECT columns** (real sql.js returns just `value` for `SELECT value FROM …`; the mock returned all columns and `LIMIT 1` picked the wrong row).
+- The INSERT handler implements **`INSERT OR REPLACE`** semantics (drop existing rows whose first column = PK) — without it, a second persist to the same key *duplicated* rows and `LIMIT 1` returned the stale first one, breaking the roundtrip.
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `next.config.ts` | `serverExternalPackages` += `'sql.js'` (native/WASM module excluded from webpack) |
+| `lib/prisma.ts` | `export const getIstDayKey = todayKey;` — shared IST-day-key source |
+| `lib/sqlite.ts` | `resolveSqlWasm(file)` + `initSqlJs({ locateFile })`; `persistOpsCounter()` / `restoreOpsCounter()` (`_backup_meta` key `ops_counter`, IST-day guard, `Math.max` merge); `startOpsCounterPersistence()` (60s, globalThis state) / `stopOpsCounterPersistence()`; restore at init + after initial sync; `SqliteFallback` + `HealthStatus.prisma` extended; `getHealthStatus()` computes `totalOperations`/`planLimit`/`planOperationsRemaining` |
+| `instrumentation.ts` | boots `startOpsCounterPersistence()` after the daily-price-flush timer |
+| `app/api/admin/db-health/route.ts` | uses `getIstDayKey`; GET ops block adds `totalOperations`/`planLimit`/`planOperationsRemaining` + persists counter; POST sync persists after `syncFromPrisma()` |
+| `app/admin/utils/db-health/page.tsx` | 6-card stat grid with "Total Ops Today"; "Plan Operations Usage" bar (reads vs writes vs plan + remaining + footnote); "Plan Ops n% Used" badge > 80% |
+| `lib/__tests__/sqlite.test.ts` | mock fixes (`getIstDayKey`, `exec()` column projection, `INSERT OR REPLACE`) + 3 new tests (health totals, persist/restore roundtrip, persist no-throw) |
+
+## Key Design Decisions
+
+1. **`Math.max` merge on restore**: a newer snapshot must never *reduce* the counter (deploys can race a persist tick), but an **IST-day boundary mismatch discards the snapshot entirely** — the counter must reset each day, not replay yesterday's usage.
+2. **Persist on every GET** of the health route: the dashboard is the primary consumer, so reading it keeps the snapshot warm without a separate writer.
+3. **`getIstDayKey` exported from prisma**: one source of truth for "which IST day is it" — sqlite and the ops counter can't disagree on the reset boundary.
+4. **serverExternalPackages, not just locateFile**: even with a locateFile, webpack's static analysis can choke on sql.js's runtime `createRequire`/WASM loading; excluding it from the server bundle is the documented fix for native/WASM deps in Next.js.
+
+## Verification
+
+- `npx jest --testPathPatterns="sqlite.test"` → **20/20** (was 17).
+- Full `npx jest` → **920 pass / 4 skip** (+3 vs 917 baseline; 4 skips = pre-existing client-cache IndexedDB tests).
+- `npx tsc --noEmit` → **46 errors, ALL pre-existing** test-file typing noise; **0 new production errors**.
+- (Deploy verification pending — commit not yet made; live Netlify check after user deploys.)
+
+---
+
+# v3.21.2 — Stock-quote tiering (cache → SQLite → Prisma, zero after-hours DB writes) + TTL ms→s fix + SQLite backup/restore in db-health
+
+> Branch `feat/db-health-ops-visibility`. Committed `7409616` + pushed. One increment (Fix A–E + backup/restore). No schema change → no migration. Catalog of "what we did so far" + call-site map preserved in `.agents/plans/04-db-op-tiering-cache-sqlite-prisma.md`.
+
+## Problem
+
+- (A) **After-hours DB writes**: the quote path upserted `daily_prices` on every `getStockQuote` even when the market was closed — useless writes burning the 10K ops/day plan limit.
+- (B) **Closed-market Prisma reads**: with the market closed, every quote still hit Prisma (`dailyPrice.findFirst` + `aggregate` + possible `prevDayPrice`) → up to 3 Prisma reads per quote, DB-ops-inflated and unnecessary.
+- (C) **TTL units bug**: `lib/enhanced-cache.ts` passed `getRecommendedTTL(ms)` (a millisecond value) straight into `NodeCache.set(key, val, ttlSec)` where TTL is **seconds** → cache entries lived ~1000× too long (e.g. an intended 120s became ~33h).
+- (D) SSE poll `cacheDailyPrice` wrote price rows at end of day unconditionally (before the batch writer logic), duplicating write pressure.
+- (E) db-health `opsSnapshot` was taken AFTER the probe + table-count queries, so the "operations this request used" number was inflated by the request's own probes.
+- User directive: SQLite backup should be **exportable** (take → download) and **restorable** (upload → apply).
+
+## Solution
+
+### Fix A — `lib/stock-service.ts`
+`syncDailyPriceOnce(symbol, snap)` — upsert gated to **market-open only** + **seed-once per symbol per IST day** via a `globalThis.__dailyPriceSynced` Set keyed `${getIstDayKey()}:${symbol}`; failure retries (not added to the Set). The in-quote upsert IIFE now calls `syncDailyPriceOnce(...).catch(()=>{})`. → **Zero Prisma writes after hours.**
+
+### Fix B — `lib/sqlite.ts` (SQLite tier)
+- NEW `daily_price_snapshot` table in `SCHEMA_SQL` + columns `(ticker TEXT PRIMARY KEY, close REAL, change REAL, percentChange REAL, lastUpdatedAt TEXT)`.
+- `createFallback` methods `getDailyPriceSnapshot`/`setDailyPriceSnapshot` (upsert).
+- Exports `getSqliteDailyPriceSnapshot(symbol)`/`cacheDailyPriceSnapshot(symbol, snap)`.
+- `syncFromPrisma` seeds the snapshot table via `DISTINCT ON` latest row per ticker.
+- Closed-market read chain in `buildQuoteFromSnapshot`: **hotCache → SQLite snapshot (ZERO Prisma) → on snapshot miss only** `prisma.dailyPrice.findFirst` + `aggregate` (yearStats) + possible `prevDayPrice` (**2–3 Prisma reads only on snapshot miss**, then the result re-populates hotCache).
+
+### Fix C — `lib/enhanced-cache.ts`
+`Math.ceil(getRecommendedTTL(ms)/1000)` before `cacheInstance.set(...)` (NodeCache TTL is seconds). Log field `ttlSec`. Corrected `lib/__tests__/enhanced-cache.test.ts` assertion `120000` → `120` (with `// Fix C`).
+
+### Fix D — `lib/services/priceSyncService.ts`
+`cacheDailyPrice` gated by `isMarketAccumulationWindow()` (only accumulate during market hours); `cacheDailyPriceSnapshot` warms SQLite each tick → closed-market reads are cache→SQLite (zero Prisma).
+
+### Fix E — `app/api/admin/db-health/route.ts`
+`opsSnapshot` captured BEFORE the probe + table-count queries; the `/ops` block reports the pre-request baseline → honest per-request ops.
+
+### SQLite backup/restore (user directive)
+- `getSqlJs()`/`_SQL` module-let: lazy `initSqlJs` with `sql-wasm.wasm` from `public/` (sql.js is a WASM module; `next.config.ts` `serverExternalPackages: ['sql.js']`).
+- `exportSqliteBackup()` → `db.export()` → `Uint8Array` (in-memory DB — no physical file).
+- `restoreSqliteBackup(bytes)` → size cap (50MB) + magic header (`0x53514c69`) + required tables (`_backup_meta`, `daily_recommendation_run`) + build fresh `SQL.Database` → swap `state.db` via `_instance = createFallback(candidate)` (live DB swap).
+- POST `/api/admin/db-health` actions `backup` (returns base64) + `restore` (accepts base64).
+- `/admin/utils/db-health` Backup & Restore card: **Download** (`ArrowDownTrayIcon`, base64 decode → Blob → anchor) + **Apply Restore** (`<input type=file>`).
+
+## Files Created
+- `lib/__tests__/dbOpTiering.test.ts` — 9 tests.
+
+## Files Modified
+- `lib/stock-service.ts`, `lib/sqlite.ts`, `lib/enhanced-cache.ts`, `lib/__tests__/enhanced-cache.test.ts`, `lib/services/priceSyncService.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `.agents/handoffs/active/latest.md` + plan doc.
+
+## Key Design Decisions
+1. **SQLite snapshot is cache-tier, not source-of-truth**: it's seeded by `syncFromPrisma` (from Prisma `daily_prices`), never by live polling writes, so it can't diverge from the DB.
+2. **seed-once-per-day guard**: the quote path stops writing to `daily_prices` entirely during market hours after the first seed — only the market-hours SSE accumulator + batch writer (v3.20.2) write after hours.
+3. **2–3 Prisma reads only on snapshot miss**: the SQLite tier collapses the closed-market hot path to zero Prisma; the miss path is still bounded.
+4. **Backup = serialized `db.export()` bytes**: matches the in-memory sql.js architecture; restore validates header + required tables before live swap.
+
+## Verification
+- NEW `dbOpTiering.test.ts` → **9/9**: snapshot round-trip, upsert (update-not-duplicate + multiple symbols), backup export header, restore apply, reject-oversize, reject-missing-tables.
+- Full `npx jest` → **941 pass / 4 skip** (was 932/4, +9; 4 skips = pre-existing client-cache IndexedDB).
+- `npx tsc --noEmit` → **46 = exact baseline (0 new production errors)**.
+- Post-commit: `7409616`; the P1001 attribution note listed in the pre-commit summary intentionally deferred to the v3.21.3 increment.
+
+---
+
+# v3.21.3 — Prisma OpenTelemetry tracing (opt-in) + Prisma Compute P1001 false-alarm diagnosis
+
+> Branch `feat/db-health-ops-visibility`, on top of `7409616`. Commit pending user.
+
+## Problem
+1. **DB query attribution/tracing**: the monitoring stack had no visibility into which Prisma query engine operations were slow/which service path drove them. (User chose "Prisma attribution = `@prisma/instrumentation`" over a numeric plan-usage split.)
+2. **Prisma Compute "Deploy failed" false alarm** (repeated #21): "Prisma Compute Deploy failed … `P1001 Can't reach database server at db.prisma.io:5432`", 0s duration, 4h ago.
+
+## Diagnosis (P1001 — no code fix; user applies a Console toggle)
+- Netlify deploys are **HEALTHY**: latest `main` deploy `state: "ready"`, `error_message: null`, deploy_time ~60s; build = `npx prisma generate && npm run quickbuild` — **no `migrate deploy`** in the Netlify build.
+- The failing "Deploy" is **Prisma Compute's auto-schema-apply sandbox** running `migrate deploy` in a **network-isolated sandbox** that can't reach the direct-TCP `db.prisma.io:5432` host. Accelerate (`prisma+postgres://accelerate.prisma-data.net`) is a **query proxy only**; DDL needs direct TCP.
+- **Verified from local**: `npx prisma migrate status` via Accelerate → **`36 migrations … Database schema is up to date!`** → **ZERO pending** → auto-apply has **nothing to do** → pure false alarm.
+- **FIX (user-approved)**: Prisma Console → DB → **toggle OFF "apply schema changes automatically"**; new migrations applied via the v3.20.5 runbook (`npx prisma migrate deploy` + `DIRECT_URL` from an environment with DB egress, as done for `intelligence_cache`).
+- **No repo/code change** required. Tracked as **BUGS.md #13**.
+
+## OTel wiring
+- Installed (25 pkgs added): `@prisma/instrumentation@7.10.0` + `@opentelemetry/api`, `sdk-trace-node`, `resources`, `semantic-conventions`, `sdk-trace-base`, `instrumentation`, `context-async-hooks`, `exporter-trace-otlp-http`.
+- NEW `lib/otel.ts` `otelSetup()` — **STRICTLY opt-in**: returns `false` (hard no-op) unless `PRISMA_OTEL_ENABLED=1`; when enabled, sets `AsyncHooksContextManager`, builds `NodeTracerProvider` (resource attrs `OTEL_SERVICE_NAME`/`OTEL_SERVICE_VERSION`, default `tradenext`/`3.21.3`), adds a `SimpleSpanProcessor` to an `OTLPTraceExporter` at `OTEL_EXPORTER_OTLP_ENDPOINT` (**console fallback** when the endpoint is unset), `provider.register()`, then `registerInstrumentations({ tracerProvider, instrumentations: [new PrismaInstrumentation()] })`. Idempotent via globalThis `__tnPrismaOtelReady`; try/catch so OTel init can **never** crash the app.
+- Wired: `lib/prisma.ts` imports + calls `otelSetup()` at the **module top BEFORE** the `PrismaClient` singleton construction (PrismaInstrumentation wraps the query engine at client construction).
+- `.env.example`: `PRISMA_OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` / `OTEL_SERVICE_VERSION` documented under a v3.21.3 header.
+
+## Files Created
+- `lib/otel.ts`, `lib/__tests__/otel.test.ts` (4 tests).
+
+## Files Modified
+- `lib/prisma.ts` (import + `otelSetup()` call), `package.json` (+9 deps), `package-lock.json`, `.env.example`, `BUGS.md` (#13), `.agents/handoffs/active/latest.md`, plan doc, `AGENTS.md`, this changelog.
+
+## Verification
+- NEW `otel.test.ts` → **4/4** (unset→false, "0"→false, "1"→true, idempotent).
+- Full `npx jest` → **945 pass / 4 skip** (was 941/4, +4; OTel wiring is a no-op in tests since `PRISMA_OTEL_ENABLED` is unset).
+- `npx tsc --noEmit` → **46 = exact baseline (0 new)**; no errors in `lib/otel.ts` or `lib/prisma.ts`.
+- Commit + push pending user approval.

@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
@@ -43,6 +43,11 @@ export async function register() {
 
     // Start daily price flush timer (batch-writes to daily_prices after 4pm IST)
     startDailyPriceFlushTimer();
+
+    // Snapshot Prisma ops counter + per-type DB error counts to SQLite every
+    // 60s so the admin dashboard survives restarts/deploys and tracks the full
+    // IST day (startOpsCounterPersistence persists BOTH snapshots).
+    startOpsCounterPersistence();
 
     logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite + price cache started via instrumentation" });
   } catch (error) {

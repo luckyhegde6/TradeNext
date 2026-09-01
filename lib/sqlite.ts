@@ -17,15 +17,37 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
+import { existsSync } from "fs";
+import path from "path";
 import initSqlJs, { type Database } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { isDbUnavailableError } from "@/lib/db-utils";
-import { dbOpsCounter } from "@/lib/prisma";
+import { isDbUnavailableError, type DbErrorType } from "@/lib/db-utils";
+import { dbOpsCounter, dbErrorCounts, getIstDayKey } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the sql.js WASM binary path at runtime.
+ *
+ * Rationale: `sql.js` is kept as a `serverExternalPackage` in next.config.ts
+ * so `require("sql.js")` loads from real `node_modules` and the module's own
+ * default `locateFile` works. As a belt-and-suspenders fallback (bundled
+ * builds, other deploy layouts), explicitly resolve the file from the two most
+ * likely runtime locations before letting sql.js use its default.
+ */
+function resolveSqlWasm(file: string): string {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", "sql.js", "dist", file),
+    path.join(process.cwd(), "public", file),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return file;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g = globalThis as any;
@@ -39,6 +61,7 @@ if (!g.__sqliteBackup) {
     lastProbeAt: null as string | null,
     syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
+    opsPersistTimer: null as ReturnType<typeof setInterval> | null,
   };
 }
 const state: {
@@ -50,6 +73,7 @@ const state: {
   lastProbeAt: string | null;
   syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
   probeTimer: ReturnType<typeof setInterval> | null;
+  opsPersistTimer: ReturnType<typeof setInterval> | null;
 } = g.__sqliteBackup;
 
 // ---------------------------------------------------------------------------
@@ -69,6 +93,9 @@ export interface HealthStatus {
     lastProbeAt: string | null;
     reads: number;
     writes: number;
+    totalOperations: number;
+    planLimit: number;
+    planOperationsRemaining: number;
     writeBudget: number;
     writeBudgetExceeded: boolean;
     writeBudgetRemaining: number;
@@ -89,6 +116,18 @@ export interface SqliteFallback {
   getLatestRecommendations(): Record<string, unknown> | null;
   /** Get chartink screener definitions. */
   getChartinkScreeners(): Array<Record<string, unknown>>;
+  /** Get latest daily price snapshot for a symbol (tier-2 quote read). */
+  getDailyPriceSnapshot(symbol: string): Record<string, unknown> | null;
+  /** Write a daily price snapshot in-process (zero Prisma ops). */
+  setDailyPriceSnapshot(rec: {
+    symbol: string;
+    tradeDate: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }): void;
   /** Get corporate actions (recent). */
   getCorporateActions(limit?: number): Array<Record<string, unknown>>;
   /** Get recent server logs. */
@@ -107,9 +146,34 @@ export interface SqliteFallback {
   getHealthStatus(): HealthStatus;
   /** Trigger a sync from Prisma -> SQLite. */
   syncFromPrisma(): Promise<void>;
+  /** Persist the Prisma ops counter snapshot into SQLite (`_backup_meta`). */
+  persistOpsCounter(): void;
+  /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
+  restoreOpsCounter(): void;
+  /** Persist the Prisma per-type DB error counts into SQLite (`_backup_meta`). */
+  persistDbErrorCounts(): void;
+  /** Restore the Prisma per-type DB error counts when they match today (IST). */
+  restoreDbErrorCounts(): void;
 }
 
 let _instance: SqliteFallback | null = null;
+
+// Cache of the resolved sql.js module so admin backup/restore can construct a
+// fresh in-memory DB from exported bytes without re-running initSqlJs.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _SQL: any = null;
+
+/**
+ * Get the resolved sql.js module (initSqlJs). Cached after the first call.
+ * Returns null if WASM resolution failed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getSqlJs(): Promise<any> {
+  if (_SQL) return _SQL;
+  const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
+  _SQL = SQL;
+  return SQL;
+}
 
 /**
  * Get (or create) the SQLite fallback singleton.
@@ -122,6 +186,152 @@ export function getSqliteFallback(): SqliteFallback | null {
     return _instance;
   }
   return null;
+}
+
+let _initPromise: Promise<void> | null = null;
+
+/**
+ * Ensure the SQLite backup layer is initialized, retrying on demand.
+ *
+ * Unlike getSqliteFallback() (which just creates the object from an ALREADY
+ * initialized db), this actively drives init when the layer is not ready:
+ * boot-time init in instrumentation.ts can fail (e.g. sql.js WASM hiccup,
+ * schema race), and this lets the admin DB-health route re-trigger it on the
+ * next request instead of serving "SQLite Not Ready" forever. Idempotent —
+ * concurrent callers share one in-flight init; a failed attempt is NOT
+ * memoized so the next call retries. Never throws.
+ */
+export async function ensureSqliteBackup(): Promise<SqliteFallback | null> {
+  if (state.ready) return getSqliteFallback();
+  if (!_initPromise) {
+    _initPromise = initSqliteBackup()
+      .catch((err) => {
+        // initSqliteBackup already swallows its own errors; belt-and-suspenders
+        // so a rejected init never propagates to the admin route.
+        logger.error({ msg: "SQLite: ensure init failed", error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => {
+        _initPromise = null;
+      });
+  }
+  await _initPromise;
+  return getSqliteFallback();
+}
+
+// ---------------------------------------------------------------------------
+// Daily price snapshot tier (cache → SQLite → Prisma)
+// ---------------------------------------------------------------------------
+// Closed-market / after-hours quote reads resolve from the in-process SQLite
+// snapshot WITHOUT hitting Prisma/Accelerate, then fall through to Prisma only
+// when the snapshot is missing. Writes go to SQLite only (zero Prisma ops).
+
+export interface DailyPriceSnapshot {
+  symbol: string;
+  tradeDate: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** Read the latest daily price snapshot for a symbol from SQLite (or null). */
+export function getSqliteDailyPriceSnapshot(symbol: string): DailyPriceSnapshot | null {
+  const s = getSqliteFallback();
+  if (!s) return null;
+  const raw = s.getDailyPriceSnapshot(symbol);
+  if (!raw) return null;
+  return {
+    symbol: raw.symbol as string,
+    tradeDate: raw.tradeDate as string,
+    open: raw.open as number,
+    high: raw.high as number,
+    low: raw.low as number,
+    close: raw.close as number,
+    volume: raw.volume as number,
+  };
+}
+
+/** Cache a daily price snapshot into SQLite in-process (zero Prisma ops). */
+export function cacheDailyPriceSnapshot(rec: DailyPriceSnapshot): void {
+  // Lazy-init so the quote path can warm this tier even before the full
+  // background sync completes (never throws, retries on next call).
+  if (!getSqliteFallback()) {
+    ensureSqliteBackup().then((s) => s?.setDailyPriceSnapshot(rec)).catch(() => {});
+    return;
+  }
+  getSqliteFallback()?.setDailyPriceSnapshot(rec);
+}
+
+// ---------------------------------------------------------------------------
+// Backup / restore (admin DB-health)
+// ---------------------------------------------------------------------------
+// The SQLite backup is an IN-MEMORY sql.js database — there is no physical
+// file to copy. "Download latest backup" exports the in-memory DB to a binary
+// .sqlite blob (db.export()); "Upload + apply restore" parses an uploaded blob
+// into a fresh in-memory DB and swaps it in as the active fallback. Restores
+// are validated (correct header + expected core tables) before swap.
+
+const MAX_RESTORE_BYTES = 50 * 1024 * 1024; // 50 MB upload cap
+
+/** Export the in-memory SQLite backup as a binary .sqlite Uint8Array (or null). */
+export function exportSqliteBackup(): Uint8Array | null {
+  if (!state.db) return null;
+  try {
+    return state.db.export();
+  } catch (err) {
+    logger.error({ msg: "SQLite: export backup failed", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * Apply a restored SQLite backup: validate + parse the uploaded bytes into a
+ * fresh in-memory DB and swap it in as the active fallback. The new DB must
+ * contain the core snapshot tables; otherwise the restore is rejected.
+ *
+ * @param bytes uploaded .sqlite blob
+ * @returns { db, tables } count of tables found for reporting
+ */
+export async function restoreSqliteBackup(bytes: Uint8Array): Promise<{ db: number; missing: string[] }> {
+  if (bytes.byteLength > MAX_RESTORE_BYTES) {
+    throw new Error(`Restore file too large (max ${Math.floor(MAX_RESTORE_BYTES / 1024 / 1024)} MB)`);
+  }
+  // Validate: SQLite files start with the "SQLite format 3\0" magic header.
+  const magic = [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00];
+  for (let i = 0; i < magic.length; i++) {
+    if (bytes[i] !== magic[i]) {
+      throw new Error("Invalid SQLite file (missing SQLite header)");
+    }
+  }
+
+  const SQL = await getSqlJs();
+  const candidate = new SQL.Database(bytes);
+  const tables = candidate.exec("SELECT name FROM sqlite_master WHERE type='table'");
+  const tableNames: string[] = [];
+  if (tables.length) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tableNames.push(...(tables[0].values as any[]).map((row: any) => String(row[0])));
+  }
+  // Require the core fallback tables so we never swap in an empty/foreign DB.
+  const required = ["_backup_meta", "daily_recommendation_run"];
+  const missing = required.filter((t) => !tableNames.includes(t));
+  if (missing.length) {
+    candidate.close();
+    throw new Error(`Restore rejected: backup missing table(s): ${missing.join(", ")}`);
+  }
+
+  // Swap: close the old in-memory DB and rebind the fallback to the restored one.
+  try {
+    state.db?.close();
+  } catch {
+    // ignore close errors on the old DB
+  }
+  state.db = candidate;
+  state.ready = true;
+  _instance = createFallback(candidate);
+  logger.info({ msg: "SQLite restored from backup", tables: tableNames.length });
+  return { db: tableNames.length, missing };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +374,23 @@ const SCHEMA_SQL = `
     screener_attribution TEXT,
     screener_count    INTEGER,
     created_at        TEXT
+  );
+
+  -- Daily price snapshots (v3.21.x quote tiering: cache → SQLite → Prisma).
+  -- In-process read store so closed-market quote lookups (SSE poll, portfolio,
+  -- alerts) can resolve from sql.js without hitting Prisma/Accelerate. Seeded
+  -- during syncFromPrisma from the latest daily_prices row per ticker and
+  -- written in-process by the quote path (cacheDailyPriceSnapshot). Zero Prisma
+  -- ops in the read path.
+  CREATE TABLE IF NOT EXISTS daily_price_snapshot (
+    symbol     TEXT PRIMARY KEY,
+    trade_date TEXT,
+    open       REAL,
+    high       REAL,
+    low        REAL,
+    close      REAL,
+    volume     INTEGER,
+    updated_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS corporate_action (
@@ -288,7 +515,7 @@ export async function initSqliteBackup(): Promise<void> {
   if (state.db) return;
 
   try {
-    const SQL = await initSqlJs();
+    const SQL = await getSqlJs();
     const db = new SQL.Database();
     state.db = db;
 
@@ -300,12 +527,24 @@ export async function initSqliteBackup(): Promise<void> {
 
     state.ready = true;
     _instance = createFallback(db);
+    // Restore the persisted Prisma ops counter (same IST day) so the admin
+    // dashboard survives restarts/deploys on the same day. Same for the
+    // per-type DB error counts (v3.21.1).
+    restoreOpsCounter();
+    restoreDbErrorCounts();
     logger.info({ msg: "SQLite backup initialized" });
 
-    // Sync from Prisma on startup (non-blocking)
+    // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
+    // after the sync completes so the dashboard reflects the latest state.
     await syncFromPrisma().catch((err) => {
       logger.error({ msg: "SQLite initial sync failed", error: err instanceof Error ? err.message : String(err) });
     });
+    try {
+      persistOpsCounter();
+      persistDbErrorCounts();
+    } catch {
+      // non-fatal
+    }
 
     // Start background recovery probe
     startRecoveryProbe();
@@ -367,6 +606,165 @@ export function stopRecoveryProbe(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Prisma ops-counter persistence
+// ---------------------------------------------------------------------------
+// The Prisma plan limit counts ALL operations (reads + writes), but the
+// in-memory `dbOpsCounter` resets on every process restart / deploy, so the
+// admin dashboard never matches the Prisma dashboard's day totals. We persist
+// a snapshot of the counter into the SQLite backup (key `ops_counter`) every
+// 60s and restore it after init when the persisted day matches today (IST).
+// Writes go to the local SQLite only -- zero Prisma ops added.
+
+const OPS_PERSIST_INTERVAL_MS = 60 * 1000;
+const OPS_COUNTER_KEY = "ops_counter";
+
+interface PersistedOpsCounter {
+  day: string;
+  reads: number;
+  writes: number;
+}
+
+/** Persist the current in-memory Prisma ops counter into the SQLite backup. */
+export function persistOpsCounter(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const snapshot: PersistedOpsCounter = {
+      day: getIstDayKey(),
+      reads: dbOpsCounter.reads,
+      writes: dbOpsCounter.writes,
+    };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      OPS_COUNTER_KEY,
+      JSON.stringify(snapshot),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist ops counter failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Restore the persisted Prisma ops counter into memory IF it was persisted
+ * for the same IST day the process is currently on. Stale (yesterday) or
+ * missing snapshots are ignored so a fresh day starts at zero.
+ */
+export function restoreOpsCounter(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [OPS_COUNTER_KEY]);
+    if (!result.length || !result[0].values.length) return;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return;
+    const persisted = JSON.parse(raw) as PersistedOpsCounter;
+    if (persisted.day !== getIstDayKey()) return;
+    dbOpsCounter.reads = Math.max(dbOpsCounter.reads, persisted.reads || 0);
+    dbOpsCounter.writes = Math.max(dbOpsCounter.writes, persisted.writes || 0);
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore ops counter failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Start a background timer that snapshots the Prisma ops counter AND the
+ * per-type DB error counts into SQLite every 60s. Idempotent. Called from
+ * instrumentation.ts at boot.
+ */
+export function startOpsCounterPersistence(): void {
+  if (state.opsPersistTimer) return;
+  state.opsPersistTimer = setInterval(() => {
+    persistOpsCounter();
+    persistDbErrorCounts();
+  }, OPS_PERSIST_INTERVAL_MS);
+}
+
+/** Stop the ops-counter persistence timer. For graceful shutdown / tests. */
+export function stopOpsCounterPersistence(): void {
+  if (state.opsPersistTimer) {
+    clearInterval(state.opsPersistTimer);
+    state.opsPersistTimer = null;
+  }
+}
+
+/**
+ * Test hook — reset the backup layer to a fresh (not-ready) state so tests can
+ * exercise re-initialization / retry paths deterministically. Clears timers
+ * and mutates the shared state object IN PLACE (a naive `g.__sqliteBackup = …`
+ * replacement would orphan the module's captured `state` binding).
+ */
+export function resetSqliteStateForTests(): void {
+  stopRecoveryProbe();
+  stopOpsCounterPersistence();
+  state.db = null;
+  state.ready = false;
+  state.syncing = false;
+  state.prismaAvailable = true;
+  state.lastSyncAt = null;
+  state.lastProbeAt = null;
+  state.syncHistory = [];
+  _instance = null;
+  _initPromise = null;
+}
+
+// ---------------------------------------------------------------------------
+// DB error-count persistence (v3.21.1)
+// ---------------------------------------------------------------------------
+// The per-type DB error summary (lib/prisma.ts dbErrorCounts) also lives only
+// in memory, so a deploy/restart would zero the dashboard buckets even though
+// the ring-buffer error log (last 50) is empty too. Same pattern as the ops
+// counter: snapshot into `_backup_meta` key `db_error_counts` every 60s and
+// restore after init when the persisted day matches today (IST). Writes go to
+// the local SQLite only — zero Prisma ops added.
+
+const DB_ERROR_COUNTS_KEY = "db_error_counts";
+
+interface PersistedDbErrorCounts {
+  day: string;
+  counts: Record<DbErrorType, number>;
+}
+
+/** Persist the current in-memory Prisma DB error counts into the SQLite backup. */
+export function persistDbErrorCounts(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const snapshot: PersistedDbErrorCounts = {
+      day: getIstDayKey(),
+      counts: { ...dbErrorCounts.counts },
+    };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      DB_ERROR_COUNTS_KEY,
+      JSON.stringify(snapshot),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist db error counts failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Restore the persisted per-type DB error counts into memory IF they were
+ * persisted for the same IST day the process is currently on. Stale (yesterday)
+ * or missing snapshots are ignored so a fresh day starts at zero.
+ */
+export function restoreDbErrorCounts(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [DB_ERROR_COUNTS_KEY]);
+    if (!result.length || !result[0].values.length) return;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return;
+    const persisted = JSON.parse(raw) as PersistedDbErrorCounts;
+    if (persisted.day !== getIstDayKey()) return;
+    const merged = persisted.counts || {};
+    for (const key of Object.keys(dbErrorCounts.counts) as DbErrorType[]) {
+      const persistedValue = merged[key];
+      if (typeof persistedValue === "number" && persistedValue > (dbErrorCounts.counts[key] || 0)) {
+        dbErrorCounts.counts[key] = persistedValue;
+      }
+    }
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore db error counts failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sync Prisma -> SQLite
 // ---------------------------------------------------------------------------
 
@@ -383,6 +781,37 @@ export async function syncFromPrisma(): Promise<void> {
   try {
     const db = state.db;
     const syncErr: string[] = [];
+
+    // --- Sync daily price snapshots (latest row per ticker) ---
+    totalRows += await syncTable(db, "daily_price_snapshot", async () => {
+      const rows = await prisma.$queryRaw<Array<{
+        ticker: string;
+        tradeDate: Date;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number | null;
+      }>>`
+        SELECT DISTINCT ON (ticker) ticker, "tradeDate", open, high, low, close, volume
+        FROM daily_prices
+        ORDER BY ticker, "tradeDate" DESC
+      `;
+      return {
+        columns: "symbol, trade_date, open, high, low, close, volume, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?",
+        rows: rows.map((r) => [
+          r.ticker.toUpperCase(),
+          r.tradeDate.toISOString().split("T")[0],
+          Number(r.open ?? 0),
+          Number(r.high ?? 0),
+          Number(r.low ?? 0),
+          Number(r.close ?? 0),
+          r.volume != null ? Number(r.volume) : 0,
+          new Date().toISOString(),
+        ]),
+      };
+    });
 
     // --- Sync latest recommendation runs (last 30 days) ---
     totalRows += await syncTable(db, "daily_recommendation_run", async () => {
@@ -794,6 +1223,63 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    // --- Daily price snapshot (tier-2 quote read; zero Prisma ops) ---
+    getDailyPriceSnapshot(symbol: string): Record<string, unknown> | null {
+      try {
+        const rows = db.exec(
+          "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_price_snapshot WHERE symbol = ? LIMIT 1",
+          [symbol.toUpperCase()],
+        );
+        if (!rows.length || !rows[0].values.length) return null;
+        const cols = rows[0].columns;
+        const vals = rows[0].values[0];
+        const r: Record<string, unknown> = {};
+        cols.forEach((c, i) => (r[c] = vals[i]));
+        return {
+          symbol: r.symbol as string,
+          tradeDate: r.trade_date as string,
+          open: Number(r.open ?? 0),
+          high: Number(r.high ?? 0),
+          low: Number(r.low ?? 0),
+          close: Number(r.close ?? 0),
+          volume: Number(r.volume ?? 0),
+        };
+      } catch (err) {
+        logger.error({ msg: "SQLite: getDailyPriceSnapshot failed", symbol, error: err instanceof Error ? err.message : String(err) });
+        return null;
+      }
+    },
+
+    setDailyPriceSnapshot(rec): void {
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO daily_price_snapshot (symbol, trade_date, open, high, low, close, volume, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol) DO UPDATE SET
+             trade_date = excluded.trade_date,
+             open = excluded.open,
+             high = excluded.high,
+             low = excluded.low,
+             close = excluded.close,
+             volume = excluded.volume,
+             updated_at = excluded.updated_at`,
+        );
+        stmt.run([
+          rec.symbol.toUpperCase(),
+          rec.tradeDate,
+          rec.open,
+          rec.high,
+          rec.low,
+          rec.close,
+          rec.volume,
+          new Date().toISOString(),
+        ]);
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: setDailyPriceSnapshot failed", symbol: rec.symbol, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
     // --- Corporate actions ---
     getCorporateActions(limit = 500): Array<Record<string, unknown>> {
       try {
@@ -925,6 +1411,8 @@ function createFallback(db: Database): SqliteFallback {
     // --- Health status ---
     getHealthStatus(): HealthStatus {
       const budget = Number(process.env.DB_WRITE_BUDGET) || 8_000;
+      const planLimit = Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000;
+      const totalOperations = dbOpsCounter.reads + dbOpsCounter.writes;
 
       // Count rows in each table
       const tables: Record<string, number> = {};
@@ -955,6 +1443,9 @@ function createFallback(db: Database): SqliteFallback {
           lastProbeAt: state.lastProbeAt,
           reads: dbOpsCounter.reads,
           writes: dbOpsCounter.writes,
+          totalOperations,
+          planLimit,
+          planOperationsRemaining: Math.max(0, planLimit - totalOperations),
           writeBudget: budget,
           writeBudgetExceeded: dbOpsCounter.writes >= budget,
           writeBudgetRemaining: Math.max(0, budget - dbOpsCounter.writes),
@@ -970,5 +1461,9 @@ function createFallback(db: Database): SqliteFallback {
     },
 
     syncFromPrisma,
+    persistOpsCounter,
+    restoreOpsCounter,
+    persistDbErrorCounts,
+    restoreDbErrorCounts,
   };
 }

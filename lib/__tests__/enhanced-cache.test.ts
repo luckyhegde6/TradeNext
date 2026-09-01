@@ -57,9 +57,10 @@ describe('Enhanced Cache System', () => {
 
       const result = await enhancedCache.getWithCache(cacheConfig, fetchFn);
 
+      // Fix C: NodeCache.set() TTL is in SECONDS; getRecommendedTTL() returns ms.
       expect(mockHotCache.get).toHaveBeenCalledWith('nse:stock:SBIN:quote');
       expect(fetchFn).toHaveBeenCalled();
-      expect(mockHotCache.set).toHaveBeenCalledWith('nse:stock:SBIN:quote', mockData, 120000);
+      expect(mockHotCache.set).toHaveBeenCalledWith('nse:stock:SBIN:quote', mockData, 120); // 120000ms → 120s
       expect(result).toEqual(mockData);
     });
 
