@@ -18,9 +18,9 @@ feature: "v3.21.1-db-health-ops-visibility"
 
 ## Handoff Required?
 
-**Yes — code + tests + docs complete on `main`; commit pending user decision (no auto-commit/tag/deploy).** 7 modified files + 10 docs files, uncommitted:
+**Branch `feat/db-health-ops-visibility` — committed `4c47348` + pushed; PR NOT created (user did not request). Offer PR to user.**
 - **v3.21.1 — DB Health ops visibility**: live-site "SQLite Not Ready" FIX (`next.config.ts` `serverExternalPackages: ['sql.js']` + `lib/sqlite.ts` `resolveSqlWasm()` → `initSqlJs({ locateFile })`); IO-count reconciliation (user-approved "Display + persist" — `getIstDayKey` shared source in `lib/prisma.ts`, `persistOpsCounter()`/`restoreOpsCounter()` key `ops_counter` in `_backup_meta` w/ IST-day guard + `Math.max` merge + 60s timer from `instrumentation.ts`); `/api/admin/db-health` returns `totalOperations`/`planLimit`/`planOperationsRemaining` + persists; UI 6th "Total Ops Today" card + Plan Usage bar + >80% badge.
-- **Verification**: suite **920 pass / 4 skip** (was 917/4, +3); `npx jest --testPathPatterns="sqlite.test"` → 20/20; tsc **46 = baseline** (0 new production errors). No schema change → no migration.
+- **Verification**: committed + pushed; post-commit full suite **66 suites, 920 pass / 4 skip** (47.7s); pre-commit hooks passed (tsc production clean, no baseline pollution). No schema change → no migration.
 - **Docs updated (all)**: AGENTS.md v3.21.1 row, root CHANGELOG.md row, .agents/CHANGELOG.md index, versions-v3.21.md v3.21.1 section, TODO.md, Primer.md, agent-memory.md, Lessons.md #95, session-todos.md, handoff latest.md, session `2026-09-02-db-health-ops-visibility/`.
 - **Other open workstream (unrelated)**: v3.21.0 (`feat/stock-analysis-skill`) also awaiting user commit/PR decision.
 - **Next**: stage + commit → push main (includes `5156eb3`) + push branch → create PR to main.

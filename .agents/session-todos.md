@@ -10,7 +10,9 @@ Branch: `main` (7 modified files, uncommitted)
 - [x] UI: 6th "Total Ops Today" stat card + "Plan Operations Usage" bar (reads vs writes vs plan, remaining, footnote) + "Plan Ops n% Used" badge > 80% — DONE
 - [x] Tests: `sqlite.test.ts` mock fixes (`getIstDayKey`, `exec()` column projection, `INSERT OR REPLACE`) + 3 new tests — **suite 920 pass / 4 skip (was 917/4), tsc 46 = baseline** — DONE
 - [x] Docs: AGENTS.md/CHANGELOG/versions-v3.21.md/TODO/Primer/agent-memory/Lessons(#95)/session-todos + session `2026-09-02-db-health-ops-visibility/` (decisions + flow) — DONE
-- [ ] Present commit/PR decision to user (no auto-commit/push/merge) — PENDING
+- [x] User decision: separate branch → commit → test → push — **COMMITTED `4c47348` + PUSHED `origin/feat/db-health-ops-visibility`** (PR NOT created — user didn't request; offer at next step)
+  - Branch: `feat/db-health-ops-visibility` (off main, 20 files, +451/−62)
+  - Full suite post-commit: **66 suites, 920 pass / 4 skip** (47.7s); pre-commit hooks passed (tsc production clean)
 
 ## Completed This Session
 - [x] Verified code diff (7 files, +277/−10) — clean, secrets-free
