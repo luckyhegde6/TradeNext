@@ -82,6 +82,55 @@ There is no `v3.21.0` deploy gate note beyond "user merges PR so Netlify rebuild
 
 > **Date**: Sep 02 2026 · **Branch**: `main` (direct, no branch) · **Suite**: 920 pass / 4 skip (+3 vs 917) · **tsc**: 46 = baseline (0 production errors)
 
+## Follow-up increment (same version): per-type DB-error summary + lazy SQLite re-init
+
+> **Suite**: 932 pass / 4 skip (+12 vs 920) · **tsc**: 46 = baseline (0 new production errors) · committed `4c47348` + docs `47e6677`, pushed `origin/feat/db-health-ops-visibility` (increment uncommitted)
+
+### Problem
+
+The ops-counter work showed "total operations" but gave no visibility into **what kind of DB errors** the app is hitting. The ring-buffer `getDbErrorLog()` (v3.20.2) lists individual failures, but there was no rolled-up per-type summary (plan-limit vs timeout vs Accelerate-proxy vs connection vs write-budget) that survives process restarts — the DB Health page couldn't answer "how many of today's failures were plan-limit holds vs transient network blips?". Separately, `initSqliteBackup()` ran only once at boot — if the WASM resolve or initial Prisma sync failed *once* (temp hiccup), SQLite stayed **"Not Ready" forever** with no retry path.
+
+### Solution
+
+**(1) Error classifier** — `lib/db-utils.ts` gains `classifyDbError(error)` returning a `DbErrorType` union (`plan_limit` | `timeout` | `accelerate_proxy` | `connection` | `write_budget` | `other`) with ordered checks (non-Error→other; P6003/hold/plan-limit→plan_limit; "write budget exceeded"→write_budget; P2024/P1008/ETIMEDOUT/name-timeout/request|gateway timeout→timeout; Accelerate proxy messages/"Invalid invocation"/"Bad Gateway"/"Service Unavailable"/"engine is not ready"/"query engine"→accelerate_proxy; P1001/P1002/P1017/ECONN*/refused/reset/aborted/socket/prepared-statement/operational/enotfound/getaddrinfo/tls/certificate/network/"fetch failed"→connection; else other). **Latest-first order matters** — an unreadable connection error must not be swallowed by an earlier generic bucket.
+
+**(2) Per-type counts** — `lib/prisma.ts` adds a globalThis `dbErrorCounts` (`__dbErrorCounts` = `{_day, counts}` with lazy IST-day rollover — bump clears `_day`, `getDbErrorCounts()` reseeds lazily). `recordDbError()` now classifies every recorded failure and bumps its bucket; `getDbErrorCounts()` returns a copy (callers can't mutate the singleton).
+
+**(3) SQLite persistence (same pattern as the ops counter)** — `lib/sqlite.ts`: `persistDbErrorCounts()`/`restoreDbErrorCounts()` store key `db_error_counts` in `_backup_meta` tagged with the IST day key; restore ignores snapshots from a different day and merges per-key with `Math.max`; the **same 60s timer** as `persistOpsCounter()` persists both snapshots; restore runs at init + after initial sync.
+
+**(4) Lazy on-demand init** — NEW `ensureSqliteBackup()`: module-level `_initPromise` with `.finally` reset — a failed/first init is **re-tried on the next call**, never throws, so SQLite can never be permanently stuck "Not Ready" after a temp WASM/DB hiccup. `/api/admin/db-health` GET + POST call it first.
+
+**(5) Test hook** — `resetSqliteStateForTests()` stops both timers and nulls `state` fields **IN PLACE** (replacing the `g.__sqliteBackup` global would orphan the module's captured `state` binding) plus re-nulls `_instance`/`_initPromise`.
+
+**(6) UI** — per-type summary chips strip on `db-health/page.tsx` above the Recent DB Errors table: "plan_limit" + "connection" red with ring when >0, "timeout"/"accelerate_proxy"/"write_budget" amber, "other" gray; an error total; IST-day footnote.
+
+### Files Modified (increment)
+
+| File | Change |
+|------|--------|
+| `lib/db-utils.ts` | NEW `DbErrorType` + `classifyDbError()` (ordered checks); imports extended |
+| `lib/prisma.ts` | globalThis `dbErrorCounts` (`__dbErrorCounts`), `seedErrorCounts()`, lazy IST-day rollover, `recordDbError()` classifies + bumps, exports `getDbErrorCounts()` |
+| `lib/sqlite.ts` | `persistDbErrorCounts()`/`restoreDbErrorCounts()` (key `db_error_counts`, IST-day guard + per-key `Math.max` merge, same 60s tick); NEW `ensureSqliteBackup()`; `resetSqliteStateForTests()`; interface + `createFallback` wiring |
+| `app/api/admin/db-health/route.ts` | GET + POST call `ensureSqliteBackup()` first; GET returns `dbErrorSummary {day, counts}` |
+| `app/admin/utils/db-health/page.tsx` | per-type chips strip (`DB_ERROR_META`) + error total + IST-day footnote above Recent DB Errors |
+| `lib/__tests__/db-utils.test.ts` | NEW `classifyDbError` describe (7 cases incl. real prod Accelerate message, benign P2021/P2002/P2025→other, non-Error→other) |
+| `lib/__tests__/sqlite.test.ts` | prisma mock gains `dbErrorCounts`; +5 tests (error-count roundtrip, stale-day via mocked `getIstDayKey`, Math.max merge, ensure-ready, re-init after reset) |
+
+### Key Design Decisions
+
+1. **Classifier ordered checks, latest-first**: an invalid-invocation that ALSO contains a timeout keyword must land in the narrower `accelerate_proxy` bucket.
+2. **Per-key `Math.max` restore merge**: mirrors the ops counter — a newer snapshot never reduces any bucket.
+3. **`resetSqliteStateForTests()` mutates in place**: module owns a captured `state` binding; reassigning `g.__sqliteBackup` breaks it — null fields, don't replace the object.
+4. **Lazy re-init via `_initPromise` finally-reset**: failed init is retryable by the next caller — resilience without a background reaper.
+
+### Verification (increment)
+
+- `npx jest lib/__tests__/db-utils.test.ts lib/__tests__/sqlite.test.ts` → both files pass (48 tests).
+- Full `npx jest` → **932 pass / 4 skip** (was 920/4, +12; 4 skips = pre-existing client-cache IndexedDB tests).
+- `npx tsc --noEmit` → **46 errors, ALL pre-existing** test-file typing noise; **0 new production errors**.
+
+---
+
 ## Problem
 
 Two live-site/perspective gaps on the DB Health dashboard (`/admin/utils/db-health`):
