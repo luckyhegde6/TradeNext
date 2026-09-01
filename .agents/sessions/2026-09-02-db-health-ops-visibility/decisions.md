@@ -1,0 +1,16 @@
+# Decisions — 2026-09-02 (DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix)
+
+## Decisions
+1. **Scope = DB Health ops visibility** (v3.21.1): fix the live-site "SQLite Not Ready" on `/admin/utils/db-health` (sql.js WASM never located) AND reconcile the IO-count gap between the authoritative Prisma dashboard Total Operations and the in-memory `dbOpsCounter` which resets on every deploy.
+2. **WASM fix (root cause: sql.js is a native/WebAssembly module)**: add `'sql.js'` to `serverExternalPackages` in `next.config.ts` (exclude from webpack) + a `resolveSqlWasm()` locator in `lib/sqlite.ts` (`node_modules/sql.js/dist` → `public/`, default `sql-wasm.wasm`) wired into `initSqlJs({ locateFile })`. Netlify ships node_modules at runtime and publishes `public/`, so the WASM resolves in both local and prod.
+3. **IO-count reconciliation — user chose the "Display + persist" approach**: (a) DISPLAY the authoritative Total Operations + Plan Usage (limit from env `DB_PLAN_LIMIT_OPS`, default 10,000) in the DB Health UI with an honest footnote (Prisma dashboard authoritative · counter restored from SQLite snapshot · resets on deploy); (b) PERSIST the in-memory counter to the SQLite `_backup_meta` table (key `ops_counter`) every 60s and restore on boot so it survives deploys.
+4. **IST-day guard + `Math.max` merge on restore** (`lib/sqlite.ts`): a snapshot from a DIFFERENT IST day is discarded (counter must reset daily, never replay yesterday's usage); a same-day snapshot merges with `Math.max` so a newer snapshot never REDUCES the count (deploy racing a persist tick can't shrink it).
+5. **`getIstDayKey` exported from `lib/prisma.ts`** as the single IST-day-key source shared with sqlite — the two layers cannot disagree on the daily reset boundary.
+6. **Persist on every GET of `/api/admin/db-health`** (plus after POST sync): the dashboard is the primary consumer, so reading it keeps the snapshot warm without a separate writer.
+7. **UI**: stat grid 5→6 cards ("Total Ops Today" — reads+writes, threshold colors >90 red / >70 amber), a "Plan Operations Usage" bar (reads vs writes stacked vs plan limit + remaining count + italic footnote), and an amber "Plan Ops n% Used" warning badge at >80%.
+8. **Test-infra mock semantics fixes** (`lib/__tests__/sqlite.test.ts`): mock `exec()` projects only the requested SELECT columns (real sql.js returns just `value`; the mock returned all → `LIMIT 1` picked the stale row) and the INSERT handler implements `INSERT OR REPLACE` (drop same-PK rows — otherwise a second persist duplicates the key row and breaks the roundtrip). Added `getIstDayKey` to the prisma mock.
+9. **No schema change** → no migration needed. Work is on `main` directly (7 modified files, uncommitted) — commit on explicit user request only; no auto-push/deploy.
+
+## Meta
+- Never `migrate dev` locally (no `_prisma_migrations` ledger). No schema change this session.
+- Verification: full suite **920 pass / 4 skip** (was 917/4, +3 new sqlite tests); tsc **46 = baseline** (0 new production errors; all 46 pre-existing test-only typing noise).

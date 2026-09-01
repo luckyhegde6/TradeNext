@@ -1,43 +1,35 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260828-stock-analysis-skill"
+session_id: "sess-20260902-db-health-ops-visibility"
 agent: "system"
-timestamp: "2026-08-28T00:00:00Z"
+timestamp: "2026-09-02T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260827-db-health-price-cache"
+parent_session: "sess-20260828-stock-analysis-skill"
 child_sessions: []
-checkpoint: "v3.21.0-implemented-915-pass-tsc-46-baseline-code-ready-commit-pr-pending-user"
+checkpoint: "v3.21.1-implemented-920-pass-tsc-46-baseline-code-ready-docs-updated-commit-pr-pending-user"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: v3.21.0 Professional Equity Research Decision Engine on branch `feat/stock-analysis-skill` — deep upgrade of v3.18.0 AI Investment Intelligence: 8-level verdict + conviction/10 + 12-section institutional memo + evidence discipline + management DNA + valuation zones + bull/base/bear + contrarian test + portfolio action + honest data gaps + optional raw-text document ingestion (annual-report/concall textareas, 50KB cap). Backward compatible (no DB migration).
-- **Branch**: `feat/stock-analysis-skill` (off `main`, clean). PR #107 on `feat/plan-limit-resilience` is a SEPARATE open workstream (playwright-debug) — unrelated.
+- **Task**: v3.21.1 DB Health ops visibility — on `main` (7 modified files, uncommitted): (1) live-site bug FIX `/admin/utils/db-health` "SQLite Not Ready" (sql.js WASM never located → `next.config.ts` `serverExternalPackages: ['sql.js']` + `lib/sqlite.ts` `resolveSqlWasm()` → `initSqlJs({ locateFile })`); (2) IO-count reconciliation (user-approved **"Display + persist"**): `lib/prisma.ts` exports `getIstDayKey`; `lib/sqlite.ts` `persistOpsCounter()`/`restoreOpsCounter()` (key `ops_counter` in `_backup_meta`, IST-day guard + `Math.max` merge) + 60s `startOpsCounterPersistence()` (globalThis) booted from `instrumentation.ts`; `/api/admin/db-health` GET returns `totalOperations`/`planLimit` (`DB_PLAN_LIMIT_OPS` default 10,000)/`planOperationsRemaining` + persists (POST sync too); UI 6th "Total Ops Today" card + "Plan Operations Usage" bar + "Plan Ops n% Used" badge >80%.
+- **Branch**: `main` (direct — no feature branch). v3.21.0 (`feat/stock-analysis-skill`) is a SEPARATE workstream awaiting user commit/PR decision.
 
 ## Progress
-- [x] Phase 1 types: `lib/services/intelligenceTypes.ts` — `Verdict` (8 levels), `EvidenceLabel`, `MarketPhase`, `EvidencePoint`, `ManagementDna`, `ValuationZones`, `RiskItem`, `ContrarianView`, `PortfolioAction`; expanded `IntelligenceAnalysis` with all new fields OPTIONAL `?`; `ShareholdingData.others` required. Legacy rows + test literals stay type-valid.
-- [x] Phase 2: NEW `lib/services/document/normalize.ts` — `normalizeDocumentText(content, maxLen=50_000)`, `DOCUMENT_MAX_LEN = 50_000`, truncation suffix, whitespace collapse, never throws. NO `import "server-only"` (not a declared dependency — resolves up to gardenVerse's throwing copy and breaks Jest; Lesson 92).
-- [x] Phase 3: `lib/services/ai/intelligence-prompt.ts` — legacy `buildIntelligencePrompt`/`parseIntelligenceResponse` KEPT unchanged (18 legacy tests pass); added `StockAnalysisDocuments` + `buildStockAnalysisPrompt(input, documents?)` + `parseStockAnalysisResponse(raw)` (8-verdict, full memo, legacy BUY→BUY/HOLD/SELL collapse, confidence derived from conviction×10 when missing, clamps).
-- [x] Phase 4: orchestrator `lib/services/ai/intelligence.ts` — documents path + audit metadata `modelUsed/verdict/conviction/confidence/hasDocuments/partialData`; whitespace-only docs → `hasDocuments:false` + no prompt block (Lesson 93).
-- [x] Phase 5: `lib/services/intelligence/adapters.ts` — `fetchTechnicalsData` window 90→280 days for `sma200` best-effort ("needs 250+ bars").
-- [x] Phase 6: `app/api/company/[ticker]/intelligence/route.ts` — POST Zod `{ force?, documents?: { annualReport?, concall? } }` (each max 50_000, 400 invalid); audit `hasDocuments`.
-- [x] Phase 7 UI: `VerdictCard` (8-verdict color/emoji + conviction bar), 11 new section components (ExecutiveThesis, FundamentalScore, ManagementDna, TechnicalStructure, ValuationZones, ShareholdingAnalysis, Contrarian, PortfolioAction, DataGapsBanner, + rewritten RiskCatalystMatrix RiskItem[]); rewritten `IntelligencePanel` (legacy fallbacks) + `CompanyIntelligence` (doc textareas). Kept: TechnicalSummary/FundamentalInsights/ValuationView/NewsCatalystList/ShareholdingTrend/CorporateActionsSummary/ScenarioAnalysis/ExecutiveSummary.
-- [x] Phase 8 tests: NEW `stock-analysis-prompt.test.ts` (21) + `document-normalize.test.ts` (9) + `intelligence.test.ts` +3 (13 total). Targeted run `npx jest document-normalize stock-analysis-prompt intelligence-prompt intelligence --silent` → **57/57 PASS**. Full suite → **66 suites, 915 pass / 4 skip** (+32, was 883/4). tsc → **46 = baseline** (0 new production errors).
-- [x] Phase 9 docs: `.agents/sessions/2026-08-28-stock-analysis-skill/decisions.md` + `flow.md`; `.agents/changelog/versions-v3.21.md` (created); `.agents/CHANGELOG.md` + root `CHANGELOG.md` + `AGENTS.md` + `TODO.md` v3.21.0 rows; `Primer.md` status + Session 20 entry; `agent-memory.md` entry; `Lessons.md` #92 + #93 + update log; `session-todos.md` (this session).
+- [x] Code: `next.config.ts`, `lib/prisma.ts`, `lib/sqlite.ts`, `instrumentation.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `lib/__tests__/sqlite.test.ts` (7 files, +277/−10).
+- [x] Tests: `sqlite.test.ts` mock fixes (`getIstDayKey`, `exec()` column projection, `INSERT OR REPLACE` semantics) + 3 new tests (health totals, persist/restore roundtrip, persist no-throw). `npx jest --testPathPatterns="sqlite.test"` → **20/20**. Full suite → **920 pass / 4 skip** (+3, was 917/4). tsc → **46 = baseline** (0 new production errors).
+- [x] Docs: AGENTS.md v3.21.1 row; `.agents/CHANGELOG.md` index + `.agents/changelog/versions-v3.21.md` v3.21.1 section; root CHANGELOG.md row; TODO.md row; Primer.md status; agent-memory.md entry; Lessons.md #95 + update log; session-todos.md; session `2026-09-02-db-health-ops-visibility/` (decisions + flow).
 
 ## Decisions
-- Deep IN-PLACE upgrade of the v3.18.0 pipeline (no duplicate pipeline), per user.
-- Backward compatible, NO DB migration: legacy prompt/parser kept; all new `IntelligenceAnalysis` fields optional `?`; legacy JSON parses onto the 8-level enum (BUY/SELL/HOLD valid members); `riskFactors` now `RiskItem[]`; `confidence = conviction*10` when missing.
-- `normalize.ts` does NOT `import "server-only"` (non-dependency → parent-path throw → Jest breaks); convention-comment only.
-- `hasDocuments` derived from NORMALIZED content, not object existence (whitespace-only → false).
-- Evidence labels & dataGaps: never fabricate; missing data surfaced in `dataGaps` + DataGapsBanner.
-- Docs (pre-pasted `.md`/`.txt`) only, 50KB cap each, appended as secondary-unverified prompt sections — no MarkItDown/PDF.
-- No auto commit/push/merge without explicit user say-so. Version = v3.21.0.
+- "Display + persist" for the IO-count gap (user-approved): Prisma dashboard Total Operations is authoritative; app counter restored from SQLite snapshot; honest UI footnote.
+- IST-day guard on restore (counter must reset daily, never replay yesterday) + `Math.max` merge (newer snapshot never reduces the count).
+- `getIstDayKey` exported from `lib/prisma.ts` — single day-key source shared with sqlite.
+- Persist on every GET of `/api/admin/db-health` (dashboard keeps the snapshot warm) + after POST sync.
+- No schema change → no migration. No auto commit/push/merge without explicit user say-so. Version = v3.21.1.
 
 ## Blockers
-- (none) — code + tests + docs complete. Awaiting user commit/PR decision (no auto-commit).
+- (none) — code + tests + docs complete. Awaiting user commit/PR decision (no auto-commit). Post-deploy: live-verify `/admin/utils/db-health` on Netlify (SQLite Ready + Total Ops restored).
 - Separate workstream (unrelated): PR #107 (https://github.com/luckyhegde6/TradeNext/pull/107) open on `feat/plan-limit-resilience`; `feat/db-health-price-cache` v3.20.2 commit/push/PR pending.
 - External (prod, not this session): Prisma Postgres hold until Sep 1; Netlify deploy blocked until Prisma Postgres extension removed.
 

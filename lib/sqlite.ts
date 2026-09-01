@@ -17,15 +17,37 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
+import { existsSync } from "fs";
+import path from "path";
 import initSqlJs, { type Database } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError } from "@/lib/db-utils";
-import { dbOpsCounter } from "@/lib/prisma";
+import { dbOpsCounter, getIstDayKey } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the sql.js WASM binary path at runtime.
+ *
+ * Rationale: `sql.js` is kept as a `serverExternalPackage` in next.config.ts
+ * so `require("sql.js")` loads from real `node_modules` and the module's own
+ * default `locateFile` works. As a belt-and-suspenders fallback (bundled
+ * builds, other deploy layouts), explicitly resolve the file from the two most
+ * likely runtime locations before letting sql.js use its default.
+ */
+function resolveSqlWasm(file: string): string {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", "sql.js", "dist", file),
+    path.join(process.cwd(), "public", file),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return file;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g = globalThis as any;
@@ -39,6 +61,7 @@ if (!g.__sqliteBackup) {
     lastProbeAt: null as string | null,
     syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
+    opsPersistTimer: null as ReturnType<typeof setInterval> | null,
   };
 }
 const state: {
@@ -50,6 +73,7 @@ const state: {
   lastProbeAt: string | null;
   syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
   probeTimer: ReturnType<typeof setInterval> | null;
+  opsPersistTimer: ReturnType<typeof setInterval> | null;
 } = g.__sqliteBackup;
 
 // ---------------------------------------------------------------------------
@@ -69,6 +93,9 @@ export interface HealthStatus {
     lastProbeAt: string | null;
     reads: number;
     writes: number;
+    totalOperations: number;
+    planLimit: number;
+    planOperationsRemaining: number;
     writeBudget: number;
     writeBudgetExceeded: boolean;
     writeBudgetRemaining: number;
@@ -107,6 +134,10 @@ export interface SqliteFallback {
   getHealthStatus(): HealthStatus;
   /** Trigger a sync from Prisma -> SQLite. */
   syncFromPrisma(): Promise<void>;
+  /** Persist the Prisma ops counter snapshot into SQLite (`_backup_meta`). */
+  persistOpsCounter(): void;
+  /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
+  restoreOpsCounter(): void;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -288,7 +319,7 @@ export async function initSqliteBackup(): Promise<void> {
   if (state.db) return;
 
   try {
-    const SQL = await initSqlJs();
+    const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
     const db = new SQL.Database();
     state.db = db;
 
@@ -300,12 +331,21 @@ export async function initSqliteBackup(): Promise<void> {
 
     state.ready = true;
     _instance = createFallback(db);
+    // Restore the persisted Prisma ops counter (same IST day) so the admin
+    // dashboard survives restarts/deploys on the same day.
+    restoreOpsCounter();
     logger.info({ msg: "SQLite backup initialized" });
 
-    // Sync from Prisma on startup (non-blocking)
+    // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
+    // after the sync completes so the dashboard reflects the latest state.
     await syncFromPrisma().catch((err) => {
       logger.error({ msg: "SQLite initial sync failed", error: err instanceof Error ? err.message : String(err) });
     });
+    try {
+      persistOpsCounter();
+    } catch {
+      // non-fatal
+    }
 
     // Start background recovery probe
     startRecoveryProbe();
@@ -363,6 +403,83 @@ export function stopRecoveryProbe(): void {
   if (state.probeTimer) {
     clearInterval(state.probeTimer);
     state.probeTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prisma ops-counter persistence
+// ---------------------------------------------------------------------------
+// The Prisma plan limit counts ALL operations (reads + writes), but the
+// in-memory `dbOpsCounter` resets on every process restart / deploy, so the
+// admin dashboard never matches the Prisma dashboard's day totals. We persist
+// a snapshot of the counter into the SQLite backup (key `ops_counter`) every
+// 60s and restore it after init when the persisted day matches today (IST).
+// Writes go to the local SQLite only -- zero Prisma ops added.
+
+const OPS_PERSIST_INTERVAL_MS = 60 * 1000;
+const OPS_COUNTER_KEY = "ops_counter";
+
+interface PersistedOpsCounter {
+  day: string;
+  reads: number;
+  writes: number;
+}
+
+/** Persist the current in-memory Prisma ops counter into the SQLite backup. */
+export function persistOpsCounter(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const snapshot: PersistedOpsCounter = {
+      day: getIstDayKey(),
+      reads: dbOpsCounter.reads,
+      writes: dbOpsCounter.writes,
+    };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      OPS_COUNTER_KEY,
+      JSON.stringify(snapshot),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist ops counter failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Restore the persisted Prisma ops counter into memory IF it was persisted
+ * for the same IST day the process is currently on. Stale (yesterday) or
+ * missing snapshots are ignored so a fresh day starts at zero.
+ */
+export function restoreOpsCounter(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [OPS_COUNTER_KEY]);
+    if (!result.length || !result[0].values.length) return;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return;
+    const persisted = JSON.parse(raw) as PersistedOpsCounter;
+    if (persisted.day !== getIstDayKey()) return;
+    dbOpsCounter.reads = Math.max(dbOpsCounter.reads, persisted.reads || 0);
+    dbOpsCounter.writes = Math.max(dbOpsCounter.writes, persisted.writes || 0);
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore ops counter failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Start a background timer that snapshots the Prisma ops counter into SQLite
+ * every 60s. Idempotent. Called from instrumentation.ts at boot.
+ */
+export function startOpsCounterPersistence(): void {
+  if (state.opsPersistTimer) return;
+  state.opsPersistTimer = setInterval(() => {
+    persistOpsCounter();
+  }, OPS_PERSIST_INTERVAL_MS);
+}
+
+/** Stop the ops-counter persistence timer. For graceful shutdown / tests. */
+export function stopOpsCounterPersistence(): void {
+  if (state.opsPersistTimer) {
+    clearInterval(state.opsPersistTimer);
+    state.opsPersistTimer = null;
   }
 }
 
@@ -925,6 +1042,8 @@ function createFallback(db: Database): SqliteFallback {
     // --- Health status ---
     getHealthStatus(): HealthStatus {
       const budget = Number(process.env.DB_WRITE_BUDGET) || 8_000;
+      const planLimit = Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000;
+      const totalOperations = dbOpsCounter.reads + dbOpsCounter.writes;
 
       // Count rows in each table
       const tables: Record<string, number> = {};
@@ -955,6 +1074,9 @@ function createFallback(db: Database): SqliteFallback {
           lastProbeAt: state.lastProbeAt,
           reads: dbOpsCounter.reads,
           writes: dbOpsCounter.writes,
+          totalOperations,
+          planLimit,
+          planOperationsRemaining: Math.max(0, planLimit - totalOperations),
           writeBudget: budget,
           writeBudgetExceeded: dbOpsCounter.writes >= budget,
           writeBudgetRemaining: Math.max(0, budget - dbOpsCounter.writes),
@@ -970,5 +1092,7 @@ function createFallback(db: Database): SqliteFallback {
     },
 
     syncFromPrisma,
+    persistOpsCounter,
+    restoreOpsCounter,
   };
 }

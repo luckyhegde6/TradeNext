@@ -32,6 +32,9 @@ interface DbHealthData {
     ops: {
       reads: number;
       writes: number;
+      totalOperations: number;
+      planLimit: number;
+      planOperationsRemaining: number;
       writeBudget: number;
       writeBudgetExceeded: boolean;
       writeBudgetRemaining: number;
@@ -218,6 +221,9 @@ export default function DbHealthPage() {
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
     : 0;
+  const planOpsPercent = prisma.ops.planLimit > 0
+    ? Math.round((prisma.ops.totalOperations / prisma.ops.planLimit) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -274,6 +280,12 @@ export default function DbHealthPage() {
             Write Budget Exceeded
           </span>
         )}
+        {planOpsPercent > 80 && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            <ExclamationTriangleIcon className="w-4 h-4" />
+            Plan Ops {planOpsPercent}% Used
+          </span>
+        )}
         <StatusBadge
           ok={!dailyPriceCache.lastError}
           label={dailyPriceCache.lastError ? "Price Cache Error" : "Price Cache OK"}
@@ -281,7 +293,7 @@ export default function DbHealthPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <StatCard
           label="Prisma Latency"
           value={prisma.healthy ? `${prisma.latencyMs}ms` : "N/A"}
@@ -302,6 +314,13 @@ export default function DbHealthPage() {
           sub={`${budgetPercent}% of budget used`}
           icon={CircleStackIcon}
           color={prisma.ops.writeBudgetExceeded ? "bg-red-500" : "bg-blue-500"}
+        />
+        <StatCard
+          label="Total Ops Today"
+          value={prisma.ops.totalOperations.toLocaleString()}
+          sub={`${prisma.ops.planLimit.toLocaleString()} plan limit · ${planOpsPercent}%`}
+          icon={CircleStackIcon}
+          color={planOpsPercent > 90 ? "bg-red-500" : planOpsPercent > 70 ? "bg-amber-500" : "bg-indigo-500"}
         />
         <StatCard
           label="Cached Prices"
@@ -342,6 +361,35 @@ export default function DbHealthPage() {
           </span>
           <span>{prisma.ops.writeBudgetRemaining.toLocaleString()} remaining</span>
         </div>
+      </div>
+
+      {/* Plan ops bar — reads + writes vs Prisma plan limit */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-3">
+          Plan Operations Usage (Reads + Writes — {prisma.ops.dayKey})
+        </h3>
+        <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+          <div
+            className={`h-4 rounded-full transition-all duration-500 ${
+              planOpsPercent > 90
+                ? "bg-red-500"
+                : planOpsPercent > 70
+                  ? "bg-amber-500"
+                  : "bg-emerald-500"
+            }`}
+            style={{ width: `${Math.min(planOpsPercent, 100)}%` }}
+          />
+        </div>
+        <div className="flex justify-between mt-2 text-xs text-gray-500 dark:text-slate-400">
+          <span>
+            {prisma.ops.totalOperations.toLocaleString()} / {prisma.ops.planLimit.toLocaleString()} ops
+            <span className="ml-2 text-gray-400">({prisma.ops.reads.toLocaleString()} reads · {prisma.ops.writes.toLocaleString()} writes)</span>
+          </span>
+          <span>{prisma.ops.planOperationsRemaining.toLocaleString()} remaining</span>
+        </div>
+        <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+          Prisma dashboard is authoritative. This counter is restored from a persisted SQLite snapshot on boot (60s interval) — resets on every deploy.
+        </p>
       </div>
 
       {/* Daily Price Cache */}

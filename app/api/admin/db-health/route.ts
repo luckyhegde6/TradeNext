@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog } from "@/lib/prisma";
+import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey } from "@/lib/prisma";
 import { getSqliteFallback } from "@/lib/sqlite";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
@@ -39,6 +39,9 @@ export async function GET() {
   const sqlite = getSqliteFallback();
   const sqliteHealth = sqlite?.getHealthStatus() ?? null;
 
+  // Persist the ops counter snapshot so it survives restarts/deploys
+  sqlite?.persistOpsCounter();
+
   // Table row counts from Prisma (if healthy)
   let prismaTableCounts: Record<string, number> = {};
   if (prismaHealthy) {
@@ -64,9 +67,7 @@ export async function GET() {
   }
 
   // Refresh day key if rollover happened
-  const now = new Date();
-  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  const currentDay = ist.toISOString().split("T")[0];
+  const currentDay = getIstDayKey();
   if (dbOpsCounter._day !== currentDay) {
     dbOpsCounter.reads = 0;
     dbOpsCounter.writes = 0;
@@ -90,6 +91,9 @@ export async function GET() {
       ops: {
         reads: dbOpsCounter.reads,
         writes: dbOpsCounter.writes,
+        totalOperations: dbOpsCounter.reads + dbOpsCounter.writes,
+        planLimit: Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000,
+        planOperationsRemaining: Math.max(0, (Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000) - dbOpsCounter.reads - dbOpsCounter.writes),
         writeBudget: WRITE_BUDGET_CONFIG,
         writeBudgetExceeded: isDbWriteBudgetExceeded(),
         writeBudgetRemaining: Math.max(0, WRITE_BUDGET_CONFIG - dbOpsCounter.writes),
@@ -152,6 +156,8 @@ export async function POST(req: Request) {
 
   try {
     await sqlite.syncFromPrisma();
+    // Persist ops counter so the snapshot reflects the post-sync state
+    sqlite.persistOpsCounter();
     const health = sqlite.getHealthStatus();
     return NextResponse.json({
       success: true,

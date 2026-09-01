@@ -111,6 +111,9 @@ const todayKey = (): string => {
   const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
   return ist.toISOString().split("T")[0];
 };
+/** Shared IST day key (YYYY-MM-DD) — reused by lib/sqlite.ts so the persisted
+ * ops-counter snapshot stays in the same day-space as the in-memory counter. */
+export const getIstDayKey = todayKey;
 if (!g.__dbOpsCounter || g.__dbOpsCounter._day !== todayKey()) {
   g.__dbOpsCounter = { reads: 0, writes: 0, _day: todayKey() };
 }

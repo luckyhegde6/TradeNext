@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-08-28 (v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration — suite 917 pass / 4 skip; tsc 46 = baseline; docs updated, commit pending user)
+2026-09-02 (v3.21.1 — DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix — suite 920 pass / 4 skip; tsc 46 = baseline; docs updated, commit pending user)
 
 ---
 
 ## Current Project Status
+
+### v3.21.1 — DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix (Sep 02 2026) — ✅ CODE + TESTS + DOCS VERIFIED, READY TO COMMIT
+**Branch**: `main` (direct, uncommitted 7-file working tree).
+**Why**: (1) Live-site bug — `/admin/utils/db-health` showed "SQLite Not Ready": sql.js is a native/WebAssembly module and its `sql-wasm.wasm` was never located, so `initSqliteBackup()` never completed → the whole SQLite fallback layer was dead on Netlify. (2) IO-count gap — Prisma dashboard Total Operations (authoritative, counts reads+writes through the Accelerate proxy vs the 10K ops/day plan limit) diverged from the in-memory `dbOpsCounter` which resets on every deploy. User chose the **"Display + persist"** approach.
+**Fix**: (1) WASM — `next.config.ts` `serverExternalPackages: ['sql.js']` + `lib/sqlite.ts` `resolveSqlWasm()` (`node_modules/sql.js/dist` → `public/`) wired into `initSqlJs({ locateFile })`. (2) Persistence — `lib/prisma.ts` exports `getIstDayKey` (shared day-key source); `lib/sqlite.ts` `persistOpsCounter()`/`restoreOpsCounter()` (key `ops_counter` in `_backup_meta`, IST-day guard + `Math.max` merge) + 60s `startOpsCounterPersistence()` (globalThis) booted from `instrumentation.ts`; restore at init + after initial sync. `/api/admin/db-health` GET returns `totalOperations`/`planLimit` (env `DB_PLAN_LIMIT_OPS`, default 10,000)/`planOperationsRemaining` + persists; POST sync persists too. UI: 6th "Total Ops Today" stat card + "Plan Operations Usage" bar (reads vs writes vs plan, remaining, footnote: Prisma dashboard authoritative · restored from SQLite snapshot · resets on deploy) + "Plan Ops n% Used" badge > 80%. (3) Test-infra mock semantics (`sqlite.test.ts`): `exec()` projects only requested columns; INSERT implements `INSERT OR REPLACE` (PK = first column); `getIstDayKey` in mock. +3 new tests (health totals, persist/restore roundtrip, persist no-throw).
+**Tests**: `npx jest --testPathPatterns="sqlite.test"` → 20/20; full suite **920 pass / 4 skip** (was 917/4, +3); tsc **46 = baseline** (0 new production errors).
+**Docs**: AGENTS.md v3.21.1 row, CHANGELOG index + versions-v3.21.md v3.21.1 section, TODO.md row, this Primer, agent-memory, Lessons (#95), session-todos.
+**Status**: Code + tests + docs verified; **commit pending user** (no auto-commit/push/deploy). After commit/deploy, live-verify `/admin/utils/db-health` on Netlify shows SQLite Ready + Total Ops. Known: `versions-v3.21.md` detail lives in `.agents/changelog/`.
 
 ### v3.20.4 — Plan-limit breaker false-positive FIX + missing `intelligence_cache` migration (Aug 28 2026) — ✅ CODE + TESTS + DOCS VERIFIED, READY TO COMMIT
 **Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 + playwright-debug + v3.21.0 on PR #107).
