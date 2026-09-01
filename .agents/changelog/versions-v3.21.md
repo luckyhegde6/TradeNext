@@ -179,3 +179,99 @@ Two live-site/perspective gaps on the DB Health dashboard (`/admin/utils/db-heal
 - Full `npx jest` → **920 pass / 4 skip** (+3 vs 917 baseline; 4 skips = pre-existing client-cache IndexedDB tests).
 - `npx tsc --noEmit` → **46 errors, ALL pre-existing** test-file typing noise; **0 new production errors**.
 - (Deploy verification pending — commit not yet made; live Netlify check after user deploys.)
+
+---
+
+# v3.21.2 — Stock-quote tiering (cache → SQLite → Prisma, zero after-hours DB writes) + TTL ms→s fix + SQLite backup/restore in db-health
+
+> Branch `feat/db-health-ops-visibility`. Committed `7409616` + pushed. One increment (Fix A–E + backup/restore). No schema change → no migration. Catalog of "what we did so far" + call-site map preserved in `.agents/plans/04-db-op-tiering-cache-sqlite-prisma.md`.
+
+## Problem
+
+- (A) **After-hours DB writes**: the quote path upserted `daily_prices` on every `getStockQuote` even when the market was closed — useless writes burning the 10K ops/day plan limit.
+- (B) **Closed-market Prisma reads**: with the market closed, every quote still hit Prisma (`dailyPrice.findFirst` + `aggregate` + possible `prevDayPrice`) → up to 3 Prisma reads per quote, DB-ops-inflated and unnecessary.
+- (C) **TTL units bug**: `lib/enhanced-cache.ts` passed `getRecommendedTTL(ms)` (a millisecond value) straight into `NodeCache.set(key, val, ttlSec)` where TTL is **seconds** → cache entries lived ~1000× too long (e.g. an intended 120s became ~33h).
+- (D) SSE poll `cacheDailyPrice` wrote price rows at end of day unconditionally (before the batch writer logic), duplicating write pressure.
+- (E) db-health `opsSnapshot` was taken AFTER the probe + table-count queries, so the "operations this request used" number was inflated by the request's own probes.
+- User directive: SQLite backup should be **exportable** (take → download) and **restorable** (upload → apply).
+
+## Solution
+
+### Fix A — `lib/stock-service.ts`
+`syncDailyPriceOnce(symbol, snap)` — upsert gated to **market-open only** + **seed-once per symbol per IST day** via a `globalThis.__dailyPriceSynced` Set keyed `${getIstDayKey()}:${symbol}`; failure retries (not added to the Set). The in-quote upsert IIFE now calls `syncDailyPriceOnce(...).catch(()=>{})`. → **Zero Prisma writes after hours.**
+
+### Fix B — `lib/sqlite.ts` (SQLite tier)
+- NEW `daily_price_snapshot` table in `SCHEMA_SQL` + columns `(ticker TEXT PRIMARY KEY, close REAL, change REAL, percentChange REAL, lastUpdatedAt TEXT)`.
+- `createFallback` methods `getDailyPriceSnapshot`/`setDailyPriceSnapshot` (upsert).
+- Exports `getSqliteDailyPriceSnapshot(symbol)`/`cacheDailyPriceSnapshot(symbol, snap)`.
+- `syncFromPrisma` seeds the snapshot table via `DISTINCT ON` latest row per ticker.
+- Closed-market read chain in `buildQuoteFromSnapshot`: **hotCache → SQLite snapshot (ZERO Prisma) → on snapshot miss only** `prisma.dailyPrice.findFirst` + `aggregate` (yearStats) + possible `prevDayPrice` (**2–3 Prisma reads only on snapshot miss**, then the result re-populates hotCache).
+
+### Fix C — `lib/enhanced-cache.ts`
+`Math.ceil(getRecommendedTTL(ms)/1000)` before `cacheInstance.set(...)` (NodeCache TTL is seconds). Log field `ttlSec`. Corrected `lib/__tests__/enhanced-cache.test.ts` assertion `120000` → `120` (with `// Fix C`).
+
+### Fix D — `lib/services/priceSyncService.ts`
+`cacheDailyPrice` gated by `isMarketAccumulationWindow()` (only accumulate during market hours); `cacheDailyPriceSnapshot` warms SQLite each tick → closed-market reads are cache→SQLite (zero Prisma).
+
+### Fix E — `app/api/admin/db-health/route.ts`
+`opsSnapshot` captured BEFORE the probe + table-count queries; the `/ops` block reports the pre-request baseline → honest per-request ops.
+
+### SQLite backup/restore (user directive)
+- `getSqlJs()`/`_SQL` module-let: lazy `initSqlJs` with `sql-wasm.wasm` from `public/` (sql.js is a WASM module; `next.config.ts` `serverExternalPackages: ['sql.js']`).
+- `exportSqliteBackup()` → `db.export()` → `Uint8Array` (in-memory DB — no physical file).
+- `restoreSqliteBackup(bytes)` → size cap (50MB) + magic header (`0x53514c69`) + required tables (`_backup_meta`, `daily_recommendation_run`) + build fresh `SQL.Database` → swap `state.db` via `_instance = createFallback(candidate)` (live DB swap).
+- POST `/api/admin/db-health` actions `backup` (returns base64) + `restore` (accepts base64).
+- `/admin/utils/db-health` Backup & Restore card: **Download** (`ArrowDownTrayIcon`, base64 decode → Blob → anchor) + **Apply Restore** (`<input type=file>`).
+
+## Files Created
+- `lib/__tests__/dbOpTiering.test.ts` — 9 tests.
+
+## Files Modified
+- `lib/stock-service.ts`, `lib/sqlite.ts`, `lib/enhanced-cache.ts`, `lib/__tests__/enhanced-cache.test.ts`, `lib/services/priceSyncService.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `.agents/handoffs/active/latest.md` + plan doc.
+
+## Key Design Decisions
+1. **SQLite snapshot is cache-tier, not source-of-truth**: it's seeded by `syncFromPrisma` (from Prisma `daily_prices`), never by live polling writes, so it can't diverge from the DB.
+2. **seed-once-per-day guard**: the quote path stops writing to `daily_prices` entirely during market hours after the first seed — only the market-hours SSE accumulator + batch writer (v3.20.2) write after hours.
+3. **2–3 Prisma reads only on snapshot miss**: the SQLite tier collapses the closed-market hot path to zero Prisma; the miss path is still bounded.
+4. **Backup = serialized `db.export()` bytes**: matches the in-memory sql.js architecture; restore validates header + required tables before live swap.
+
+## Verification
+- NEW `dbOpTiering.test.ts` → **9/9**: snapshot round-trip, upsert (update-not-duplicate + multiple symbols), backup export header, restore apply, reject-oversize, reject-missing-tables.
+- Full `npx jest` → **941 pass / 4 skip** (was 932/4, +9; 4 skips = pre-existing client-cache IndexedDB).
+- `npx tsc --noEmit` → **46 = exact baseline (0 new production errors)**.
+- Post-commit: `7409616`; the P1001 attribution note listed in the pre-commit summary intentionally deferred to the v3.21.3 increment.
+
+---
+
+# v3.21.3 — Prisma OpenTelemetry tracing (opt-in) + Prisma Compute P1001 false-alarm diagnosis
+
+> Branch `feat/db-health-ops-visibility`, on top of `7409616`. Commit pending user.
+
+## Problem
+1. **DB query attribution/tracing**: the monitoring stack had no visibility into which Prisma query engine operations were slow/which service path drove them. (User chose "Prisma attribution = `@prisma/instrumentation`" over a numeric plan-usage split.)
+2. **Prisma Compute "Deploy failed" false alarm** (repeated #21): "Prisma Compute Deploy failed … `P1001 Can't reach database server at db.prisma.io:5432`", 0s duration, 4h ago.
+
+## Diagnosis (P1001 — no code fix; user applies a Console toggle)
+- Netlify deploys are **HEALTHY**: latest `main` deploy `state: "ready"`, `error_message: null`, deploy_time ~60s; build = `npx prisma generate && npm run quickbuild` — **no `migrate deploy`** in the Netlify build.
+- The failing "Deploy" is **Prisma Compute's auto-schema-apply sandbox** running `migrate deploy` in a **network-isolated sandbox** that can't reach the direct-TCP `db.prisma.io:5432` host. Accelerate (`prisma+postgres://accelerate.prisma-data.net`) is a **query proxy only**; DDL needs direct TCP.
+- **Verified from local**: `npx prisma migrate status` via Accelerate → **`36 migrations … Database schema is up to date!`** → **ZERO pending** → auto-apply has **nothing to do** → pure false alarm.
+- **FIX (user-approved)**: Prisma Console → DB → **toggle OFF "apply schema changes automatically"**; new migrations applied via the v3.20.5 runbook (`npx prisma migrate deploy` + `DIRECT_URL` from an environment with DB egress, as done for `intelligence_cache`).
+- **No repo/code change** required. Tracked as **BUGS.md #13**.
+
+## OTel wiring
+- Installed (25 pkgs added): `@prisma/instrumentation@7.10.0` + `@opentelemetry/api`, `sdk-trace-node`, `resources`, `semantic-conventions`, `sdk-trace-base`, `instrumentation`, `context-async-hooks`, `exporter-trace-otlp-http`.
+- NEW `lib/otel.ts` `otelSetup()` — **STRICTLY opt-in**: returns `false` (hard no-op) unless `PRISMA_OTEL_ENABLED=1`; when enabled, sets `AsyncHooksContextManager`, builds `NodeTracerProvider` (resource attrs `OTEL_SERVICE_NAME`/`OTEL_SERVICE_VERSION`, default `tradenext`/`3.21.3`), adds a `SimpleSpanProcessor` to an `OTLPTraceExporter` at `OTEL_EXPORTER_OTLP_ENDPOINT` (**console fallback** when the endpoint is unset), `provider.register()`, then `registerInstrumentations({ tracerProvider, instrumentations: [new PrismaInstrumentation()] })`. Idempotent via globalThis `__tnPrismaOtelReady`; try/catch so OTel init can **never** crash the app.
+- Wired: `lib/prisma.ts` imports + calls `otelSetup()` at the **module top BEFORE** the `PrismaClient` singleton construction (PrismaInstrumentation wraps the query engine at client construction).
+- `.env.example`: `PRISMA_OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` / `OTEL_SERVICE_VERSION` documented under a v3.21.3 header.
+
+## Files Created
+- `lib/otel.ts`, `lib/__tests__/otel.test.ts` (4 tests).
+
+## Files Modified
+- `lib/prisma.ts` (import + `otelSetup()` call), `package.json` (+9 deps), `package-lock.json`, `.env.example`, `BUGS.md` (#13), `.agents/handoffs/active/latest.md`, plan doc, `AGENTS.md`, this changelog.
+
+## Verification
+- NEW `otel.test.ts` → **4/4** (unset→false, "0"→false, "1"→true, idempotent).
+- Full `npx jest` → **945 pass / 4 skip** (was 941/4, +4; OTel wiring is a no-op in tests since `PRISMA_OTEL_ENABLED` is unset).
+- `npx tsc --noEmit` → **46 = exact baseline (0 new)**; no errors in `lib/otel.ts` or `lib/prisma.ts`.
+- Commit + push pending user approval.

@@ -3,6 +3,12 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
+import { otelSetup } from './otel';
+
+// OTel must be initialized BEFORE the PrismaClient singleton is constructed
+// so PrismaInstrumentation can wrap the query engine (opt-in via
+// PRISMA_OTEL_ENABLED=1; no-op otherwise — see lib/otel.ts).
+otelSetup();
 import {
   isDbUnavailableError,
   isPlanLimitBreakerOpen,
