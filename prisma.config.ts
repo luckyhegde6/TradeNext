@@ -15,6 +15,20 @@ function getDatabaseUrl(): string {
     }
 }
 
+// DIRECT_URL holds the DIRECT connection string to Prisma Postgres
+// (postgres://USER:PASSWORD@db.prisma.io:5432/?sslmode=require). Accelerate
+// (prisma+postgres://accelerate.prisma-data.net) is a QUERY proxy — it cannot
+// run migrations/DDL, so Prisma Migrate (deploy/dev/db push) must connect
+// directly. When DIRECT_URL is unset, CLI ops fall back to getDatabaseUrl()
+// (local Docker + remote legacy configs keep working unchanged).
+function getDirectUrl(): string | undefined {
+    try {
+        return process.env.DIRECT_URL || env('DIRECT_URL') || undefined;
+    } catch {
+        return process.env.DIRECT_URL || undefined;
+    }
+}
+
 export default defineConfig({
     // path to your Prisma schema
     schema: 'prisma/schema.prisma',
@@ -26,8 +40,10 @@ export default defineConfig({
     },
 
     // supply the migration/runtime connection URL from env
-    // (you can use DATABASE_URL or DIRECT_DATABASE_URL depending on your setup)
+    // CLI operations (migrate/db push) use directUrl when set (required for
+    // Prisma Postgres via Accelerate); otherwise fall back to url.
     datasource: {
         url: getDatabaseUrl(),
+        ...(getDirectUrl() ? { directUrl: getDirectUrl() as string } : {}),
     },
 });
