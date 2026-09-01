@@ -293,3 +293,52 @@ The existing `P2002 → false` unit test passed only because it built `Object.as
 ## Notes
 - The external **prod** Prisma Postgres hold (if still active) is a separate concern that affects only the Accelerate path; Fix A means a transient/benign error on a **healthy** prod DB no longer freezes it for 5 minutes (previous false-positive risk now eliminated). After any hold lifts, still run `scripts/backfill-corporate-actions-prod.ts` (2,053 records).
 - No DB `migrate dev` run locally (the local DB has no ledger — destructive); the migration folder ships so **CI + prod `migrate deploy`** will create the table. Prod still needs the migration applied on next deploy.
+
+---
+
+## v3.20.5 — Prod deploy / migration runner FIX: `DIRECT_URL` support + `intelligence_cache` applied to prod
+
+> **Date**: Sep 01 2026 · **Branch**: follow-up to `feat/plan-limit-resilience` · **tsc**: 46 = exact baseline (0 new) · **Suite**: unchanged (no code logic touched)
+
+## Problem — every Prisma Dashboard auto-schema-apply deploy failed with P1001
+
+The Prisma Postgres **Dashboard auto-schema-apply sandbox** (`sandbox orchestrator starting for luckyhegde6/TradeNext@main … buildType=auto`, deploy `cmtczggjm71b43rdv0q84izs8`) ran `migrate deploy` and could NOT connect:
+
+```
+migrate deploy (engine=prisma-orm, target=unknown)
+Datasource 'db': PostgreSQL database 'postgres', schema 'public' at 'db.prisma.io:5432'
+Error: P1001: Can't reach database server at `db.prisma.io:5432`
+```
+
+## Root Cause
+
+The schema engine resolved the **Accelerate proxy** connection string (`prisma+postgres://accelerate.prisma-data.net/?api_key=…`) to the direct-TCP endpoint **`db.prisma.io:5432`** for the DDL connection and that endpoint was unreachable from the sandbox. **Accelerate is a query proxy only — it serves queries, not DDL/migration connections.** Migrations need a **direct** Postgres connection string, which the repo never supplied (schema has no `url`; `prisma.config.ts` returned only the Accelerate `DATABASE_URL`).
+
+## Fix — `prisma.config.ts`
+
+- NEW `getDirectUrl()`: reads `process.env.DIRECT_URL` then falls back to `env('DIRECT_URL')` (try/catch so missing env never throws), returns `undefined` when unset.
+- Datasource now:
+  ```ts
+  { url: getDatabaseUrl(), ...(getDirectUrl() ? { directUrl: getDirectUrl() as string } : {}) }
+  ```
+  → Prisma CLI / `migrate deploy` / `db push` / `migrate status` use the **direct URL** when `DIRECT_URL` is set (`db.prisma.io:5432` reachable), and fall back to previous behavior otherwise (local Docker via `DATABASE_URL`, Accelerate URL).
+- **Runtime app client is unaffected** — the Prisma client never reads `prisma.config.ts`; it still uses `lib/prisma.ts` URL selection (`ENVIRONMENT` / `USE_REMOTE_DB` / Accelerate).
+- `.env.example` documents `DIRECT_URL`: format `postgres://USER:PASSWORD@db.prisma.io:5432/?sslmode=require`, obtained from **Prisma Console → Database → Connections → Create connection** (direct).
+
+## Verification — migration applied to prod
+
+1. `npx prisma migrate status` through the **Accelerate URL from local env → connects and works** (36 migrations found, **1 pending**: `20260828000000_add_intelligence_cache`). The P1001 was specific to the dashboard **sandbox's** direct-TCP path — the Accelerate URL itself is a valid DDL path from this environment.
+2. Per user instruction ("use the DATABASE_REMOTE URL"), ran **`npx prisma migrate deploy`** → applied `20260828000000_add_intelligence_cache` to **prod** (purely additive: `CREATE TABLE "intelligence_cache"` + unique symbol index + `(symbol, expiresAt)` index — user-approved).
+3. Post-verify via remote Prisma client: `intelligence_cache` exists (0 rows), ledger `_prisma_migrations` = **36/36**, latest entries `20260828000000_add_intelligence_cache → 20260817000000_add_swing_signal → 20260816000000_add_swing_analysis_job`.
+4. `npx prisma validate` passes; `npx tsc --noEmit` = **46 = exact baseline, 0 new** (initial pre-fix baseline).
+
+## Files changed
+
+- `prisma.config.ts` — `getDirectUrl()` + conditional `directUrl` in the datasource.
+- `.env.example` — `DIRECT_URL` documented (line 8 area).
+
+## Notes
+
+- The dashboard sandbox will still fail **unless `DIRECT_URL` is set in the dashboard deploy/sandbox env** (Prisma Console → database → deploy settings) — the code now supports it; the sandbox just doesn't have a value yet. On Netlify, `netlify.toml` build is only `npx prisma generate && npm run quickbuild` (no migrate), so Netlify doesn't need it; setting it there is future-proofing.
+- Local dev DB (no ledger) remains on the local-Docker path — untouched. Do NOT `migrate dev` locally (destructive).
+- Still pending: `scripts/backfill-corporate-actions-prod.ts` (2,053 records) — prod data write, awaiting user approval.
