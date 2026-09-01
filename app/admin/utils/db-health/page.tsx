@@ -64,7 +64,29 @@ interface DbHealthData {
     isPostMarket: boolean;
   };
   dbErrors: DbErrorEntry[];
+  dbErrorSummary: {
+    day: string;
+    counts: {
+      plan_limit: number;
+      timeout: number;
+      accelerate_proxy: number;
+      connection: number;
+      write_budget: number;
+      other: number;
+    };
+  };
 }
+
+type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
+
+const DB_ERROR_META: Record<DbErrorKey, { label: string; chip: string }> = {
+  plan_limit: { label: "Plan Limit Hold", chip: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
+  timeout: { label: "Timeout", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  accelerate_proxy: { label: "Accelerate Proxy", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  connection: { label: "Connection", chip: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
+  write_budget: { label: "Write Budget", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
+  other: { label: "Other", chip: "bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-slate-300" },
+};
 
 function formatTimeAgo(dateStr: string | null): string {
   if (!dateStr) return "Never";
@@ -217,7 +239,8 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary } = data;
+  const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
     : 0;
@@ -437,6 +460,39 @@ export default function DbHealthPage() {
             </button>
           )}
         </div>
+
+        {/* Per-type day summary (v3.21.1) */}
+        <div className="mb-4">
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">
+            Errors today ({dbErrorSummary.day}) — {errorTotal.toLocaleString()} total
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(DB_ERROR_META) as DbErrorKey[]).map((key) => {
+              const count = dbErrorSummary.counts[key] ?? 0;
+              const meta = DB_ERROR_META[key];
+              const highlighted = key === "plan_limit" || key === "connection";
+              return (
+                <span
+                  key={key}
+                  title={`${meta.label} DB failures today`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${meta.chip} ${
+                    count > 0 && highlighted ? "ring-2 ring-red-400 dark:ring-red-500" : ""
+                  }`}
+                >
+                  {meta.label}
+                  <span className={`px-1.5 py-0.5 rounded-full text-xs ${count > 0 ? "bg-white/70 dark:bg-slate-900/70" : ""}`}>
+                    {count.toLocaleString()}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+            Day-scoped counts, persisted to the SQLite backup every 60s and restored on boot (IST day).
+            Clearing the ring buffer below does not reset these counts.
+          </p>
+        </div>
+
         {dbErrors.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-slate-400">No DB errors recorded this session.</p>
         ) : (

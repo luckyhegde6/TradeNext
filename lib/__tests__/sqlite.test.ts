@@ -140,6 +140,10 @@ jest.mock("@/lib/prisma", () => ({
   },
   dbOpsCounter: { reads: 42, writes: 8, _day: "2026-08-25" },
   getIstDayKey: () => "2026-08-25",
+  dbErrorCounts: {
+    _day: "2026-08-25",
+    counts: { plan_limit: 0, timeout: 0, accelerate_proxy: 0, connection: 0, write_budget: 0, other: 0 },
+  },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -522,6 +526,98 @@ describe("SQLite backup fallback", () => {
       // Restore originals
       dbOpsCounter.reads = prevReads;
       dbOpsCounter.writes = prevWrites;
+    });
+  });
+
+  describe("db error counts persist / restore roundtrip", () => {
+    it("persists per-type counts to SQLite and restores them on demand", async () => {
+      const { dbErrorCounts } = await import("@/lib/prisma");
+      const prev = { ...dbErrorCounts.counts };
+
+      dbErrorCounts.counts.plan_limit = 2;
+      dbErrorCounts.counts.timeout = 3;
+      dbErrorCounts.counts.accelerate_proxy = 1;
+      dbErrorCounts.counts.write_budget = 0;
+      dbErrorCounts.counts.other = 5;
+      const fb = getSqliteFallback()!;
+      fb.persistDbErrorCounts();
+
+      // Simulate a restart: zero the in-memory counts
+      dbErrorCounts.counts = { plan_limit: 0, timeout: 0, accelerate_proxy: 0, connection: 0, write_budget: 0, other: 0 };
+
+      fb.restoreDbErrorCounts();
+      expect(dbErrorCounts.counts.plan_limit).toBe(2);
+      expect(dbErrorCounts.counts.timeout).toBe(3);
+      expect(dbErrorCounts.counts.accelerate_proxy).toBe(1);
+      expect(dbErrorCounts.counts.connection).toBe(0);
+      expect(dbErrorCounts.counts.other).toBe(5);
+
+      // Restore originals for other tests
+      dbErrorCounts.counts = prev;
+    });
+
+    it("ignores stale (previous-day) persisted counts", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const prismaModule = require("@/lib/prisma");
+      const { dbErrorCounts } = await import("@/lib/prisma");
+      const prev = { ...dbErrorCounts.counts };
+      const originalKey = prismaModule.getIstDayKey;
+
+      try {
+        // Persist a snapshot stamped with YESTERDAY's day key
+        prismaModule.getIstDayKey = () => "2026-08-24";
+        dbErrorCounts.counts.connection = 9;
+        getSqliteFallback()!.persistDbErrorCounts();
+
+        // Now it is a new day: zero in-memory and restore → must NOT apply
+        prismaModule.getIstDayKey = () => "2026-08-25";
+        dbErrorCounts.counts = { plan_limit: 0, timeout: 0, accelerate_proxy: 0, connection: 0, write_budget: 0, other: 0 };
+        getSqliteFallback()!.restoreDbErrorCounts();
+        expect(dbErrorCounts.counts.connection).toBe(0);
+        expect(dbErrorCounts.counts.timeout).toBe(0);
+      } finally {
+        prismaModule.getIstDayKey = originalKey;
+        dbErrorCounts.counts = prev;
+      }
+    });
+
+    it("merges with Math.max instead of overwriting when both sides have counts", async () => {
+      const { dbErrorCounts } = await import("@/lib/prisma");
+      const prev = { ...dbErrorCounts.counts };
+
+      dbErrorCounts.counts.timeout = 4;
+      dbErrorCounts.counts.plan_limit = 1;
+      getSqliteFallback()!.persistDbErrorCounts();
+
+      // More errors accumulate before the restore runs
+      dbErrorCounts.counts.timeout = 6;
+      dbErrorCounts.counts.plan_limit = 0;
+
+      getSqliteFallback()!.restoreDbErrorCounts();
+      expect(dbErrorCounts.counts.timeout).toBe(6); // max(6, 4)
+      expect(dbErrorCounts.counts.plan_limit).toBe(1); // max(0, 1)
+
+      dbErrorCounts.counts = prev;
+    });
+  });
+
+  describe("ensureSqliteBackup (lazy on-demand init)", () => {
+    it("returns the ready fallback when already initialized", async () => {
+      const { ensureSqliteBackup } = await import("../sqlite");
+      const fb = await ensureSqliteBackup();
+      expect(fb).not.toBeNull();
+      expect(fb!.isReady()).toBe(true);
+    });
+
+    it("re-initializes on demand after a reset (retry path, never stuck disabled)", async () => {
+      const { ensureSqliteBackup, resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests();
+      expect(getSqliteFallback()).toBeNull();
+
+      const fb = await ensureSqliteBackup();
+      expect(fb).not.toBeNull();
+      expect(fb!.isReady()).toBe(true);
+      expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
     });
   });
 });

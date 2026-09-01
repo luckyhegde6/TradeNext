@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey } from "@/lib/prisma";
-import { getSqliteFallback } from "@/lib/sqlite";
+import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
+import { ensureSqliteBackup, getSqliteFallback } from "@/lib/sqlite";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
 
@@ -12,6 +12,7 @@ import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/p
  * - Prisma connectivity + ops counters + recent errors
  * - SQLite backup status + table row counts + sync history
  * - Daily price cache status (market-hours accumulator)
+ * - Per-type DB error summary (day-scoped, persisted to SQLite)
  */
 export async function GET() {
   const session = await auth();
@@ -35,12 +36,16 @@ export async function GET() {
     }
   }
 
-  // Get SQLite status
-  const sqlite = getSqliteFallback();
+  // Get SQLite status — ensure the backup layer is initialized first so a
+  // failed boot-time init is retried on demand instead of serving
+  // "SQLite Not Ready" forever (v3.21.1).
+  const sqlite = await ensureSqliteBackup();
   const sqliteHealth = sqlite?.getHealthStatus() ?? null;
 
-  // Persist the ops counter snapshot so it survives restarts/deploys
+  // Persist snapshots so the ops counter + per-type error counts survive
+  // restarts/deploys on the same IST day.
   sqlite?.persistOpsCounter();
+  sqlite?.persistDbErrorCounts();
 
   // Table row counts from Prisma (if healthy)
   let prismaTableCounts: Record<string, number> = {};
@@ -77,6 +82,9 @@ export async function GET() {
   // Recent DB errors from ring buffer
   const dbErrors = getDbErrorLog();
 
+  // Per-type DB error summary (day-scoped, persisted to SQLite)
+  const dbErrorSummary = getDbErrorCounts();
+
   // Daily price cache status
   const priceCacheStatus = getDailyPriceCacheStatus();
 
@@ -109,6 +117,7 @@ export async function GET() {
     },
     dailyPriceCache: priceCacheStatus,
     dbErrors,
+    dbErrorSummary,
   });
 }
 
@@ -149,15 +158,16 @@ export async function POST(req: Request) {
   }
 
   // Default: sync SQLite
-  const sqlite = getSqliteFallback();
+  const sqlite = await ensureSqliteBackup();
   if (!sqlite) {
     return NextResponse.json({ error: "SQLite backup not initialized" }, { status: 503 });
   }
 
   try {
     await sqlite.syncFromPrisma();
-    // Persist ops counter so the snapshot reflects the post-sync state
+    // Persist snapshots so the post-sync state survives restarts/deploys
     sqlite.persistOpsCounter();
+    sqlite.persistDbErrorCounts();
     const health = sqlite.getHealthStatus();
     return NextResponse.json({
       success: true,

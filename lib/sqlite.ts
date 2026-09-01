@@ -22,8 +22,8 @@ import path from "path";
 import initSqlJs, { type Database } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { isDbUnavailableError } from "@/lib/db-utils";
-import { dbOpsCounter, getIstDayKey } from "@/lib/prisma";
+import { isDbUnavailableError, type DbErrorType } from "@/lib/db-utils";
+import { dbOpsCounter, dbErrorCounts, getIstDayKey } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -138,6 +138,10 @@ export interface SqliteFallback {
   persistOpsCounter(): void;
   /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
   restoreOpsCounter(): void;
+  /** Persist the Prisma per-type DB error counts into SQLite (`_backup_meta`). */
+  persistDbErrorCounts(): void;
+  /** Restore the Prisma per-type DB error counts when they match today (IST). */
+  restoreDbErrorCounts(): void;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -153,6 +157,36 @@ export function getSqliteFallback(): SqliteFallback | null {
     return _instance;
   }
   return null;
+}
+
+let _initPromise: Promise<void> | null = null;
+
+/**
+ * Ensure the SQLite backup layer is initialized, retrying on demand.
+ *
+ * Unlike getSqliteFallback() (which just creates the object from an ALREADY
+ * initialized db), this actively drives init when the layer is not ready:
+ * boot-time init in instrumentation.ts can fail (e.g. sql.js WASM hiccup,
+ * schema race), and this lets the admin DB-health route re-trigger it on the
+ * next request instead of serving "SQLite Not Ready" forever. Idempotent —
+ * concurrent callers share one in-flight init; a failed attempt is NOT
+ * memoized so the next call retries. Never throws.
+ */
+export async function ensureSqliteBackup(): Promise<SqliteFallback | null> {
+  if (state.ready) return getSqliteFallback();
+  if (!_initPromise) {
+    _initPromise = initSqliteBackup()
+      .catch((err) => {
+        // initSqliteBackup already swallows its own errors; belt-and-suspenders
+        // so a rejected init never propagates to the admin route.
+        logger.error({ msg: "SQLite: ensure init failed", error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => {
+        _initPromise = null;
+      });
+  }
+  await _initPromise;
+  return getSqliteFallback();
 }
 
 // ---------------------------------------------------------------------------
@@ -332,8 +366,10 @@ export async function initSqliteBackup(): Promise<void> {
     state.ready = true;
     _instance = createFallback(db);
     // Restore the persisted Prisma ops counter (same IST day) so the admin
-    // dashboard survives restarts/deploys on the same day.
+    // dashboard survives restarts/deploys on the same day. Same for the
+    // per-type DB error counts (v3.21.1).
     restoreOpsCounter();
+    restoreDbErrorCounts();
     logger.info({ msg: "SQLite backup initialized" });
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
@@ -343,6 +379,7 @@ export async function initSqliteBackup(): Promise<void> {
     });
     try {
       persistOpsCounter();
+      persistDbErrorCounts();
     } catch {
       // non-fatal
     }
@@ -465,13 +502,15 @@ export function restoreOpsCounter(): void {
 }
 
 /**
- * Start a background timer that snapshots the Prisma ops counter into SQLite
- * every 60s. Idempotent. Called from instrumentation.ts at boot.
+ * Start a background timer that snapshots the Prisma ops counter AND the
+ * per-type DB error counts into SQLite every 60s. Idempotent. Called from
+ * instrumentation.ts at boot.
  */
 export function startOpsCounterPersistence(): void {
   if (state.opsPersistTimer) return;
   state.opsPersistTimer = setInterval(() => {
     persistOpsCounter();
+    persistDbErrorCounts();
   }, OPS_PERSIST_INTERVAL_MS);
 }
 
@@ -480,6 +519,86 @@ export function stopOpsCounterPersistence(): void {
   if (state.opsPersistTimer) {
     clearInterval(state.opsPersistTimer);
     state.opsPersistTimer = null;
+  }
+}
+
+/**
+ * Test hook — reset the backup layer to a fresh (not-ready) state so tests can
+ * exercise re-initialization / retry paths deterministically. Clears timers
+ * and mutates the shared state object IN PLACE (a naive `g.__sqliteBackup = …`
+ * replacement would orphan the module's captured `state` binding).
+ */
+export function resetSqliteStateForTests(): void {
+  stopRecoveryProbe();
+  stopOpsCounterPersistence();
+  state.db = null;
+  state.ready = false;
+  state.syncing = false;
+  state.prismaAvailable = true;
+  state.lastSyncAt = null;
+  state.lastProbeAt = null;
+  state.syncHistory = [];
+  _instance = null;
+  _initPromise = null;
+}
+
+// ---------------------------------------------------------------------------
+// DB error-count persistence (v3.21.1)
+// ---------------------------------------------------------------------------
+// The per-type DB error summary (lib/prisma.ts dbErrorCounts) also lives only
+// in memory, so a deploy/restart would zero the dashboard buckets even though
+// the ring-buffer error log (last 50) is empty too. Same pattern as the ops
+// counter: snapshot into `_backup_meta` key `db_error_counts` every 60s and
+// restore after init when the persisted day matches today (IST). Writes go to
+// the local SQLite only — zero Prisma ops added.
+
+const DB_ERROR_COUNTS_KEY = "db_error_counts";
+
+interface PersistedDbErrorCounts {
+  day: string;
+  counts: Record<DbErrorType, number>;
+}
+
+/** Persist the current in-memory Prisma DB error counts into the SQLite backup. */
+export function persistDbErrorCounts(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const snapshot: PersistedDbErrorCounts = {
+      day: getIstDayKey(),
+      counts: { ...dbErrorCounts.counts },
+    };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      DB_ERROR_COUNTS_KEY,
+      JSON.stringify(snapshot),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist db error counts failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Restore the persisted per-type DB error counts into memory IF they were
+ * persisted for the same IST day the process is currently on. Stale (yesterday)
+ * or missing snapshots are ignored so a fresh day starts at zero.
+ */
+export function restoreDbErrorCounts(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [DB_ERROR_COUNTS_KEY]);
+    if (!result.length || !result[0].values.length) return;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return;
+    const persisted = JSON.parse(raw) as PersistedDbErrorCounts;
+    if (persisted.day !== getIstDayKey()) return;
+    const merged = persisted.counts || {};
+    for (const key of Object.keys(dbErrorCounts.counts) as DbErrorType[]) {
+      const persistedValue = merged[key];
+      if (typeof persistedValue === "number" && persistedValue > (dbErrorCounts.counts[key] || 0)) {
+        dbErrorCounts.counts[key] = persistedValue;
+      }
+    }
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore db error counts failed", error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -1094,5 +1213,7 @@ function createFallback(db: Database): SqliteFallback {
     syncFromPrisma,
     persistOpsCounter,
     restoreOpsCounter,
+    persistDbErrorCounts,
+    restoreDbErrorCounts,
   };
 }

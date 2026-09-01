@@ -14,6 +14,7 @@ import {
   openPlanLimitBreaker,
   closePlanLimitBreaker,
   resetPlanLimitBreaker,
+  classifyDbError,
 } from "@/lib/db-utils";
 
 describe("isDbUnavailableError", () => {
@@ -113,6 +114,69 @@ describe("isDbUnavailableError", () => {
 
   it("recognizes the PlanLimitOpenError fail-fast rejection", () => {
     expect(isDbUnavailableError(new PlanLimitOpenError())).toBe(true);
+  });
+});
+
+describe("classifyDbError", () => {
+  it("classifies the Prisma Postgres account-hold error as plan_limit", () => {
+    const hold = Object.assign(
+      new Error("Invalid `prisma.notification.findMany()` invocation:\n\nThere is a hold on your account. Reason: planLimitReached. Please contact Prisma support if you think this is an error."),
+      { code: "P6003" },
+    );
+    expect(classifyDbError(hold)).toBe("plan_limit");
+    expect(classifyDbError(new Error("There is a hold on your account. Reason: planLimitReached."))).toBe("plan_limit");
+    expect(classifyDbError(new Error("Plan limit exceeded for your account"))).toBe("plan_limit");
+  });
+
+  it("classifies timeouts as timeout", () => {
+    expect(classifyDbError(Object.assign(new Error("Timed out during query execution"), { code: "P2024" }))).toBe("timeout");
+    expect(classifyDbError(Object.assign(new Error("Operations timed out"), { code: "P1008" }))).toBe("timeout");
+    expect(classifyDbError(Object.assign(new Error("boom"), { name: "PrismaQueryTimeoutError" }))).toBe("timeout");
+    expect(classifyDbError(Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }))).toBe("timeout");
+    expect(classifyDbError(new Error("Request timeout"))).toBe("timeout");
+  });
+
+  it("classifies the real prod Accelerate <-> Query Engine error as accelerate_proxy", () => {
+    // The exact message seen on prod (2026-09-02)
+    const err = new Error(
+      "Accelerate experienced an error communicating with your Query Engine. Please contact Prisma support if this error persists.",
+    );
+    expect(classifyDbError(err)).toBe("accelerate_proxy");
+    expect(classifyDbError(new Error("Invalid invocation"))).toBe("accelerate_proxy");
+    expect(classifyDbError(new Error("Bad Gateway"))).toBe("accelerate_proxy");
+    expect(classifyDbError(new Error("PrismaClientInitializationError: engine is not ready"))).toBe("accelerate_proxy");
+  });
+
+  it("classifies connection failures as connection", () => {
+    expect(classifyDbError(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }))).toBe("connection");
+    expect(classifyDbError(Object.assign(new Error("Can't reach database server"), { code: "P1001" }))).toBe("connection");
+    expect(classifyDbError(new Error("Connection refused"))).toBe("connection");
+    expect(classifyDbError(Object.assign(new Error("failed to connect to database: too many connections"), { code: "P1017" }))).toBe("connection");
+    // Undici socket-level fetch failures during probe
+    expect(classifyDbError(Object.assign(new Error("fetch failed"), { code: "UND_ERR_CONNECT_TIMEOUT" }))).toBe("connection");
+  });
+
+  it("classifies write-budget rejections as write_budget", () => {
+    expect(
+      classifyDbError(new Error("DB write budget exceeded (9123/8000 writes today). Try again tomorrow or set DB_WRITE_BUDGET env.")),
+    ).toBe("write_budget");
+    expect(classifyDbError(new Error("write budget exceeded (42/8000)"))).toBe("write_budget");
+  });
+
+  it("classifies benign Prisma request errors as other — never a DB-outage bucket", () => {
+    const shape = (message: string, code: string) =>
+      Object.assign(new Error(message), { code, name: "PrismaClientKnownRequestError" });
+    // P2021 table missing (intelligence_cache CI gap), P2002 unique, P2025 not-found
+    expect(classifyDbError(shape("The table `public.intelligence_cache` does not exist in the current database.", "P2021"))).toBe("other");
+    expect(classifyDbError(shape("Unique constraint failed on the fields: (`symbol`)", "P2002"))).toBe("other");
+    expect(classifyDbError(shape("An operation failed because it depends on one or more records that were required but not found.", "P2025"))).toBe("other");
+  });
+
+  it("handles non-Error inputs and plain errors as other", () => {
+    expect(classifyDbError(null)).toBe("other");
+    expect(classifyDbError(undefined)).toBe("other");
+    expect(classifyDbError("not an error")).toBe("other");
+    expect(classifyDbError(new Error("Something went wrong"))).toBe("other");
   });
 });
 

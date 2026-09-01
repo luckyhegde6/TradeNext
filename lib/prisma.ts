@@ -10,6 +10,8 @@ import {
   openPlanLimitBreaker,
   closePlanLimitBreaker,
   PlanLimitOpenError,
+  classifyDbError,
+  type DbErrorType,
 } from './db-utils';
 
 // Determine environment from ENVIRONMENT env var (defaults to 'development')
@@ -119,6 +121,41 @@ if (!g.__dbOpsCounter || g.__dbOpsCounter._day !== todayKey()) {
 }
 export const dbOpsCounter: { reads: number; writes: number; _day: string } = g.__dbOpsCounter;
 
+// ─── DB error counts by type (v3.21.1) ─────────────────────────────────────
+// Day-scoped (IST) counter of classified DB errors for the DB Health
+// dashboard's per-type summary. Every DB failure recorded via recordDbError()
+// also bumps ONE type bucket (classifyDbError is an exhaustive partition).
+// Counts live on globalThis (hot-reload + module-graph safety, mirrors
+// dbOpsCounter) and are persisted to the SQLite backup by lib/sqlite.ts under
+// the "_backup_meta" key "db_error_counts" so they survive process restarts.
+const DB_ERROR_TYPES: DbErrorType[] = [
+  "plan_limit",
+  "timeout",
+  "accelerate_proxy",
+  "connection",
+  "write_budget",
+  "other",
+];
+function seedErrorCounts(): Record<DbErrorType, number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seed: any = {};
+  for (const t of DB_ERROR_TYPES) seed[t] = 0;
+  return seed as Record<DbErrorType, number>;
+}
+if (!g.__dbErrorCounts || (g.__dbErrorCounts as { _day: string })._day !== todayKey()) {
+  g.__dbErrorCounts = { _day: todayKey(), counts: seedErrorCounts() };
+}
+export const dbErrorCounts: { _day: string; counts: Record<DbErrorType, number> } =
+  g.__dbErrorCounts;
+
+export function getDbErrorCounts(): { day: string; counts: Record<DbErrorType, number> } {
+  if (dbErrorCounts._day !== todayKey()) {
+    dbErrorCounts._day = todayKey();
+    dbErrorCounts.counts = seedErrorCounts();
+  }
+  return { day: dbErrorCounts._day, counts: { ...dbErrorCounts.counts } };
+}
+
 const WRITE_BUDGET = Number(process.env.DB_WRITE_BUDGET) || 8_000;
 
 export function isDbWriteBudgetExceeded(): boolean {
@@ -152,6 +189,14 @@ export function recordDbError(model: string, operation: string, error: unknown):
     message: error instanceof Error ? error.message : String(error),
   });
   if (dbErrorLog.length > DB_ERROR_BUFFER_SIZE) dbErrorLog.shift();
+
+  // Bump the typed day-scoped bucket (rollover to a fresh day first).
+  if (dbErrorCounts._day !== todayKey()) {
+    dbErrorCounts._day = todayKey();
+    dbErrorCounts.counts = seedErrorCounts();
+  }
+  const type = classifyDbError(error);
+  dbErrorCounts.counts[type] = (dbErrorCounts.counts[type] || 0) + 1;
 }
 
 export function getDbErrorLog(): DbErrorEntry[] {
