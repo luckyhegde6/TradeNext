@@ -4,7 +4,8 @@ import logger from "@/lib/logger";
 import { nseFetch } from "@/lib/nse-client";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
 import cache from "@/lib/cache";
-import { isDbUnavailableError } from "@/lib/db-utils";
+import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { recordRead } from "@/lib/services/readTier";
 import { getSqliteFallback } from "@/lib/sqlite";
 
 /** Module-level guard: prevent overlapping NSE refreshes. */
@@ -275,7 +276,21 @@ export async function GET(req: Request) {
       // Still trigger background NSE refresh (non-blocking, guarded)
       triggerNseRefresh(false);
       logger.debug({ msg: "CorporateActions: Serving from memory cache" });
+      recordRead("corp-actions.memory", { source: "memory", latencyMs: 0, rows: 1, hit: true });
       return NextResponse.json(cached);
+    }
+  }
+
+  // --- v3.23.x: SQLite-mirror fast path during a plan-limit hold ---
+  // Serve the SQLite corporate_action mirror directly WITHOUT any Prisma call
+  // (even a fast-fail breaker throw generates log noise). Prisma is only
+  // touched again on the 12h recovery sync or a manual force.
+  if (isPlanLimitBreakerOpen()) {
+    const sqlite = getSqliteFallback();
+    const actions = sqlite?.isReady() ? sqlite.getCorporateActions(500) : [];
+    if (actions.length) {
+      logger.warn({ msg: "CorporateActions: plan-limit breaker open — serving SQLite mirror" });
+      return NextResponse.json({ data: actions, source: "sqlite_mirror" });
     }
   }
 
@@ -294,6 +309,7 @@ export async function GET(req: Request) {
       }
     }
 
+    const _ca = performance.now();
     const actions = await prisma.corporateAction.findMany({
       where,
       orderBy: [
@@ -322,6 +338,12 @@ export async function GET(req: Request) {
         announcementDate: true,
         source: true,
       },
+    });
+    recordRead("corp-actions.prisma", {
+      source: "prisma",
+      latencyMs: Math.max(0, Math.round(performance.now() - _ca)),
+      rows: actions.length,
+      hit: false,
     });
 
     const formatted = actions.map(a => ({

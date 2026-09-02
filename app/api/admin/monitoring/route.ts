@@ -231,11 +231,25 @@ export async function GET(req: Request) {
       case "worker-logs": {
         // Worker task log files — written per executed task by the worker
         // engine (createTaskLogger → writeLog) into <cwd>/worker_logs.
-        const { getAllLogFiles, readLog } = await import("@/lib/services/worker/worker-logger");
+        const { getAllLogFiles, readLog, readAllLogs } = await import("@/lib/services/worker/worker-logger");
         if (searchParams.get("action") === "list") {
           const files = getAllLogFiles();
           logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
           return NextResponse.json({ files });
+        }
+
+        // v3.23.x: bulk download — stream every worker task log file as a
+        // single downloadable .log attachment (like the DB-log NDJSON export).
+        if (searchParams.get("action") === "download" || searchParams.get("download") === "true") {
+          const content = await readAllLogs();
+          const filename = `worker-logs-${new Date().toISOString().split("T")[0]}.log`;
+          logHttpRequest('GET', url, 200, Date.now() - startTime, ip, userAgent);
+          return new NextResponse(content, {
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "Content-Disposition": `attachment; filename="${filename}"`,
+            },
+          });
         }
 
         const taskId = searchParams.get("taskId");

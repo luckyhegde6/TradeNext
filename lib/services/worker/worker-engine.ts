@@ -4,7 +4,7 @@ import logger from "@/lib/logger";
 import { executeTask } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
-import { isDbUnavailableError } from "@/lib/db-utils";
+import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
@@ -205,6 +205,17 @@ async function pollAndExecute() {
     // "running" task never blocks new work.
     await maybeReap();
 
+    // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
+    // (account on hold / DB down), skip the pending-task discovery read
+    // entirely. The claim below (atomic updateMany) would fail-fast on the held
+    // DB anyway, so the findFirst is pure waste — and it was the direct source
+    // of the prod "Worker DB unavailable — backing off poll" noise every 30s ×
+    // 5 instances once the hold hit. Nothing can be claimed while Prisma is
+    // down; the poll simply no-ops and re-checks after the breaker closes
+    // (backoff handles the reschedule). All read-mirrors (worker_task etc.)
+    // stay servable from SQLite during the hold.
+    if (isPlanLimitBreakerOpen()) return;
+
     // 2. Pick up next pending task
     const task = await prisma.workerTask.findFirst({
         where: { status: "pending" },
@@ -301,6 +312,17 @@ async function pollAndExecute() {
  * Exported for tests and the cleanup tooling.
  */
 export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<{ reapedTasks: number; reapedRuns: number }> {
+    // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
+    // (account on hold / DB down), skip the read+sweep entirely and report
+    // "nothing reaped". The stale reaper exists to keep the QUEUE healthy when
+    // Prisma is UP; during a hold spraying read queries just adds to the
+    // breaker storm the prod logs showed ("Stale worker-task reap failed" every
+    // minute once the hold hit). Nothing runs while the DB is down, so nothing
+    // can go truly stale in a way that blocks a future run — ready to sweep the
+    // moment the breaker closes.
+    if (isPlanLimitBreakerOpen()) {
+        return { reapedTasks: 0, reapedRuns: 0 };
+    }
     const cutoff = new Date(Date.now() - staleMs);
     let reapedTasks = 0;
     let reapedRuns = 0;
@@ -489,6 +511,13 @@ export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
  */
 export async function checkScheduledJobs() {
     const now = new Date();
+
+    // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN,
+    // skip the cron-due read entirely — the prod "Cron daemon resync deferred
+    // (DB unavailable)" noise came from hammering a held DB every tick. Nothing
+    // can spawn while Prisma is down anyway; nextRun just stays put and ticks
+    // again once the breaker closes.
+    if (isPlanLimitBreakerOpen()) return;
 
     const dueJobs = await prisma.cronJob.findMany({
         where: {

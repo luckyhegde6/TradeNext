@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
-import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind } from "@/lib/sqlite";
-import { isDbUnavailableError } from "@/lib/db-utils";
+import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
+import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
 import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
+import { getReadMetrics } from "@/lib/services/readTier";
+import { getCacheMetrics } from "@/lib/cache";
+
+/**
+ * v3.23.x: the GET path performs NO Prisma reads (probe + table counts moved
+ * to a 12-hourly cadence / manual triggers). Prisma availability shown on the
+ * dashboard is the flag carried by the last 12h recovery-probe tick, surfaced
+ * via SQLite health state. When the mirror isn't ready we default to an
+ * optimistic `true` (request serving never blocks on Prisma availability).
+ */
+function statePrismaAvailableFallback(): boolean {
+  return true;
+}
 
 /**
  * GET /api/admin/db-health
@@ -16,10 +28,56 @@ import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
  * - Daily price cache status (market-hours accumulator)
  * - Per-type DB error summary (day-scoped, persisted to SQLite)
  */
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // v3.23.x DB-log export (user directive): support downloading the DB-log
+  // stream as files, exactly like server logs. Two shapes:
+  //   ?export=<kind>       -> serialize the CURRENT SQLite wb_* rows for
+  //                           api_request|server_log|audit_log as NDJSON.
+  //   ?archiveFile=<date>  -> a dated logs/db-logs/<date>.ndjson archive file.
+  const url = new URL(req.url);
+  const exportKind = url.searchParams.get("export");
+  const archiveFile = url.searchParams.get("archiveFile");
+
+  if (exportKind) {
+    const kind = ["api_request", "server_log", "audit_log"].includes(exportKind)
+      ? (exportKind as WriteBehindKind)
+      : null;
+    if (!kind) {
+      return NextResponse.json({ error: "export must be api_request | server_log | audit_log" }, { status: 400 });
+    }
+    const body = exportDbLogsAsNdjson(kind);
+    if (!body) {
+      return NextResponse.json({ error: `No pending SQLite rows for ${kind}` }, { status: 404 });
+    }
+    return new NextResponse(body, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Content-Disposition": `attachment; filename="db-${kind}-${new Date().toISOString().split("T")[0]}.ndjson"`,
+      },
+    });
+  }
+
+  if (archiveFile) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(archiveFile)) {
+      return NextResponse.json({ error: "archiveFile must be YYYY-MM-DD" }, { status: 400 });
+    }
+    const files = getDbLogFiles();
+    const hit = files.find((f) => f.date === archiveFile);
+    if (!hit) {
+      return NextResponse.json({ error: `No DB-log archive for ${archiveFile}` }, { status: 404 });
+    }
+    const lines = readDbLogFile(hit.path, 100000);
+    return new NextResponse(lines.join("\n") + (lines.length ? "\n" : ""), {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Content-Disposition": `attachment; filename="db-logs-${archiveFile}.ndjson"`,
+      },
+    });
   }
 
   // Refresh the day key first (rollover resets counts to the new IST day),
@@ -40,56 +98,29 @@ export async function GET() {
     day: dbOpsCounter._day,
   };
 
-  // Probe Prisma connectivity
-  let prismaHealthy = false;
-  let prismaLatencyMs = 0;
-  let prismaError: string | null = null;
-  try {
-    const start = Date.now();
-    await prisma.$queryRaw`SELECT 1`;
-    prismaLatencyMs = Date.now() - start;
-    prismaHealthy = true;
-  } catch (err) {
-    prismaError = err instanceof Error ? err.message : String(err);
-    if (!isDbUnavailableError(err)) {
-      prismaHealthy = true;
-    }
-  }
-
   // Get SQLite status — ensure the backup layer is initialized first so a
   // failed boot-time init is retried on demand instead of serving
   // "SQLite Not Ready" forever (v3.21.1).
   const sqlite = await ensureSqliteBackup();
   const sqliteHealth = sqlite?.getHealthStatus() ?? null;
 
+  // v3.23.x (user directive): the per-refresh Prisma probe + per-model table
+  // count() loop are REMOVED from the GET path. Prisma is now only touched at
+  // the 12-hourly recovery-sync and via explicit manual triggers (POST
+  // `probe_prisma` / `restore_counts`). The dashboard reads:
+  //   - the in-memory ops counter snapshot (zero Prisma ops),
+  //   - SQLite mirror table counts from getHealthStatus() (zero Prisma ops),
+  //   - the 12h-probe availability flag carried in SQLite health state.
+  // This removes the ~11 Prisma reads that every admin auto-refresh (30s) cost.
+  const prismaHealthy = sqliteHealth?.prisma.available ?? statePrismaAvailableFallback();
+
   // Persist snapshots so the ops counter + per-type error counts survive
   // restarts/deploys on the same IST day.
   sqlite?.persistOpsCounter();
   sqlite?.persistDbErrorCounts();
 
-  // Table row counts from Prisma (if healthy)
-  let prismaTableCounts: Record<string, number> = {};
-  if (prismaHealthy) {
-    const tables = [
-      "DailyRecommendationRun",
-      "DailyRecommendationStock",
-      "CorporateAction",
-      "ChartinkScreener",
-      "WorkerStatus",
-      "ServerLog",
-      "AuditLog",
-      "CronJob",
-      "WorkerTask",
-    ] as const;
-    for (const model of tables) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prismaTableCounts[model] = await (prisma as any)[model].count();
-      } catch {
-        prismaTableCounts[model] = -1;
-      }
-    }
-  }
+  // Table row counts served from the SQLite mirror (the read tier).
+  const prismaTableCounts: Record<string, number> = sqliteHealth?.sqlite.tables ?? {};
 
   // Recent DB errors from ring buffer
   const dbErrors = getDbErrorLog();
@@ -104,9 +135,9 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     prisma: {
       healthy: prismaHealthy,
-      latencyMs: prismaLatencyMs,
-      error: prismaError,
-      lastProbeAt: new Date().toISOString(),
+      latencyMs: null,
+      error: null,
+      lastProbeAt: sqliteHealth?.prisma.lastProbeAt ?? null,
       tableCounts: prismaTableCounts,
       ops: {
         reads: opsSnapshot.reads,
@@ -133,6 +164,18 @@ export async function GET() {
     // v3.22.0: write-behind queue stats + leader election status + liveness
     // heartbeats (SQLite-backed, zero Prisma footprint in the response path).
     writeBehind: getWriteBehindStats(),
+    // v3.23.x: dated DB-log archive files (logs/db-logs/<date>.ndjson) available
+    // for download — zero Prisma footprint (filesystem read only).
+    dbLogFiles: getDbLogFiles().map((f) => ({ date: f.date, size: f.size })),
+    // v3.23.x: read-tier + cache + SQLite latency telemetry. Zero Prisma
+    // (in-memory counters + lib/cache.ts NodeCache stats).
+    readTier: getReadMetrics(),
+    cache: {
+      metrics: getCacheMetrics(),
+      // cache utilisation (hit-rate) is per-process: NodeCache resets on every
+      // deploy/restart and flush, and most hot reads short-circuit at the
+      // SQLite mirror, so a low value is EXPECTED right after boot.
+    },
     leader: {
       self: LEADER_SELF,
       worker: await getLeaderInfo("worker"),
@@ -279,6 +322,29 @@ export async function POST(req: Request) {
     } catch (err) {
       return NextResponse.json(
         { error: "Log flush failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (action === "probe_prisma") {
+    // v3.23.x manual-trigger Prisma health check (the GET path is Prisma-free;
+    // this is the only on-demand way to force a connectivity probe). Updates
+    // the `prismaAvailable` flag the dashboard reflects.
+    try {
+      const probe = await probePrismaNow();
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_SYNC",
+        resource: "prisma-probe",
+        responseStatus: 200,
+        metadata: { available: probe.available, latencyMs: probe.latencyMs },
+      });
+      return NextResponse.json({ success: true, ...probe });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Prisma probe failed", detail: err instanceof Error ? err.message : String(err) },
         { status: 500 },
       );
     }

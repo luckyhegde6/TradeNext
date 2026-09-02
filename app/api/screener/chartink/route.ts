@@ -12,6 +12,8 @@ import {
   runChartinkScreenerById,
 } from "@/lib/services/chartinkUnifiedScreenerService";
 import { getSqliteFallback } from "@/lib/sqlite";
+import { isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { recordRead } from "@/lib/services/readTier";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,10 +38,33 @@ export async function GET() {
   try {
     const categories = getChartinkCategories();
     const registry = getChartinkTemplates();
-    const overviews = await getChartinkScreeners();
-    const overviewById = new Map<string, ChartinkScreenerOverview>(
-      overviews.map((o) => [o.id, o]),
-    );
+    const overviewById = new Map<string, ChartinkScreenerOverview>();
+
+    // v3.23.x: during a plan-limit hold, serve the SQLite mirror directly
+    // without any Prisma call (even a fast-fail breaker throw generates log
+    // noise). The catch block below remains the general DB-error fallback.
+    if (isPlanLimitBreakerOpen()) {
+      const sqlite = getSqliteFallback();
+      const screeners = sqlite?.isReady() ? sqlite.getChartinkScreeners() : [];
+      if (screeners.length) {
+        logger.warn({ msg: "Chartink templates: plan-limit breaker open — serving SQLite mirror" });
+        for (const s of screeners) {
+          overviewById.set(s.id as string, s as unknown as ChartinkScreenerOverview);
+        }
+      }
+    }
+
+    if (overviewById.size === 0) {
+      const _cs = performance.now();
+      const overviews = await getChartinkScreeners();
+      recordRead("screener.chartink.prisma", {
+        source: "prisma",
+        latencyMs: Math.max(0, Math.round(performance.now() - _cs)),
+        rows: overviews.length,
+        hit: false,
+      });
+      for (const o of overviews) overviewById.set(o.id, o);
+    }
 
     const templates = registry.map((t) => {
       const ov = overviewById.get(t.id);

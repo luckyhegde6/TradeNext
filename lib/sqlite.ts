@@ -17,13 +17,15 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
-import { existsSync } from "fs";
+import { existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { isDbUnavailableError, type DbErrorType } from "@/lib/db-utils";
+import { isDbUnavailableError, isPlanLimitBreakerOpen, type DbErrorType } from "@/lib/db-utils";
 import { dbOpsCounter, dbErrorCounts, getIstDayKey } from "@/lib/prisma";
+import { resolveLogsDir } from "@/lib/logger";
+import { recordRead } from "@/lib/services/readTier";
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -68,6 +70,7 @@ if (!g.__sqliteBackup) {
     syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
     opsPersistTimer: null as ReturnType<typeof setInterval> | null,
+    sqliteBytes: 0 as number,
     wbBuffer: [] as Array<{ kind: WriteBehindKind; row: Record<string, unknown> }>,
     wbLastFlushAt: null as string | null,
     wbLastFlushCounts: {} as Record<string, number>,
@@ -86,6 +89,7 @@ const state: {
   syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
   probeTimer: ReturnType<typeof setInterval> | null;
   opsPersistTimer: ReturnType<typeof setInterval> | null;
+  sqliteBytes: number;
   wbBuffer: Array<{ kind: WriteBehindKind; row: Record<string, unknown> }>;
   wbLastFlushAt: string | null;
   wbLastFlushCounts: Record<string, number>;
@@ -124,6 +128,8 @@ export interface HealthStatus {
     lastSyncAt: string | null;
     tables: Record<string, number>;
     recentSyncs: SyncResult[];
+    /** Approx in-memory footprint of the SQLite mirror (pure-JS sql.js heap). */
+    memoryBytes: number;
   };
 }
 
@@ -669,17 +675,28 @@ export async function initSqliteBackup(): Promise<void> {
 // Background recovery probe
 // ---------------------------------------------------------------------------
 
-const PROBE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+// v3.23.x (user directive): the Prisma recovery probe is now a 12-hourly
+// check. Since SQLite is the primary READ tier (market data, corporate
+// actions, screener, price cache, logs/audit are all served from the local
+// mirror at ZERO Prisma ops), Prisma availability no longer affects request
+// serving — the probe exists only to detect a held/recovered Prisma account
+// so a leader can re-sync the mirror. A 12h window is acceptable: the mirror
+// stays warm via the market-sync cron + write-behind promotion, and reads
+// degrade gracefully throughout. This removes the ~2 ops/min the 5-min probe
+// cost across instances (2880/day under the old cadence).
+const PROBE_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 /**
- * Start a background timer that probes Prisma every 5 minutes.
+ * Start a background timer that probes Prisma every 12 hours (was 5 min —
+ * v3.23.x user directive: drop the frequent Prisma health check; SQLite is
+ * the primary read tier and Prisma health no longer gates request serving).
  * When Prisma recovers after being unavailable, triggers a full sync.
  *
  * Leader gate (v3.22.0): only the instance holding the `sqlite-sync` leader
  * lock probes the DB, so a multi-instance deploy doesn't fire N Prisma reads
- * every 5 minutes. Non-leader instances skip the DB probe entirely (their
- * SQLite is only a local write-behind buffer anyway); when they later become
- * leader they pick up the probe on the next tick.
+ * per interval. Non-leader instances skip the DB probe entirely (their SQLite
+ * is only a local write-behind buffer anyway); when they later become leader
+ * they pick up the probe on the next tick.
  */
 function startRecoveryProbe(): void {
   if (state.probeTimer) return;
@@ -728,6 +745,35 @@ export function stopRecoveryProbe(): void {
   if (state.probeTimer) {
     clearInterval(state.probeTimer);
     state.probeTimer = null;
+  }
+}
+
+/**
+ * v3.23.x manual-trigger probe (admin db-health `probe_prisma` action).
+ * Runs ONE explicit Prisma connectivity check NOW and updates the
+ * `prismaAvailable` flag the dashboard reads. This is the ONLY on-demand
+ * (non-12h) Prisma health read — the GET dashboard path stays Prisma-free.
+ * Returns the outcome for the admin response.
+ */
+export async function probePrismaNow(): Promise<{
+  available: boolean;
+  latencyMs: number;
+  error: string | null;
+}> {
+  const start = Date.now();
+  try {
+    await prisma.cronJob.findFirst({ select: { id: true }, take: 1 });
+    state.prismaAvailable = true;
+    return { available: true, latencyMs: Date.now() - start, error: null };
+  } catch (err) {
+    const dbDown = isDbUnavailableError(err);
+    if (dbDown) state.prismaAvailable = false;
+    else state.prismaAvailable = true;
+    return {
+      available: !dbDown,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -1107,11 +1153,17 @@ export async function drainWriteBehind(): Promise<{
   for (const kind of kinds) {
     const table = WB_TABLES[kind];
     try {
-      // Read up to WB_MAX_DRAIN_CHUNKS × WB_CHUNK rows at once, then promote
-      // the important subset in a single createMany (1 Prisma op per flush),
-      // leaving the rest in SQLite.
+      // Read up to WB_MAX_DRAIN_CHUNKS × WB_CHUNK rows at once. High-frequency
+      // kinds (api_request/server_log) are SQLite-primary + file-archived and
+      // never promoted. Only the low-frequency audit_log subset (security/
+      // critical) is promoted via ONE createMany (1 Prisma op per flush).
       const rows = readWbRows(table, WB_CHUNK * WB_MAX_DRAIN_CHUNKS);
       if (rows.length === 0) continue;
+
+      // Continuous exportable file archive (v3.23.x): every drained row of
+      // every kind is appended to logs/db-logs/<date>.ndjson so DB logs are
+      // exportable exactly like server logs — with ZERO extra Prisma ops.
+      appendDbLogsToArchive(kind, rows);
 
       const promotable = rows.filter((r) => isWbImportant(kind, r));
       retained[kind] = rows.length - promotable.length;
@@ -1148,23 +1200,24 @@ export async function drainWriteBehind(): Promise<{
   return { flushed, retained, skipped };
 }
 
-/** True when a queued write-behind row is "important" enough to promote to Prisma. */
+/** True when a queued write-behind row should be promoted to Prisma.
+ *
+ * v3.23.x policy (user directive): ALL high-frequency logs — api_request
+ * (HTTP/NSE/rate-limit/worker) and server_log — are SQLite-first + file-archive
+ * ONLY and are NEVER written to Prisma during normal operation. Only
+ * low-frequency, security-sensitive audit_log rows (auth/admin/failure/critical)
+ * are promoted, per "low frequency and backup to Prisma".
+ */
 function isWbImportant(kind: WriteBehindKind, row: Record<string, unknown>): boolean {
   switch (kind) {
-    case "api_request": {
-      if (Number(row.is_anomaly) === 1) return true;
-      if (Number(row.is_rate_limited) === 1) return true;
-      if (Number(row.status_code) >= 500) return true;
-      if (typeof row.error_message === "string" && row.error_message.length > 0) return true;
+    case "api_request":
+      // High-frequency HTTP/NSE/worker/rate-limit log — never promoted.
       return false;
-    }
-    case "server_log": {
-      const level = String(row.level ?? "").toLowerCase();
-      return level === "error" || level === "warn";
-    }
+    case "server_log":
+      // High-frequency service log — never promoted.
+      return false;
     case "audit_log": {
-      // Security/critical audits: action prefixes that indicate auth/access
-      // events, or any failed/blocked outcome.
+      // Low-frequency, security-sensitive: promote auth/admin access + failures.
       const action = String(row.action ?? "").toUpperCase();
       const secPrefix = ["AUTH", "JOIN", "PASSWORD", "ADMIN", "SESSION", "LOGIN", "LOGOUT"].some((p) =>
         action.startsWith(p),
@@ -1219,13 +1272,24 @@ async function writeWbRowsToPrisma(kind: WriteBehindKind, rows: Array<Record<str
   }
 }
 
-/** Dispatch a bulk createMany to the correct Prisma delegate (avoids union-call). */
+/**
+ * Dispatch a bulk createMany to the correct Prisma delegate (avoids union-call).
+ *
+ * v3.23.x policy guard: api_request and server_log are SQLite-primary +
+ * file-archived and are NEVER written to Prisma. This dispatcher hard-refuses
+ * them so the "no high-frequency logs in Prisma" invariant can't be broken by a
+ * future isWbImportant change — only audit_log (low-frequency/security) lands.
+ */
 function createManyWb(kind: WriteBehindKind, chunk: Array<Record<string, unknown>>): Promise<{ count: number }> {
   switch (kind) {
     case "api_request":
-      return prisma.aPIRequestLog.createMany({ data: chunk as never, skipDuplicates: true });
+      return Promise.reject(
+        new Error("api_request is SQLite-primary; never written to Prisma (v3.23.x policy)"),
+      );
     case "server_log":
-      return prisma.serverLog.createMany({ data: chunk as never, skipDuplicates: true });
+      return Promise.reject(
+        new Error("server_log is SQLite-primary; never written to Prisma (v3.23.x policy)"),
+      );
     case "audit_log":
       return prisma.auditLog.createMany({ data: chunk as never, skipDuplicates: true });
   }
@@ -1292,6 +1356,118 @@ function deleteWbRows(table: string, kind: WriteBehindKind, rows: Array<Record<s
       msg: `SQLite: write-behind delete failed (${kind})`,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DB-log file archive (v3.23.x WP-E2)
+// ---------------------------------------------------------------------------
+// The user asked for DB logs (the write-behind `api_request` / `server_log` /
+// `audit_log` stream) to be exportable as FILES, exactly like server logs live
+// in `logs/YYYY-MM/date.log`. Every drain appendends ALL drained rows (both the
+// promoted-to-Prisma subset and the retained-in-SQLite subset) as NDJSON lines
+// to `logs/db-logs/YYYY-MM-DD.ndjson`. This gives a durable, file-based,
+// exportable copy of the DB-log stream with ZERO extra Prisma ops (it's a pure
+// filesystem append mirroring the server-log pattern).
+
+function dbLogsArchiveDir(): string | null {
+  const base = resolveLogsDir();
+  if (!base) return null;
+  const dir = path.join(base, "db-logs");
+  try {
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
+/** Append drained DB-log rows to the dated NDJSON archive file. Never throws. */
+function appendDbLogsToArchive(
+  kind: WriteBehindKind,
+  rows: Array<Record<string, unknown>>,
+): void {
+  if (!state.db || !state.ready || rows.length === 0) return;
+  const dir = dbLogsArchiveDir();
+  if (!dir) return;
+  const today = new Date().toISOString().split("T")[0];
+  const file = path.join(dir, `${today}.ndjson`);
+  try {
+    const lines = rows.map((r) => {
+      const entry: Record<string, unknown> = { kind, ts: new Date().toISOString(), ...r };
+      try {
+        return JSON.stringify(entry);
+      } catch {
+        return null;
+      }
+    });
+    const body = lines.filter((l): l is string => l !== null).join("\n") + (lines.length ? "\n" : "");
+    appendFileSync(file, body, "utf8");
+  } catch (err) {
+    // File archive is best-effort — a full disk / read-only FS (serverless)
+    // must never break the write-behind drain.
+    logger.warn({
+      msg: "SQLite: DB-log NDJSON archive append failed (best-effort, skipped)",
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** v3.23.x: list DB-log NDJSON archive files (like getLogFiles). */
+export function getDbLogFiles(): { date: string; path: string; size: number }[] {
+  const dir = dbLogsArchiveDir();
+  if (!dir) return [];
+  try {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".ndjson"))
+      .map((f) => {
+        const p = path.join(dir, f);
+        return { date: f.replace(".ndjson", ""), path: p, size: statSync(p).size };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  } catch {
+    return [];
+  }
+}
+
+/** v3.23.x: read the last N lines of a DB-log archive file (like readLogFile). */
+export function readDbLogFile(filePath: string, limit: number = 1000): string[] {
+  try {
+    const { readFileSync } = require("fs");
+    if (!existsSync(filePath)) return [];
+    const content = readFileSync(filePath, "utf8");
+    const lines = content.split("\n").filter((l: string) => l.trim().length > 0);
+    return lines.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+/** v3.23.x: serialize a DB-log kind's current SQLite rows as NDJSON (for export). */
+export function exportDbLogsAsNdjson(kind: WriteBehindKind): string {
+  if (!state.db || !state.ready) return "";
+  const table = WB_TABLES[kind];
+  try {
+    const rows = readWbRows(table, 100000);
+    if (rows.length === 0) return "";
+    return rows
+      .map((r) => {
+        try {
+          return JSON.stringify({ kind, ...r });
+        } catch {
+          return null;
+        }
+      })
+      .filter((l): l is string => l !== null)
+      .join("\n") + "\n";
+  } catch (err) {
+    logger.error({
+      msg: `SQLite: DB-log NSJSON export failed (${kind})`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "";
   }
 }
 
@@ -1448,6 +1624,23 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     if (!isSyncLeader) {
       logger.info({
         msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
+        self: leader.LEADER_SELF,
+      });
+      return;
+    }
+    // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
+    // (account on hold / DB down), do NOT touch Prisma at all — the SQLite
+    // read mirror already holds the last-known-good copy of every synced table
+    // (cached). prod logs showed ×7-per-cycle "failed to sync X =
+    // Plan limit circuit breaker open" spam because every sync cycle hammered a
+    // held DB just to re-read mirrors that were already current. The mirror is
+    // only refreshed once Prisma recovers (breaker closes) or on an explicit
+    // admin `force` (deploy_prep / sync button). This keeps the whole app
+    // read-servable from SQLite during a hold — the exact intent of the
+    // SQLite-primary policy.
+    if (isPlanLimitBreakerOpen()) {
+      logger.info({
+        msg: "SQLite sync skipped — Prisma plan-limit breaker open (serving cached SQLite mirror)",
         self: leader.LEADER_SELF,
       });
       return;
@@ -1752,6 +1945,14 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     state.syncHistory.push({ at: now, rowsSynced: totalRows, durationMs });
     if (state.syncHistory.length > 20) state.syncHistory.shift();
 
+    // Refresh the in-memory size probe once per hydration (cheap: only runs on
+    // deploy/recovery, never on the read path).
+    try {
+      state.sqliteBytes = db.export().byteLength;
+    } catch {
+      state.sqliteBytes = 0;
+    }
+
     if (syncErr.length > 0) {
       logger.warn({ msg: "SQLite: sync complete with partial failures", tables: syncErr, totalRows, durationMs });
     } else {
@@ -1812,17 +2013,35 @@ async function syncTable(
 // Fallback query helpers
 // ---------------------------------------------------------------------------
 
+function recordSqliteRead(
+  name: string,
+  startMs: number,
+  rows: number,
+  hit: boolean,
+): void {
+  recordRead(name, {
+    source: "sqlite",
+    latencyMs: Math.max(0, Math.round(performance.now() - startMs)),
+    rows,
+    hit,
+  });
+}
+
 function createFallback(db: Database): SqliteFallback {
   return {
     isReady: () => state.ready,
 
     // --- Recommendations ---
     getLatestRecommendations(): Record<string, unknown> | null {
+      const _start = performance.now();
       try {
         const runRow = db.exec(
           "SELECT * FROM daily_recommendation_run ORDER BY run_date DESC LIMIT 1",
         );
-        if (!runRow.length || !runRow[0].values.length) return null;
+        if (!runRow.length || !runRow[0].values.length) {
+          recordSqliteRead("getLatestRecommendations", _start, 0, false);
+          return null;
+        }
 
         const cols = runRow[0].columns;
         const vals = runRow[0].values[0];
@@ -1844,7 +2063,7 @@ function createFallback(db: Database): SqliteFallback {
           });
         }
 
-        return {
+        const out = {
           success: true,
           run: {
             id: run.id,
@@ -1879,6 +2098,8 @@ function createFallback(db: Database): SqliteFallback {
           source: "sqlite_backup",
           timestamp: new Date().toISOString(),
         };
+        recordSqliteRead("getLatestRecommendations", _start, stocks.length, true);
+        return out;
       } catch (err) {
         logger.error({ msg: "SQLite: getLatestRecommendations failed", error: err instanceof Error ? err.message : String(err) });
         return null;
@@ -1887,33 +2108,45 @@ function createFallback(db: Database): SqliteFallback {
 
     // --- Chartink screeners ---
     getChartinkScreeners(): Array<Record<string, unknown>> {
+      const _start = performance.now();
       try {
         const rows = db.exec("SELECT * FROM chartink_screener ORDER BY category_id ASC, name ASC");
-        if (!rows.length) return [];
+        if (!rows.length) {
+          recordSqliteRead("getChartinkScreeners", _start, 0, false);
+          return [];
+        }
         const cols = rows[0].columns;
-        return rows[0].values.map((row) => {
+        const out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           obj.enabled = Boolean(obj.enabled);
           return obj;
         });
+        recordSqliteRead("getChartinkScreeners", _start, out.length, true);
+        return out;
       } catch {
+        recordSqliteRead("getChartinkScreeners", _start, 0, false);
         return [];
       }
     },
 
     // --- Daily price snapshot (tier-2 quote read; zero Prisma ops) ---
     getDailyPriceSnapshot(symbol: string): Record<string, unknown> | null {
+      const _start = performance.now();
       try {
         const rows = db.exec(
           "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_price_snapshot WHERE symbol = ? LIMIT 1",
           [symbol.toUpperCase()],
         );
-        if (!rows.length || !rows[0].values.length) return null;
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getDailyPriceSnapshot", _start, 0, false);
+          return null;
+        }
         const cols = rows[0].columns;
         const vals = rows[0].values[0];
         const r: Record<string, unknown> = {};
         cols.forEach((c, i) => (r[c] = vals[i]));
+        recordSqliteRead("getDailyPriceSnapshot", _start, 1, true);
         return {
           symbol: r.symbol as string,
           tradeDate: r.trade_date as string,
@@ -1961,19 +2194,26 @@ function createFallback(db: Database): SqliteFallback {
 
     // --- Corporate actions ---
     getCorporateActions(limit = 500): Array<Record<string, unknown>> {
+      const _start = performance.now();
       try {
         const rows = db.exec(
           "SELECT * FROM corporate_action ORDER BY ex_date DESC LIMIT ?",
           [limit],
         );
-        if (!rows.length) return [];
+        if (!rows.length) {
+          recordSqliteRead("getCorporateActions", _start, 0, false);
+          return [];
+        }
         const cols = rows[0].columns;
-        return rows[0].values.map((row) => {
+        const out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           return obj;
         });
+        recordSqliteRead("getCorporateActions", _start, out.length, true);
+        return out;
       } catch {
+        recordSqliteRead("getCorporateActions", _start, 0, false);
         return [];
       }
     },
@@ -2018,17 +2258,24 @@ function createFallback(db: Database): SqliteFallback {
 
     // --- Cron jobs ---
     getCronJobs(): Array<Record<string, unknown>> {
+      const _start = performance.now();
       try {
         const rows = db.exec("SELECT * FROM cron_job ORDER BY name ASC");
-        if (!rows.length) return [];
+        if (!rows.length) {
+          recordSqliteRead("getCronJobs", _start, 0, false);
+          return [];
+        }
         const cols = rows[0].columns;
-        return rows[0].values.map((row) => {
+        const out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           obj.is_active = Boolean(obj.is_active);
           return obj;
         });
+        recordSqliteRead("getCronJobs", _start, out.length, true);
+        return out;
       } catch {
+        recordSqliteRead("getCronJobs", _start, 0, false);
         return [];
       }
     },
@@ -2070,19 +2317,26 @@ function createFallback(db: Database): SqliteFallback {
 
     // --- Worker tasks ---
     getWorkerTasks(limit = 50): Array<Record<string, unknown>> {
+      const _start = performance.now();
       try {
         const rows = db.exec(
           "SELECT * FROM worker_task ORDER BY created_at DESC LIMIT ?",
           [limit],
         );
-        if (!rows.length) return [];
+        if (!rows.length) {
+          recordSqliteRead("getWorkerTasks", _start, 0, false);
+          return [];
+        }
         const cols = rows[0].columns;
-        return rows[0].values.map((row) => {
+        const out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           return obj;
         });
+        recordSqliteRead("getWorkerTasks", _start, out.length, true);
+        return out;
       } catch {
+        recordSqliteRead("getWorkerTasks", _start, 0, false);
         return [];
       }
     },
@@ -2135,6 +2389,9 @@ function createFallback(db: Database): SqliteFallback {
           lastSyncAt: state.lastSyncAt,
           tables,
           recentSyncs: [...state.syncHistory].reverse().slice(0, 10),
+          // In-memory footprint of the sql.js mirror (refreshed at sync time via
+          // db.export().byteLength — cheap because it only runs on hydration).
+          memoryBytes: state.sqliteBytes,
         },
       };
     },

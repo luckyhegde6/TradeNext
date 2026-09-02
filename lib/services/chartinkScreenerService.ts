@@ -337,7 +337,7 @@ export async function pruneExpiredChartinkResults(
  * and prevents 500 cascades when DB is unavailable.
  */
 const CHARTINK_SCREENERS_CACHE_KEY = "chartink:screeners:overview";
-const CHARTINK_SCREENERS_CACHE_TTL = 5 * 60; // 5 minutes
+const CHARTINK_SCREENERS_CACHE_TTL = 15 * 60; // 15 minutes (was 5m) — DB read gate
 
 export async function getChartinkScreeners(
   options: ChartinkScreenerReadOptions = {},

@@ -204,6 +204,42 @@ export function getAllLogFiles(): { taskId: string; path: string; size: number; 
 }
 
 /**
+ * Read ALL worker task log files concatenated (newest first), for bulk
+ * download / archive. Returns a single text blob or empty string when there
+ * are no log files. Zero DB footprint — file-system read only.
+ */
+export async function readAllLogs(limit = 200): Promise<string> {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const logsDir = resolveLogsDir();
+    if (!logsDir || !fs.existsSync(logsDir)) return "";
+    const files = fs
+      .readdirSync(logsDir)
+      .filter((f: string) => f.endsWith(".log"))
+      .sort((a: string, b: string) => {
+        // Newest first by mtime
+        const mtime = (f: string) =>
+          fs.statSync(path.join(logsDir, f)).mtimeMs;
+        return mtime(b) - mtime(a);
+      })
+      .slice(0, limit);
+
+    const parts: string[] = [];
+    for (const file of files) {
+      const filePath = path.join(logsDir, file);
+      if (!filePath.startsWith(logsDir + path.sep)) continue; // traversal guard
+      const header = `\n===== ${file} =====\n`;
+      parts.push(header + fs.readFileSync(filePath, "utf-8"));
+    }
+    return parts.join("\n");
+  } catch (error) {
+    logger.warn({ msg: "Failed to read all worker log files", error });
+    return "";
+  }
+}
+
+/**
  * Delete log file
  */
 export async function deleteLog(taskId: string): Promise<boolean> {

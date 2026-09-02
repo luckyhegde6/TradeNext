@@ -91,6 +91,33 @@ interface DbHealthData {
     sqliteSync: Record<string, unknown> | null;
   };
   liveness: Array<Record<string, unknown>>;
+  // v3.23.x: dated DB-log archive files available for download.
+  dbLogFiles: Array<{ date: string; size: number }>;
+  // v3.23.x: read-tier + cache + SQLite latency telemetry.
+  readTier: {
+    byReader: Array<{
+      name: string;
+      source: "sqlite" | "memory" | "prisma" | "nse" | "filesystem" | "other";
+      hits: number;
+      misses: number;
+      calls: number;
+      latency: { last: number; min: number; max: number; avg: number };
+      rows: number;
+    }>;
+    bySource: Record<string, { calls: number; hits: number; misses: number; totalMs: number; minMs: number | null; maxMs: number | null; rows: number }>;
+    longQueries: Array<{ name: string; source: string; latencyMs: number; rows: number; at: string }>;
+    totalCalls: number;
+    sqlite: { calls: number; totalMs: number; avgMs: number; minMs: number | null; maxMs: number | null };
+  };
+  cache: {
+    metrics: {
+      mainCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
+      hotCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
+      staticCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
+      recommendationsCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
+      historicalCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
+    };
+  };
 }
 
 type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
@@ -190,6 +217,7 @@ export default function DbHealthPage() {
   const [restoring, setRestoring] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [logDownloadMsg, setLogDownloadMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -284,6 +312,44 @@ export default function DbHealthPage() {
       setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setFlushingLogs(false);
+    }
+  };
+
+  // v3.23.x: download the write-behind log stream. Two modes:
+  //   kind: "api_request" | "server_log" | "audit_log"  -> export the CURRENT
+  //         in-memory SQLite wb_* rows as NDJSON (`?export=<kind>`).
+  //   date: a dated logs/db-logs/<date>.ndjson archive  -> `?archiveFile=<date>`.
+  const triggerLogDownload = async ({ kind, date }: { kind?: string; date?: string } = {}) => {
+    setLogDownloadMsg(null);
+    try {
+      const params = new URLSearchParams();
+      if (kind) params.set("export", kind);
+      else if (date) params.set("archiveFile", date);
+      else {
+        setLogDownloadMsg("Select a log source to download.");
+        return;
+      }
+      const res = await fetch(`/api/admin/db-health?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setLogDownloadMsg(`Download failed: ${body?.error ?? res.status}`);
+        return;
+      }
+      // Stream the NDJSON body straight to the browser as an attachment.
+      const blob = await res.blob();
+      const filename = res.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1]
+        ?? `db-logs-${date ?? kind}-${new Date().toISOString().split("T")[0]}.ndjson`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setLogDownloadMsg(`Downloaded ${kind ? `live ${kind} log` : `archive ${date}`} (${filename}).`);
+    } catch (e) {
+      setLogDownloadMsg(`Download error: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -395,7 +461,7 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache } = data;
   const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
@@ -756,6 +822,271 @@ export default function DbHealthPage() {
               </table>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* DB Logs — Download / Export (v3.23.x) */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+            DB Logs — Download / Export
+          </h3>
+          <span className="text-xs text-gray-400 dark:text-slate-500 font-mono">NDJSON · logs/db-logs</span>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          The write-behind log store mirrors high-frequency API / server / audit logs into SQLite (the
+          primary durable store) and archives them to dated <span className="font-mono">logs/db-logs/&lt;date&gt;.ndjson</span>{" "}
+          files — exactly like server logs, so they are easy to pull down and debug. Bulky info/api logs
+          are never written to Prisma (per the SQLite-primary policy); only important rows are promoted.
+        </p>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">
+          Pending in queue —{" "}
+          {(["api_request", "server_log", "audit_log"] as const).map((k) => `${k}: ${writeBehind.pending[k] ?? 0}`).join(" · ")}
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {(["api_request", "server_log", "audit_log"] as const).map((kind) => (
+            <button
+              key={kind}
+              onClick={() => triggerLogDownload({ kind })}
+              className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition text-xs font-medium flex items-center gap-1.5"
+              title={`Download the current in-memory ${kind} write-behind queue as NDJSON`}
+            >
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+              Live {kind === "api_request" ? "api" : kind === "server_log" ? "server" : "audit"} log
+            </button>
+          ))}
+        </div>
+
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">
+          Archived daily files ({dbLogFiles.length})
+        </p>
+        {dbLogFiles.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-slate-500">No DB-log archive files yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-slate-700">
+                  <th className="text-left py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Date</th>
+                  <th className="text-right py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Size</th>
+                  <th className="text-right py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {dbLogFiles.slice().reverse().map((f) => (
+                  <tr
+                    key={f.date}
+                    className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                  >
+                    <td className="py-1.5 px-2 text-gray-900 dark:text-white font-mono text-xs">{f.date}</td>
+                    <td className="py-1.5 px-2 text-right text-gray-600 dark:text-slate-400 text-xs">
+                      {(f.size / 1024).toFixed(1)} KB
+                    </td>
+                    <td className="py-1.5 px-2 text-right">
+                      <button
+                        onClick={() => triggerLogDownload({ date: f.date })}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
+                        title={`Download db-logs-${f.date}.ndjson`}
+                      >
+                        <ArrowDownTrayIcon className="w-3.5 h-3.5" /> Download
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {logDownloadMsg && (
+          <div className="mt-3 px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg text-xs text-gray-600 dark:text-slate-400">
+            {logDownloadMsg}
+          </div>
+        )}
+      </div>
+
+      {/* v3.23.x: Cache Utilisation + Read-Tier metrics (zero Prisma) */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+            Cache &amp; Read-Tier Utilisation
+          </h3>
+          <span className="text-xs text-gray-400 dark:text-slate-500">
+            {readTier?.totalCalls?.toLocaleString() ?? 0} reads tracked this session
+          </span>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          In-memory counters (reset on deploy/restart). Most hot reads short-circuit at the
+          SQLite mirror, so NodeCache hit-rate is expected to read low right after boot — that is
+          correct, not a fault. SQLite latency below is the real engine (sql.js) time.
+        </p>
+
+        {/* NodeCache hit-rate */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+          {cache && (
+            <>
+              {(
+                [
+                  ["main", cache.metrics.mainCache],
+                  ["hot", cache.metrics.hotCache],
+                  ["static", cache.metrics.staticCache],
+                  ["recommendations", cache.metrics.recommendationsCache],
+                  ["historical", cache.metrics.historicalCache],
+                ] as const
+              ).map(([label, m]) => {
+                const rate = Math.round(m.hitRate * 100);
+                return (
+                  <div key={label} className="rounded-lg border border-gray-200 dark:border-slate-700 p-3">
+                    <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">{label} cache</p>
+                    <p className="text-lg font-semibold text-gray-800 dark:text-slate-200">{rate}%</p>
+                    <p className="text-[11px] text-gray-400 dark:text-slate-500">
+                      {m.keys} keys · {m.stats.hits} hits / {m.stats.misses} misses
+                    </p>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        {/* High-frequency (hot read tier) */}
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+          High-frequency queries (SQLite mirror / memory cache)
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+          {(["sqlite", "memory"] as const).map((src) => {
+            const agg = readTier?.bySource?.[src];
+            return (
+              <div key={src} className="rounded-lg border border-gray-200 dark:border-slate-700 p-3">
+                <p className="text-xs font-medium text-gray-700 dark:text-slate-300 mb-1 capitalize">{src}</p>
+                <div className="text-[11px] text-gray-500 dark:text-slate-400 leading-relaxed">
+                  <p>Calls: <span className="font-semibold text-gray-700 dark:text-slate-200">{agg?.calls ?? 0}</span>
+                    {" "}· Hits: <span className="font-semibold text-emerald-600">{agg?.hits ?? 0}</span>
+                    {" "}· Misses: <span className="font-semibold text-red-500">{agg?.misses ?? 0}</span></p>
+                  <p>Latency (ms): {agg?.minMs ?? 0} min / {agg && agg.totalMs && agg.calls ? Math.round(agg.totalMs / agg.calls) : 0} avg /
+                    {agg?.maxMs ?? 0} max</p>
+                  <p>Rows returned: {agg?.rows ?? 0}</p>
+                </div>
+              </div>
+            );
+          })}
+          <div className="md:col-span-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-slate-700 text-left text-gray-500 dark:text-slate-400">
+                  <th className="py-1.5 pr-3 font-medium">Reader</th>
+                  <th className="py-1.5 pr-3 font-medium">Source</th>
+                  <th className="py-1.5 pr-3 font-medium">Calls</th>
+                  <th className="py-1.5 pr-3 font-medium">Hits</th>
+                  <th className="py-1.5 pr-3 font-medium">Misses</th>
+                  <th className="py-1.5 pr-3 font-medium">Avg (ms)</th>
+                  <th className="py-1.5 pr-3 font-medium">Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(readTier?.byReader ?? []).map((r) => (
+                  <tr key={r.name} className="border-b border-gray-100 dark:border-slate-800">
+                    <td className="py-1.5 pr-3 font-mono text-gray-700 dark:text-slate-300">{r.name}</td>
+                    <td className="py-1.5 pr-3 capitalize">{r.source}</td>
+                    <td className="py-1.5 pr-3">{r.calls}</td>
+                    <td className="py-1.5 pr-3 text-emerald-600">{r.hits}</td>
+                    <td className="py-1.5 pr-3 text-red-500">{r.misses}</td>
+                    <td className="py-1.5 pr-3">{r.latency.avg}</td>
+                    <td className="py-1.5 pr-3">{r.rows}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Low-frequency (direct Prisma) */}
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+          Low-frequency queries (direct Prisma)
+        </h4>
+        <div className="mb-5">
+          {(() => {
+            const agg = readTier?.bySource?.prisma;
+            return (
+              <div className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 p-3 text-[11px] text-gray-600 dark:text-slate-300">
+                <p className="font-medium text-amber-700 dark:text-amber-400 mb-1">Direct Prisma reads</p>
+                <p>
+                  Calls: <span className="font-semibold">{agg?.calls ?? 0}</span> · Hits:{" "}
+                  <span className="font-semibold text-emerald-600">{agg?.hits ?? 0}</span> · Misses:{" "}
+                  <span className="font-semibold text-red-500">{agg?.misses ?? 0}</span> · Avg latency:{" "}
+                  <span className="font-semibold">
+                    {agg && agg.totalMs && agg.calls ? Math.round(agg.totalMs / agg.calls) : 0} ms
+                  </span>
+                </p>
+                <p className="italic mt-1">
+                  These do consume plan-limit operations. Under a hold the app serves reads from SQLite and
+                  this count should stay near zero.
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Long / large queries */}
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+          Long / Large Queries (&gt;100ms)
+        </h4>
+        <div className="mb-5">
+          {!readTier?.longQueries?.length ? (
+            <p className="text-xs text-gray-400 dark:text-slate-500">No slow reads this session.</p>
+          ) : (
+            <div className="overflow-x-auto max-h-56 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-white dark:bg-slate-900">
+                  <tr className="border-b border-gray-200 dark:border-slate-700 text-left text-gray-500 dark:text-slate-400">
+                    <th className="py-1.5 pr-3 font-medium">Reader</th>
+                    <th className="py-1.5 pr-3 font-medium">Source</th>
+                    <th className="py-1.5 pr-3 font-medium">Latency (ms)</th>
+                    <th className="py-1.5 pr-3 font-medium">Rows</th>
+                    <th className="py-1.5 pr-3 font-medium">At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {readTier.longQueries.map((q, i) => (
+                    <tr key={i} className="border-b border-gray-100 dark:border-slate-800">
+                      <td className="py-1.5 pr-3 font-mono text-gray-700 dark:text-slate-300">{q.name}</td>
+                      <td className="py-1.5 pr-3 capitalize">{q.source}</td>
+                      <td className="py-1.5 pr-3 font-semibold text-amber-600">{q.latencyMs}</td>
+                      <td className="py-1.5 pr-3">{q.rows}</td>
+                      <td className="py-1.5 pr-3 text-gray-400">{q.at}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* SQLite performance (latency) */}
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+          SQLite Performance (engine latency)
+        </h4>
+        <div>
+          {(() => {
+            const s = readTier?.sqlite;
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  ["Calls", s?.calls ?? 0],
+                  ["Avg (ms)", s?.avgMs ?? 0],
+                  ["Min (ms)", s?.minMs ?? 0],
+                  ["Max (ms)", s?.maxMs ?? 0],
+                  ["Total (ms)", s?.totalMs ?? 0],
+                ].map(([label, val]) => (
+                  <div key={String(label)} className="rounded-lg border border-gray-200 dark:border-slate-700 p-3">
+                    <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">{label}</p>
+                    <p className="text-lg font-semibold text-gray-800 dark:text-slate-200">{val}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
