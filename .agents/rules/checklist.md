@@ -105,6 +105,15 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 - [ ] parallelize_independent_queries (use Promise.all for independent DB calls)
 - [ ] avoid_queries_in_loops (pre-fetch data, then look up in-memory)
 
+### DB Ops / Plan-Limit Discipline (v3.19.0–v3.22.0)
+
+- [ ] high_frequency_log_writes_via_write_behind (API/log/audit writes enqueue to SQLite `wb_*`, zero Prisma ops, never direct per-call Prisma writes — `enqueueWriteBehind` in `lib/sqlite.ts`)
+- [ ] only_important_logs_promoted (drain promotes ONLY `isWbImportant` rows — api 5xx/rate-limited/anomaly/error, server_log error|warn, security/critical audits — in ONE `createMany`; bulk info/api logs stay SQLite-only)
+- [ ] createMany_counts_as_one_op (never `+= rows.length` in the ops/write-budget counter — `createMany` is 1 op via `$allOperations`)
+- [ ] write_behind_ttl_applied (prune write-behind/log mirror tables on a retention window — 14-day TTL by PK)
+- [ ] leader_elected_for_single_writer (cold-start multi-instance bursts must elect ONE `leader-<role>` writer for SQLite sync / scheduler / flush — `lib/services/leader.ts`; DB-down fail-open to local leader, re-elect on recovery)
+- [ ] is_db_write_budget_exceeded_respected (reject non-critical writes beyond `DB_WRITE_BUDGET`; `$allOperations` tracks reads/writes with IST-day reset)
+
 ---
 
 ## Logging

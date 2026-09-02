@@ -19,7 +19,7 @@
 
 import { existsSync } from "fs";
 import path from "path";
-import initSqlJs, { type Database } from "sql.js";
+import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError, type DbErrorType } from "@/lib/db-utils";
@@ -32,20 +32,26 @@ import { dbOpsCounter, dbErrorCounts, getIstDayKey } from "@/lib/prisma";
 /**
  * Resolve the sql.js WASM binary path at runtime.
  *
- * Rationale: `sql.js` is kept as a `serverExternalPackage` in next.config.ts
- * so `require("sql.js")` loads from real `node_modules` and the module's own
- * default `locateFile` works. As a belt-and-suspenders fallback (bundled
- * builds, other deploy layouts), explicitly resolve the file from the two most
- * likely runtime locations before letting sql.js use its default.
+ * Rationale: `sql.js` is kept as a `serverExternalPackage` in next.config.ts so
+ * it is NOT webpack-bundled into `.next` — the raw WASM must exist on the
+ * runtime filesystem. `scripts/copy-sql-wasm.mjs` copies
+ * `node_modules/sql.js/dist/sql-wasm.wasm` into `public/` during the build so
+ * Netlify's deploy ships it. We resolve from the deploy layouts first:
+ * 1. `public/<file>`  (shipped by the build copy — Netlify primary)
+ * 2. `.next/<file>`   (Next.js also copies public/ into the .next root)
+ * 3. `node_modules/<…>` (standard local install)
+ * then fall back to sql.js's own default locateFile.
  */
 function resolveSqlWasm(file: string): string {
   const candidates = [
-    path.join(process.cwd(), "node_modules", "sql.js", "dist", file),
-    path.join(process.cwd(), "public", file),
+    path.join(process.cwd(), ".next", file), // Netlify publish dir — populated by copy-sql-wasm-netlify.mjs
+    path.join(process.cwd(), "public", file), // shipped in public/ by copy-sql-wasm.mjs
+    path.join(process.cwd(), "node_modules", "sql.js", "dist", file), // standard local install
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
+  // Let sql.js use its own default locateFile as a final fallback.
   return file;
 }
 
@@ -62,6 +68,12 @@ if (!g.__sqliteBackup) {
     syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
     opsPersistTimer: null as ReturnType<typeof setInterval> | null,
+    wbBuffer: [] as Array<{ kind: WriteBehindKind; row: Record<string, unknown> }>,
+    wbLastFlushAt: null as string | null,
+    wbLastFlushCounts: {} as Record<string, number>,
+    wbLastPromoted: {} as Record<string, number>,
+    wbLastRetained: {} as Record<string, number>,
+    wbFlushTimer: null as ReturnType<typeof setInterval> | null,
   };
 }
 const state: {
@@ -74,6 +86,12 @@ const state: {
   syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
   probeTimer: ReturnType<typeof setInterval> | null;
   opsPersistTimer: ReturnType<typeof setInterval> | null;
+  wbBuffer: Array<{ kind: WriteBehindKind; row: Record<string, unknown> }>;
+  wbLastFlushAt: string | null;
+  wbLastFlushCounts: Record<string, number>;
+  wbLastPromoted: Record<string, number>;
+  wbLastRetained: Record<string, number>;
+  wbFlushTimer: ReturnType<typeof setInterval> | null;
 } = g.__sqliteBackup;
 
 // ---------------------------------------------------------------------------
@@ -107,6 +125,21 @@ export interface HealthStatus {
     tables: Record<string, number>;
     recentSyncs: SyncResult[];
   };
+}
+
+/** Write-behind queue kinds — which Prisma model a queued row maps to. */
+export type WriteBehindKind = "api_request" | "server_log" | "audit_log";
+
+/** Stats reported to the admin DB-Health page. */
+export interface WriteBehindStats {
+  /** Rows still queued in SQLite (SQLite-only log, 14-day TTL). */
+  pending: Record<string, number>;
+  /** Rows promoted to Prisma during the last drain. */
+  lastPromoted: Record<string, number>;
+  /** Rows retained SQLite-only (not promoted) during the last drain. */
+  lastRetained: Record<string, number>;
+  lastFlushAt: string | null;
+  lastFlushCounts: Record<string, number>;
 }
 
 export interface SqliteFallback {
@@ -144,8 +177,8 @@ export interface SqliteFallback {
   getWorkerTasks(limit?: number): Array<Record<string, unknown>>;
   /** Get full health status for admin dashboard. */
   getHealthStatus(): HealthStatus;
-  /** Trigger a sync from Prisma -> SQLite. */
-  syncFromPrisma(): Promise<void>;
+  /** Trigger a sync from Prisma -> SQLite (leader-gated unless `force`). */
+  syncFromPrisma(opts?: { force?: boolean }): Promise<void>;
   /** Persist the Prisma ops counter snapshot into SQLite (`_backup_meta`). */
   persistOpsCounter(): void;
   /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
@@ -154,6 +187,27 @@ export interface SqliteFallback {
   persistDbErrorCounts(): void;
   /** Restore the Prisma per-type DB error counts when they match today (IST). */
   restoreDbErrorCounts(): void;
+  /** Enqueue a log write for later bulk-flush to Prisma (zero Prisma ops). */
+  enqueueWriteBehind(kind: WriteBehindKind, row: Record<string, unknown>): void;
+  /** Bulk-flush pending write-behind rows to Prisma. */
+  drainWriteBehind(): Promise<{ flushed: Record<string, number>; skipped: boolean }>;
+  /** Pending write-behind counts + last flush metadata. */
+  getWriteBehindStats(): WriteBehindStats;
+  /** Admin-triggered full flush (drains buffer, drains queue, returns aggregate). */
+  flushWriteBehind(): Promise<{
+    flushed: Record<string, number>;
+    retained: Record<string, number>;
+    skipped: boolean;
+    pending: Record<string, number>;
+  }>;
+  /**
+   * Write a liveness heartbeat into the LOCAL SQLite `_backup_meta` (zero Prisma
+   * ops). Used by the worker engine + cron daemon periodic pings so idle polling
+   * never touches the Prisma DB.
+   */
+  writeLivenessHeartbeat(role: "worker" | "cron-daemon", snapshot: Record<string, unknown>): void;
+  /** Read the liveness heartbeats persisted in SQLite (admin visibility). */
+  getLivenessHeartbeats(): Array<Record<string, unknown>>;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -501,6 +555,60 @@ const SCHEMA_SQL = `
     triggered_by TEXT,
     created_at   TEXT
   );
+
+  -- Write-behind queue tables (v3.22.0): high-frequency log writes land here
+  -- (zero Prisma ops) and are bulk-flushed to Prisma via drainWriteBehind().
+  -- These are SEPARATE from the read mirrors (server_log / audit_log) which
+  -- syncFromPrisma populates for DB-down reads.
+  CREATE TABLE IF NOT EXISTS wb_api_request (
+    request_id      TEXT PRIMARY KEY,
+    user_id         INTEGER,
+    user_email      TEXT,
+    ip_address      TEXT,
+    user_agent      TEXT,
+    method          TEXT,
+    path            TEXT,
+    query_params    TEXT,
+    status_code     INTEGER,
+    response_time   INTEGER,
+    error_message   TEXT,
+    is_nse          INTEGER,
+    nse_endpoint    TEXT,
+    is_rate_limited INTEGER,
+    is_anomaly      INTEGER,
+    anomaly_type    TEXT,
+    queued_at       TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS wb_server_log (
+    id         TEXT PRIMARY KEY,
+    level      TEXT,
+    message    TEXT,
+    source     TEXT,
+    task_id    TEXT,
+    metadata   TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    request_id TEXT,
+    queued_at  TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS wb_audit_log (
+    id              TEXT PRIMARY KEY,
+    user_id         INTEGER,
+    user_email      TEXT,
+    action          TEXT,
+    resource        TEXT,
+    resource_id     TEXT,
+    method          TEXT,
+    path            TEXT,
+    response_status INTEGER,
+    response_time   INTEGER,
+    ip_address      TEXT,
+    metadata        TEXT,
+    error_message   TEXT,
+    queued_at       TEXT
+  );
 `;
 
 // ---------------------------------------------------------------------------
@@ -532,6 +640,9 @@ export async function initSqliteBackup(): Promise<void> {
     // per-type DB error counts (v3.21.1).
     restoreOpsCounter();
     restoreDbErrorCounts();
+    // Move any pre-init buffered log writes into the queue now that SQLite is
+    // ready (v3.22.0 write-behind).
+    drainWriteBehindBuffer();
     logger.info({ msg: "SQLite backup initialized" });
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
@@ -563,6 +674,12 @@ const PROBE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Start a background timer that probes Prisma every 5 minutes.
  * When Prisma recovers after being unavailable, triggers a full sync.
+ *
+ * Leader gate (v3.22.0): only the instance holding the `sqlite-sync` leader
+ * lock probes the DB, so a multi-instance deploy doesn't fire N Prisma reads
+ * every 5 minutes. Non-leader instances skip the DB probe entirely (their
+ * SQLite is only a local write-behind buffer anyway); when they later become
+ * leader they pick up the probe on the next tick.
  */
 function startRecoveryProbe(): void {
   if (state.probeTimer) return;
@@ -571,6 +688,15 @@ function startRecoveryProbe(): void {
     if (state.syncing) return;
 
     try {
+      const leader = await import("@/lib/services/leader");
+      const isSyncLeader = await leader.isLeader("sqlite-sync");
+      if (!isSyncLeader) {
+        // Not the sqlite-sync leader — skip the Prisma probe. The leader's
+        // sync + recovery is authoritative; we stay a standby buffer.
+        state.lastProbeAt = new Date().toISOString();
+        return;
+      }
+
       // Lightweight probe: try to read one row from any table
       await prisma.cronJob.findFirst({ select: { id: true }, take: 1 });
       const wasUnavailable = !state.prismaAvailable;
@@ -693,6 +819,7 @@ export function stopOpsCounterPersistence(): void {
 export function resetSqliteStateForTests(): void {
   stopRecoveryProbe();
   stopOpsCounterPersistence();
+  stopWriteBehindFlush();
   state.db = null;
   state.ready = false;
   state.syncing = false;
@@ -700,6 +827,8 @@ export function resetSqliteStateForTests(): void {
   state.lastSyncAt = null;
   state.lastProbeAt = null;
   state.syncHistory = [];
+  state.wbLastPromoted = {};
+  state.wbLastRetained = {};
   _instance = null;
   _initPromise = null;
 }
@@ -765,15 +894,565 @@ export function restoreDbErrorCounts(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Liveness heartbeats to SQLite (v3.22.0)
+// ---------------------------------------------------------------------------
+// The worker engine and cron daemon periodically ping to prove they're alive.
+// Those pings used to `upsert` into Prisma `worker_status` — at 1-2 instances
+// (leader-gated) with a 5-15 min cadence that's ~288-576 ops/day of pure idle
+// noise. Now they land in the LOCAL SQLite `_backup_meta` (zero Prisma ops);
+// only STATEFUL transitions (busy/task-complete/stop) still touch Prisma so
+// admin dashboards and the stale-task reaper keep a correct cross-instance view.
+
+const LIVENESS_KEY_PREFIX = "liveness_heartbeat:";
+
+/** Write a liveness heartbeat to the local SQLite `_backup_meta`. Never throws. */
+export function writeLivenessHeartbeat(
+  role: "worker" | "cron-daemon",
+  snapshot: Record<string, unknown>,
+): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const entry = { ...snapshot, role, at: new Date().toISOString(), pid: process.pid };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      `${LIVENESS_KEY_PREFIX}${role}`,
+      JSON.stringify(entry),
+    ]);
+  } catch (err) {
+    logger.debug({ msg: "SQLite: liveness heartbeat write failed", role, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Read all liveness heartbeats persisted in the local SQLite `_backup_meta`. */
+export function getLivenessHeartbeats(): Array<Record<string, unknown>> {
+  if (!state.db || !state.ready) return [];
+  try {
+    const result = state.db.exec("SELECT key, value FROM _backup_meta WHERE key LIKE 'liveness_heartbeat:%'");
+    if (!result.length) return [];
+    const cols = result[0].columns;
+    return result[0].values
+      .map((row) => {
+        const obj: Record<string, unknown> = {};
+        cols.forEach((c, i) => (obj[c] = row[i]));
+        let parsed: unknown = obj.value;
+        if (typeof obj.value === "string") {
+          try {
+            parsed = JSON.parse(obj.value);
+          } catch {
+            parsed = obj.value;
+          }
+        }
+        // Return { key, ...parsedValue } for JSON values (liveness heartbeats).
+        return { key: obj.key, ...(parsed && typeof parsed === "object" ? (parsed as object) : { value: parsed }) };
+      });
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Write-behind logging queue (v3.22.0)
+// ---------------------------------------------------------------------------
+// High-frequency log writes (APIRequestLog, ServerLog, AuditLog) land in local
+// SQLite — ZERO Prisma ops at call time — and are bulk-flushed to Prisma by
+// drainWriteBehind (nightly + on-demand admin button). This removes the
+// per-request Prisma write that tripped the plan-limit breaker in the
+// 2026-09-02 prod log (APIRequestLog.upsert timed out after 120000ms).
+
+const WB_CHUNK = 250; // per-table per-pass chunk for the bulk flush
+// Max chunks drained per kind per drainWriteBehind() call. Each chunk is ONE
+// Prisma createMany operation (bounded and op-cheap), so draining up to 8
+// chunks moves up to 2,000 rows/kind using just 8 ops. This evens out bursty
+// log queues (market-hours APIRequestLog) into small, infrequent batches.
+const WB_MAX_DRAIN_CHUNKS = 8;
+// Queued wb_* rows older than this are pruned (see pruneWriteBehind) so the
+// SQLite-only log is TTL-bounded at 14 days. api_request is the highest-volume
+// kind and the same requests are already visible via the file logger + pino;
+// dropping stale metrics rows is the intended tradeoff.
+const WB_RETENTION_MS = 14 * 24 * 60 * 60 * 1000; // 14d TTL on the wb_* log tables
+// How often the leader promotes important wb_* rows to Prisma and prunes stale
+// ones (see startWriteBehindFlush). Each window = ≤1 createMany op per kind.
+const WB_FLUSH_INTERVAL_MS = 15 * 60 * 1000; // 15 min
+const WB_TABLES: Record<WriteBehindKind, string> = {
+  api_request: "wb_api_request",
+  server_log: "wb_server_log",
+  audit_log: "wb_audit_log",
+};
+
+/** Insert a row into the in-memory early buffer (before SQLite is ready). */
+function bufferWriteBehind(kind: WriteBehindKind, row: Record<string, unknown>): void {
+  state.wbBuffer.push({ kind, row });
+  // Bound the buffer so a long pre-init window can't grow unbounded.
+  if (state.wbBuffer.length > 1000) {
+    state.wbBuffer.splice(0, state.wbBuffer.length - 1000);
+  }
+}
+
+/** Drain the early-buffer into the SQLite queue once it's ready. */
+function drainWriteBehindBuffer(): void {
+  if (!state.db || !state.ready || state.wbBuffer.length === 0) return;
+  const pending = state.wbBuffer;
+  state.wbBuffer = [];
+  for (const { kind, row } of pending) {
+    enqueueWriteBehind(kind, row);
+  }
+}
+
+/**
+ * Enqueue a log write for later bulk-flush to Prisma. Local SQLite insert,
+ * sub-ms, zero Prisma ops. If SQLite isn't ready yet, buffers in memory and
+ * drains once ready. Never throws — logging is best-effort.
+ *
+ * `api_request` dedupes on `request_id` (matches the Prisma unique on
+ * `APIRequestLog.requestId`). `server_log`/`audit_log` use their client-side
+ * uuid `id` so a flush is idempotent via `INSERT OR REPLACE`.
+ */
+export function enqueueWriteBehind(kind: WriteBehindKind, row: Record<string, unknown>): void {
+  if (!state.db || !state.ready) {
+    bufferWriteBehind(kind, row);
+    return;
+  }
+  const table = WB_TABLES[kind];
+  if (!table) return;
+  try {
+    const columns = getWbColumns(kind);
+    const placeholders = columns.map(() => "?").join(", ");
+    const values: SqlValue[] = columns.map((col) => toSqlValue(row[col]));
+    // Include queued_at last (it's the final column); a caller-provided
+    // queued_at is honored if present, else now.
+    const queuedAt = (row["queued_at"] as string) ?? new Date().toISOString();
+    state.db.run(
+      `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}, queued_at) VALUES (${placeholders}, ?)`,
+      [...values, queuedAt],
+    );
+  } catch (err) {
+    logger.error({
+      msg: `SQLite: write-behind enqueue failed (${kind})`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Coerce a row value into a sql.js SqlValue (string | number | null). */
+function toSqlValue(v: unknown): SqlValue {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "string" || typeof v === "number") return v;
+  if (v instanceof Date) return v.toISOString();
+  // objects/arrays (e.g. metadata) are JSON-stringified so we can reload them.
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/** Column set for a write-behind kind, in INSERT order. */
+function getWbColumns(kind: WriteBehindKind): string[] {
+  switch (kind) {
+    case "api_request":
+      return [
+        "request_id", "user_id", "user_email", "ip_address", "user_agent", "method",
+        "path", "query_params", "status_code", "response_time", "error_message",
+        "is_nse", "nse_endpoint", "is_rate_limited", "is_anomaly", "anomaly_type",
+      ];
+    case "server_log":
+      return [
+        "id", "level", "message", "source", "task_id", "metadata",
+        "ip_address", "user_agent", "request_id",
+      ];
+    case "audit_log":
+      return [
+        "id", "user_id", "user_email", "action", "resource", "resource_id", "method",
+        "path", "response_status", "response_time", "ip_address", "metadata", "error_message",
+      ];
+  }
+}
+
+/**
+ * Bulk-flush the write-behind queue to Prisma.
+ *
+ * LONG-LIVED LOG STORE MODEL (v3.22.2): SQLite is the PRIMARY durable store for
+ * API-request, server-log and audit-log rows. Only a filtered "important"
+ * subset is PROMOTED to Prisma (for the admin monitoring UI) — the rest STAY
+ * in the wb_* tables and are pruned by TTL (see pruneWriteBehind). This keeps
+ * the bulk info-level log stream off the Prisma plan budget entirely (SQLite
+ * writes cost 0 Prisma ops) while still surfacing errors/security events.
+ *
+ * Promotion rules:
+ *   - api_request: is_anomaly, is_rate_limited, status_code >= 500, or has an
+ *     error_message (otherwise SQLite-only).
+ *   - server_log: only level "error" / "warn".
+ *   - audit_log: security/critical actions (AUTH/JOIN/PASSWORD/ADMIN/SESSION
+ *     or *_FAILED/*_BLOCKED) OR response_status >= 400 with an error_message.
+ *
+ * Promoted rows are written via ONE createMany (op-cheap) and then deleted
+ * from SQLite. Non-promoted rows are left in place (SQLite-only log). Respects
+ * the DB plan-limit breaker: on DB-unavailable the pass is SKIPPED.
+ *
+ * Returns per-table promoted ("flushed") counts, how many rows were retained
+ * SQLite-only ("retained"), and whether the pass was skipped.
+ */
+export async function drainWriteBehind(): Promise<{
+  flushed: Record<string, number>;
+  retained: Record<string, number>;
+  skipped: boolean;
+}> {
+  const flushed: Record<string, number> = { api_request: 0, server_log: 0, audit_log: 0 };
+  const retained: Record<string, number> = { api_request: 0, server_log: 0, audit_log: 0 };
+  if (!state.db || !state.ready) return { flushed, retained, skipped: false };
+
+  const kinds: WriteBehindKind[] = ["api_request", "server_log", "audit_log"];
+  let skipped = false;
+
+  for (const kind of kinds) {
+    const table = WB_TABLES[kind];
+    try {
+      // Read up to WB_MAX_DRAIN_CHUNKS × WB_CHUNK rows at once, then promote
+      // the important subset in a single createMany (1 Prisma op per flush),
+      // leaving the rest in SQLite.
+      const rows = readWbRows(table, WB_CHUNK * WB_MAX_DRAIN_CHUNKS);
+      if (rows.length === 0) continue;
+
+      const promotable = rows.filter((r) => isWbImportant(kind, r));
+      retained[kind] = rows.length - promotable.length;
+
+      if (promotable.length > 0) {
+        const ok = await writeWbRowsToPrisma(kind, promotable);
+        if (!ok) {
+          skipped = true;
+          continue; // DB down — leave ALL rows queued
+        }
+        // Delete ONLY the promoted rows we wrote; the retained stay in SQLite.
+        deleteWbRows(table, kind, promotable);
+        flushed[kind] = promotable.length;
+      }
+    } catch (err) {
+      if (isDbUnavailableError(err)) {
+        skipped = true;
+      } else {
+        logger.error({
+          msg: `SQLite: write-behind drain failed (${kind})`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  if (Object.values(flushed).some((n) => n > 0) || Object.values(retained).some((n) => n > 0)) {
+    state.wbLastFlushAt = new Date().toISOString();
+    state.wbLastFlushCounts = { ...flushed };
+    state.wbLastPromoted = { ...flushed };
+    state.wbLastRetained = { ...retained };
+    persistWriteBehindMeta();
+  }
+  return { flushed, retained, skipped };
+}
+
+/** True when a queued write-behind row is "important" enough to promote to Prisma. */
+function isWbImportant(kind: WriteBehindKind, row: Record<string, unknown>): boolean {
+  switch (kind) {
+    case "api_request": {
+      if (Number(row.is_anomaly) === 1) return true;
+      if (Number(row.is_rate_limited) === 1) return true;
+      if (Number(row.status_code) >= 500) return true;
+      if (typeof row.error_message === "string" && row.error_message.length > 0) return true;
+      return false;
+    }
+    case "server_log": {
+      const level = String(row.level ?? "").toLowerCase();
+      return level === "error" || level === "warn";
+    }
+    case "audit_log": {
+      // Security/critical audits: action prefixes that indicate auth/access
+      // events, or any failed/blocked outcome.
+      const action = String(row.action ?? "").toUpperCase();
+      const secPrefix = ["AUTH", "JOIN", "PASSWORD", "ADMIN", "SESSION", "LOGIN", "LOGOUT"].some((p) =>
+        action.startsWith(p),
+      );
+      if (secPrefix) return true;
+      if (action.endsWith("_FAILED") || action.endsWith("_BLOCKED") || action.endsWith("_REJECTED")) return true;
+      // Server-side errors on an audit action are worth surfacing too.
+      if (Number(row.response_status) >= 400 && typeof row.error_message === "string" && row.error_message.length > 0) {
+        return true;
+      }
+      return false;
+    }
+  }
+}
+
+/** Read up to `limit` pending rows from a wb_* table (oldest first). */
+function readWbRows(table: string, limit: number): Array<Record<string, unknown>> {
+  const result = state.db!.exec(`SELECT * FROM ${table} ORDER BY queued_at ASC LIMIT ${limit}`);
+  if (!result.length) return [];
+  const cols = result[0].columns;
+  return result[0].values.map((vals) =>
+    cols.reduce<Record<string, unknown>>((acc, c, i) => {
+      acc[c] = vals[i];
+      return acc;
+    }, {}),
+  );
+}
+
+/**
+ * Write the queued rows to Prisma, chunked. Returns false if DB unavailable.
+ *
+ * OPS ACCOUNTING (v3.22.1 fix): a `createMany` is ONE query-engine operation
+ * regardless of row count, and the `$allOperations` extension in lib/prisma.ts
+ * already increments `dbOpsCounter.writes++` once per call. The pre-v3.22.1
+ * code ALSO added `dbOpsCounter.writes += chunk.length` here, which over-counted
+ * each flush by (rows-1) — flushing 6,000 queued log rows recorded ~6,000
+ * phantom writes for just 24 real ops, burning the plan budget on the dashboard
+ * without touching the DB. That manual increment is removed so the counter
+ * reflects TRUE Prisma operations (createMany = 1 write op).
+ */
+async function writeWbRowsToPrisma(kind: WriteBehindKind, rows: Array<Record<string, unknown>>): Promise<boolean> {
+  const data = rows.map((r) => mapWbToPrisma(kind, r));
+  try {
+    for (let i = 0; i < data.length; i += WB_CHUNK) {
+      const chunk = data.slice(i, i + WB_CHUNK);
+      await createManyWb(kind, chunk);
+    }
+    return true;
+  } catch (err) {
+    if (isDbUnavailableError(err)) return false;
+    throw err;
+  }
+}
+
+/** Dispatch a bulk createMany to the correct Prisma delegate (avoids union-call). */
+function createManyWb(kind: WriteBehindKind, chunk: Array<Record<string, unknown>>): Promise<{ count: number }> {
+  switch (kind) {
+    case "api_request":
+      return prisma.aPIRequestLog.createMany({ data: chunk as never, skipDuplicates: true });
+    case "server_log":
+      return prisma.serverLog.createMany({ data: chunk as never, skipDuplicates: true });
+    case "audit_log":
+      return prisma.auditLog.createMany({ data: chunk as never, skipDuplicates: true });
+  }
+}
+
+function mapWbToPrisma(kind: WriteBehindKind, row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (v === null || v === undefined) continue;
+    switch (k) {
+      case "user_id": out.userId = v; break;
+      case "user_email": out.userEmail = v; break;
+      case "ip_address": out.ipAddress = v; break;
+      case "user_agent": out.userAgent = v; break;
+      case "method": out.method = v; break;
+      case "path": out.path = v; break;
+      case "query_params": out.queryParams = v; break;
+      case "status_code": out.statusCode = v; break;
+      case "response_time": out.responseTime = v; break;
+      case "error_message": out.errorMessage = v; break;
+      case "is_nse": out.isNSE = !!v; break;
+      case "nse_endpoint": out.nseEndpoint = v; break;
+      case "is_rate_limited": out.isRateLimited = !!v; break;
+      case "is_anomaly": out.isAnomaly = !!v; break;
+      case "anomaly_type": out.anomalyType = v; break;
+      case "task_id": out.taskId = v; break;
+      case "resource_id": out.resourceId = v; break;
+      case "response_status": out.responseStatus = v; break;
+      // metadata is already a JSON string in SQLite — parse for Prisma Json.
+      case "metadata": out.metadata = parseWbJson(v as string); break;
+      case "request_id": out.requestId = v; break;
+      default:
+        // Pass through same-name fields (id, level, message, source, action,
+        // resource, created_at handled below).
+        if (k === "created_at") out.createdAt = new Date(v as string);
+        else out[k] = v;
+    }
+  }
+  return out;
+}
+
+function parseWbJson(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
+
+/** Delete the exact flushed rows from SQLite (by PK). */
+function deleteWbRows(table: string, kind: WriteBehindKind, rows: Array<Record<string, unknown>>): void {
+  const pk =
+    kind === "api_request"
+      ? "request_id"
+      : "id";
+  const ids = rows
+    .map((r) => r[pk])
+    .filter((v): v is string | number => typeof v === "string" || typeof v === "number");
+  if (ids.length === 0) return;
+  try {
+    state.db!.run(`DELETE FROM ${table} WHERE ${pk} IN (${ids.map((_, i) => `?${i + 1}`).join(", ")})`, ids);
+  } catch (err) {
+    logger.error({
+      msg: `SQLite: write-behind delete failed (${kind})`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Pending write-behind counts + last flush metadata (for DB-Health page). */
+export function getWriteBehindStats(): WriteBehindStats {
+  const pending: Record<string, number> = { api_request: 0, server_log: 0, audit_log: 0 };
+  if (state.db && state.ready) {
+    for (const kind of Object.keys(WB_TABLES) as WriteBehindKind[]) {
+      try {
+        const res = state.db.exec(`SELECT COUNT(*) as cnt FROM ${WB_TABLES[kind]}`);
+        pending[kind] = res.length && res[0].values.length ? Number(res[0].values[0][0]) : 0;
+      } catch {
+        pending[kind] = 0;
+      }
+    }
+  } else {
+    // Count buffered items (not queued yet).
+    for (const b of state.wbBuffer) pending[b.kind] = (pending[b.kind] || 0) + 1;
+  }
+  return {
+    pending,
+    lastPromoted: { ...state.wbLastPromoted },
+    lastRetained: { ...state.wbLastRetained },
+    lastFlushAt: state.wbLastFlushAt,
+    lastFlushCounts: { ...state.wbLastFlushCounts },
+  };
+}
+
+/** Persist last-flush metadata to `_backup_meta` so figures survive restarts. */
+function persistWriteBehindMeta(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES ('wb_flush_at', ?)", [
+      state.wbLastFlushAt ?? null,
+    ]);
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES ('wb_flush_counts', ?)", [
+      JSON.stringify(state.wbLastFlushCounts),
+    ]);
+  } catch {
+    // non-fatal
+  }
+}
+
+/** Public wrapper for the admin route — awaits readiness, drains, returns aggregate. */
+export async function flushWriteBehind(): Promise<{
+  flushed: Record<string, number>;
+  retained: Record<string, number>;
+  skipped: boolean;
+  pending: Record<string, number>;
+}> {
+  drainWriteBehindBuffer();
+  const res = await drainWriteBehind();
+  return { ...res, pending: getWriteBehindStats().pending };
+}
+
+// ---------------------------------------------------------------------------
+// Write-behind TTL prune + periodic leader flush
+// ---------------------------------------------------------------------------
+
+/** Prune wb_* rows older than the 14-day retention window (SQLite-only log TTL). */
+export function pruneWriteBehind(): Record<string, number> {
+  const pruned: Record<string, number> = { api_request: 0, server_log: 0, audit_log: 0 };
+  if (!state.db || !state.ready) return pruned;
+  const cutoff = new Date(Date.now() - WB_RETENTION_MS).toISOString();
+  for (const kind of Object.keys(WB_TABLES) as WriteBehindKind[]) {
+    try {
+      const table = WB_TABLES[kind];
+      // Collect the ids older than the cutoff, then delete by PK (the in-memory
+      // sql.js DB doesn't support parameterized DELETE with a subquery in the
+      // test mock, so we resolve ids here).
+      const res = state.db.exec(`SELECT * FROM ${table} WHERE queued_at < ?`, [cutoff]);
+      if (!res.length || !res[0].values.length) continue;
+      const cols = res[0].columns;
+      const pkIdx = cols.indexOf(kind === "api_request" ? "request_id" : "id");
+      const oldRows = res[0].values.map((vals) =>
+        cols.reduce<Record<string, unknown>>((acc, c, i) => {
+          acc[c] = vals[i];
+          return acc;
+        }, {}),
+      );
+      deleteWbRows(table, kind, oldRows);
+      pruned[kind] = oldRows.length;
+    } catch {
+      // non-fatal
+    }
+  }
+  if (Object.values(pruned).some((n) => n > 0)) {
+    logger.info({ msg: "SQLite: pruned stale write-behind rows", pruned });
+  }
+  return pruned;
+}
+
+/**
+ * Periodic leader-gated write-behind flush + TTL prune. Runs every
+ * WB_FLUSH_INTERVAL_MS (15 min) on the sqlite-sync leader only, so a
+ * multi-instance Netlify deploy promotes "important" log rows to Prisma and
+ * prunes stale rows exactly once per window instead of once per instance.
+ *
+ * Data-loss/whiplash note: the pre-v3.22.2 flush was effectively ad-hoc (manual
+ * admin button), so queued logs only reached Prisma on manual flush or were
+ * lost on deploy. This timer closes that gap cheaply — each drain promotes at
+ * most WB_MAX_DRAIN_CHUNKS chunks (ONE createMany op per kind per window).
+ */
+export function startWriteBehindFlush(): void {
+  if (state.wbFlushTimer) return;
+  state.wbFlushTimer = setInterval(() => {
+    void (async () => {
+      // Leader-only, but degrade to running when the DB is down so queued
+      // retention still prunes and we don't fully halt on a DB outage.
+      try {
+        const leader = await import("@/lib/services/leader");
+        if (!(await leader.isLeader("sqlite-sync"))) return;
+        await drainWriteBehind();
+        pruneWriteBehind();
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: periodic write-behind flush skipped",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  }, WB_FLUSH_INTERVAL_MS);
+}
+
+/** Stop the periodic write-behind flush timer. For graceful shutdown / tests. */
+export function stopWriteBehindFlush(): void {
+  if (state.wbFlushTimer) {
+    clearInterval(state.wbFlushTimer);
+    state.wbFlushTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sync Prisma -> SQLite
 // ---------------------------------------------------------------------------
 
 /**
  * Sync data from Prisma -> SQLite. Called on startup, after writes, and
  * when Prisma recovers. Non-fatal -- failures are logged but don't crash.
+ *
+ * Leader gate (v3.22.0): when called with `opts.force`, always sync (used by
+ * the admin "Sync Now" button / manual trigger). Otherwise, only the instance
+ * that holds the `sqlite-sync` leader lock performs the sync, so a
+ * multi-instance deploy doesn't run N concurrent full synchs at boot. If the
+ * DB is unavailable the gate degrades (leader.ts returns true) and sync
+ * proceeds only as far as individual tables allow.
  */
-export async function syncFromPrisma(): Promise<void> {
+export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> {
   if (!state.db || state.syncing) return;
+  if (!opts?.force) {
+    // lazy require to keep the module graph light at init (avoids a hard cycle)
+    const leader = await import("@/lib/services/leader");
+    const isSyncLeader = await leader.isLeader("sqlite-sync");
+    if (!isSyncLeader) {
+      logger.info({
+        msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
+        self: leader.LEADER_SELF,
+      });
+      return;
+    }
+  }
   state.syncing = true;
   const startTime = Date.now();
   let totalRows = 0;
@@ -1465,5 +2144,11 @@ function createFallback(db: Database): SqliteFallback {
     restoreOpsCounter,
     persistDbErrorCounts,
     restoreDbErrorCounts,
+    enqueueWriteBehind,
+    drainWriteBehind,
+    getWriteBehindStats,
+    flushWriteBehind,
+    writeLivenessHeartbeat,
+    getLivenessHeartbeats,
   };
 }

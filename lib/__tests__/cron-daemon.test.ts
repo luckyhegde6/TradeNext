@@ -74,6 +74,15 @@ jest.mock("@/lib/services/worker/worker-service", () => ({
   executeTask: jest.fn(),
 }));
 
+const mockSqliteHeartbeat = jest.fn();
+jest.mock("@/lib/sqlite", () => ({
+  __esModule: true,
+  getSqliteFallback: jest.fn(() => ({
+    isReady: () => true,
+    writeLivenessHeartbeat: mockSqliteHeartbeat,
+  })),
+}));
+
 jest.mock("@/lib/services/worker/worker-logger", () => ({
   __esModule: true,
   createTaskLogger: jest.fn(() => ({
@@ -172,15 +181,20 @@ describe("startCronDaemon", () => {
     expect(mockSchedule).toHaveBeenCalledTimes(1);
   });
 
-  it("writes an initial heartbeat row under the daemon workerId", async () => {
+  it("writes an initial liveness heartbeat to the LOCAL SQLite store (zero Prisma ops)", async () => {
+    const { getSqliteFallback } = require("@/lib/sqlite") as {
+      getSqliteFallback: jest.Mock;
+    };
     await startCronDaemon();
 
-    expect(prisma.workerStatus.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { workerId: expect.stringContaining("cron-daemon-") },
-        create: expect.objectContaining({ status: "idle", workerName: expect.stringContaining("cron-daemon") }),
-      }),
+    // v3.22.0: the daemon heartbeat is written to the local SQLite liveness
+    // store — NOT a Prisma workerStatus.upsert — to keep Prisma ops ~0.
+    expect(mockSqliteHeartbeat).toHaveBeenCalledWith(
+      "cron-daemon",
+      expect.objectContaining({ daemonId: expect.stringContaining("cron-daemon-") }),
     );
+    expect(getSqliteFallback().isReady()).toBe(true);
+    expect(prisma.workerStatus.upsert).not.toHaveBeenCalled();
   });
 });
 

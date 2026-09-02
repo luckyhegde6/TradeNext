@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma, { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
-import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup } from "@/lib/sqlite";
+import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind } from "@/lib/sqlite";
 import { isDbUnavailableError } from "@/lib/db-utils";
+import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
+import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
 
 /**
  * GET /api/admin/db-health
@@ -128,6 +130,16 @@ export async function GET() {
     dailyPriceCache: priceCacheStatus,
     dbErrors,
     dbErrorSummary,
+    // v3.22.0: write-behind queue stats + leader election status + liveness
+    // heartbeats (SQLite-backed, zero Prisma footprint in the response path).
+    writeBehind: getWriteBehindStats(),
+    leader: {
+      self: LEADER_SELF,
+      worker: await getLeaderInfo("worker"),
+      cronDaemon: await getLeaderInfo("cron-daemon"),
+      sqliteSync: await getLeaderInfo("sqlite-sync"),
+    },
+    liveness: getSqliteFallback()?.getLivenessHeartbeats() ?? [],
   });
 }
 
@@ -136,9 +148,13 @@ export async function GET() {
  * Trigger a manual SQLite sync from Prisma, flush daily prices, or perform an
  * admin backup / restore of the in-memory SQLite backup layer.
  *
- * Body: { action?: "sync_sqlite" | "flush_prices" | "backup" | "restore" }
- *  - backup:  returns { data: base64 } of the exported .sqlite blob
- *  - restore: { data: <base64 sqlite> } applies the uploaded backup
+ * Body: { action?: "sync_sqlite" | "flush_prices" | "flush_logs" | "deploy_prep" | "backup" | "restore" }
+ *  - backup:      returns { data: base64 } of the exported .sqlite blob
+ *  - restore:     { data: <base64 sqlite> } applies the uploaded backup
+ *  - deploy_prep: run the "Prepare for Deploy" sequence — flush write-behind logs
+ *                 from SQLite into Prisma (so in-memory queued logs survive the
+ *                 deploy/restart), then force-refresh the SQLite read-mirror from
+ *                 Prisma, then persist ops/error snapshots and return a summary.
  */
 export async function POST(req: Request) {
   const session = await auth();
@@ -161,6 +177,15 @@ export async function POST(req: Request) {
     }
     const base64 = Buffer.from(bytes).toString("base64");
     const filename = `tradenext-sqlite-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`;
+    void createAuditLog({
+      userId: session.user.id ? parseInt(session.user.id) : undefined,
+      userEmail: session.user.email,
+      action: "ADMIN_DB_BACKUP",
+      resource: "sqlite",
+      resourceId: filename,
+      responseStatus: 200,
+      metadata: { size: bytes.byteLength },
+    });
     return NextResponse.json({
       success: true,
       filename,
@@ -187,6 +212,14 @@ export async function POST(req: Request) {
       // Persist snapshots from the restored DB so ops/error counts survive.
       getSqliteFallback()?.persistOpsCounter();
       getSqliteFallback()?.persistDbErrorCounts();
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_RESTORE",
+        resource: "sqlite",
+        responseStatus: 200,
+        metadata: { tables: result.db, bytes: bytes.byteLength },
+      });
       return NextResponse.json({
         success: true,
         message: `SQLite backup restored (${result.db} tables)`,
@@ -203,6 +236,14 @@ export async function POST(req: Request) {
   if (action === "flush_prices") {
     try {
       const result = await flushDailyPricesToDb();
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_FLUSH_PRICES",
+        resource: "daily_prices",
+        responseStatus: 200,
+        metadata: { rows: result.rows, errors: result.errors },
+      });
       return NextResponse.json({
         success: true,
         message: `Flushed ${result.rows} rows to daily_prices (${result.errors} errors)`,
@@ -216,6 +257,79 @@ export async function POST(req: Request) {
     }
   }
 
+  if (action === "flush_logs") {
+    // v3.22.0: bulk-flush the write-behind log queue (APIRequestLog / ServerLog
+    // / AuditLog) from SQLite into Prisma. Manual admin trigger; the leader
+    // worker also flushes periodically (nightly + after writes).
+    try {
+      const result = await flushWriteBehind();
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_FLUSH_LOGS",
+        resource: "write_behind",
+        responseStatus: 200,
+        metadata: { flushed: result.flushed, retained: result.retained, pending: result.pending },
+      });
+      return NextResponse.json({
+        success: true,
+        message: `Write-behind log flush complete (${Object.values(result.flushed).reduce((a, b) => a + b, 0)} rows)`,
+        ...result,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Log flush failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (action === "deploy_prep") {
+    // "Prepare for Deploy": the SQLite backup layer is an in-memory sql.js DB,
+    // so a deploy/restart wipes the queued write-behind logs + heartbeat data.
+    // Step 1 — bulk-flush pending write-behind logs (APIRequestLog/ServerLog/
+    // AuditLog) from SQLite into Prisma so nothing queued is lost on restart.
+    // Step 2 — force-refresh the SQLite read-mirror from the current Prisma
+    // state so DB-down reads after deploy serve recent data.
+    try {
+      const flushed = await flushWriteBehind();
+      const sqlite = await ensureSqliteBackup();
+      if (!sqlite) {
+        return NextResponse.json(
+          { error: "SQLite backup not initialized (logs flushed, mirror sync skipped)" },
+          { status: 503 },
+        );
+      }
+      await sqlite.syncFromPrisma({ force: true });
+      sqlite.persistOpsCounter();
+      sqlite.persistDbErrorCounts();
+      const health = sqlite.getHealthStatus();
+      const rowsFlushed = Object.values(flushed.flushed).reduce((a, b) => a + b, 0);
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_DEPLOY_PREP",
+        resource: "sqlite",
+        responseStatus: 200,
+        metadata: { rowsFlushed, pushed: flushed.flushed, retained: flushed.retained, pending: flushed.pending },
+      });
+      return NextResponse.json({
+        success: true,
+        message: `Deploy prep complete — promoted ${rowsFlushed} important write-behind rows to Prisma and refreshed the SQLite mirror`,
+        flushed: flushed.flushed,
+        retained: flushed.retained,
+        pending: flushed.pending,
+        rowsFlushed,
+        sqlite: health.sqlite,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Deploy prep failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
   // Default: sync SQLite
   const sqlite = await ensureSqliteBackup();
   if (!sqlite) {
@@ -223,11 +337,20 @@ export async function POST(req: Request) {
   }
 
   try {
-    await sqlite.syncFromPrisma();
+    // Manual admin action — force the sync regardless of leader election so it
+    // works on whatever instance the admin is hitting (leader-gated otherwise).
+    await sqlite.syncFromPrisma({ force: true });
     // Persist snapshots so the post-sync state survives restarts/deploys
     sqlite.persistOpsCounter();
     sqlite.persistDbErrorCounts();
     const health = sqlite.getHealthStatus();
+    void createAuditLog({
+      userId: session.user.id ? parseInt(session.user.id) : undefined,
+      userEmail: session.user.email,
+      action: "ADMIN_DB_SYNC",
+      resource: "sqlite",
+      responseStatus: 200,
+    });
     return NextResponse.json({
       success: true,
       message: "SQLite sync completed",

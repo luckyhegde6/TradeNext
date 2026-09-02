@@ -332,41 +332,31 @@ export async function logAPIRequest(data: {
   anomalyType?: string;
 }): Promise<void> {
   try {
-    const logData = {
-      userId: data.userId,
-      userEmail: data.userEmail,
-      ipAddress: data.ipAddress,
-      userAgent: data.userAgent,
-      method: data.method,
-      path: data.path,
-      queryParams: data.queryParams,
-      statusCode: data.statusCode,
-      responseTime: data.responseTime,
-      errorMessage: data.errorMessage,
-      isNSE: data.isNSE ?? false,
-      nseEndpoint: data.nseEndpoint,
-      isRateLimited: data.isRateLimited ?? false,
-      isAnomaly: data.isAnomaly ?? false,
-      anomalyType: data.anomalyType
-    };
-
-    // FIRE-AND-FORGET (v3.20.3): never let a slow/stalled DB block the request
-    // path. This runs on every API request; when Prisma is unavailable (e.g.
-    // account hold) the upsert used to wait the full 120s timeout even though
-    // this function catches it. Callers `await` us for API stability, but we
-    // resolve immediately and write in the background.
-    void prisma.aPIRequestLog
-      .upsert({
-        where: { requestId: data.requestId },
-        create: {
-          requestId: data.requestId,
-          ...logData
-        },
-        update: logData
-      })
-      .catch((error) => {
-        logger.error({ msg: "Failed to log API request", error: error instanceof Error ? error.message : String(error) });
+    // WRITE-BEHIND QUEUE (v3.22.0): land in local SQLite (zero Prisma ops at
+    // call time) and bulk-flush to Prisma via drainWriteBehind(). This removes
+    // the per-request Prisma upsert that tripped the plan-limit breaker
+    // (2026-09-02 prod: APIRequestLog.upsert timed out after 120000ms).
+    // Fire-and-forget: we resolve immediately and the enqueue is sub-ms.
+    void import("@/lib/sqlite").then(({ enqueueWriteBehind }) => {
+      enqueueWriteBehind("api_request", {
+        request_id: data.requestId,
+        user_id: data.userId,
+        user_email: data.userEmail,
+        ip_address: data.ipAddress,
+        user_agent: data.userAgent,
+        method: data.method,
+        path: data.path,
+        query_params: data.queryParams,
+        status_code: data.statusCode,
+        response_time: data.responseTime,
+        error_message: data.errorMessage,
+        is_nse: data.isNSE ?? false,
+        nse_endpoint: data.nseEndpoint,
+        is_rate_limited: data.isRateLimited ?? false,
+        is_anomaly: data.isAnomaly ?? false,
+        anomaly_type: data.anomalyType,
       });
+    });
   } catch (error) {
     logger.error({ msg: "Failed to log API request", error: error instanceof Error ? error.message : String(error) });
   }

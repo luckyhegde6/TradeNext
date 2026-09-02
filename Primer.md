@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-09-02 (v3.21.3 — Prisma OTel tracing (opt-in) + Prisma Compute P1001 false-alarm diagnosis [user applies Dashboard "auto schema apply" toggle, BUGS.md #13]; also v3.21.2 stock-quote tiering `7409616` committed+pushed — suite 945 pass / 4 skip; tsc 46 = baseline; OTel commit pending user)
+2026-09-02 (v3.22.0 — write-behind log store [SQLite-primary, Prisma promotion for important logs only] + leader election + audit-tag gap fill, Prisma ops target <1000/day — suite 972 pass / 4 skip / 0 fail; tsc 46 = baseline; commit/PR/deploy pending user. Covers the full in-flight `feat/db-health-ops-visibility` branch on top of v3.21.3.)
 
 ---
 
 ## Current Project Status
+
+### v3.22.0 — Write-behind log store (SQLite-primary, Prisma promotion for important logs only) + leader election + audit-tag gap fill (Sep 02 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING USER
+**Branch**: `feat/db-health-ops-visibility` (on top of v3.21.3). Deployable unit — covers the full in-flight branch.
+**Why**: (1) Multi-instance boot duplication — 2026-09-02 prod log showed 5 Netlify instances each syncing SQLite + scheduling duplicate cron/workers → Prisma ops/BG ~5–10× on cold-start. (2) `drainWriteBehind` promoted EVERY queued row → info logs alone pushed daily ops way past target. (3) Audit-tag + db-health UI keying gaps.
+**Fix**: (1) **Leader election** (`lib/services/leader.ts`) — single-writer lock on `worker_status` (`leader-<role>` + heartbeat, 5-min staleness), DB-down fail-open to local leader, re-elect on recovery; `acquireLeaderLock` reconcile — create-path genuine errors rethrow, `updateMany` claim-race stands down, DB-unavailable fail-open. (2) **Write-behind promotion model** — SQLite = PRIMARY durable log store (14-day TTL); `isWbImportant` filters api 5xx/rate-limited/anomaly/error + server_log error|warn + security/critical audits → ONE `createMany` promotes only the important subset; bulk info/api logs stay SQLite-only (0 Prisma ops); `pruneWriteBehind` + 15-min leader-gated `startWriteBehindFlush` booted after `startOpsCounterPersistence()`; `lastPromoted`/`lastRetained` surfaced; **double-count fix** — `createMany`=1 op via `$allOperations`, removed `dbOpsCounter.writes += chunk.length`. (3) **Audit-tag gap fill** — `lib/audit.ts` +9 `ADMIN_*` tags, wired `void createAuditLog` in db-health POST (backup/restore/flush_prices/flush_logs/deploy_prep/sync) + admin recommendations POST (run_now/check_performance/check_swing_performance with `taskId`). (4) **db-health UI kind-key fix** — `pending`/`lastFlushCounts` keyed by KIND (`api_request`/`server_log`/`audit_log`) not table (`wb_*`); emerald `lastPromoted` vs amber `lastRetained` split. (5) **cron-daemon heartbeat → local SQLite** (`writeLivenessHeartbeat`, zero Prisma ops).
+**Tests**: sqlite `__resetStore` mock isolation; promotion + regression (600 error rows → 3 createMany, writes counter unchanged); `leader.test.ts` (18); audit-action coverage. Full suite **972 pass / 4 skip / 0 fail** (was 945/4, +27); tsc **46 = baseline** (0 new); no schema change → no migration. Spec `.agents/specs/01-db-ops-reduction.md` + plan `.agents/plans/01-db-ops-reduction.md`.
+**Docs**: AGENTS.md v3.22.0 row, CHANGELOG index + `.agents/changelog/versions-v3.22.md`, TODO.md row, Primer, Lessons, agent-memory, ARCHITECTURE (leader + write-behind), rules/guardrails.
+**Status**: Code + tests + docs verified; **commit/PR/deploy pending user** (no auto-commit/push/deploy). After deploy, live-verify db-health shows promoted-vs-retained split + healthy ops count.
 
 ### v3.21.1 — DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix (Sep 02 2026) — ✅ CODE + TESTS + DOCS VERIFIED
 **Branch**: `feat/db-health-ops-visibility` (committed `4c47348` + docs `47e6677`, pushed; PR NOT created — user decision). Increment (per-type DB-error summary + lazy SQLite re-init) uncommitted, on top.

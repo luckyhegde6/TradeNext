@@ -15,16 +15,40 @@ jest.mock("sql.js", () => {
 
   class MockDatabase {
     run(sql: string, _params: any[] = []) {
-      // Split multi-statement SQL on ; and process each
+      // Split multi-statement SQL on ; and process each. sql.js accepts
+      // `-- comment` lines before a statement, so strip leading comment lines
+      // so a comment-prefixed CREATE is still classified (mimics SQLite).
       const stmts = sql.split(";").map((s) => s.trim()).filter(Boolean);
-      for (const stmt of stmts) {
+      for (let raw of stmts) {
+        // Drop full-line SQL comments (e.g. the `-- Write-behind ...` header
+        // that precedes CREATE TABLE wb_api_request in SCHEMA_SQL).
+        raw = raw
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => !l.startsWith("--"))
+          .join(" ");
+        const stmt = raw;
         const upper = stmt.toUpperCase();
         if (upper.startsWith("CREATE TABLE")) {
           const m = stmt.match(/CREATE TABLE IF NOT EXISTS (\w+)/i);
           if (m && !store[m[1]]) store[m[1]] = { columns: [], rows: [] };
         } else if (upper.startsWith("DELETE")) {
           const m = stmt.match(/DELETE FROM (\w+)/i);
-          if (m && store[m[1]]) store[m[1]].rows = [];
+          if (m && store[m[1]]) {
+            // DELETE ... WHERE <pk> IN (?, ...) — remove only the listed rows.
+            const t = store[m[1]];
+            const inM = stmt.match(/WHERE\s+(\w+)\s+IN\s*\(/i);
+            if (inM && _params.length > 0) {
+              const pkIdx = t.columns.indexOf(inM[1]);
+              if (pkIdx >= 0) {
+                const ids = new Set(_params.map(String));
+                t.rows = t.rows.filter((r) => !ids.has(String(r[pkIdx])));
+              }
+            } else {
+              // Unscoped DELETE (no WHERE) wipes the whole table.
+              t.rows = [];
+            }
+          }
         } else if (upper.startsWith("INSERT")) {
           const m = stmt.match(/INSERT OR REPLACE INTO (\w+)/i);
           if (m && store[m[1]]) {
@@ -76,6 +100,14 @@ jest.mock("sql.js", () => {
         if (idx >= 0) rows = rows.filter((r) => r[idx] === params[0]);
       }
 
+      // WHERE col LIKE '<prefix>%' — filter literal LIKE against the column.
+      const likeM = sql.match(/WHERE\s+(\w+)\s+LIKE\s+'([^']+)'%/i);
+      if (likeM) {
+        const idx = t.columns.indexOf(likeM[1]);
+        const prefix = likeM[2];
+        if (idx >= 0) rows = rows.filter((r) => typeof r[idx] === "string" && r[idx].startsWith(prefix));
+      }
+
       // ORDER BY col DESC/ASC
       const orderM = sql.match(/ORDER BY\s+(\w+)\s+(DESC|ASC)/i);
       if (orderM) {
@@ -118,6 +150,12 @@ jest.mock("sql.js", () => {
   return {
     __esModule: true,
     default: jest.fn().mockResolvedValue({ Database: MockDatabase }),
+    __resetStore: () => {
+      // Clear all table rows (the store is shared/global across mock DB
+      // instances, mirroring the real sql.js in-memory DB). Used in beforeEach
+      // so tests start from a clean queue.
+      for (const k of Object.keys(store)) store[k] = { columns: [], rows: [] };
+    },
   };
 });
 
@@ -133,8 +171,9 @@ jest.mock("@/lib/prisma", () => ({
     corporateAction: { findMany: jest.fn().mockResolvedValue([]) },
     chartinkScreener: { findMany: jest.fn().mockResolvedValue([]) },
     workerStatus: { findMany: jest.fn().mockResolvedValue([]) },
-    serverLog: { findMany: jest.fn().mockResolvedValue([]) },
-    auditLog: { findMany: jest.fn().mockResolvedValue([]) },
+    serverLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    auditLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    aPIRequestLog: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     cronJob: { findMany: jest.fn().mockResolvedValue([]) },
     workerTask: { findMany: jest.fn().mockResolvedValue([]) },
   },
@@ -148,6 +187,26 @@ jest.mock("@/lib/prisma", () => ({
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const mockPrisma = require("@/lib/prisma").default;
+
+// ── Mock leader election ─────────────────────────────────────────────────
+// sqlite.ts lazily imports @/lib/services/leader inside syncFromPrisma to gate
+// the full Prisma->SQLite sync to the "sqlite-sync" role leader. For unit
+// tests we default `isLeader` to TRUE so the sync runs; individual tests can
+// flip it to false to exercise the gate / "skipped" path.
+jest.mock("@/lib/services/leader", () => ({
+  __esModule: true,
+  isLeader: jest.fn().mockResolvedValue(true),
+  acquireLeaderLock: jest.fn().mockResolvedValue(true),
+  renewLeaderLock: jest.fn().mockResolvedValue(true),
+  releaseLeaderLock: jest.fn().mockResolvedValue(undefined),
+  getLeaderInfo: jest.fn().mockResolvedValue(null),
+  leaderWorkerId: jest.fn((role: string) => `leader-${role}`),
+  LEADER_SELF: "unit-test-host-1",
+  LEADER_STALENESS_MS: 5 * 60_000,
+  LEADER_HEARTBEAT_MS: 60_000,
+}));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockLeader = require("@/lib/services/leader");
 
 // ── Imports (after mocks so they use the mocked modules) ──────────────────
 import { getSqliteFallback, syncFromPrisma } from "../sqlite";
@@ -618,6 +677,228 @@ describe("SQLite backup fallback", () => {
       expect(fb).not.toBeNull();
       expect(fb!.isReady()).toBe(true);
       expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
+    });
+  });
+
+  // ── v3.22.0: write-behind logging queue ─────────────────────────────────
+  describe("write-behind log queue", () => {
+    beforeEach(async () => {
+      mockPrisma.serverLog.createMany.mockClear();
+      mockPrisma.auditLog.createMany.mockClear();
+      mockPrisma.aPIRequestLog.createMany.mockClear();
+      // The sql.js mock store is shared/global across mock DB instances — clear
+      // it + re-init so each test starts from an empty write-behind queue.
+      const sqljs: any = require("sql.js");
+      sqljs.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      await ensureSqliteBackup();
+    });
+
+    it("increments pending counts when enqueued", () => {
+      const fb = getSqliteFallback()!;
+      fb.enqueueWriteBehind("server_log", {
+        id: "l1",
+        level: "info",
+        message: "hello",
+        source: "test",
+        created_at: new Date().toISOString(),
+      });
+      fb.enqueueWriteBehind("audit_log", {
+        id: "a1",
+        user_id: 1,
+        action: "LOGIN",
+        created_at: new Date().toISOString(),
+      });
+      fb.enqueueWriteBehind("api_request", {
+        request_id: "r1",
+        method: "GET",
+        path: "/api/x",
+        status_code: 200,
+        created_at: new Date().toISOString(),
+      });
+
+      const stats = fb.getWriteBehindStats();
+      expect(stats.pending.server_log).toBeGreaterThanOrEqual(1);
+      expect(stats.pending.audit_log).toBeGreaterThanOrEqual(1);
+      expect(stats.pending.api_request).toBeGreaterThanOrEqual(1);
+    });
+
+    it("promotes ONLY important rows to Prisma and retains the rest in SQLite [v3.22.2]", async () => {
+      const fb = getSqliteFallback()!;
+      // Seed promotable rows (error-level log, security audit, 5xx api) plus
+      // NON-promotable rows (info log, 200 api).
+      fb.enqueueWriteBehind("server_log", {
+        id: "l-err-1", level: "error", message: "boom", source: "test",
+        created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+      fb.enqueueWriteBehind("server_log", {
+        id: "l-info-1", level: "info", message: "hello", source: "test",
+        created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+      fb.enqueueWriteBehind("audit_log", {
+        id: "a-sec-1", user_id: 1, action: "AUTH_LOGIN",
+        created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+      fb.enqueueWriteBehind("api_request", {
+        request_id: "r-5xx-1", method: "GET", path: "/api/x", status_code: 500,
+        created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+      fb.enqueueWriteBehind("api_request", {
+        request_id: "r-200-1", method: "GET", path: "/api/y", status_code: 200,
+        created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+
+      const res = await fb.flushWriteBehind();
+      expect(res.skipped).toBe(false);
+      // Promoted: error log, security audit, 5xx api.
+      expect(res.flushed.server_log).toBeGreaterThanOrEqual(1);
+      expect(res.flushed.audit_log).toBeGreaterThanOrEqual(1);
+      expect(res.flushed.api_request).toBeGreaterThanOrEqual(1);
+      // Retained: info log, 200 api stay in SQLite.
+      expect(res.retained.server_log).toBeGreaterThanOrEqual(1);
+      expect(res.retained.api_request).toBeGreaterThanOrEqual(1);
+
+      // createMany was invoked only for the promoted rows (per delegTheate).
+      expect(mockPrisma.serverLog.createMany).toHaveBeenCalled();
+      expect(mockPrisma.auditLog.createMany).toHaveBeenCalled();
+      expect(mockPrisma.aPIRequestLog.createMany).toHaveBeenCalled();
+
+      // The promoted rows are gone from the queue; the retained rows remain.
+      const after = fb.getWriteBehindStats();
+      expect(after.pending.audit_log).toBe(0);
+      expect(after.pending.server_log).toBe(1); // the info row stays
+      expect(after.pending.api_request).toBe(1); // the 200 row stays
+      expect(after.lastFlushAt).not.toBeNull();
+      expect(after.lastPromoted.server_log).toBeGreaterThanOrEqual(1);
+      expect(after.lastRetained.api_request).toBeGreaterThanOrEqual(1);
+    });
+
+    it("leaves rows queued when the DB is unavailable (skip, not 500)", async () => {
+      const fb = getSqliteFallback()!;
+      fb.enqueueWriteBehind("audit_log", {
+        id: "a-skip-1", user_id: 1, action: "LOGIN", created_at: new Date("2026-08-25T10:00:00.000Z"),
+      });
+      // Prisma Postgres errors are Error instances with a `code` (P6003 = hold).
+      const p6003 = new Error("There is a hold on your account. Reason: planLimitReached.");
+      (p6003 as any).code = "P6003";
+      mockPrisma.auditLog.createMany.mockRejectedValueOnce(p6003);
+
+      const res = await fb.flushWriteBehind();
+      expect(res.skipped).toBe(true);
+      expect(res.flushed.audit_log).toBe(0);
+      // Rows remain queued for a later flush.
+      expect(fb.getWriteBehindStats().pending.audit_log).toBeGreaterThanOrEqual(1);
+
+      // A subsequent successful flush applies them.
+      mockPrisma.auditLog.createMany.mockResolvedValueOnce({ count: 1 });
+      const res2 = await fb.flushWriteBehind();
+      expect(res2.flushed.audit_log).toBeGreaterThanOrEqual(1);
+      expect(res2.skipped).toBe(false);
+    });
+
+    it("does NOT inflate the ops counter by row count (createMany = 1 op) [v3.22.1 regression]", async () => {
+      const fb = getSqliteFallback()!;
+      // The $allOperations extension in lib/prisma.ts counts ONE write op per
+      // createMany call regardless of row count. The flush path must NOT add
+      // dbOpsCounter.writes += rows itself (that double-counted: ~6k phantom
+      // writes for a handful of real ops). Here the Prisma mock is plain (no
+      // $allOperations), so if the flush inflated the counter we'd see it here.
+      const cap: any = require("@/lib/prisma");
+      const writesBefore = cap.dbOpsCounter.writes;
+
+      // Seed > WB_CHUNK (250) PROMOTABLE rows (error-level logs are promoted to
+      // Prisma). A single drain reads up to 2000 rows and createMany batches in
+      // 250-row chunks → 600 rows = 3 createMany calls.
+      for (let i = 0; i < 600; i++) {
+        fb.enqueueWriteBehind("server_log", {
+          id: `reg-${i}`,
+          level: "error",
+          message: "row",
+          source: "test",
+          created_at: new Date("2026-08-25T10:00:00.000Z"),
+        });
+      }
+      mockPrisma.serverLog.createMany.mockResolvedValue({ count: 250 });
+      const res = await fb.flushWriteBehind();
+      expect(res.skipped).toBe(false);
+      // All 600 promotable rows were flushed.
+      expect(res.flushed.server_log).toBe(600);
+      expect(res.retained.server_log).toBe(0);
+
+      // 600 / 250 = 3 createMany calls.
+      expect(mockPrisma.serverLog.createMany.mock.calls.length).toBe(3);
+      // The flush path no longer mutates the counter directly (writesBefore
+      // stays unchanged – only $allOperations would increment it in prod).
+      expect(cap.dbOpsCounter.writes).toBe(writesBefore);
+      // Queue is fully drained (no rows left for a kind that all promoted).
+      expect(fb.getWriteBehindStats().pending.server_log).toBe(0);
+    });
+  });
+
+  // ── v3.22.0: liveness heartbeats (SQLite, zero Prisma) ─────────────────
+  describe("liveness heartbeats", () => {
+    it("writes and reads a worker heartbeat", () => {
+      const fb = getSqliteFallback()!;
+      fb.writeLivenessHeartbeat("worker", { status: "idle", tasksCompleted: 5 });
+
+      const beats = fb.getLivenessHeartbeats();
+      expect(beats.length).toBeGreaterThanOrEqual(1);
+      const workerBeat = beats.find((b) => b.role === "worker");
+      expect(workerBeat).toBeDefined();
+      expect(workerBeat!.status).toBe("idle");
+      expect(workerBeat!.tasksCompleted).toBe(5);
+      expect(typeof workerBeat!.at).toBe("string");
+    });
+
+    it("overwrites the heartbeat for the same role (INSERT OR REPLACE)", () => {
+      const fb = getSqliteFallback()!;
+      fb.writeLivenessHeartbeat("cron-daemon", { state: "one" });
+      fb.writeLivenessHeartbeat("cron-daemon", { state: "two" });
+
+      const beats = fb.getLivenessHeartbeats().filter((b) => b.role === "cron-daemon");
+      expect(beats).toHaveLength(1);
+      expect(beats[0].state).toBe("two");
+    });
+  });
+
+  // ── v3.22.0: sqlite-sync leader gate ───────────────────────────────────
+  describe("sqlite-sync leader gate", () => {
+    it("skips the full sync when this instance is not the sqlite-sync leader", async () => {
+      // Flip the mock: not the leader. Reset SQLite to a fresh empty state so
+      // we can unambiguously assert the sync never ran (lastSyncAt stays null).
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      mockLeader.isLeader.mockResolvedValue(false);
+      resetSqliteStateForTests();
+      await ensureSqliteBackup();
+
+      // ensureSqliteBackup() calls syncFromPrisma() during init; the leader
+      // gate should make it a no-op, so no sync timestamp is recorded.
+      const fb = getSqliteFallback()!;
+      expect(fb.getHealthStatus().sqlite.lastSyncAt).toBeNull();
+
+      // An explicit syncFromPrisma() call is likewise gated.
+      await fb.syncFromPrisma();
+      expect(fb.getHealthStatus().sqlite.lastSyncAt).toBeNull();
+      // Restore the default for later tests.
+      mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("runs the full sync when force is passed even if not the leader", async () => {
+      mockLeader.isLeader.mockResolvedValue(false);
+      mockPrisma.dailyRecommendationRun.findMany.mockResolvedValue([{
+        id: "run-force", runDate: new Date("2026-08-25"), status: "completed",
+        totalScreeners: 1, uniqueStocks: 1, aiProcessed: true, executionTimeMs: 1,
+        triggeredBy: "system", metadata: null, createdAt: new Date("2026-08-25"),
+      }]);
+
+      const fb = getSqliteFallback()!;
+      await fb.syncFromPrisma({ force: true });
+
+      const recs = fb.getLatestRecommendations();
+      expect(recs).not.toBeNull();
+      expect((recs!.run as any).id).toBe("run-force");
+      mockLeader.isLeader.mockResolvedValue(true);
     });
   });
 });

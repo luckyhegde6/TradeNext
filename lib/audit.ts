@@ -1,4 +1,5 @@
 import prisma from "./prisma";
+import { randomUUID } from "crypto";
 
 export type AuditAction =
   | 'API_CALL'
@@ -37,6 +38,17 @@ export type AuditAction =
   | 'ADMIN_UPLOAD'
   | 'ADMIN_INGEST'
   | 'ADMIN_NSE_LIVE_SYNC'
+  // DB Health / SQLite admin actions (v3.22.x — DB ops reduction workstream)
+  | 'ADMIN_DB_SYNC'
+  | 'ADMIN_DB_FLUSH_PRICES'
+  | 'ADMIN_DB_FLUSH_LOGS'
+  | 'ADMIN_DB_DEPLOY_PREP'
+  | 'ADMIN_DB_BACKUP'
+  | 'ADMIN_DB_RESTORE'
+  // Admin-triggered recommendation / performance / swing jobs (v3.22.x)
+  | 'ADMIN_RECOMMENDATION_RUN'
+  | 'ADMIN_PERFORMANCE_CHECK'
+  | 'ADMIN_SWING_PERFORMANCE_CHECK'
   | 'ADMIN_ANNOUNCEMENT_CREATE'
   | 'ADMIN_ANNOUNCEMENT_UPDATE'
   | 'ADMIN_ANNOUNCEMENT_DELETE'
@@ -119,6 +131,7 @@ interface AuditLogParams {
   nseEndpoint?: string;
   metadata?: any;
   errorMessage?: string;
+  ipAddress?: string;
   session?: any; // New optional session parameter
 }
 
@@ -148,31 +161,29 @@ export async function createAuditLog(params: AuditLogParams) {
       }
     }
 
-    // FIRE-AND-FORGET (v3.20.3): never let a slow/stalled DB block the request
-    // path. Audit logging is best-effort — when Prisma is unavailable (e.g.
-    // account hold) the write used to wait the full 120s timeout even though
-    // this function catches it. The caller still `await`s us, so we resolve
-    // immediately here and kick the DB write off without awaiting it.
-    void prisma.auditLog
-      .create({
-        data: {
-          userId,
-          userEmail,
-          action: params.action as any,
-          resource: params.resource,
-          resourceId: params.resourceId,
-          method: params.method,
-          path: params.path,
-          responseStatus: params.responseStatus,
-          responseTime: params.responseTime,
-          nseEndpoint: params.nseEndpoint,
-          metadata: params.metadata,
-          errorMessage: params.errorMessage,
-        },
-      })
-      .catch((error) => {
-        console.error("Failed to create audit log:", error instanceof Error ? error.message : error);
+    // WRITE-BEHIND QUEUE (v3.22.0): land in local SQLite (`wb_audit_log`) with
+    // a client-side uuid id so the bulk-flush to Prisma is idempotent, at zero
+    // Prisma ops per call and sub-ms. This removes the per-call Prisma create
+    // and its 120s stall risk on a held account (v3.20.3 concern). Fire-and-forget
+    // — we still resolve immediately.
+    void import("@/lib/sqlite").then(({ enqueueWriteBehind }) => {
+      enqueueWriteBehind("audit_log", {
+        id: randomUUID(),
+        user_id: userId,
+        user_email: userEmail,
+        action: params.action,
+        resource: params.resource,
+        resource_id: params.resourceId,
+        method: params.method,
+        path: params.path,
+        response_status: params.responseStatus,
+        response_time: params.responseTime,
+        ip_address: params.ipAddress,
+        metadata: params.metadata !== undefined ? JSON.stringify(params.metadata) : null,
+        error_message: params.errorMessage,
+        nseEndpoint: params.nseEndpoint,
       });
+    });
 
     return null;
   } catch (error) {

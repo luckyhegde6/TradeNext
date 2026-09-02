@@ -12,6 +12,7 @@
  */
 import logger from "@/lib/logger";
 import prisma from "@/lib/prisma";
+import { randomUUID } from "crypto";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -168,13 +169,19 @@ export function getAiStats(timeframeMinutes = 60): AiStats {
  */
 export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
   try {
-    await prisma.serverLog.create({
-      data: {
+    // WRITE-BEHIND QUEUE (v3.22.0): land in local SQLite with a client-side
+    // uuid id (idempotent bulk-flush to Prisma), zero Prisma ops per call.
+    // The row is durable in SQLite (survives handler completion / restart) and
+    // reaches Prisma via drainWriteBehind. The in-memory buffer still serves
+    // getAiCalls immediately; the DB tier catches up on flush.
+    void import("@/lib/sqlite").then(({ enqueueWriteBehind }) => {
+      enqueueWriteBehind("server_log", {
+        id: randomUUID(),
         level: entry.status === "error" ? "warn" : "info",
         message: `AI call: ${entry.action}`,
         source: "ai",
-        taskId: `${entry.action}-${entry.model}`,
-        metadata: {
+        task_id: `${entry.action}-${entry.model}`,
+        metadata: JSON.stringify({
           action: entry.action,
           model: entry.model,
           status: entry.status,
@@ -187,8 +194,8 @@ export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
           result: entry.result,
           userLabel: entry.userLabel,
           timestamp: entry.timestamp,
-        },
-      },
+        }),
+      });
     });
   } catch (err) {
     // Don't let logging failures break the app

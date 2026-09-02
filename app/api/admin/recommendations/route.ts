@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { spawnRegularTask } from "@/lib/services/worker/task-orchestrator";
 import { ensureRecommendationCrons } from "@/lib/services/recommendationCronService";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -89,6 +90,14 @@ export async function POST(request: Request) {
         createdBy: Number(session.user.id),
       });
       logger.info({ msg: "Admin triggered recommendation run", taskId: task.id });
+      void createAuditLog({
+        userId: Number(session.user.id),
+        userEmail: session.user.email,
+        action: "ADMIN_RECOMMENDATION_RUN",
+        resource: "recommendations",
+        responseStatus: 200,
+        metadata: { taskId: task.id },
+      });
       return NextResponse.json({ success: true, message: "Recommendation run queued", taskId: task.id });
     }
 
@@ -102,6 +111,14 @@ export async function POST(request: Request) {
         createdBy: Number(session.user.id),
       });
       logger.info({ msg: "Admin triggered performance check", taskId: task.id });
+      void createAuditLog({
+        userId: Number(session.user.id),
+        userEmail: session.user.email,
+        action: "ADMIN_PERFORMANCE_CHECK",
+        resource: "recommendations",
+        responseStatus: 200,
+        metadata: { taskId: task.id },
+      });
       return NextResponse.json({ success: true, message: "Performance check queued", taskId: task.id });
     }
 
@@ -118,6 +135,14 @@ export async function POST(request: Request) {
         createdBy: Number(session.user.id),
       });
       logger.info({ msg: "Admin triggered swing performance check", taskId: task.id });
+      void createAuditLog({
+        userId: Number(session.user.id),
+        userEmail: session.user.email,
+        action: "ADMIN_SWING_PERFORMANCE_CHECK",
+        resource: "swing",
+        responseStatus: 200,
+        metadata: { taskId: task.id },
+      });
       return NextResponse.json({ success: true, message: "Swing performance check queued", taskId: task.id });
     }
 

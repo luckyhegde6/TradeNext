@@ -10,17 +10,31 @@ let autoStarted = false;
 
 /**
  * Auto-start the worker engine on first request (lazy initialization)
- * This ensures cron jobs run in production without manual admin intervention
+ * This ensures cron jobs run in production without manual admin intervention.
+ *
+ * LEADER GATE (v3.22.0): only the elected leader instance actually starts the
+ * engine/daemon, so a multi-instance deploy doesn't run N poll loops + N cron
+ * schedulers. Other instances log "standby awaiting leadership" and rely on the
+ * DB-back leader lock takeover when the current leader dies.
  */
-function autoStartEngine() {
+async function autoStartEngine() {
     if (autoStarted) return;
-    
+
     try {
-        startWorker(30_000); // v3.20.1: 30s polling (was 5s — saves ~14,400 DB reads/day)
-        // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
-        // (avoids duplicate cronJob.findMany queries every 60s).
-        startCronDaemon().catch((error) => logger.error({ msg: "Failed to auto-start cron daemon", error }));
-        logger.info({ msg: "Worker engine auto-started on first request" });
+        const leader = await import("@/lib/services/leader");
+        const workerLeader = await leader.acquireLeaderLock("worker");
+        if (workerLeader) {
+            startWorker(30_000); // v3.20.1: 30s polling (was 5s — saves ~14,400 DB reads/day)
+        }
+        const cronLeader = await leader.acquireLeaderLock("cron-daemon");
+        if (cronLeader) {
+            // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
+            // (avoids duplicate cronJob.findMany queries every 60s).
+            startCronDaemon().catch((error) => logger.error({ msg: "Failed to auto-start cron daemon", error }));
+        } else {
+            logger.warn({ msg: "Engine auto-start skipped (another instance leads)", self: leader.LEADER_SELF });
+        }
+        logger.info({ msg: "Worker engine auto-start evaluated", workerLeader, cronLeader });
         autoStarted = true;
     } catch (error) {
         logger.error({ msg: "Failed to auto-start worker engine", error });
@@ -37,11 +51,23 @@ export async function POST(req: Request) {
         const { action } = await req.json();
 
         if (action === "start") {
-            startWorker(30_000); // v3.20.1: 30s polling (was 5s)
-            // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
-            await startCronDaemon(); // v3.11.0: node-cron scheduler daemon
-            logger.info({ msg: "Background services started via API" });
-            return NextResponse.json({ success: true, message: "Services started" });
+            const leader = await import("@/lib/services/leader");
+            const workerLeader = await leader.acquireLeaderLock("worker");
+            if (workerLeader) {
+                startWorker(30_000); // v3.20.1: 30s polling (was 5s)
+            }
+            const cronLeader = await leader.acquireLeaderLock("cron-daemon");
+            if (cronLeader) {
+                // v3.20.1: Legacy scheduler removed — cron daemon handles scheduling
+                await startCronDaemon(); // v3.11.0: node-cron scheduler daemon
+            }
+            logger.info({ msg: "Background services start evaluated via API", workerLeader, cronLeader });
+            return NextResponse.json({
+                success: true,
+                message: workerLeader || cronLeader ? "Services started (leader gate)" : "Another instance is the active leader — standing by",
+                workerLeader,
+                cronLeader,
+            });
         } else if (action === "stop") {
             stopWorkerEngine();
             stopCronDaemon(); // v3.11.0

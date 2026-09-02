@@ -79,15 +79,19 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant Caller as Worker / API / AI
+    participant SQLite as SQLite wb_* queue (in-memory)
     participant DB as PostgreSQL (ServerLog)
     participant Admin as /api/admin/monitoring
 
     Caller->>Caller: dbInfo/dbWarn/dbError/dbDebug(msg, meta, source)
-    Caller->>DB: INSERT ServerLog {level, message, source, taskId, metadata, requestId}
+    Caller->>SQLite: enqueueWriteBehind (0 Prisma ops)
+    Note over SQLite: drain (15-min, leader-gated); isWbImportant filter
+    SQLite->>DB: ONE createMany ServerLog (error|warn ONLY)
     Note over DB: Retention: cleanupOldLogs(7 days) default
     Admin->>DB: getDbLogs({ level, source, taskId, limit, offset })
     Admin-->>Admin: filter client-side by level tab
 ```
+> **v3.22.0**: `ServerLog` (and `APIRequestLog` / `AuditLog`) writes go through the **SQLite write-behind queue** first (`lib/sqlite.ts`). Only `error`/`warn`-level rows are promoted to Prisma in ONE `createMany`; bulk `info`/`debug` rows stay SQLite-only (0 Prisma ops). See ARCHITECTURE.md §5.
 
 **`ServerLog` model:**
 ```prisma
