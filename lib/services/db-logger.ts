@@ -1,6 +1,7 @@
 // lib/services/db-logger.ts - Database-backed logger (durable, queryable)
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { randomUUID } from "crypto";
 
 export type LogLevel = "info" | "warn" | "error" | "debug";
 
@@ -19,25 +20,32 @@ export interface LogEntry {
 const DEFAULT_RETENTION_DAYS = 7;
 
 /**
- * Log an entry to the database
+ * Log an entry to the database.
+ *
+ * WRITE-BEHIND QUEUE (v3.22.0): the durable row lands in local SQLite
+ * (`wb_server_log`) with a client-side uuid id so a later bulk-flush to Prisma
+ * is idempotent (`INSERT OR REPLACE` by id), at zero Prisma ops per call. The
+ * enqueue itself is sub-ms and fire-and-forget, so this never blocks or
+ * stalls the request/worker path (the pre-v3.22 path awaited a Prisma create).
  */
 export async function logToDb(entry: LogEntry): Promise<void> {
   try {
-    await prisma.serverLog.create({
-      data: {
+    void import("@/lib/sqlite").then(({ enqueueWriteBehind }) => {
+      enqueueWriteBehind("server_log", {
+        id: randomUUID(),
         level: entry.level,
         message: entry.message,
         source: entry.source || "system",
-        taskId: entry.taskId || null,
-        metadata: entry.metadata ? (entry.metadata as never) : undefined,
-        ipAddress: entry.ipAddress || null,
-        userAgent: entry.userAgent || null,
-        requestId: entry.requestId || null,
-      },
+        task_id: entry.taskId || null,
+        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
+        ip_address: entry.ipAddress || null,
+        user_agent: entry.userAgent || null,
+        request_id: entry.requestId || null,
+      });
     });
   } catch (error) {
-    // If DB logging fails, at least log to console
-    console.error("[DB-Logger] Failed to log to database:", error);
+    // If queueing fails, at least log to console
+    console.error("[DB-Logger] Failed to enqueue database log:", error);
     console.log(`[${entry.level.toUpperCase()}] ${entry.message}`, entry.metadata);
   }
 }

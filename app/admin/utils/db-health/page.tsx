@@ -76,6 +76,21 @@ interface DbHealthData {
       other: number;
     };
   };
+  // v3.22.0: write-behind queue stats + leader election + SQLite liveness
+  writeBehind: {
+    pending: Record<string, number>;
+    lastPromoted: Record<string, number>;
+    lastRetained: Record<string, number>;
+    lastFlushAt: string | null;
+    lastFlushCounts: Record<string, number>;
+  };
+  leader: {
+    self: string;
+    worker: Record<string, unknown> | null;
+    cronDaemon: Record<string, unknown> | null;
+    sqliteSync: Record<string, unknown> | null;
+  };
+  liveness: Array<Record<string, unknown>>;
 }
 
 type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
@@ -99,6 +114,18 @@ function formatTimeAgo(dateStr: string | null): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+function safeStringify(value: unknown): string {
+  if (value == null) return "--";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    const s = JSON.stringify(value);
+    return s && s.length > 80 ? `${s.slice(0, 80)}…` : (s ?? "--");
+  } catch {
+    return "--";
+  }
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -156,6 +183,9 @@ export default function DbHealthPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [flushingPrices, setFlushingPrices] = useState(false);
+  const [flushingLogs, setFlushingLogs] = useState(false);
+  const [preppingDeploy, setPreppingDeploy] = useState(false);
+  const [deployMsg, setDeployMsg] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
@@ -225,6 +255,61 @@ export default function DbHealthPage() {
       setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setFlushingPrices(false);
+    }
+  };
+
+  const triggerFlushLogs = async () => {
+    setFlushingLogs(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "flush_logs" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        const counts = body.flushedCounts
+          ? Object.entries(body.flushedCounts)
+              .filter(([, n]) => (n as number) > 0)
+              .map(([k, n]) => `${k}: ${n}`)
+              .join(", ")
+          : "";
+        setSyncMsg(body.message ?? `Flushed write-behind logs (${counts})`);
+        await fetchHealth();
+      } else {
+        setSyncMsg(`Flush failed: ${body.error}`);
+      }
+    } catch (e) {
+      setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setFlushingLogs(false);
+    }
+  };
+
+  const triggerDeployPrep = async () => {
+    setPreppingDeploy(true);
+    setDeployMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deploy_prep" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setDeployMsg(
+          body.message ??
+            `Deploy prep complete — flushed ${body.rowsFlushed} write-behind rows and refreshed the SQLite mirror`,
+        );
+        await fetchHealth();
+      } else {
+        setDeployMsg(`Deploy prep failed: ${body.error ?? body.detail}`);
+      }
+    } catch (e) {
+      setDeployMsg(`Deploy prep error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreppingDeploy(false);
     }
   };
 
@@ -310,7 +395,7 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness } = data;
   const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
@@ -333,6 +418,15 @@ export default function DbHealthPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={triggerDeployPrep}
+            disabled={preppingDeploy || !sqlite.ready}
+            title="Before deploying: flush queued write-behind logs (APIRequestLog/ServerLog/AuditLog) from the in-memory SQLite queue into Prisma, then refresh the SQLite read-mirror from Prisma so no in-memory data is lost on restart."
+            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <ArrowPathIcon className={`w-4 h-4 ${preppingDeploy ? "animate-spin" : ""}`} />
+            {preppingDeploy ? "Preparing..." : "Prepare for Deploy"}
+          </button>
+          <button
             onClick={fetchHealth}
             className="px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 transition text-sm font-medium"
           >
@@ -354,12 +448,26 @@ export default function DbHealthPage() {
             <BoltIcon className={`w-4 h-4 ${flushingPrices ? "animate-spin" : ""}`} />
             {flushingPrices ? "Flushing..." : "Flush Prices"}
           </button>
+          <button
+            onClick={triggerFlushLogs}
+            disabled={flushingLogs}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <BoltIcon className={`w-4 h-4 ${flushingLogs ? "animate-spin" : ""}`} />
+            {flushingLogs ? "Flushing..." : "Flush Logs"}
+          </button>
         </div>
       </div>
 
       {syncMsg && (
         <div className="px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
           {syncMsg}
+        </div>
+      )}
+
+      {deployMsg && (
+        <div className="px-4 py-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">
+          {deployMsg}
         </div>
       )}
 
@@ -514,6 +622,141 @@ export default function DbHealthPage() {
             Last error: {dailyPriceCache.lastError}
           </p>
         )}
+      </div>
+
+      {/* Write-Behind Queue + Leader Election + Liveness (v3.22.0) */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+            Write-Behind Log Queue · Leader Election · Liveness
+          </h3>
+          <span className="text-xs text-gray-400 dark:text-slate-500 font-mono">
+            self: {leader.self ?? "--"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+          {([["api_request", "api"], ["server_log", "log"], ["audit_log", "audit"]] as const).map(([key, label]) => (
+            <div key={key} className="bg-gray-50 dark:bg-slate-800/50 rounded-lg p-3">
+              <p className="text-xs text-gray-500 dark:text-slate-400">{label}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">
+                {(writeBehind.pending[key] ?? 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-slate-500">pending</p>
+            </div>
+          ))}
+          <div className="bg-gray-50 dark:bg-slate-800/50 rounded-lg p-3">
+            <p className="text-xs text-gray-500 dark:text-slate-400">Last Flush</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">
+              {formatTimeAgo(writeBehind.lastFlushAt)}
+            </p>
+            <p className="text-xs text-gray-400 dark:text-slate-500">
+              {writeBehind.lastFlushAt
+                ? `api:${writeBehind.lastFlushCounts.api_request ?? 0} · log:${writeBehind.lastFlushCounts.server_log ?? 0} · audit:${writeBehind.lastFlushCounts.audit_log ?? 0}`
+                : "never flushed"}
+            </p>
+            {writeBehind.lastFlushAt && (
+              <p className="mt-1 text-[11px] text-gray-400 dark:text-slate-500">
+                <span className="text-emerald-600 dark:text-emerald-400">promoted</span>
+                {" api:"}
+                {writeBehind.lastPromoted.api_request ?? 0} · log:
+                {writeBehind.lastPromoted.server_log ?? 0} · audit:
+                {writeBehind.lastPromoted.audit_log ?? 0}
+                {" · "}
+                <span className="text-amber-600 dark:text-amber-400">retained</span>
+                {" api:"}
+                {writeBehind.lastRetained.api_request ?? 0} · log:
+                {writeBehind.lastRetained.server_log ?? 0} · audit:
+                {writeBehind.lastRetained.audit_log ?? 0}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Leader per role */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          {(["worker", "cronDaemon", "sqliteSync"] as const).map((role) => {
+            const info = leader[role];
+            const active = !!info;
+            return (
+              <div
+                key={role}
+                className={`rounded-lg border p-3 text-sm ${
+                  active
+                    ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20"
+                    : "border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-medium text-gray-700 dark:text-slate-300">
+                    {role === "cronDaemon" ? "cron-daemon" : role === "sqliteSync" ? "sqlite-sync" : "worker"}
+                  </p>
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      active
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        : "bg-gray-100 text-gray-500 dark:bg-slate-700 dark:text-slate-400"
+                    }`}
+                  >
+                    {active ? "Leader" : "Standby"}
+                  </span>
+                </div>
+                {active && (
+                  <p className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate" title={String(info.holder ?? "")}>
+                    {String(info.holder ?? "")}
+                  </p>
+                )}
+                {active && typeof info.updatedAt === "string" && (
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                    {formatTimeAgo(info.updatedAt)}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Liveness heartbeats (SQLite) */}
+        <div>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">
+            Liveness Heartbeats (SQLite — not Prisma)
+          </p>
+          {liveness.length === 0 ? (
+            <p className="text-sm text-gray-400 dark:text-slate-500">No heartbeats recorded.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-slate-700">
+                    <th className="text-left py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Role</th>
+                    <th className="text-left py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Holder</th>
+                    <th className="text-left py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Snapshot</th>
+                    <th className="text-left py-1.5 px-2 text-gray-500 dark:text-slate-400 font-medium">Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveness.map((row, i) => {
+                    const role = String(row.role ?? "--");
+                    const holder = String(row.holder ?? "--");
+                    const snapshot = safeStringify(row.snapshot);
+                    const updated = row.updatedAt ? formatTimeAgo(String(row.updatedAt)) : "--";
+                    return (
+                      <tr
+                        key={`${role}-${i}`}
+                        className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                      >
+                        <td className="py-1.5 px-2 font-medium text-gray-900 dark:text-white">{role}</td>
+                        <td className="py-1.5 px-2 text-gray-600 dark:text-slate-400 font-mono text-xs">{holder}</td>
+                        <td className="py-1.5 px-2 text-gray-500 dark:text-slate-500 text-xs max-w-xs truncate">{snapshot}</td>
+                        <td className="py-1.5 px-2 text-gray-600 dark:text-slate-400">{updated}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Recent DB Errors */}

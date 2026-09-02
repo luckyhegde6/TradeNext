@@ -32,6 +32,24 @@ describe('Audit Logging Types', () => {
       expect(actions.length).toBe(6);
       actions.forEach((a) => expect(typeof a).toBe('string'));
     });
+
+    test('should include DB-health + admin-trigger audit actions (v3.22.x)', () => {
+      // Type-only import — erased at runtime, but tsc enforces that every
+      // action below is a valid member of the AuditAction union.
+      const actions: AuditAction[] = [
+        'ADMIN_DB_SYNC',
+        'ADMIN_DB_FLUSH_PRICES',
+        'ADMIN_DB_FLUSH_LOGS',
+        'ADMIN_DB_DEPLOY_PREP',
+        'ADMIN_DB_BACKUP',
+        'ADMIN_DB_RESTORE',
+        'ADMIN_RECOMMENDATION_RUN',
+        'ADMIN_PERFORMANCE_CHECK',
+        'ADMIN_SWING_PERFORMANCE_CHECK',
+      ];
+      expect(actions.length).toBe(9);
+      actions.forEach((a) => expect(typeof a).toBe('string'));
+    });
   });
 
   describe('AuditLogData Interface', () => {

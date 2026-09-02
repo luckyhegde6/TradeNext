@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
@@ -27,16 +27,48 @@ export async function register() {
       import("@/lib/logger"),
     ]);
 
-    // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
-    startWorker(30_000);
-    await startCronDaemon();
+    // LEADER ELECTION (v3.22.0): a multi-instance deploy (Netlify cold-start
+    // burst / scale) would otherwise start a cron daemon, a worker poll loop,
+    // and a full SQLite sync on EVERY instance — multiplying Prisma ops and
+    // firing duplicate cron jobs. Only the elected leader starts each.
+    // DB-unavailable degrades to running locally (leader.ts) so cron/work
+    // never halt; leadership re-elects once the DB recovers.
+    const leader = await import("@/lib/services/leader");
+
+    const workerLeader = await leader.acquireLeaderLock("worker");
+    if (workerLeader) {
+      // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
+      startWorker(30_000);
+    } else {
+      logger.warn({ msg: "Worker engine NOT started (another instance is worker leader)", self: leader.LEADER_SELF });
+    }
+
+    const cronLeader = await leader.acquireLeaderLock("cron-daemon");
+    if (cronLeader) {
+      startCronDaemon().then(() =>
+        logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
+      );
+    } else {
+      logger.warn({ msg: "Cron daemon NOT started (another instance is cron leader)", self: leader.LEADER_SELF });
+    }
 
     // Pre-load intelligence cache from DB so there's no cold-start penalty
     await restoreIntelligenceCacheFromDB().catch((err: unknown) =>
       logger.warn({ msg: "Intelligence cache restore failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
 
-    // Initialize SQLite backup (background sync, non-blocking)
+    // Acquire the sqlite-sync leader lock so the Prisma->SQLite sync inside
+    // initSqliteBackup runs on exactly ONE instance (syncFromPrisma gates on
+    // isLeader). Standing-by instances still init SQLite locally for fallback
+    // reads + write-behind buffering, but skip the heavy full sync.
+    const syncLeader = await leader.acquireLeaderLock("sqlite-sync");
+    if (!syncLeader) {
+      logger.warn({ msg: "SQLite sync will be skipped (another instance is sqlite-sync leader)", self: leader.LEADER_SELF });
+    }
+
+    // Initialize SQLite backup (background sync, non-blocking). NOTE: the
+    // Prisma->SQLite sync inside is leader-gated (sqlite-sync) — SQLite itself
+    // is initialized on EVERY instance for fallback reads + write-behind.
     await initSqliteBackup().catch((err: unknown) =>
       logger.warn({ msg: "SQLite backup init failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
@@ -49,7 +81,13 @@ export async function register() {
     // IST day (startOpsCounterPersistence persists BOTH snapshots).
     startOpsCounterPersistence();
 
-    logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite + price cache started via instrumentation" });
+    // Periodically promote important write-behind log rows to Prisma and prune
+    // 14-day-old rows (leader-gated to ONE instance/window in multi-instance
+    // deploys). Closes the old gap where queued logs only reached Prisma on a
+    // manual admin flush — but stays op-cheap (≤1 createMany per kind/window).
+    startWriteBehindFlush();
+
+    logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite + price cache started via instrumentation", self: leader.LEADER_SELF });
   } catch (error) {
     // Never crash server startup — crons can still be started manually from
     // the admin Workers/Cron pages. console fallback in case logger's own

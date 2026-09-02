@@ -185,28 +185,23 @@ async function fireJob(jobId: string): Promise<void> {
   }
 }
 
-/** Heartbeat row so /admin sees which host runs the daemon (non-fatal). */
+/** Heartbeat so /admin sees which host runs the daemon (non-fatal).
+ *  v3.22.0: written to the LOCAL SQLite `_backup_meta` (zero Prisma ops) — the
+ *  in-memory `lastHeartbeatAt` powers the admin Cron-tab chip, and the SQLite
+ *  copy gives shutdown/restart visibility without a 15-min Prisma upsert. */
 async function writeHeartbeat(): Promise<void> {
   try {
-    const mem = process.memoryUsage();
     lastHeartbeatAt = new Date();
-    await prisma.workerStatus.upsert({
-      where: { workerId: DAEMON_ID },
-      create: {
-        workerId: DAEMON_ID,
-        workerName: `cron-daemon (${os.hostname()})`,
-        status: "idle",
-        lastHeartbeat: lastHeartbeatAt,
-        memoryUsage: mem.heapUsed / 1024 / 1024,
-        cpuUsage: os.loadavg()[0],
-      },
-      update: {
-        status: "idle",
-        lastHeartbeat: lastHeartbeatAt,
-        memoryUsage: mem.heapUsed / 1024 / 1024,
-        cpuUsage: os.loadavg()[0],
-      },
-    });
+    const sqlite = await import("@/lib/sqlite");
+    const s = sqlite.getSqliteFallback();
+    if (s?.isReady()) {
+      const mem = process.memoryUsage();
+      s.writeLivenessHeartbeat("cron-daemon", {
+        daemonId: DAEMON_ID,
+        registeredJobs: tasks.size,
+        memoryUsageMb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
+      });
+    }
   } catch (error) {
     // Heartbeat failures are non-fatal — the daemon keeps scheduling in memory.
   }

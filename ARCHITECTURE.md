@@ -255,6 +255,43 @@ When the primary PostgreSQL database is unavailable (plan limit exceeded, networ
 
 **Admin health dashboard**: `GET /api/admin/db-health` + UI at `/admin/utils/db-health` showing Prisma connectivity, ops counters, table row counts, write budget, and sync history.
 
+### Leader Election (v3.22.0)
+
+**Why**: Netlify runs a persistent Next.js server, but a cold-start burst can spin up several instances at once — each booting and independently running SQLite sync + scheduler/cron + the write-behind flush timer. That multiplies Prisma plan ops and background work ~5–10×. `lib/services/leader.ts` elects a **single writer** per role.
+
+- `acquireLeaderLock(role)` / `renewLeaderLock` / `releaseLeaderLock` / `isLeader` / `getLeaderInfo` — a single-writer lock on a `worker_status` row (`leader-<role>`), with a **5-minute staleness** expiry so any instance can reclaim a dead leader's row.
+- Roles: `cron-daemon`, `worker`, `sqlite-sync`.
+- **DB down → fail-open to a local leader** (so cron/work never halt); on DB recovery the election re-runs. `acquireLeaderLock` reconciles the two paths: a genuine `create`-path non-conflict/unavailable error **rethrows** (never silently stands down), a generic `updateMany` claim-race failure **stands down → return false**, DB-unavailable returns **true** (fail-open).
+- `instrumentation.ts` acquires the `worker` + `cron-daemon` locks and only starts each engine on the leader; SQLite full-sync and the write-behind flush timer are leader-gated on `sqlite-sync`. Non-leader instances log `standby (non-leader)`.
+
+### Write-Behind Log Store (v3.22.0)
+
+**Why**: `APIRequestLog` (`logAPIRequest` in `lib/rate-limit.ts`), `ServerLog` (`logToDb` in `lib/services/db-logger.ts` + `ai-monitoring.ts`), and `AuditLog` (`createAuditLog` in `lib/audit.ts`) previously wrote directly to Prisma on every call. With **SQLite as the primary durable log store** and **Prisma reserved for only the important rows**, net Prisma ops stay below the **< 1000/day** target.
+
+```
+┌──────────┐   enqueue (0 Prisma ops)  ┌──────────────────────────┐
+│  App/API │ ──────────────────────────▶  SQLite wb_* tables      │
+└──────────┘                            │   (in-memory, 14-day TTL)│
+                                        └────────────┬─────────────┘
+                                                     │ drain (15-min, leader-gated)
+                                                     ▼
+                                        ┌──────────────────────────┐
+                                        │  isWbImportant() filter  │
+                                        └────────────┬─────────────┘
+                                                     │ ONE createMany (≈1 op)
+                                                     ▼
+                                        ┌──────────────────────────┐
+                                        │  Prisma APIRequestLog /  │
+                                        │  ServerLog / AuditLog    │
+                                        └──────────────────────────┘
+```
+
+- **`isWbImportant()`** promotes ONLY: `api_request` with `is_anomaly=1`, `is_rate_limited=1`, `status_code ≥ 500`, or an `error_message`; `server_log` at `error`/`warn` level; `audit_log` with a security/critical action (`AUTH`/`JOIN`/`PASSWORD`/`ADMIN`/`SESSION`/`LOGIN`/`LOGOUT` prefix, or suffix `_FAILED`/`_BLOCKED`/`_REJECTED`, or `response_status ≥ 400` with `error_message`).
+- **`drainWriteBehind()`** reads up to `WB_CHUNK × WB_MAX_DRAIN_CHUNKS` (250 × 8 = 2000) rows, promotes the important subset in **ONE `createMany` (≈1 op)**, deletes only promoted rows; bulk info/api logs stay SQLite-only (**0 Prisma ops**). Returns `{ flushed, retained, skipped }` (kind-keyed by `api_request`/`server_log`/`audit_log`).
+- **`pruneWriteBehind()`** enforces a **14-day TTL** (delete by PK); **`startWriteBehindFlush()`**/**`stopWriteBehindFlush()`** run a leader-gated 15-min interval (drains + prunes), booted after `startOpsCounterPersistence()` in `instrumentation.ts`.
+- **Op accounting**: `createMany` counts as **1 op** via `$allOperations` — never `+= rows.length` (a double-count that inflated the write-budget gauge is removed). `lastPromoted`/`lastRetained` are surfaced in `getWriteBehindStats()` / `flushWriteBehind()` and on the `/admin/utils/db-health` Log Flush card (emerald promoted vs amber retained).
+- SQLite is in-memory sql.js — a deploy wipes non-promoted rows. Accepted: retained rows are low-value metric/info logs already captured in pino/file logs; only important logs get cross-deploy durability via Prisma.
+
 ### Cache Implementation
 
 ```typescript
@@ -355,12 +392,17 @@ localhost:3000 (Next.js)
 
 ### Production (Netlify — Persistent Server)
 ```
-Netlify Persistent Server
+Netlify Persistent Server (cold-start bursts can run several instances)
   ├── Next.js (Node.js runtime)
   ├── In-process cron daemon (instrumentation.ts)
-  ├── SQLite backup (sql.js, in-memory, synced from Prisma)
+  ├── Leader election (lib/services/leader.ts) — single-writer
+  │     per role (cron-daemon / worker / sqlite-sync) on a
+  │     worker_status row; 5-min staleness, DB-down fail-open
+  ├── SQLite backup + write-behind log store (sql.js, in-memory,
+  │     synced from Prisma; important logs promoted to Prisma)
   └── PostgreSQL (Prisma Cloud/TimescaleDB)
 ```
+Cold-start bursts are de-duplicated by leadership: only ONE instance runs the full SQLite sync, the scheduler/cron, and the write-behind flush timer; the others log `standby (non-leader)`. This keeps Prisma plan ops near the **< 1000/day** target even under multi-instance starts.
 
 ### Docker Compose (Optional)
 ```yaml
@@ -392,6 +434,8 @@ services:
 - [x] Write budget guard — reject non-critical writes when daily ops budget exceeded (v3.19.0)
 - [x] Automatic recovery sync — background probe detects Prisma recovery and re-syncs SQLite (v3.19.2)
 - [x] Admin DB health monitoring dashboard (v3.19.2)
+- [x] Leader election — single-writer lock per role avoids multi-instance boot duplication of SQLite sync / cron / flush (v3.22.0)
+- [x] Write-behind log store — SQLite-primary, only important logs promoted to Prisma in ONE `createMany`; net Prisma ops < 1000/day (v3.22.0)
 
 ### Planned
 - [ ] Redis for distributed caching

@@ -135,16 +135,19 @@ export function startWorker(pollingIntervalMs = 30_000) {
     // (e.g. an admin runNow killed by the sync-function timeout yesterday).
     maybeReap().catch(() => {});
 
-    // Heartbeat — writes to DB every 60s for crash recovery visibility
+    // Ping (idle heartbeat) — v3.22.0: written to the LOCAL SQLite backup only
+    // (zero Prisma ops). The periodic idle ping no longer upserts `worker_status`
+    // every 5 min; only STATEFUL transitions (busy / task-complete / stop) hit
+    // Prisma so the stale-task reaper + admin dashboards keep an accurate view.
     heartbeatInterval = setInterval(async () => {
         try {
-            await updateHeartbeat(lastHeartbeatStatus, lastHeartbeatTaskId);
+            await pingLiveness();
         } catch (error) {
             // Ignore heartbeat errors
         }
     }, HEARTBEAT_INTERVAL_MS);
 
-    // Write initial heartbeat
+    // Write initial stateful heartbeat (busy/idle) to Prisma on start.
     updateHeartbeat("idle").catch(() => {});
 }
 
@@ -502,6 +505,35 @@ export async function checkScheduledJobs() {
         } catch (error) {
             logger.error({ msg: "Failed to spawn task for cron job", jobId: job.id, error: error instanceof Error ? error.message : String(error) });
         }
+    }
+}
+
+/**
+ * Reset a task to 'pending' if it is still safely requeueable (used when the
+ * worker comes back from a restart and finds tasks it was mid-flight on).
+ */
+
+// v3.22.0: idle heartbeat → LOCAL SQLite (`_backup_meta`), zero Prisma ops.
+// Called by the periodic 5-min timer. `updateHeartbeat` (Prisma) is reserved
+// for STATEFUL transitions (busy/task-complete/stop) so the stale-task reaper
+// and admin dashboards keep a correct cross-instance view without per-tick
+// DB traffic.
+async function pingLiveness(): Promise<void> {
+    try {
+        const sqlite = await import("@/lib/sqlite");
+        const s = sqlite.getSqliteFallback();
+        if (s?.isReady()) {
+            const mem = process.memoryUsage();
+            s.writeLivenessHeartbeat("worker", {
+                workerId: WORKER_ID,
+                workerName: os.hostname(),
+                status: lastHeartbeatStatus,
+                currentTaskId: lastHeartbeatTaskId || null,
+                memoryUsageMb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
+            });
+        }
+    } catch {
+        // Heartbeat failures are non-fatal — the worker loop keeps running.
     }
 }
 
