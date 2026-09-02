@@ -959,6 +959,18 @@ export default function MonitoringPage() {
                         Per-executed-task log files written by the worker engine into <code className="bg-gray-100 dark:bg-slate-800 px-1 rounded">worker_logs/</code> (DB fallback when the filesystem is read-only).
                       </p>
                     </div>
+                    <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        // v3.23.x: bulk-download worker task logs as one file
+                        window.location.href = "/api/admin/monitoring?type=worker-logs&action=download";
+                      }}
+                      className="px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-lg flex items-center gap-2"
+                      title="Download all worker task log files as a single .log"
+                    >
+                      <ArrowDownTrayIcon className="w-4 h-4" />
+                      Download all
+                    </button>
                     <button
                       onClick={fetchData}
                       className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
@@ -966,6 +978,7 @@ export default function MonitoringPage() {
                       <FolderIcon className="w-4 h-4" />
                       Refresh
                     </button>
+                  </div>
                   </div>
 
                   {!selectedWorkerLog ? (

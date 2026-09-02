@@ -17,6 +17,15 @@ jest.mock("@/lib/logger", () => {
   return { __esModule: true, default: mock, info: mock.info, warn: mock.warn, error: mock.error, debug: mock.debug };
 });
 
+// v3.23.x: controlled mock so we can toggle the Prisma plan-limit breaker.
+// Defaults to CLOSED (false) so the existing suite runs unchanged.
+const mockIsPlanLimitBreakerOpen = jest.fn().mockReturnValue(false);
+jest.mock("@/lib/db-utils", () => ({
+  __esModule: true,
+  isDbUnavailableError: jest.fn().mockReturnValue(false),
+  isPlanLimitBreakerOpen: (...a: unknown[]) => mockIsPlanLimitBreakerOpen(...(a as [])) as boolean,
+}));
+
 jest.mock("@/lib/prisma", () => {
   const mock = {
     workerTask: {
@@ -276,5 +285,38 @@ describe("timeout constants", () => {
   it("TASK_TIMEOUT_MS is 40 minutes (must be less than STALE_MS)", () => {
     expect(TASK_TIMEOUT_MS).toBe(40 * 60_000);
     expect(TASK_TIMEOUT_MS).toBeLessThan(STALE_MS);
+  });
+});
+
+// ─── v3.23.x: plan-limit breaker gating (user directive) ──────────────────
+// When the Prisma plan-limit breaker is OPEN (account on hold / DB down), the
+// worker poll, the stale-task reaper and the cron scheduler all SKIP their
+// Prisma reads entirely — they no-op and re-check once the breaker closes.
+// This eliminates the prod "Worker DB unavailable — backing off poll" and
+// "Stale worker-task reap failed" spam every 30s × instances during a hold.
+
+describe("plan-limit breaker gating", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+  });
+
+  it("reapStaleWorkerTasks is a no-op (0/0) when the breaker is OPEN", async () => {
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    const result = await reapStaleWorkerTasks();
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+    // No Prisma reads/writes were attempted while the breaker is open.
+    expect(prisma.workerStatus.findMany).not.toHaveBeenCalled();
+    expect(prisma.workerTask.findMany).not.toHaveBeenCalled();
+    expect(prisma.dailyRecommendationRun.findMany).not.toHaveBeenCalled();
+    expect(prisma.workerTask.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("checkScheduledJobs performs no Prisma cron read when the breaker is OPEN", async () => {
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    prisma.cronJob.findMany.mockResolvedValue([]);
+    await checkScheduledJobs();
+    expect(prisma.cronJob.findMany).not.toHaveBeenCalled();
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
   });
 });

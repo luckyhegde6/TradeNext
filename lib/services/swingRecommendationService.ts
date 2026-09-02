@@ -29,6 +29,8 @@ import { Prisma } from "@prisma/client";
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
+import { isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { recordRead } from "@/lib/services/readTier";
 import {
   getChartinkTemplates,
   getChartinkTemplate,
@@ -919,6 +921,13 @@ export async function getSwingRecommendations(
     if (cached) return cached;
   }
 
+  // v3.23.x: during a plan-limit hold the Prisma account is unavailable —
+  // the cached payload above is served on steady-state polls; below we avoid
+  // EVERY Prisma read/write (job lookup, supersede, job create, signal
+  // persistence, processor kick) and fall through to a screener-only feed.
+  // The tab degrades gracefully (honest "pending" analysis) and Prisma is
+  // only touched again on the 12h recovery sync or a manual force.
+  const breakerOpen = isPlanLimitBreakerOpen();
   const templateIds = getSwingTemplateIds();
   const prisma = (await import("@/lib/prisma")).default;
 
@@ -926,7 +935,7 @@ export async function getSwingRecommendations(
   // WITHOUT re-running the screener — the job row is the durable source of
   // truth (survives cache LRU eviction + instance recycle), the cache is only
   // a 30-min accelerator for steady-state polls.
-  if (analyze) {
+  if (analyze && !breakerOpen) {
     const latestJob = await prisma.swingAnalysisJob.findFirst({
       orderBy: { createdAt: "desc" },
     });
@@ -1041,7 +1050,7 @@ export async function getSwingRecommendations(
   // immediately; the processor (daemon tick + this kick) completes it in the
   // background. The DB row survives Netlify instance recycle and staticCache
   // LRU eviction — the tab can never hang on "generating".
-  if (analyze) {
+  if (analyze && !breakerOpen) {
     const created = await prisma.swingAnalysisJob.create({
       data: {
         status: "pending",
@@ -1083,6 +1092,33 @@ export async function getSwingRecommendations(
       templateCount: created.templateCount,
       totalRaw: created.totalRaw,
       topN: created.stockCount,
+      segregation: countSegregation(enriched),
+      analysisStatus: "pending",
+      analysisError: null,
+      stocks: enriched,
+    };
+    return pending;
+  }
+
+  // v3.23.x: plan-limit breaker open + analyze=true — cannot persist a durable
+  // job (Prisma writes are held). Return the fresh screener-only feed with an
+  // honest "pending" analysis status (no AI, no job row); the tab's SWR poll
+  // re-serves the cached payload once the breaker closes (12h recovery sync /
+  // manual force) and a normal run can proceed then. The feed itself is still
+  // served so the tab shows live data, not a freeze.
+  if (analyze && breakerOpen) {
+    recordRead("swing.breaker-open-feed", {
+      source: "sqlite",
+      latencyMs: 0,
+      rows: enriched.length,
+      hit: true,
+    });
+    const pending: SwingResponse = {
+      success: true,
+      generatedAt: new Date().toISOString(),
+      templateCount: templateIds.length,
+      totalRaw: deduped.length,
+      topN: enriched.length,
       segregation: countSegregation(enriched),
       analysisStatus: "pending",
       analysisError: null,

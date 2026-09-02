@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestRecommendations } from "@/lib/services/dailyRecommendationService";
 import { recommendationsCache } from "@/lib/cache";
-import { isDbUnavailableError } from "@/lib/db-utils";
+import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { getSqliteFallback } from "@/lib/sqlite";
+import { recordRead } from "@/lib/services/readTier";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -13,7 +14,44 @@ export async function GET(req: NextRequest) {
   
   try {
     logger.info({ msg: "Fetching latest recommendations", requestId });
+
+    // v3.23.x: during a plan-limit hold the Prisma account is unavailable —
+    // serve the SQLite mirror directly WITHOUT attempting any Prisma call
+    // (even a fast-fail breaker throw generates log noise). Prisma is only
+    // touched again on the 12h recovery sync or a manual force.
+    if (isPlanLimitBreakerOpen()) {
+      const sqlite = getSqliteFallback();
+      const cached = sqlite?.isReady() ? sqlite.getLatestRecommendations() : null;
+      if (cached) {
+        logger.warn({
+          msg: "Recommendations: plan-limit breaker open — serving SQLite mirror",
+          requestId,
+        });
+        return NextResponse.json({
+          ...cached,
+          timestamp: new Date().toISOString(),
+          servedFrom: "sqlite_mirror",
+        });
+      }
+      // No SQLite mirror yet — fall through to memory cache / Prisma attempt.
+      const memCached = recommendationsCache.get("recommendations:latest");
+      if (memCached) {
+        logger.warn({
+          msg: "Recommendations: plan-limit breaker open — serving memory cache",
+          requestId,
+        });
+        return NextResponse.json({ ...memCached, servedFrom: "memory_cache" });
+      }
+    }
+
+    const _recStart = performance.now();
     const { run, stocks, latestRun } = await getLatestRecommendations();
+    recordRead("recommendations.prisma", {
+      source: "prisma",
+      latencyMs: Math.max(0, Math.round(performance.now() - _recStart)),
+      rows: stocks.length,
+      hit: false,
+    });
 
     logger.info({
       msg: "Recommendations fetched",

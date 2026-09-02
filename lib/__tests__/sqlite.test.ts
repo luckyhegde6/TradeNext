@@ -208,6 +208,23 @@ jest.mock("@/lib/services/leader", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const mockLeader = require("@/lib/services/leader");
 
+// ── Mock @/lib/db-utils (v3.23.x plan-limit breaker) ─────────────────────
+// Delegate to the REAL implementation for everything EXCEPT
+// `isPlanLimitBreakerOpen`, which we control per-test (defaults to false =
+// breaker CLOSED so the existing suite runs unchanged). Acquire the handle
+// via require() exactly like `mockLeader` (SWC-safe, no closure/TDZ).
+jest.mock("@/lib/db-utils", () => {
+  const real = jest.requireActual<Record<string, unknown>>("@/lib/db-utils");
+  return {
+    ...real,
+    isPlanLimitBreakerOpen: jest.fn().mockReturnValue(false),
+  };
+});
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockDbUtils = require("@/lib/db-utils") as {
+  isPlanLimitBreakerOpen: jest.Mock<boolean, []>;
+};
+
 // ── Imports (after mocks so they use the mocked modules) ──────────────────
 import { getSqliteFallback, syncFromPrisma } from "../sqlite";
 
@@ -751,27 +768,34 @@ describe("SQLite backup fallback", () => {
 
       const res = await fb.flushWriteBehind();
       expect(res.skipped).toBe(false);
-      // Promoted: error log, security audit, 5xx api.
-      expect(res.flushed.server_log).toBeGreaterThanOrEqual(1);
+      // v3.23.x (user ALWAYS policy): server_log + api_request are NEVER
+      // promoted to Prisma — SQLite is their PRIMARY durable store (they stay
+      // queued until the 14-day TTL prune; file archive mirrors them). Only
+      // security/critical audit_log rows still promote.
+      //   - info server_log      → retained (never promoted)
+      //   - error audit_log(sec) → promoted
+      //   - 5xx api_request      → retained (never promoted)
+      //   - 200 api_request      → retained
+      expect(res.flushed.server_log).toBe(0);
       expect(res.flushed.audit_log).toBeGreaterThanOrEqual(1);
-      expect(res.flushed.api_request).toBeGreaterThanOrEqual(1);
-      // Retained: info log, 200 api stay in SQLite.
+      expect(res.flushed.api_request).toBe(0);
+      // All log rows stay in SQLite.
       expect(res.retained.server_log).toBeGreaterThanOrEqual(1);
-      expect(res.retained.api_request).toBeGreaterThanOrEqual(1);
+      expect(res.retained.api_request).toBeGreaterThanOrEqual(2);
 
-      // createMany was invoked only for the promoted rows (per delegTheate).
-      expect(mockPrisma.serverLog.createMany).toHaveBeenCalled();
+      // createMany was invoked only for the promoted audit row.
       expect(mockPrisma.auditLog.createMany).toHaveBeenCalled();
-      expect(mockPrisma.aPIRequestLog.createMany).toHaveBeenCalled();
+      expect(mockPrisma.serverLog.createMany).not.toHaveBeenCalled();
+      expect(mockPrisma.aPIRequestLog.createMany).not.toHaveBeenCalled();
 
-      // The promoted rows are gone from the queue; the retained rows remain.
+      // The promoted audit row is gone from the queue; the log rows remain.
       const after = fb.getWriteBehindStats();
       expect(after.pending.audit_log).toBe(0);
-      expect(after.pending.server_log).toBe(1); // the info row stays
-      expect(after.pending.api_request).toBe(1); // the 200 row stays
+      expect(after.pending.server_log).toBeGreaterThanOrEqual(1); // the info row stays
+      expect(after.pending.api_request).toBeGreaterThanOrEqual(2); // both stay
       expect(after.lastFlushAt).not.toBeNull();
-      expect(after.lastPromoted.server_log).toBeGreaterThanOrEqual(1);
-      expect(after.lastRetained.api_request).toBeGreaterThanOrEqual(1);
+      expect(after.lastRetained.server_log).toBeGreaterThanOrEqual(1);
+      expect(after.lastRetained.api_request).toBeGreaterThanOrEqual(2);
     });
 
     it("leaves rows queued when the DB is unavailable (skip, not 500)", async () => {
@@ -807,9 +831,10 @@ describe("SQLite backup fallback", () => {
       const cap: any = require("@/lib/prisma");
       const writesBefore = cap.dbOpsCounter.writes;
 
-      // Seed > WB_CHUNK (250) PROMOTABLE rows (error-level logs are promoted to
-      // Prisma). A single drain reads up to 2000 rows and createMany batches in
-      // 250-row chunks → 600 rows = 3 createMany calls.
+      // Seed > WB_CHUNK (250) rows of a NEVER-PROMOTED kind (server_log). Under
+      // the v3.23.x user ALWAYS policy, server_log (any level, incl. error)
+      // is PRIMARY-stored in SQLite and never promoted → the drain retains all
+      // 600, so it issues zero Prisma createMany calls and zero Prisma ops.
       for (let i = 0; i < 600; i++) {
         fb.enqueueWriteBehind("server_log", {
           id: `reg-${i}`,
@@ -822,17 +847,18 @@ describe("SQLite backup fallback", () => {
       mockPrisma.serverLog.createMany.mockResolvedValue({ count: 250 });
       const res = await fb.flushWriteBehind();
       expect(res.skipped).toBe(false);
-      // All 600 promotable rows were flushed.
-      expect(res.flushed.server_log).toBe(600);
-      expect(res.retained.server_log).toBe(0);
+      // All 600 server_log rows are RETAINED in SQLite (never promoted).
+      expect(res.flushed.server_log).toBe(0);
+      expect(res.retained.server_log).toBe(600);
 
-      // 600 / 250 = 3 createMany calls.
-      expect(mockPrisma.serverLog.createMany.mock.calls.length).toBe(3);
+      // Zero promotions → zero createMany calls.
+      expect(mockPrisma.serverLog.createMany.mock.calls.length).toBe(0);
       // The flush path no longer mutates the counter directly (writesBefore
       // stays unchanged – only $allOperations would increment it in prod).
       expect(cap.dbOpsCounter.writes).toBe(writesBefore);
-      // Queue is fully drained (no rows left for a kind that all promoted).
-      expect(fb.getWriteBehindStats().pending.server_log).toBe(0);
+      // All 600 rows REMAIN queued (SQLite is their primary store — they are
+      // pruned by the 14-day TTL, never promoted to Prisma).
+      expect(fb.getWriteBehindStats().pending.server_log).toBe(600);
     });
   });
 
@@ -899,6 +925,35 @@ describe("SQLite backup fallback", () => {
       expect(recs).not.toBeNull();
       expect((recs!.run as any).id).toBe("run-force");
       mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    // ── v3.23.x: plan-limit breaker gate (user directive) ────────────────
+    // When the Prisma plan-limit breaker is OPEN (account on hold / DB down),
+    // syncFromPrisma is a NO-OP: it must NOT touch Prisma at all and must
+    // serve the last-known-good cached SQLite mirror — that is exactly the
+    // prod "SQLite: failed to sync X = Plan limit circuit breaker open" spam
+    // (×7 tables per cycle) this eliminates.
+    it("skips the Prisma->SQLite sync entirely when the plan-limit breaker is OPEN", async () => {
+      // Flip the controllable db-utils mock to OPEN.
+      mockDbUtils.isPlanLimitBreakerOpen.mockReturnValue(true);
+
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      // Clear cumulative call history from earlier tests so `not.toHaveBeenCalled`
+      // measures ONLY what this test's re-init triggers.
+      jest.clearAllMocks();
+      await ensureSqliteBackup();
+
+      // Not a single Prisma read should fire during a hold — the mirror is
+      // already current from the last good sync.
+      expect(mockPrisma.dailyRecommendationRun.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.chartinkScreener.findMany).not.toHaveBeenCalled();
+
+      const fb = getSqliteFallback()!;
+      expect(fb.getHealthStatus().sqlite.lastSyncAt).toBeNull();
+
+      // Restore the default (breaker CLOSED) for later tests.
+      mockDbUtils.isPlanLimitBreakerOpen.mockReturnValue(false);
     });
   });
 });
