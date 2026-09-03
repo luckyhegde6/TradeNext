@@ -1,9 +1,18 @@
 // Prisma client singleton - only log in development for debugging
 import { PrismaClient } from '@prisma/client';
+import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
 import { otelSetup } from './otel';
+
+// The exported client is typed as the base PrismaClient (preserving all
+// model-method typing across 400+ call sites). The RUNTIME client is extended
+// with withAccelerate() (see construction above), so model reads support
+// `cacheStrategy` — but the base type declares it `never`. `withAccelerateCache`
+// adds it at the query boundary without degrading typing anywhere else.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AccelerateClient = PrismaClient;
 
 // OTel must be initialized BEFORE the PrismaClient singleton is constructed
 // so PrismaInstrumentation can wrap the query engine (opt-in via
@@ -18,6 +27,12 @@ import {
   classifyDbError,
   type DbErrorType,
 } from './db-utils';
+
+// Default cache TTL for Accelerate edge caching (seconds).
+// Only effective when withAccelerate() is wired and cacheStrategy is used per-query.
+// Set to 0 to disable caching globally. Queries without cacheStrategy are NOT cached.
+export const ACCELERATE_CACHE_TTL =
+  Number(process.env.PRISMA_ACCELERATE_CACHE_TTL) || 300; // 5 min default
 
 // Determine environment from ENVIRONMENT env var (defaults to 'development')
 // Options: local, development, production
@@ -75,15 +90,19 @@ if (isDev) {
 }
 
 // Create Prisma client singleton
-let prismaClient: PrismaClient;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let prismaClient: any;
 
 try {
   if (useAccelerate) {
-    // For Prisma Accelerate, use the accelerateUrl option
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prismaClient = new PrismaClient({ 
-      accelerateUrl: databaseUrl 
-    } as any);
+    // For Prisma Accelerate / Prisma Postgres — use the accelerateUrl option
+    // and activate built-in edge caching via withAccelerate().
+    // Extension order matters: withAccelerate() is applied FIRST so that
+    // the $allOperations extension (circuit breaker / op counting / timeout)
+    // wraps the Accelerate-extended client, not the other way around.
+    prismaClient = new PrismaClient({
+      accelerateUrl: databaseUrl,
+    }).$extends(withAccelerate());
   } else {
     const pool = new Pool({ 
       connectionString: databaseUrl,
@@ -103,7 +122,7 @@ try {
 }
 
 // Use global singleton to avoid multiple connections in development
-const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient | undefined };
+const globalForPrisma = globalThis as unknown as { prismaClient: AccelerateClient | undefined };
 
 // ─── DB operations counter + write budget limiter (v3.19.0) ──────────────
 // Tracks reads/writes per calendar day (IST). When writes exceed the budget,
@@ -273,7 +292,12 @@ function withQueryTimeout<T>(promise: Promise<T>, model: string, operation: stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
   query: {
-    $allOperations({ model, operation, args, query }) {
+    $allOperations({ model, operation, args, query }: {
+      model: string;
+      operation: string;
+      args: Record<string, unknown>;
+      query: (args: Record<string, unknown>) => Promise<unknown>;
+    }) {
       // Plan-limit circuit breaker — if open, fail fast WITHOUT hitting the
       // proxy (avoids the 120s per-query timeout during an account hold).
       if (isPlanLimitBreakerOpen()) {
@@ -367,10 +391,34 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
       return result;
     },
   },
-}) as PrismaClient;
+  }) as AccelerateClient;
 
 export const db = globalForPrisma.prismaClient ?? extendedClient;
 export const prisma = globalForPrisma.prismaClient ?? extendedClient;
+
+/**
+ * Add Accelerate edge caching to a single Prisma READ.
+ *
+ * The exported `prisma`/`db` is typed as the base PrismaClient for model-method
+ * safety, but the RUNTIME client is extended with withAccelerate() so reads
+ * accept `cacheStrategy` ({ttl}/{swr}/{tags}). Because the base type declares
+ * `cacheStrategy?: never`, passing it inline fails to type-check. This helper
+ * preserves Prisma's contextual typing for the args (via `Parameters<T>[0]`)
+ * while injecting `cacheStrategy` at the boundary (safe — the runtime client
+ * supports it).
+ *
+ * @example
+ * await prisma.corporateAction.findMany(
+ *   withAccelerateCache({ ttl: 300, swr: 60 })({ where, orderBy, select }),
+ * );
+ */
+export function withAccelerateCache<T extends (args: any) => any>(
+  strategy: { ttl: number; swr?: number; tags?: string[] },
+) {
+  return (args: Parameters<T>[0]): ReturnType<T> =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({ ...(args as any), cacheStrategy: strategy } as any);
+}
 
 // Default export for backward compatibility
 export default prisma;

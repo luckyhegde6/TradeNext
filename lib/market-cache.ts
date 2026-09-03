@@ -1,5 +1,5 @@
 // lib/market-cache.ts - Smart caching service for NSE data
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import { isMarketOpen, getMillisecondsUntilNextMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 import logger from "@/lib/logger";
 import cache from "@/lib/cache";
@@ -126,10 +126,10 @@ export async function getOrFetchNseData<T>(
       };
     }
 
-    // 2) Persistent DB cache
-    const cached = await prisma.marketCache.findUnique({
+    // 2) Persistent DB cache (edge-cached: hot market reads, 5 min TTL)
+    const cached = await prisma.marketCache.findUnique(withAccelerateCache({ ttl: 300, swr: 60 })({
       where: { cacheKey }
-    });
+    }));
 
     const lastSyncedAt = cached?.lastSyncedAt || null;
     const nextSyncAt = cached?.nextSyncAt || null;

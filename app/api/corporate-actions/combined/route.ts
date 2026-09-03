@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { nseFetch } from "@/lib/nse-client";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
@@ -310,7 +310,9 @@ export async function GET(req: Request) {
     }
 
     const _ca = performance.now();
-    const actions = await prisma.corporateAction.findMany({
+    // Accelerate edge cache: 5 min TTL, 1 min stale-while-revalidate.
+    // Corporate actions change infrequently; serve cached reads at the edge.
+    const actions = await prisma.corporateAction.findMany(withAccelerateCache({ ttl: 300, swr: 60 })({
       where,
       orderBy: [
         { exDate: 'desc' },
@@ -338,7 +340,7 @@ export async function GET(req: Request) {
         announcementDate: true,
         source: true,
       },
-    });
+    }));
     recordRead("corp-actions.prisma", {
       source: "prisma",
       latencyMs: Math.max(0, Math.round(performance.now() - _ca)),

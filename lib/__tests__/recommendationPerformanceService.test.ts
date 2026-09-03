@@ -52,7 +52,15 @@ jest.mock("@/lib/prisma", () => {
     },
     $queryRaw: jest.fn(),
   };
-  return { __esModule: true, default: mock };
+  return {
+    __esModule: true,
+    default: mock,
+    // Pure helper (matches lib/prisma.ts): injects cacheStrategy at the query
+    // boundary for Accelerate edge-cached reads. Not used by these mock
+    // delegates, but the service imports it, so it must exist.
+    withAccelerateCache: (strategy: { ttl: number; swr?: number; tags?: string[] }) => (args: unknown) =>
+      ({ ...(args as object), cacheStrategy: strategy }),
+  };
 });
 
 // ─── Imports ──────────────────────────────────────────────────────────────
