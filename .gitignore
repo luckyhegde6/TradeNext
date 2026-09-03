@@ -54,6 +54,9 @@ nul
 
 *.log
 
+# sql.js WASM binary — generated at build time by scripts/copy-sql-wasm.mjs
+/public/sql-wasm.wasm
+
 # Worker logs
 worker_logs/
 
