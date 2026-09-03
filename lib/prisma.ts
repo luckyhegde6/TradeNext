@@ -400,12 +400,15 @@ export const prisma = globalForPrisma.prismaClient ?? extendedClient;
  * Add Accelerate edge caching to a single Prisma READ.
  *
  * The exported `prisma`/`db` is typed as the base PrismaClient for model-method
- * safety, but the RUNTIME client is extended with withAccelerate() so reads
- * accept `cacheStrategy` ({ttl}/{swr}/{tags}). Because the base type declares
+ * safety, but the RUNTIME client is ONLY extended with withAccelerate() on the
+ * Accelerate / Prisma Postgres branch (useAccelerate=true), where reads accept
+ * `cacheStrategy` ({ttl}/{swr}/{tags}). Because the base type declares
  * `cacheStrategy?: never`, passing it inline fails to type-check. This helper
  * preserves Prisma's contextual typing for the args (via `Parameters<T>[0]`)
- * while injecting `cacheStrategy` at the boundary (safe — the runtime client
- * supports it).
+ * while injecting `cacheStrategy` at the boundary ONLY when the client is
+ * Accelerate-extended. On the direct-PG / local fallback (useAccelerate=false)
+ * it passes the args through unchanged — the base client would otherwise reject
+ * `cacheStrategy` as an unknown argument (PrismaClientValidationError).
  *
  * @example
  * await prisma.corporateAction.findMany(
@@ -415,9 +418,15 @@ export const prisma = globalForPrisma.prismaClient ?? extendedClient;
 export function withAccelerateCache<T extends (args: any) => any>(
   strategy: { ttl: number; swr?: number; tags?: string[] },
 ) {
-  return (args: Parameters<T>[0]): ReturnType<T> =>
+  return (args: Parameters<T>[0]): ReturnType<T> => {
+    if (!useAccelerate) {
+      // Non-Accelerate client — cacheStrategy is an unknown arg, so pass through.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return args as any;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ({ ...(args as any), cacheStrategy: strategy } as any);
+    return { ...(args as any), cacheStrategy: strategy } as any;
+  };
 }
 
 // Default export for backward compatibility
