@@ -3,6 +3,33 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 
 /**
+ * Seed the LOCAL SQLite mirror with a freshly created task so SQLite-first
+ * worker polls (discoverPendingTask) can discover it immediately instead of
+ * waiting for the mirror to go stale and fall back to Prisma. Task CREATION
+ * stays on Prisma — the cross-instance atomic claim needs the shared row — but
+ * the local mirror copy is what the 30s poll reads in steady state.
+ * Non-fatal: a mirror hiccup must never block task creation.
+ */
+async function seedTaskMirror(task: {
+  id: string;
+  name: string;
+  taskType: string;
+  priority: number;
+  status: string;
+  createdAt: Date;
+  payload?: unknown;
+  assignedTo?: string | null;
+  cronJobId?: string | null;
+}) {
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    sqlite.getSqliteFallback?.()?.upsertWorkerTask?.(task);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/**
  * Task Orchestrator — central service for spawning and tracking tasks across categories.
  *
  * - spawnCronTask:    Creates a worker task linked to a CronJob (taskCategory: "cron")
@@ -63,12 +90,13 @@ export async function spawnCronTask(
         },
     });
 
+    await seedTaskMirror(task);
     await logTaskEvent(task.id, "task_created", `Cron task spawned from job ${cronJobId}`, {
         cronJobId,
         taskType: options.taskType,
     });
 
-    // Update the CronJob's lastRun and runCount
+    // Update the CronJob's lastRun and runCount (cross-instance state stays Prisma)
     await prisma.cronJob.update({
         where: { id: cronJobId },
         data: {
@@ -102,6 +130,7 @@ export async function spawnAsyncTask(
         },
     });
 
+    await seedTaskMirror(task);
     await logTaskEvent(task.id, "task_created", `Async task created: ${options.name}`, {
         taskType: options.taskType,
         triggeredBy: options.triggeredBy ?? "upload",
@@ -132,6 +161,7 @@ export async function spawnRegularTask(
         },
     });
 
+    await seedTaskMirror(task);
     await logTaskEvent(task.id, "task_created", `Regular task created: ${options.name}`, {
         taskType: options.taskType,
         triggeredBy: options.triggeredBy ?? "admin",
