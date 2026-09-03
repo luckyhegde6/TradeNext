@@ -204,15 +204,27 @@ export async function persistAiCallToDb(entry: AiCallEntry): Promise<void> {
 }
 
 /**
- * Read AI call records that were persisted to the database.
+ * Read AI call records that were persisted to the database OR the local
+ * SQLite write-behind queue.
  *
- * This is the source of truth that survives process restarts.
- * Only non-null metadata is mapped back into an {@link AiCallEntry}.
+ * Two durable tiers exist since v3.22.0:
+ *   - Prisma `serverLog` (source="ai"): only the rows `drainWriteBehind`
+ *     promoted (error/warn — `isWbImportant`). Survives across deploys.
+ *   - Local SQLite `wb_server_log` (source="ai"): ALL AI calls land here via
+ *     `enqueueWriteBehind`; info-level success calls are retained here only.
+ *     Survives process restarts but is wiped on a re-deploy/restart of state.
+ *
+ * We read BOTH (Prisma + SQLite) so the admin page shows the full persisted
+ * history (including info-level success calls) whenever the in-memory buffer
+ * is cold — without any extra Prisma ops (SQLite reads are free).
  */
 export async function getPersistedAiCalls(
   limit = 100,
   timeframeMinutes?: number,
 ): Promise<AiCallEntry[]> {
+  const entries: AiCallEntry[] = [];
+
+  // Tier 1: Prisma `serverLog` promoted rows (survive deploys).
   try {
     const where: { source: string; createdAt?: { gte: Date } } = {
       source: "ai",
@@ -229,32 +241,79 @@ export async function getPersistedAiCalls(
       take: Math.min(limit, 500),
     });
 
-    return logs
-      .map((log) => {
-        const m = (log.metadata ?? {}) as Record<string, unknown>;
-        if (!m.action) return null;
-        const entry: AiCallEntry = {
-          timestamp:
-            (m.timestamp as string) ?? log.createdAt.toISOString(),
-          action: String(m.action),
-          model: (m.model as string) ?? "unknown",
-          status: (m.status as AiCallEntry["status"]) ?? "error",
-          tokensUsed: Number(m.tokensUsed ?? 0),
-          responseTimeMs: Number(m.responseTimeMs ?? 0),
-        };
-        if (m.error) entry.error = String(m.error);
-        if (m.analysisType) entry.analysisType = String(m.analysisType);
-        if (m.userId) entry.userId = Number(m.userId);
-        if (m.prompt) entry.prompt = String(m.prompt);
-        if (m.result) entry.result = String(m.result);
-        if (m.userLabel) entry.userLabel = String(m.userLabel);
-        return entry;
-      })
-      .filter((e): e is AiCallEntry => e !== null);
+    for (const log of logs) {
+      const m = (log.metadata ?? {}) as Record<string, unknown>;
+      if (!m.action) continue;
+      const entry: AiCallEntry = {
+        timestamp:
+          (m.timestamp as string) ?? log.createdAt.toISOString(),
+        action: String(m.action),
+        model: (m.model as string) ?? "unknown",
+        status: (m.status as AiCallEntry["status"]) ?? "error",
+        tokensUsed: Number(m.tokensUsed ?? 0),
+        responseTimeMs: Number(m.responseTimeMs ?? 0),
+      };
+      if (m.error) entry.error = String(m.error);
+      if (m.analysisType) entry.analysisType = String(m.analysisType);
+      if (m.userId) entry.userId = Number(m.userId);
+      if (m.prompt) entry.prompt = String(m.prompt);
+      if (m.result) entry.result = String(m.result);
+      if (m.userLabel) entry.userLabel = String(m.userLabel);
+      entries.push(entry);
+    }
   } catch (err) {
-    logger.debug({ msg: "Failed to read persisted AI calls", error: err });
-    return [];
+    logger.debug({ msg: "Failed to read persisted AI calls (Prisma)", error: err });
   }
+
+  // Tier 2: SQLite write-behind queue (source="ai") — full history incl.
+  // info-level success calls that are never promoted to Prisma. Zero Prisma ops.
+  try {
+    const sqlite = (await import("@/lib/sqlite")).getSqliteFallback();
+    const wbRows = sqlite?.getWriteBehindLogsBySource?.("ai", limit) ?? [];
+    const cutoff = timeframeMinutes
+      ? Date.now() - timeframeMinutes * 60 * 1000
+      : 0;
+    for (const row of wbRows) {
+      let m: Record<string, unknown> = {};
+      if (typeof row.metadata === "string") {
+        try {
+          m = JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch {
+          m = {};
+        }
+      } else if (row.metadata && typeof row.metadata === "object") {
+        m = row.metadata as Record<string, unknown>;
+      }
+      if (!m.action) continue;
+      const queuedAt = row.queued_at as string | undefined;
+      const ts = (m.timestamp as string) ?? queuedAt;
+      if (!ts) continue;
+      const tsMs = new Date(ts).getTime();
+      if (cutoff && !(tsMs > cutoff)) continue;
+      entries.push({
+        timestamp: ts,
+        action: String(m.action),
+        model: (m.model as string) ?? "unknown",
+        status: (m.status as AiCallEntry["status"]) ?? "error",
+        tokensUsed: Number(m.tokensUsed ?? 0),
+        responseTimeMs: Number(m.responseTimeMs ?? 0),
+        error: m.error ? String(m.error) : undefined,
+        analysisType: m.analysisType ? String(m.analysisType) : undefined,
+        userId: m.userId ? Number(m.userId) : undefined,
+        prompt: m.prompt ? String(m.prompt) : undefined,
+        result: m.result ? String(m.result) : undefined,
+        userLabel: m.userLabel ? String(m.userLabel) : undefined,
+      });
+    }
+  } catch (err) {
+    logger.debug({ msg: "Failed to read persisted AI calls (SQLite wb)", error: err });
+  }
+
+  // Order newest-first; SQLite `queued_at` is chronological so rows appended to
+  // the tail of this array are the newest from the queue — sort by timestamp.
+  return entries
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, limit);
 }
 
 /**

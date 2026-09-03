@@ -171,6 +171,11 @@ export interface SqliteFallback {
   getCorporateActions(limit?: number): Array<Record<string, unknown>>;
   /** Get recent server logs. */
   getServerLogs(limit?: number): Array<Record<string, unknown>>;
+  /** Get write-behind queue records by source (e.g. `ai`) — zero Prisma reads. */
+  getWriteBehindLogsBySource(
+    source: string,
+    limit?: number,
+  ): Array<Record<string, unknown>>;
   /** Get recent audit logs. */
   getAuditLogs(limit?: number): Array<Record<string, unknown>>;
   /** Get cron jobs. */
@@ -214,6 +219,32 @@ export interface SqliteFallback {
   writeLivenessHeartbeat(role: "worker" | "cron-daemon", snapshot: Record<string, unknown>): void;
   /** Read the liveness heartbeats persisted in SQLite (admin visibility). */
   getLivenessHeartbeats(): Array<Record<string, unknown>>;
+
+  /**
+   * v3.25.x SQLite-primary control plane. Upsert an entire control-plane row
+   * (worker_task / worker_status / cron_job) into the SQLite mirror. Best-effort
+   * and never throws — the row's authoritative copy lives on Prisma, but the
+   * daemons reads serve from this mirror (zero Prisma read/write per tick).
+   * Also bumps the per-table "last control write" timestamp used by
+   * `isControlMirrorFresh` so a dormant mirror falls back to Prisma.
+   */
+  upsertWorkerTask(row: Record<string, unknown>): void;
+  upsertWorkerStatus(row: Record<string, unknown>): void;
+  upsertCronJob(row: Record<string, unknown>): void;
+  /** Best-effort delete of a control-plane row from the SQLite mirror. */
+  deleteWorkerTask(id: string): void;
+  deleteCronJob(id: string): void;
+  /**
+   * True when the SQLite control-plane mirror for a table is non-empty AND a
+   * control write happened within `maxAgeMs`. When false, a daemon read falls
+   * back to Prisma (and, on a hit, seeds the local mirror). This prevents a
+   * per-instance fresh-but-empty or idle mirror from being mistaken for a real
+   * empty shared queue / empty cron schedule.
+   */
+  isControlMirrorFresh(
+    table: "worker_task" | "worker_status" | "cron_job",
+    maxAgeMs: number,
+  ): boolean;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -622,6 +653,44 @@ const SCHEMA_SQL = `
 // ---------------------------------------------------------------------------
 
 /**
+ * v3.25.x: add the control-plane columns the SQLite-primary daemons need, which
+ * were not in the original mirror schema. Idempotent and guarded by
+ * `PRAGMA table_info` so repeated init (and tests) never fail. SQLite-only —
+ * NO Prisma schema change / NO migration.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureControlColumns(db: any): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addIfMissing = (table: string, col: string, ddl: string): void => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec(`PRAGMA table_info(${table})`);
+      if (!res || !res.length) return;
+      const cols = res[0].columns as string[];
+      const nameIdx = cols.indexOf("name");
+      const existing = new Set<string>();
+      res[0].values.forEach((row: unknown[]) => {
+        if (nameIdx >= 0) existing.add(String((row as string[])[nameIdx]));
+      });
+      if (!existing.has(col)) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    };
+    // worker_task needs the claim / payload routing columns.
+    addIfMissing("worker_task", "assigned_to", "assigned_to TEXT");
+    addIfMissing("worker_task", "cron_job_id", "cron_job_id TEXT");
+    addIfMissing("worker_task", "payload", "payload TEXT");
+    // cron_job needs the config blob (job-specific config / indexName etc.).
+    addIfMissing("cron_job", "config", "config TEXT");
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: ensureControlColumns failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize the SQLite backup database. Called once from instrumentation.ts
  * or on first request. Non-blocking -- sync happens in background.
  */
@@ -638,6 +707,9 @@ export async function initSqliteBackup(): Promise<void> {
     for (const stmt of stmts) {
       db.run(stmt);
     }
+    // v3.25.x: add the control-plane columns the daemons need (idempotent,
+    // SQLite-only — no Prisma schema change, no migration).
+    ensureControlColumns(db);
 
     state.ready = true;
     _instance = createFallback(db);
@@ -1654,6 +1726,13 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     const db = state.db;
     const syncErr: string[] = [];
 
+    // v3.25.x SQLite-primary control plane: FIRST push the SQLite-only daemon
+    // writes (heartbeats, cron advances, completed/failed task status) into
+    // Prisma — this is the ONLY Prisma write to these tables, per the user
+    // directive ("only write to prisma during the 12hr sync job"). Then the
+    // pulls below re-sync Prisma→SQLite with the reconciled values (idempotent).
+    await reconcileControlToPrisma(db);
+
     // --- Sync daily price snapshots (latest row per ticker) ---
     totalRows += await syncTable(db, "daily_price_snapshot", async () => {
       const rows = await prisma.$queryRaw<Array<{
@@ -1876,8 +1955,8 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
         orderBy: { createdAt: "asc" },
       });
       return {
-        columns: "id, name, description, task_type, cron_expression, is_active, last_run, next_run, run_count, success_count, failure_count, created_at",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, name, description, task_type, cron_expression, is_active, last_run, next_run, run_count, success_count, failure_count, created_at, config",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: jobs.map((j) => [
           j.id,
           j.name,
@@ -1891,6 +1970,9 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
           j.successCount,
           j.failureCount,
           j.createdAt?.toISOString() ?? null,
+          (j.config as Record<string, unknown> | null | undefined) != null
+            ? JSON.stringify(j.config)
+            : null,
         ]),
       };
     });
@@ -1915,11 +1997,16 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
           error: true,
           triggeredBy: true,
           createdAt: true,
+          // v3.25.x control columns populated into the mirror backfill so the
+          // SQLite-first poll discovery + reaper can read them without Prisma.
+          assignedTo: true,
+          cronJobId: true,
+          payload: true,
         },
       });
       return {
-        columns: "id, name, task_type, status, priority, started_at, completed_at, error, triggered_by, created_at",
-        placeholders: "?,?,?,?,?,?,?,?,?,?",
+        columns: "id, name, task_type, status, priority, started_at, completed_at, error, triggered_by, created_at, assigned_to, cron_job_id, payload",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: tasks.map((t) => [
           t.id,
           t.name,
@@ -1931,6 +2018,9 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
           t.error,
           t.triggeredBy,
           t.createdAt?.toISOString() ?? null,
+          t.assignedTo ?? null,
+          t.cronJobId ?? null,
+          t.payload != null ? JSON.stringify(t.payload) : null,
         ]),
       };
     });
@@ -1966,6 +2056,105 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     logger.error({ msg: "SQLite: sync failed", error: errorMsg });
   } finally {
     state.syncing = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v3.25.x SQLite→Prisma reconcile (SQLite-primary control plane)
+// ---------------------------------------------------------------------------
+// Pushes the SQLite-only daemon writes into Prisma. Called ONLY from the 12h
+// `syncFromPrisma` job (leader-gated), per the user's "write to prisma only
+// during the 12hr sync" directive. Non-fatal — a failure never fails the sync.
+async function reconcileControlToPrisma(db: Database): Promise<void> {
+  if (!db) return;
+  try {
+    // --- Worker status heartbeats (few rows per instance) ---
+    const wsRes = db.exec("SELECT * FROM worker_status");
+    if (wsRes.length) {
+      const cols = wsRes[0].columns;
+      const rows = wsRes[0].values;
+      for (const row of rows) {
+        const obj: Record<string, unknown> = {};
+        cols.forEach((c, i) => (obj[c] = row[i]));
+        const workerId = String(obj.worker_id ?? "");
+        const hb = obj.last_heartbeat ? String(obj.last_heartbeat) : "";
+        if (!workerId || !hb) continue;
+        await prisma.workerStatus.upsert({
+          where: { workerId },
+          create: {
+            workerId,
+            workerName: obj.worker_name ? String(obj.worker_name) : null,
+            status: obj.status ? String(obj.status) : "idle",
+            currentTaskId: obj.current_task_id ? String(obj.current_task_id) : null,
+            tasksCompleted: Number(obj.tasks_completed ?? 0),
+            tasksFailed: Number(obj.tasks_failed ?? 0),
+            lastHeartbeat: new Date(hb),
+            cpuUsage: obj.cpu_usage != null ? Number(obj.cpu_usage) : null,
+            memoryUsage: obj.memory_usage != null ? Number(obj.memory_usage) : null,
+          },
+          update: {
+            workerName: obj.worker_name ? String(obj.worker_name) : undefined,
+            status: obj.status ? String(obj.status) : undefined,
+            currentTaskId: obj.current_task_id ? String(obj.current_task_id) : undefined,
+            tasksCompleted: Number(obj.tasks_completed ?? 0),
+            tasksFailed: Number(obj.tasks_failed ?? 0),
+            lastHeartbeat: new Date(hb),
+            cpuUsage: obj.cpu_usage != null ? Number(obj.cpu_usage) : undefined,
+            memoryUsage: obj.memory_usage != null ? Number(obj.memory_usage) : undefined,
+          },
+        });
+      }
+    }
+
+    // --- Cron job advances (nextRun / counters) ---
+    const cjRes = db.exec("SELECT * FROM cron_job");
+    if (cjRes.length) {
+      const cols = cjRes[0].columns;
+      const rows = cjRes[0].values;
+      for (const row of rows) {
+        const obj: Record<string, unknown> = {};
+        cols.forEach((c, i) => (obj[c] = row[i]));
+        const id = String(obj.id ?? "");
+        if (!id) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: Record<string, unknown> = {} as any;
+        if (obj.next_run) data.nextRun = new Date(String(obj.next_run));
+        if (obj.last_run) data.lastRun = new Date(String(obj.last_run));
+        if (obj.run_count != null) data.runCount = Number(obj.run_count);
+        if (obj.success_count != null) data.successCount = Number(obj.success_count);
+        if (obj.failure_count != null) data.failureCount = Number(obj.failure_count);
+        if (Object.keys(data).length) {
+          await prisma.cronJob.updateMany({ where: { id }, data });
+        }
+      }
+    }
+
+    // --- Completed / failed worker tasks ---
+    const wtRes = db.exec(
+      "SELECT id, completed_at, status, error, assigned_to FROM worker_task WHERE status IN ('completed','failed') AND completed_at IS NOT NULL",
+    );
+    if (wtRes.length) {
+      const cols = wtRes[0].columns;
+      const rows = wtRes[0].values;
+      for (const row of rows) {
+        const obj: Record<string, unknown> = {};
+        cols.forEach((c, i) => (obj[c] = row[i]));
+        const id = String(obj.id ?? "");
+        if (!id) continue;
+        const patch: { status: string; completedAt?: Date; error?: string; assignedTo?: string } = {
+          status: String(obj.status),
+        };
+        if (obj.completed_at) patch.completedAt = new Date(String(obj.completed_at));
+        if (obj.error != null) patch.error = String(obj.error);
+        if (obj.assigned_to) patch.assignedTo = String(obj.assigned_to);
+        await prisma.workerTask.updateMany({ where: { id }, data: patch });
+      }
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: reconcileControlToPrisma failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -2237,6 +2426,29 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    // --- Write-behind queue (v3.22.0) ---
+    getWriteBehindLogsBySource(source: string, limit = 100): Array<Record<string, unknown>> {
+      try {
+        // ai-monitoring persists AI calls through enqueueWriteBehind("server_log")
+        // into wb_server_log. Info-level success calls are retained SQLite-only
+        // (never promoted to Prisma), so this read is what makes them visible to
+        // the admin AI-monitoring page across cold starts (zero Prisma ops).
+        const rows = db.exec(
+          "SELECT * FROM wb_server_log WHERE source = ? ORDER BY queued_at DESC LIMIT ?",
+          [source, limit],
+        );
+        if (!rows.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) => {
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return obj;
+        });
+      } catch {
+        return [];
+      }
+    },
+
     // --- Audit logs ---
     getAuditLogs(limit = 100): Array<Record<string, unknown>> {
       try {
@@ -2338,6 +2550,201 @@ function createFallback(db: Database): SqliteFallback {
       } catch {
         recordSqliteRead("getWorkerTasks", _start, 0, false);
         return [];
+      }
+    },
+
+    // =========================================================================
+    // SQLite-primary control plane (v3.25.x)
+    // -------------------------------------------------------------------------
+    // These writes are the daemons' periodic control-plane state. They land in
+    // the LOCAL SQLite mirror (zero Prisma ops and thus zero plan-limit /
+    // Accelerate reads+writes per tick). Only the two cross-instance atomic
+    // exclusions (worker task CLAIM + leader LOCK claim) stay on Prisma; the
+    // SQLite rows are reconciled to Prisma at the 12h `syncFromPrisma` job via
+    // the SQLite→Prisma `reconcileControlToPrisma` pass.
+    // =========================================================================
+
+    upsertWorkerTask(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO worker_task (
+             id, name, task_type, status, priority, started_at, completed_at,
+             error, triggered_by, created_at, assigned_to, cron_job_id, payload
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             status=excluded.status,
+             priority=excluded.priority,
+             started_at=excluded.started_at,
+             completed_at=excluded.completed_at,
+             error=excluded.error,
+             triggered_by=excluded.triggered_by,
+             assigned_to=excluded.assigned_to,
+             cron_job_id=excluded.cron_job_id,
+             payload=excluded.payload`,
+          [
+            String(row.id ?? ""),
+            row.name != null ? String(row.name) : String(row.task_type ?? row.type ?? "task"),
+            String(row.taskType ?? row.task_type ?? row.type ?? "unknown"),
+            String(row.status ?? "pending"),
+            Number(row.priority ?? 0),
+            (row.startedAt ?? row.started_at) as string | null,
+            (row.completedAt ?? row.completed_at) as string | null,
+            row.error != null ? String(row.error) : null,
+            (row.triggeredBy ?? row.triggered_by ?? "system") as string,
+            (row.createdAt ?? row.created_at ?? now) as string,
+            (row.assignedTo ?? row.assigned_to ?? null) as string | null,
+            (row.cronJobId ?? row.cron_job_id ?? null) as string | null,
+            row.payload != null ? JSON.stringify(row.payload) : null,
+          ],
+        );
+        db.run(
+          "INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)",
+          [`control_write_at:worker_task`, now],
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertWorkerTask failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertWorkerStatus(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO worker_status (
+             worker_id, worker_name, status, current_task_id, tasks_completed,
+             tasks_failed, last_heartbeat, cpu_usage, memory_usage, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(worker_id) DO UPDATE SET
+             worker_name=excluded.worker_name,
+             status=excluded.status,
+             current_task_id=excluded.current_task_id,
+             tasks_completed=excluded.tasks_completed,
+             tasks_failed=excluded.tasks_failed,
+             last_heartbeat=excluded.last_heartbeat,
+             cpu_usage=excluded.cpu_usage,
+             memory_usage=excluded.memory_usage`,
+          [
+            String(row.workerId ?? row.worker_id ?? row.id ?? ""),
+            row.workerName ?? row.worker_name ?? row.name != null ? String(row.name) : null,
+            String(row.status ?? "idle"),
+            (row.currentTaskId ?? row.current_task_id ?? null) as string | null,
+            Number(row.tasksCompleted ?? row.tasks_completed ?? 0),
+            Number(row.tasksFailed ?? row.tasks_failed ?? 0),
+            (row.lastHeartbeat ?? row.last_heartbeat ?? now) as string,
+            row.cpuUsage != null ? Number(row.cpuUsage) : null,
+            row.memoryUsage != null ? Number(row.memoryUsage) : null,
+            (row.createdAt ?? row.created_at ?? now) as string,
+          ],
+        );
+        db.run(
+          "INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)",
+          [`control_write_at:worker_status`, now],
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertWorkerStatus failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertCronJob(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO cron_job (
+             id, name, description, task_type, cron_expression, is_active,
+             last_run, next_run, run_count, success_count, failure_count,
+             created_at, config
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             name=excluded.name,
+             description=excluded.description,
+             task_type=excluded.task_type,
+             cron_expression=excluded.cron_expression,
+             is_active=excluded.is_active,
+             last_run=excluded.last_run,
+             next_run=excluded.next_run,
+             run_count=excluded.run_count,
+             success_count=excluded.success_count,
+             failure_count=excluded.failure_count,
+             config=excluded.config`,
+          [
+            String(row.id ?? ""),
+            String(row.name ?? ""),
+            row.description != null ? String(row.description) : null,
+            String(row.taskType ?? row.task_type ?? ""),
+            String(row.cronExpression ?? row.cron_expression ?? ""),
+            // Resolve active from either is_active or isActive
+            (() => {
+              const v = row.isActive ?? row.is_active;
+              return v == null ? 1 : v ? 1 : 0;
+            })(),
+            (row.lastRun ?? row.last_run) as string | null,
+            (row.nextRun ?? row.next_run ?? now) as string,
+            Number(row.runCount ?? row.run_count ?? 0),
+            Number(row.successCount ?? row.success_count ?? 0),
+            Number(row.failCount ?? row.failure_count ?? row.fail_count ?? 0),
+            (row.createdAt ?? row.created_at ?? now) as string,
+            row.config != null ? JSON.stringify(row.config) : null,
+          ],
+        );
+        db.run(
+          "INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)",
+          [`control_write_at:cron_job`, now],
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertCronJob failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteWorkerTask(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM worker_task WHERE id = ?", [id]);
+      } catch {
+        // best-effort
+      }
+    },
+
+    deleteCronJob(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM cron_job WHERE id = ?", [id]);
+      } catch {
+        // best-effort
+      }
+    },
+
+    isControlMirrorFresh(
+      table: "worker_task" | "worker_status" | "cron_job",
+      maxAgeMs: number,
+    ): boolean {
+      if (!db) return false;
+      try {
+        const countRes = db.exec(`SELECT COUNT(*) AS cnt FROM ${table}`);
+        const cnt = countRes.length ? Number(countRes[0].values[0][0]) : 0;
+        if (cnt <= 0) return false;
+        const metaRes = db.exec(
+          `SELECT value FROM _backup_meta WHERE key = ? LIMIT 1`,
+          [`control_write_at:${table}`],
+        );
+        if (!metaRes.length) return false;
+        const at = Number(new Date(String(metaRes[0].values[0][0])).getTime());
+        if (!Number.isFinite(at)) return false;
+        return Date.now() - at <= maxAgeMs;
+      } catch {
+        return false;
       }
     },
 

@@ -51,6 +51,15 @@ export const STALE_MS = 45 * 60_000;
 export const TASK_TIMEOUT_MS = 40 * 60_000; // hard ceiling on any single task execution
 const REAP_INTERVAL_MS = 60_000; // reaper throttled to once per minute
 const WORKER_ALIVE_WINDOW_MS = 10 * 60_000; // 10 min — 2x heartbeat cadence (5 min)
+// ─── SQLite-primary control plane (v3.25.x) ────────────────────────────────
+// The 30s worker poll + 1-min reaper check-reads serve from the LOCAL SQLite
+// mirror (zero Prisma) while the mirror is non-empty AND a control write
+// happened within this window. When the mirror is empty/idle the read falls
+// back to Prisma and re-seeds the mirror (per the user directive: "if sqlite
+// is empty then fetch from prisma but write to sqlite"). The atomic CLAIM
+// (updateMany) and the task-boundary liveness heartbeat stay on Prisma — they
+// are the cross-instance coordination points and must never be per-instance.
+const CONTROL_TTL_MS = 5 * 60_000; // poll mirror trusted for 5 min, then re-seed
 // Task types that CREATE DailyRecommendationRun rows (runDailyRecommendations).
 // A running run is legit only while one of these is executing on a live worker
 // (runs carry no worker id of their own).
@@ -197,6 +206,84 @@ export function stopWorkerEngine() {
     logger.info({ msg: "Worker and Scheduler engines stopped", workerId: WORKER_ID });
 }
 
+/** Resolve the SQLite fallback singleton (lazy import, never throws). */
+async function getSqliteControl() {
+    try {
+        const sqlite = await import("@/lib/sqlite");
+        return sqlite.getSqliteFallback ? sqlite.getSqliteFallback() : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Parse a payload column that may be JSON-string or raw object. */
+function safeJson(value: unknown): Record<string, unknown> {
+    if (value == null) return {};
+    if (typeof value === "object") return value as Record<string, unknown>;
+    try {
+        const parsed = JSON.parse(String(value));
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * SQLite-primary pending-task discovery (v3.25.x).
+ *
+ * Serves the next pending task from the LOCAL SQLite mirror when the mirror is
+ * fresh (`isControlMirrorFresh`) — eliminating the 30s-per-instance Prisma
+ * read in steady state. When the mirror is empty or stale, falls back to a
+ * Prisma findFirst and seeds the mirror so subsequent polls hit SQLite. The
+ * authoritative atomic claim (updateMany) still runs on Prisma, so a stale
+ * mirror can never double-execute a task.
+ */
+export async function discoverPendingTask(): Promise<any | null> {
+    const sqlite = await getSqliteControl();
+    const fresh =
+        sqlite?.isReady &&
+        typeof sqlite.isControlMirrorFresh === "function" &&
+        sqlite.isControlMirrorFresh("worker_task", CONTROL_TTL_MS);
+
+    if (fresh) {
+        const rows = (sqlite.getWorkerTasks(50) || []) as Array<Record<string, unknown>>;
+        const pending = rows
+            .filter((r) => r.status === "pending")
+            .sort(
+                (a, b) =>
+                    Number(b.priority) - Number(a.priority) ||
+                    String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
+            );
+        const top = pending[0];
+        if (top && top.id) {
+            return {
+                id: String(top.id),
+                name: String(top.name ?? top.task_type ?? "task"),
+                taskType: String(top.task_type ?? "unknown"),
+                status: "pending",
+                priority: Number(top.priority ?? 0),
+                createdAt: top.created_at ? new Date(String(top.created_at)) : new Date(),
+                startedAt: top.started_at ? new Date(String(top.started_at)) : null,
+                assignedTo: top.assigned_to ? String(top.assigned_to) : null,
+                cronJobId: top.cron_job_id ? String(top.cron_job_id) : null,
+                payload: safeJson(top.payload),
+            };
+        }
+        // Mirror is fresh but has no pending work — trust it, skip Prisma.
+        return null;
+    }
+
+    const task = await prisma.workerTask.findFirst({
+        where: { status: "pending" },
+        orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+    });
+    if (task && sqlite?.upsertWorkerTask) {
+        // Seed the local mirror so subsequent polls discover it via SQLite.
+        sqlite.upsertWorkerTask(task);
+    }
+    return task;
+}
+
 /**
  * Poll for pending tasks and execute them one by one
  */
@@ -216,15 +303,8 @@ async function pollAndExecute() {
     // stay servable from SQLite during the hold.
     if (isPlanLimitBreakerOpen()) return;
 
-    // 2. Pick up next pending task
-    const task = await prisma.workerTask.findFirst({
-        where: { status: "pending" },
-        orderBy: [
-            { priority: "desc" },
-            { createdAt: "asc" },
-        ],
-    });
-
+    // 2. Pick up next pending task (SQLite-primary with Prisma fallback + seed)
+    const task = await discoverPendingTask();
     if (!task) return;
 
     // 2. Claim the task
@@ -274,6 +354,20 @@ async function pollAndExecute() {
                 error: result.error || null,
             },
         });
+        // Keep the local SQLite mirror in sync so this task disappears from the
+        // poll mirror's pending set (non-fatal; Prisma remains authoritative).
+        const sql = await getSqliteControl();
+        sql?.upsertWorkerTask?.({
+            id: task.id,
+            name: task.name,
+            taskType: task.taskType,
+            status: result.success ? "completed" : "failed",
+            completedAt: new Date(),
+            error: result.error || null,
+            payload: task.payload,
+            assignedTo: WORKER_ID,
+            cronJobId: (task as any).cronJobId ?? null,
+        });
 
         await taskLogger.info(`Task ${task.id} finished with status: ${result.success ? "completed" : "failed"}`);
     } catch (error) {
@@ -285,6 +379,18 @@ async function pollAndExecute() {
                 completedAt: new Date(),
                 error: errorMessage,
             },
+        });
+        const sql2 = await getSqliteControl();
+        sql2?.upsertWorkerTask?.({
+            id: task.id,
+            name: task.name,
+            taskType: task.taskType,
+            status: "failed",
+            completedAt: new Date(),
+            error: errorMessage,
+            payload: task.payload,
+            assignedTo: WORKER_ID,
+            cronJobId: (task as any).cronJobId ?? null,
         });
         await taskLogger.error(`Task ${task.id} execution failed`, error);
     } finally {
@@ -310,6 +416,14 @@ async function pollAndExecute() {
  * kill work we can't prove is dead.
  *
  * Exported for tests and the cleanup tooling.
+ *
+ * v3.25.x note: the liveness reads in this reaper (alive-worker heartbeats +
+ * running-task owners) INTENTIONALLY stay on Prisma. They are CROSS-INSTANCE
+ * coordination reads — a local per-instance SQLite mirror only holds this
+ * process's data, so serving liveness from it would blind the reaper to other
+ * Netlify instances and risk reaping their live work (the v3.12.0 prod bug).
+ * They are also low-frequency (≤1/min, breaker-guarded) — not the 30s poll
+ * noise the SQLite-primary directive targets.
  */
 export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<{ reapedTasks: number; reapedRuns: number }> {
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN

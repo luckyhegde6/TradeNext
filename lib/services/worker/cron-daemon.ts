@@ -28,6 +28,35 @@ const HEARTBEAT_INTERVAL_MS = 900_000; // 15 min — was 5 min (saves ~192 write
 export const DAEMON_HEARTBEAT_WINDOW_MS = 2 * HEARTBEAT_INTERVAL_MS;
 export const DAEMON_ID = `cron-daemon-${os.hostname()}-${process.pid}`;
 
+// v3.25.x: the 5-min resync reads its active-job list from the LOCAL SQLite
+// mirror while fresh, falling back to Prisma when empty/stale and reseeding the
+// mirror (user directive: "check the SQLITE first"). node-cron schedules purely
+// by expression, so a stale nextRun in the mirror is irrelevant to registration;
+// nextRun/spawn correctness stays on Prisma via spawnDueCronJob.
+const CONTROL_TTL_MS = 5 * 60_000; // cron mirror trusted for 5 min, then reseed
+
+/** Parse a SQLite-stored config column (JSON string) back to an object. */
+function parseConfig(value: unknown): Record<string, unknown> | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "object") return value as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve the SQLite fallback singleton (lazy import, never throws). */
+async function getSqliteFallback() {
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    return sqlite.getSqliteFallback ? sqlite.getSqliteFallback() : null;
+  } catch {
+    return null;
+  }
+}
+
 interface RegisteredTask {
   task: ReturnType<typeof cron.schedule>;
   expression: string;
@@ -123,7 +152,32 @@ export function stopCronDaemon(): void {
  * Exported for tests. Returns the number of registered jobs.
  */
 export async function syncCronJobs(): Promise<{ registered: number }> {
-  const jobs = await prisma.cronJob.findMany({ where: { isActive: true } });
+  // v3.25.x SQLite-primary: serve the active cron list from the local mirror
+  // when fresh; otherwise read Prisma and reseed the mirror.
+  const sqlite = await getSqliteFallback();
+  let jobs: Array<any>;
+  const fresh =
+    !!sqlite &&
+    typeof sqlite.isControlMirrorFresh === "function" &&
+    sqlite.isControlMirrorFresh("cron_job", CONTROL_TTL_MS);
+
+  if (fresh && sqlite) {
+    const rows = (sqlite.getCronJobs() || []) as Array<Record<string, unknown>>;
+    jobs = rows
+      .filter((r) => r.is_active !== false && r.is_active !== 0 && r.id)
+      .map((r) => ({
+        id: String(r.id),
+        name: String(r.name ?? ""),
+        cronExpression: r.cron_expression ? String(r.cron_expression) : "",
+        isActive: true,
+        config: parseConfig(r.config),
+      }));
+  } else {
+    jobs = await prisma.cronJob.findMany({ where: { isActive: true } });
+    // Reseed the local mirror so subsequent resyncs hit SQLite.
+    for (const j of jobs) sqlite?.upsertCronJob?.(j);
+  }
+
   const seen = new Set<string>();
 
   for (const job of jobs) {

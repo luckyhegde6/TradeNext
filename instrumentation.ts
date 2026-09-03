@@ -39,6 +39,9 @@ export async function register() {
     if (workerLeader) {
       // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
       startWorker(30_000);
+      leader.startLeaderHeartbeat("worker", () => {
+        logger.warn({ msg: "Lost worker leadership — stopping", self: leader.LEADER_SELF });
+      });
     } else {
       logger.warn({ msg: "Worker engine NOT started (another instance is worker leader)", self: leader.LEADER_SELF });
     }
@@ -48,6 +51,9 @@ export async function register() {
       startCronDaemon().then(() =>
         logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
       );
+      leader.startLeaderHeartbeat("cron-daemon", () => {
+        logger.warn({ msg: "Lost cron leadership — stopping", self: leader.LEADER_SELF });
+      });
     } else {
       logger.warn({ msg: "Cron daemon NOT started (another instance is cron leader)", self: leader.LEADER_SELF });
     }
@@ -62,7 +68,11 @@ export async function register() {
     // isLeader). Standing-by instances still init SQLite locally for fallback
     // reads + write-behind buffering, but skip the heavy full sync.
     const syncLeader = await leader.acquireLeaderLock("sqlite-sync");
-    if (!syncLeader) {
+    if (syncLeader) {
+      leader.startLeaderHeartbeat("sqlite-sync", () => {
+        logger.warn({ msg: "Lost sqlite-sync leadership — stopping sync", self: leader.LEADER_SELF });
+      });
+    } else {
       logger.warn({ msg: "SQLite sync will be skipped (another instance is sqlite-sync leader)", self: leader.LEADER_SELF });
     }
 
