@@ -171,6 +171,44 @@ export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
   }
 }
 
+/**
+ * Periodically refresh OUR leadership heartbeat for `role` so the row never
+ * goes stale inside LEADER_STALENESS_MS (which would let a standby instance
+ * claim the lock and split leadership). Uses LEADER_HEARTBEAT_MS (60s) which
+ * is well under the 5-min staleness window. Self-healing: if renewal stops
+ * returning true (we lost the lock), stop renewing and notify via a callback.
+ * Returns a stop() function.
+ */
+export function startLeaderHeartbeat(
+  role: LeaderRole,
+  onLost?: (role: LeaderRole) => void,
+): () => void {
+  let stopped = false;
+  const timer = setInterval(() => {
+    if (stopped) return;
+    renewLeaderLock(role).then((stillLeader) => {
+      if (stopped) return;
+      if (!stillLeader) {
+        logger.warn({
+          msg: "Lost leader lock — stopping heartbeat (another instance took over)",
+          role,
+          workerId: leaderWorkerId(role),
+          self: LEADER_SELF,
+        });
+        stopped = true;
+        clearInterval(timer);
+        onLost?.(role);
+      }
+    });
+  }, LEADER_HEARTBEAT_MS);
+  // Don't keep the process alive just for the heartbeat.
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 /** Release leadership (graceful shutdown). Only clears the row if it's ours. */
 export async function releaseLeaderLock(role: LeaderRole): Promise<void> {
   const workerId = leaderWorkerId(role);

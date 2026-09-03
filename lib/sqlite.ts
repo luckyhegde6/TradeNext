@@ -171,6 +171,11 @@ export interface SqliteFallback {
   getCorporateActions(limit?: number): Array<Record<string, unknown>>;
   /** Get recent server logs. */
   getServerLogs(limit?: number): Array<Record<string, unknown>>;
+  /** Get write-behind queue records by source (e.g. `ai`) — zero Prisma reads. */
+  getWriteBehindLogsBySource(
+    source: string,
+    limit?: number,
+  ): Array<Record<string, unknown>>;
   /** Get recent audit logs. */
   getAuditLogs(limit?: number): Array<Record<string, unknown>>;
   /** Get cron jobs. */
@@ -2224,6 +2229,29 @@ function createFallback(db: Database): SqliteFallback {
         const rows = db.exec(
           "SELECT * FROM server_log ORDER BY created_at DESC LIMIT ?",
           [limit],
+        );
+        if (!rows.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) => {
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return obj;
+        });
+      } catch {
+        return [];
+      }
+    },
+
+    // --- Write-behind queue (v3.22.0) ---
+    getWriteBehindLogsBySource(source: string, limit = 100): Array<Record<string, unknown>> {
+      try {
+        // ai-monitoring persists AI calls through enqueueWriteBehind("server_log")
+        // into wb_server_log. Info-level success calls are retained SQLite-only
+        // (never promoted to Prisma), so this read is what makes them visible to
+        // the admin AI-monitoring page across cold starts (zero Prisma ops).
+        const rows = db.exec(
+          "SELECT * FROM wb_server_log WHERE source = ? ORDER BY queued_at DESC LIMIT ?",
+          [source, limit],
         );
         if (!rows.length) return [];
         const cols = rows[0].columns;

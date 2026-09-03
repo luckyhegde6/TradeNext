@@ -227,6 +227,10 @@ export const WRITE_BUDGET_CONFIG = WRITE_BUDGET;
 // instead of silent hang.
 const QUERY_TIMEOUT_MS = Number(process.env.PRISMA_QUERY_TIMEOUT_MS) || 120_000;
 
+// Throttle the "breaker OPEN — tripping error" warning so a repetitively-triggered
+// false-positive doesn't flood the cron/worker logs (default: 1 per 60s).
+const BREAKER_TRIP_LOG_THROTTLE_MS = 60_000;
+
 export class PrismaQueryTimeoutError extends Error {
   constructor(model: string, operation: string) {
     super(`Prisma query ${model}.${operation} timed out after ${QUERY_TIMEOUT_MS}ms`);
@@ -302,9 +306,21 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
             // Record failures in the ring buffer (fire-and-forget, non-blocking)
             recordDbError(model ?? "?", operation, err);
             // If this is a plan-limit hold / DB timeout, open the breaker so
-            // subsequent calls fail fast instead of waiting 120s each.
+            // subsequent calls fail fast instead of waiting 120s each. Log the
+            // ACTUAL triggering error message (throttled) so a spurious trip
+            // on a healthy DB is diagnosable instead of invisible.
             if (isPlanLimitHoldError(err) || isDbUnavailableError(err)) {
               openPlanLimitBreaker();
+              if (Date.now() - g.__lastBreakerTripLog >= BREAKER_TRIP_LOG_THROTTLE_MS) {
+                g.__lastBreakerTripLog = Date.now();
+                logger.warn({
+                  msg: "Plan-limit breaker OPEN — tripping error",
+                  model: model ?? "?",
+                  operation,
+                  error: err instanceof Error ? err.message : String(err),
+                  type: classifyDbError(err),
+                });
+              }
             }
             throw err;
           }) as ReturnType<typeof query>;
