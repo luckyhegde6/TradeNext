@@ -284,7 +284,7 @@ export async function GET(req: Request) {
   // --- v3.23.x: SQLite-mirror fast path during a plan-limit hold ---
   // Serve the SQLite corporate_action mirror directly WITHOUT any Prisma call
   // (even a fast-fail breaker throw generates log noise). Prisma is only
-  // touched again on the 12h recovery sync or a manual force.
+  // touched again on the 6h recovery sync or a manual force.
   if (isPlanLimitBreakerOpen()) {
     const sqlite = getSqliteFallback();
     const actions = sqlite?.isReady() ? sqlite.getCorporateActions(500) : [];

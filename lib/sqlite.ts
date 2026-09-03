@@ -747,28 +747,35 @@ export async function initSqliteBackup(): Promise<void> {
 // Background recovery probe
 // ---------------------------------------------------------------------------
 
-// v3.23.x (user directive): the Prisma recovery probe is now a 12-hourly
-// check. Since SQLite is the primary READ tier (market data, corporate
+// v3.26.0 (user directive): the Prisma sync/reconcile cadence is now 6-hourly
+// (was 12h). Since SQLite is the primary READ tier (market data, corporate
 // actions, screener, price cache, logs/audit are all served from the local
 // mirror at ZERO Prisma ops), Prisma availability no longer affects request
-// serving — the probe exists only to detect a held/recovered Prisma account
-// so a leader can re-sync the mirror. A 12h window is acceptable: the mirror
-// stays warm via the market-sync cron + write-behind promotion, and reads
-// degrade gracefully throughout. This removes the ~2 ops/min the 5-min probe
-// cost across instances (2880/day under the old cadence).
-const PROBE_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+// serving — the probe exists to (a) detect a held/recovered Prisma account so
+// a leader can re-sync the mirror, AND (b) run the periodic SQLite→Prisma
+// control-plane reconcile (`reconcileControlToPrisma`) so the SQLite-only
+// daemon writes (heartbeats, cron advances, completed/failed task status) reach
+// Prisma every 6h — per the user's "write to prisma only during the sync job"
+// directive. The 6h cadence is the compromise between keeping the mirror fresh
+// and reining in the (leader-gated) reconcile cost. This removed the ~2 ops/min
+// the old 5-min probe cost across instances (2880/day).
+const PROBE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /**
- * Start a background timer that probes Prisma every 12 hours (was 5 min —
- * v3.23.x user directive: drop the frequent Prisma health check; SQLite is
- * the primary read tier and Prisma health no longer gates request serving).
- * When Prisma recovers after being unavailable, triggers a full sync.
+ * Start a background timer that probes Prisma every 6 hours (was 12h in
+ * v3.23.x, 5 min in v3.19.x; v3.26.0 user directive: 6h). When Prisma recovers
+ * after being unavailable, triggers a full sync. Additionally, whenever Prisma
+ * is AVAILABLE on a tick it runs a periodic full `syncFromPrisma()` — so the
+ * SQLite→Prisma control-plane reconcile actually happens every 6h even on a
+ * continuously-healthy DB (previously the periodic reconcile only ran at boot,
+ * since the sync fired only on the down→up transition).
  *
  * Leader gate (v3.22.0): only the instance holding the `sqlite-sync` leader
- * lock probes the DB, so a multi-instance deploy doesn't fire N Prisma reads
- * per interval. Non-leader instances skip the DB probe entirely (their SQLite
- * is only a local write-behind buffer anyway); when they later become leader
- * they pick up the probe on the next tick.
+ * lock probes the DB / reconciles, so a multi-instance deploy doesn't fire N
+ * Prisma reads per interval. Non-leader instances skip the DB entirely (their
+ * SQLite is only a local write-behind buffer anyway); when they later become
+ * leader they pick up the probe on the next tick. `syncFromPrisma()` is itself
+ * leader + breaker + syncing guarded, so this is safe to call unconditionally.
  */
 function startRecoveryProbe(): void {
   if (state.probeTimer) return;
@@ -791,11 +798,15 @@ function startRecoveryProbe(): void {
       const wasUnavailable = !state.prismaAvailable;
       state.prismaAvailable = true;
 
-      // If DB was previously unavailable and now recovered, trigger sync
+      // v3.26.0: run a periodic full reconcile on EVERY tick when Prisma is
+      // available — this is the "6h Prisma sync/reconcile" (was 12h). Not gated
+      // on the down→up transition, so pending SQLite→Prisma control writes
+      // reach Prisma every 6h even on a healthy DB. syncFromPrisma() is
+      // leader + breaker + syncing guarded internally.
       if (wasUnavailable) {
         logger.info({ msg: "SQLite: Prisma recovered, triggering re-sync" });
-        await syncFromPrisma();
       }
+      await syncFromPrisma();
     } catch (err) {
       if (isDbUnavailableError(err)) {
         state.prismaAvailable = false;
@@ -824,7 +835,7 @@ export function stopRecoveryProbe(): void {
  * v3.23.x manual-trigger probe (admin db-health `probe_prisma` action).
  * Runs ONE explicit Prisma connectivity check NOW and updates the
  * `prismaAvailable` flag the dashboard reads. This is the ONLY on-demand
- * (non-12h) Prisma health read — the GET dashboard path stays Prisma-free.
+ * (non-6h) Prisma health read — the GET dashboard path stays Prisma-free.
  * Returns the outcome for the admin response.
  */
 export async function probePrismaNow(): Promise<{
@@ -1729,7 +1740,7 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     // v3.25.x SQLite-primary control plane: FIRST push the SQLite-only daemon
     // writes (heartbeats, cron advances, completed/failed task status) into
     // Prisma — this is the ONLY Prisma write to these tables, per the user
-    // directive ("only write to prisma during the 12hr sync job"). Then the
+    // directive ("only write to prisma during the 6h sync job"). Then the
     // pulls below re-sync Prisma→SQLite with the reconciled values (idempotent).
     await reconcileControlToPrisma(db);
 
@@ -2062,9 +2073,9 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
 // ---------------------------------------------------------------------------
 // v3.25.x SQLite→Prisma reconcile (SQLite-primary control plane)
 // ---------------------------------------------------------------------------
-// Pushes the SQLite-only daemon writes into Prisma. Called ONLY from the 12h
+// Pushes the SQLite-only daemon writes into Prisma. Called ONLY from the 6h
 // `syncFromPrisma` job (leader-gated), per the user's "write to prisma only
-// during the 12hr sync" directive. Non-fatal — a failure never fails the sync.
+// during the 6h sync" directive. Non-fatal — a failure never fails the sync.
 async function reconcileControlToPrisma(db: Database): Promise<void> {
   if (!db) return;
   try {
@@ -2560,7 +2571,7 @@ function createFallback(db: Database): SqliteFallback {
     // the LOCAL SQLite mirror (zero Prisma ops and thus zero plan-limit /
     // Accelerate reads+writes per tick). Only the two cross-instance atomic
     // exclusions (worker task CLAIM + leader LOCK claim) stay on Prisma; the
-    // SQLite rows are reconciled to Prisma at the 12h `syncFromPrisma` job via
+    // SQLite rows are reconciled to Prisma at the 6h `syncFromPrisma` job via
     // the SQLite→Prisma `reconcileControlToPrisma` pass.
     // =========================================================================
 

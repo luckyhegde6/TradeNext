@@ -926,7 +926,7 @@ export async function getSwingRecommendations(
   // EVERY Prisma read/write (job lookup, supersede, job create, signal
   // persistence, processor kick) and fall through to a screener-only feed.
   // The tab degrades gracefully (honest "pending" analysis) and Prisma is
-  // only touched again on the 12h recovery sync or a manual force.
+  // only touched again on the 6h recovery sync or a manual force.
   const breakerOpen = isPlanLimitBreakerOpen();
   const templateIds = getSwingTemplateIds();
   const prisma = (await import("@/lib/prisma")).default;
@@ -1103,7 +1103,7 @@ export async function getSwingRecommendations(
   // v3.23.x: plan-limit breaker open + analyze=true — cannot persist a durable
   // job (Prisma writes are held). Return the fresh screener-only feed with an
   // honest "pending" analysis status (no AI, no job row); the tab's SWR poll
-  // re-serves the cached payload once the breaker closes (12h recovery sync /
+  // re-serves the cached payload once the breaker closes (6h recovery sync /
   // manual force) and a normal run can proceed then. The feed itself is still
   // served so the tab shows live data, not a freeze.
   if (analyze && breakerOpen) {

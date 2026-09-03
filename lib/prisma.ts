@@ -10,7 +10,6 @@ import { otelSetup } from './otel';
 // PRISMA_OTEL_ENABLED=1; no-op otherwise — see lib/otel.ts).
 otelSetup();
 import {
-  isDbUnavailableError,
   isPlanLimitBreakerOpen,
   isPlanLimitHoldError,
   openPlanLimitBreaker,
@@ -209,6 +208,24 @@ export function getDbErrorLog(): DbErrorEntry[] {
   return [...dbErrorLog];
 }
 
+// v3.26.0: benign application-level unique-constraint conflicts (Prisma code
+// P2002) are NOT DB health faults. The most frequent source is the
+// leader-election "create-or-stand-by" race in lib/services/leader.ts: on a
+// cold-start burst several instances contend for the SAME workerId
+// (`leader-<role>`); every loser throws P2002, which the caller handles
+// gracefully by standing down. These must not be recorded in the DB Errors
+// panel / `other` bucket (they inflated the count on every multi-instance
+// restart). The error is still THROWN and propagates to the caller unchanged —
+// we only skip the diagnostic recording.
+function isBenignUniqueConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
 export const WRITE_BUDGET_CONFIG = WRITE_BUDGET;
 
 // ─── Plan-limit circuit breaker (v3.20.3) ──────────────────────────────────
@@ -303,13 +320,34 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
             return val;
           })
           .catch((err: unknown) => {
-            // Record failures in the ring buffer (fire-and-forget, non-blocking)
-            recordDbError(model ?? "?", operation, err);
-            // If this is a plan-limit hold / DB timeout, open the breaker so
-            // subsequent calls fail fast instead of waiting 120s each. Log the
-            // ACTUAL triggering error message (throttled) so a spurious trip
-            // on a healthy DB is diagnosable instead of invisible.
-            if (isPlanLimitHoldError(err) || isDbUnavailableError(err)) {
+            // Record failures in the ring buffer (fire-and-forget, non-blocking).
+            // SKIP benign application-level unique-constraint conflicts (P2002):
+            // e.g. the leader-election "create-or-stand-by" race in
+            // lib/services/leader.ts where multiple instances contend for the
+            // same workerId and every loser throws P2002 — handled gracefully by
+            // the caller, NOT a DB health fault, so it must not pollute the
+            // DB Errors panel / `other` bucket (v3.26.0).
+            if (!isBenignUniqueConflict(err)) {
+              recordDbError(model ?? "?", operation, err);
+            }
+            // If this is a genuine PLAN-LIMIT HOLD / query timeout, open the
+            // circuit breaker so subsequent calls fail fast instead of waiting
+            // 120s each. Log the ACTUAL triggering error message (throttled)
+            // so a spurious trip is diagnosable instead of invisible.
+            //
+            // v3.26.0: the breaker is tripped ONLY by isPlanLimitHoldError
+            // (P6003 / "hold on your account" / "planLimitReached" / query
+            // timeout) — NOT by isDbUnavailableError. Plain connection/network
+            // errors ("fetch failed", DNS, TLS, ECONNRESET…) are usually a
+            // transient Accelerate-proxy blip on a HEALTHY DB; tripping the
+            // 5-min breaker on one froze the whole app (prod logs: a "fetch
+            // failed" reap error → "Plan limit circuit breaker open" →
+            // "Swing analysis processor crashed" + "Cron daemon resync
+            // deferred" cascade with zero Prisma access for the cooldown).
+            // Transient comms errors still drive per-query graceful degradation
+            // (worker backoff + cached/empty fallbacks), they just don't
+            // freeze the global breaker.
+            if (isPlanLimitHoldError(err)) {
               openPlanLimitBreaker();
               if (Date.now() - g.__lastBreakerTripLog >= BREAKER_TRIP_LOG_THROTTLE_MS) {
                 g.__lastBreakerTripLog = Date.now();

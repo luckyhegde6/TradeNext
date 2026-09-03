@@ -652,6 +652,15 @@ async function executeMarketDataSync(payload?: Record<string, unknown>): Promise
 
   const stocks = await getIndexStocks(indexName);
 
+  // Guard against a non-array return (NSE error → getIndexStocks returns
+  // null). Without this, `for (const stock of stocks)` throws a bare
+  // "X is not iterable" which surfaced in prod as the Daily Market Sync
+  // (system) `market_data` task failing with "a is not iterable". Throw a
+  // clear, actionable error like executeStockSync does (v3.26.0).
+  if (!Array.isArray(stocks) || stocks.length === 0) {
+    throw new Error("No stocks fetched from NSE (market data sync)");
+  }
+
   const now = new Date();
   let synced = 0;
 
