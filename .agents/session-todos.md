@@ -2,14 +2,14 @@
 
 ## Current (v3.28.4 — Read-first recommendations route + edge-cache the heavy latest-run reads)
 
-Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.3 `a1dd094`, committed + pushed). v3.28.4 VERIFIED (tsc **46 = exact baseline (0 new)**, `dailyRecommendationService.test.ts` **34/34**, readTier + recPerf **25/25**, full suite **1004 pass / 4 skip / 2 fail** with the 2 = documented pre-existing `intelligence.test.ts` flake) and docs updated; **commit pending user (no push/merge)**. No schema change → no migration.
+Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.3 `a1dd094`, committed + pushed). v3.28.4 VERIFIED (tsc **46 = exact baseline (0 new)**, `dailyRecommendationService.test.ts` **34/34**, readTier + recPerf **25/25**, full suite **1004 pass / 4 skip / 2 fail** with the 2 = documented pre-existing `intelligence.test.ts` flake) and docs updated; **committed `c90f052` + pushed to `fix/v3.28.1-sqlite-self-heal` (user-approved; no merge)**. No schema change → no migration.
 
 - [x] v3.28.4 root cause: `app/api/recommendations/route.ts` wrote `responseBody` under the **service's** `LATEST_KEY` (`"recommendations:latest"`) → clobbered the `LatestCacheEntry {runId, newestRunId, data}` → fingerprint check read `cached.runId === undefined` → heavy stocks-include query re-ran on **EVERY request** (db-health read-tier `recommendations.prisma` 14/14 misses) + heavy reads unedge-cached — DONE
 - [x] v3.28.4 fix (route + service): route gains `ROUTE_CACHE_KEY = "recommendations:api:latest"` + `ROUTE_CACHE_TTL_SECONDS = 60` + typed `RouteRecommendationsCacheBody` + read-first memory fast path after the breaker (`servedFrom: "memory_cache"`, `recordRead("recommendations.memory", {hit:true})`, zero Prisma); all 3 legacy `"recommendations:latest"` refs switched to the route key; `getLatestRecommendations` heavy `latestRun`/`newestRun` `findFirst` wrapped in `withAccelerateCache({ttl: 60, swr: 30})`; fingerprint probes stay uncached (cross-instance guard); `findFirst`+`include` payload falls back to bare model through the wrapper → re-used the existing `as RunWithStocks | null` cast at the `serializedStocks` usage — DONE
 - [x] v3.28.4 regression test (+1 in `dailyRecommendationService.test.ts` → **34**): factory gains the pure `withAccelerateCache` stub (spread preserves keys — existing `where/select` assertions still pass); NEW test asserts fingerprint calls lack `cacheStrategy` while heavy calls[2]/[3] carry `{ttl:60, swr:30}` — DONE
 - [x] v3.28.4 verification: tsc **46 = exact baseline (0 new)**; targeted recs 34/34 + readTier/recPerf 25/25; full suite **1004 pass / 4 skip / 2 fail** (2 = pre-existing `intelligence.test.ts` flake only) — DONE
 - [x] v3.28.4 docs: AGENTS.md row, CHANGELOG index + versions-v3.28.md (also removed orphaned duplicate `# v3.28.2` header at EOF), session-todos, HANDOFF — DONE
-- [ ] v3.28.4 commit (code + test + docs, separate commit, no push/merge) — PENDING USER
+- [x] v3.28.4 commit `c90f052` (code + test + docs, separate commit, no push/merge) + push — DONE (user-approved 2026-09-05)
 
 ## Completed earlier (v3.28.3 — Audit write-behind promotion fix, strip `queued_at`)
 
@@ -34,7 +34,7 @@ Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.3 `a1dd094`, committed +
 - [ ] FINDING (minor, likely pre-fix server): 4× `WorkerStatus create` P2002 in ring buffer at "1m ago" — benign leader-claim races; v3.26.0 `isBenignUniqueConflict` skip should filter (running server hot-reload may predate it; dev server PID 34672 must not be killed / restarting it would apply current code)
 
 ## Pending (held by user)
-- [ ] User decision: commit + push v3.28.4 (route + service + test + docs) — PENDING USER (held; separate commit, do not amend `a1dd094` or older)
+- [x] User decision: commit + push v3.28.4 (route + service + test + docs) — DONE (`c90f052`, user-approved 2026-09-05, pushed; separate commit, `a1dd094` not amended)
 - [ ] User decision: merge/deploy v3.28.4 + v3.28.3 + v3.28.2 + v3.28.1 (`fix/v3.28.1-sqlite-self-heal` → `main`/prod) — PENDING USER (held; do not amend `718b5d2`/`8020dee`/`a6d902e`/`24e3586`/`3605c64`/`5a63fc4`/`c86f7ef`/`a1dd094`)
 - [ ] Post-ship: investigate **daily recommendation job failures** (Issue 3, deferred from earlier triage) — PENDING
 - [ ] v3.28.0 commit (code + docs, incl. regression-fix commit `8020dee`) — PENDING USER (still uncommitted after v3.27.0)
