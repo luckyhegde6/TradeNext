@@ -1689,6 +1689,12 @@ function mapWbToPrisma(kind: WriteBehindKind, row: Record<string, unknown>): Rec
       // metadata is already a JSON string in SQLite — parse for Prisma Json.
       case "metadata": out.metadata = parseWbJson(v as string); break;
       case "request_id": out.requestId = v; break;
+      case "queued_at":
+        // SQLite write-behind bookkeeping column — NOT a Prisma field. Skipped
+        // so the promoted `auditLog.createMany` never receives "Unknown argument
+        // queued_at" (pre-v3.28.3 bug: audit rows never promoted + the sticky
+        // wb rows re-failed every 15-min flush, spamming db-health DB Errors).
+        break;
       default:
         // Pass through same-name fields (id, level, message, source, action,
         // resource, created_at handled below).

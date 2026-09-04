@@ -160,3 +160,53 @@ Both stop functions already existed and are safe. Pruning idle `worker_status` r
 - **Full suite** — 1003 pass / 4 skip / 1 fail (1003 = 998 + 5 new; 1 fail = documented pre-existing `intelligence.test.ts` async cache-flake, `intelligence.ts` untouched — excluding it: **72 suites / 1003 pass / 4 skip / 0 fail**).
 - **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**.
 - No Prisma schema change → no migration.
+
+---
+
+# v3.28.3 — Audit write-behind promotion fix (strip `queued_at` before Prisma `createMany`)
+
+- **Date**: Sep 05 2026
+- **On top of**: v3.28.2
+- **Status**: Code + tests + docs complete; commit pending user approval (no push)
+
+## What was broken (db-health DB Errors panel)
+
+The db-health "Recent DB Errors" ring was full of repeating `AuditLog createMany — Unknown argument queued_at`
+(≈15-min spacing). Root cause: the write-behind flush (`writeWbRowsToPrisma` → `mapWbToPrisma` in `lib/sqlite.ts`)
+has a `default` branch that passes same-name wb-row columns verbatim into Prisma `auditLog.createMany`.
+`queued_at` is a **SQLite wb-only bookkeeping column** (auto-added by `enqueueWriteBehind`) that does not exist on
+the Prisma `AuditLog` model → every ~15-min flush threw → **audit rows never promoted** (sticky rows re-failed
+every flush, promoted audit: 0 / retained: 13-ish, and the db-health DB Errors panel logged each failure).
+Pre-existing since the v3.22.0 write-behind promotion model.
+
+## Root cause (corrected from earlier suspect)
+
+Earlier note pointed at `lib/prisma.ts`; **the fix actually lives in `lib/sqlite.ts`** — `mapWbToPrisma`
+(`writeWbRowsToPrisma` ~:1629) is what shapes the promoted row set. Only `audit_log` is ever promoted —
+`server_log`/`api_request` are hard-refused (SQLite-primary store) — so `queued_at` (and any future wb-only
+bookkeeping column) only leaks through the audit `createMany`. The `id` passthrough is correct (client-side UUID
+per wb row, idempotent via `INSERT OR REPLACE`).
+
+## Fix (`lib/sqlite.ts`)
+
+NEW `case "queued_at": break;` skip branch in `mapWbToPrisma` (before the `default:` branch), with a comment
+noting the pre-v3.28.3 bug. Any other validated same-name column still passes through — only the wb-only
+bookkeeping column is stripped.
+
+## Test (`lib/__tests__/sqlite.test.ts` — +1 → 37)
+
+NEW regression test **"strips SQLite-only bookkeeping columns (queued_at) from the promoted Prisma createMany
+[v3.28.3]"** (inserted after the "promotes ONLY important rows" test): seeds an `audit_log` wb row, calls
+`mockPrisma.auditLog.createMany.mockClear()`, flushes, then asserts: flush not skipped, `flushed.audit_log >= 1`,
+**every** `createMany` data entry lacks `queued_at`, and the mapped fields arrive (action / userId / userEmail /
+ipAddress / parsed metadata). Existing promotion tests only asserted call counts (not args) — why this slipped.
+
+## Verification
+
+- **Targeted** — `sqlite.test.ts` **37/37** green.
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**.
+- No Prisma schema change → no migration.
+
+---
+
+# v3.28.2 — Lost-leader engine stop (single-active-worker enforcement)

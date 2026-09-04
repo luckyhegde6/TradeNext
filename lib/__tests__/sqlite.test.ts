@@ -855,6 +855,50 @@ describe("SQLite backup fallback", () => {
       expect(after.lastRetained.api_request).toBeGreaterThanOrEqual(2);
     });
 
+    it("strips SQLite-only bookkeeping columns (queued_at) from the promoted Prisma createMany [v3.28.3 regression]", async () => {
+      mockPrisma.auditLog.createMany.mockClear();
+      const fb = getSqliteFallback()!;
+      // enqueueWriteBehind AUTO-ADDS `queued_at` to every stored row — the
+      // pre-v3.28.3 mapWbToPrisma passed it through verbatim, so
+      // auditLog.createMany threw "Unknown argument queued_at" and audit rows
+      // were NEVER promoted (sticky wb rows re-failed every 15-min flush,
+      // spamming db-health DB Errors — observed 2026-09-05).
+      fb.enqueueWriteBehind("audit_log", {
+        id: "a-map-1",
+        user_id: 7,
+        user_email: "who@example.com",
+        action: "ADMIN_DB_SYNC",
+        resource: "db-health",
+        resource_id: "x",
+        method: "POST",
+        path: "/api/admin/db-health",
+        response_status: 200,
+        response_time: 42,
+        ip_address: "127.0.0.1",
+        metadata: { ok: true, n: 3 },
+      });
+
+      const res = await fb.flushWriteBehind();
+      expect(res.skipped).toBe(false);
+      expect(res.flushed.audit_log).toBeGreaterThanOrEqual(1);
+      expect(mockPrisma.auditLog.createMany).toHaveBeenCalled();
+
+      const data = mockPrisma.auditLog.createMany.mock.calls.flatMap(
+        (call: unknown[]) => (call[0] as { data: Array<Record<string, unknown>> }).data,
+      );
+      expect(data.length).toBeGreaterThanOrEqual(1);
+      for (const entry of data) {
+        // The wb-only bookkeeping column must NEVER reach Prisma.
+        expect(entry).not.toHaveProperty("queued_at");
+        // Mapped fields still arrive correctly for Prisma.
+        expect(entry.action).toBe("ADMIN_DB_SYNC");
+        expect(entry.userId).toBe(7);
+        expect(entry.userEmail).toBe("who@example.com");
+        expect(entry.ipAddress).toBe("127.0.0.1");
+        expect(entry.metadata).toEqual({ ok: true, n: 3 });
+      }
+    });
+
     it("leaves rows queued when the DB is unavailable (skip, not 500)", async () => {
       const fb = getSqliteFallback()!;
       fb.enqueueWriteBehind("audit_log", {
