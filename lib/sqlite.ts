@@ -1014,8 +1014,17 @@ export async function initSqliteBackup(): Promise<void> {
     // Start background recovery probe
     startRecoveryProbe();
   } catch (err) {
+    // Partial-init repair (v3.28.1): if any schema statement / post-init step
+    // throws AFTER `state.db` was assigned (line 976), null it out so the next
+    // ensureSqliteBackup()/initSqliteBackup() call REBUILDS from scratch instead
+    // of being permanently defeated by the `if (state.db) return` early-return.
+    // Without this, a partially-built DB (tables missing) leaves `ready:false`
+    // forever on the instance while promoteNseToPrisma keeps hitting
+    // "no such table: daily_price" (it only guards on non-null state.db).
     logger.error({ msg: "SQLite backup init failed", error: err instanceof Error ? err.message : String(err) });
+    state.db = null;
     state.ready = false;
+    _instance = null;
   }
 }
 
@@ -1998,7 +2007,7 @@ async function promoteTable(
   table: "symbols" | "daily_price" | "corporate_action" | "chartink_screener_result",
 ): Promise<number> {
   const s = getSqliteFallback();
-  if (!s || !state.db) return 0;
+  if (!state.ready || !s || !state.db) return 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = state.db as any;
   let promoted = 0;
@@ -2137,7 +2146,10 @@ export async function promoteNseToPrisma(): Promise<Record<string, number>> {
     corporate_action: 0,
     chartink_screener_result: 0,
   };
-  if (!state.db || isPlanLimitBreakerOpen()) return summary;
+  // Require a fully-ready mirror: a partially-built DB (state.db set but
+  // ready=false, e.g. post partial-init) must NOT be promoted — it would fail
+  // on the missing NSE store tables ("no such table: daily_price").
+  if (!state.ready || !state.db || isPlanLimitBreakerOpen()) return summary;
   if (nsePromoteInFlight) return summary;
   nsePromoteInFlight = true;
   try {

@@ -695,6 +695,63 @@ describe("SQLite backup fallback", () => {
       expect(fb!.isReady()).toBe(true);
       expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
     });
+
+    it("v3.28.1 — repairs a partial init (state.db set but ready=false) on the next retry", async () => {
+      // Simulate the prod failure: initSqliteBackup assigns state.db, then the
+      // schema loop throws partway, leaving state.db non-null + ready:false.
+      // Before the fix, the `if (state.db) return` guard made the retry a
+      // permanent no-op → "SQLite Not Ready" + promoteNseToPrisma "no such
+      // table". After the fix, the catch nulls state.db so the retry rebuilds.
+      const sqljsModule: any = require("sql.js");
+      const { Database } = await sqljsModule.default();
+      const proto = Database.prototype;
+      const origRun = proto.run;
+      let failed = false;
+      proto.run = function (...args: any[]) {
+        if (!failed) {
+          failed = true;
+          throw new Error("simulated schema-loop failure");
+        }
+        return origRun.apply(this, args);
+      };
+      try {
+        sqljsModule.__resetStore();
+        const { initSqliteBackup, resetSqliteStateForTests, getSqliteFallback } = await import("../sqlite");
+        resetSqliteStateForTests();
+
+        // First init FAILS partway — the fix must reset state.db so the layer
+        // is not left stuck: getSqliteFallback() returns null after the catch.
+        await initSqliteBackup();
+        expect(getSqliteFallback()).toBeNull();
+
+        // The next ensureSqliteBackup() rebuilds from scratch → ready.
+        const { ensureSqliteBackup } = await import("../sqlite");
+        const fb = await ensureSqliteBackup();
+        expect(fb).not.toBeNull();
+        expect(fb!.isReady()).toBe(true);
+        expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
+      } finally {
+        proto.run = origRun;
+      }
+    });
+
+    it("v3.28.1 — promoteNseToPrisma on a not-ready mirror returns zero without touching tables", async () => {
+      // A not-ready mirror (db unset OR partially built) must never be promoted:
+      // reading missing NSE-store tables would throw "no such table". The guard
+      // returns the zero summary instead (no Prisma ops, no throw).
+      const sqljsModule: any = require("sql.js");
+      sqljsModule.__resetStore();
+      const { promoteNseToPrisma, resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests(); // ready:false, state.db:null → skip
+
+      const summary = await promoteNseToPrisma();
+      expect(summary).toEqual({
+        symbols: 0,
+        daily_price: 0,
+        corporate_action: 0,
+        chartink_screener_result: 0,
+      });
+    });
   });
 
   // ── v3.22.0: write-behind logging queue ─────────────────────────────────

@@ -58,3 +58,58 @@ The SQLite mirror helpers kick an async `ensureSqliteBackup()` when the mirror i
 start / unit tests), which attempts a sql.js WASM load that fails harmlessly in CI/test environments — the
 `.catch(() => {})` swallows it (visible as `wasm streaming compile failed` log lines; non-fatal, does not
 affect test results).
+
+---
+
+# v3.28.1 — SQLite partial-init self-heal + promote not-ready guard
+
+- **Date**: Sep 04 2026
+- **On top of**: v3.28.0
+- **Status**: Code + tests complete; docs/commit pending user approval
+
+## What was broken (live prod symptoms)
+
+After the v3.28.0 deploy to `main` three prod issues surfaced:
+
+1. Dashboard shows **"SQLite Not Ready"** (`/admin/utils/db-health` derives from `sqliteHealth.sqlite.ready`).
+2. `promoteNseToPrisma … no such table: daily_price` (and `chartink_screener_result`) errors.
+3. Daily recommendation jobs failing (not yet investigated — deferred until this ships).
+
+**Root cause (single defect → both symptoms #1 + #2).** `initSqliteBackup` (`lib/sqlite.ts` :970) assigns
+`state.db = db` (:976) **BEFORE** the schema loop (:979-982). If any schema statement throws, the catch
+(:1016+) leaves `state.db` **non-null** (partially built — `daily_price`/`chartink_screener_result` missing)
+with `ready:false`. This is deterministic and **self-perpetuating**:
+
+- `getHealthStatus()` reports `ready:false` → dashboard "SQLite Not Ready" (#1).
+- `promoteNseToPrisma`/`promoteTable` only guarded `if (!state.db …)` → a non-null partial `state.db` passed
+  the guard → reading the missing NSE tables threw "no such table" (#2).
+- `ensureSqliteBackup()` retry calls `initSqliteBackup`, whose line 971 `if (state.db) return` **short-circuits**
+  → the partial DB + `ready:false` are **permanent** until process restart.
+- `ensureNseColumns` is ALTER-only and can't create missing tables, so no self-heal existed.
+
+## Fixes (`lib/sqlite.ts`)
+
+1. **Init-catch reset (self-healing)** — the `initSqliteBackup` catch now resets `state.db = null`, `state.ready = false`,
+   `_instance = null` so the next `ensureSqliteBackup()`/`initSqliteBackup()` call **REBUILDS from scratch**
+   instead of being defeated by the `if (state.db) return` early-return.
+2. **Promote not-ready guard** — `promoteNseToPrisma()` (top guard) and `promoteTable()` now require
+   `!state.ready ||` in addition to the existing `!state.db` guard, so a partially-built mirror is **skipped**
+   (all-zero summary, no Prisma ops, no throw) rather than erroring on the missing NSE store tables.
+
+## Tests (`lib/__tests__/sqlite.test.ts`)
+
+- **partial-init repair** — patches the sql.js `MockDatabase.run` prototype to throw once inside the schema
+  loop (after `state.db` is assigned), then asserts the catch resets the fallback to null and the next
+  `ensureSqliteBackup()` rebuilds to `ready:true`.
+- **promote not-ready guard** — after `resetSqliteStateForTests()` (not-ready mirror) `promoteNseToPrisma()`
+  returns the all-zero summary without throwing or touching any table.
+
+## Verification
+
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**.
+- **Full suite** — `npm run test` = **998 pass / 4 skip / 1 fail** (998 = 995 baseline + 3 new; the 1 fail is the
+  documented pre-existing `intelligence.test.ts` async cache-flake — it timed out in isolation, `intelligence.ts`/
+  `cache.ts` untouched — excluding it: **71 suites / 998 pass / 4 skip / 0 fail from these changes**).
+- **Targeted** — `sqlite.test.ts` 36/36 incl. both new, `daemon-sqlite-first`, `dbOpTiering`,
+  `historicalPriceSyncService` (31 combined) all green.
+- No Prisma schema change → no migration.

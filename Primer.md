@@ -5,11 +5,19 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
-2026-09-04 (v3.28.0 — SQLite-first NSE data store: mirror + read-first + write-through + instant promote. On `v3.26.0-prod-failure-triage` on top of v3.27.0. tsc 46 = baseline, suite 995 pass / 4 skip (2 fails = documented pre-existing intelligence.test.ts flake). Docs complete; **commit + push pending user**.)
+2026-09-04 (v3.28.1 — SQLite partial-init self-heal + promote not-ready guard — fixes live "SQLite Not Ready" + "promoteNseToPrisma … no such table" after the v3.28.0 deploy. Root cause: `initSqliteBackup` set `state.db` before the schema loop; a throw left state.db non-null + ready:false, and the `if (state.db) return` guard made the retry a permanent no-op. Fix: init catch nulls state.db/_instance (self-healing rebuild) + promoteNseToPrisma/promoteTable now require state.ready. tsc 46 = baseline; suite 998 pass / 4 skip / 1 fail (1 = documented pre-existing intelligence.test.ts flake). Docs complete; **commit pending user**.)
 
 ---
 
 ## Current Project Status
+
+### v3.28.1 — SQLite partial-init self-heal + promote not-ready guard (Sep 04 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT PENDING USER
+**Why**: After the v3.28.0 deploy to `main`, three prod issues surfaced: (1) dashboard "SQLite Not Ready", (2) `promoteNseToPrisma … no such table: daily_price` (and `chartink_screener_result`), (3) daily recommendation jobs failing (not yet investigated — deferred).
+**Root cause (1 defect → both symptoms)**: `initSqliteBackup` (`lib/sqlite.ts` :970) assigns `state.db = db` (:976) BEFORE the schema loop (:979-982). A schema throw left `state.db` non-null (partially built — `daily_price`/`chartink_screener_result` missing) + `ready:false`, and the `if (state.db) return` early-return (:971) made the `ensureSqliteBackup()` retry a permanent no-op. `ensureNseColumns` is ALTER-only and can't create missing tables. → dashboard "SQLite Not Ready" (from `ready`) AND `promoteNseToPrisma` "no such table" (it only guarded non-null `state.db`, not `ready`).
+**Fix** — (1) `initSqliteBackup` catch now resets `state.db = null` + `_instance = null` so the next `ensureSqliteBackup()` REBUILDS from scratch (self-healing). (2) `promoteNseToPrisma()`/`promoteTable()` now require `!state.ready ||` so a partially-built mirror is SKIPPED (all-zero summary, no Prisma ops, no throw).
+**Tests** (+2 in `lib/__tests__/sqlite.test.ts`): partial-init repair (patched `MockDatabase.run` throws in the schema loop → fallback null after catch → next `ensureSqliteBackup()` ready); promote not-ready returns the all-zero summary without touching a table.
+**Verification**: tsc **46 = exact baseline (0 new)**; sqlite 36/36 + daemon-sqlite-first/dbOpTiering/historical (31) green; full suite **998 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake — excluding it 71 suites / 998 pass / 4 skip / 0 fail from these changes). No schema change → no migration.
+**Docs**: AGENTS.md v3.28.1 row, CHANGELOG index + `.agents/changelog/versions-v3.28.md`, this Primer, agent-memory. **Commit pending user approval (do not push/merge without explicit approval).**
 
 ### v3.28.0 — SQLite-first NSE data store: mirror + read-first + write-through + instant promote (Sep 04 2026) — ✅ CODE + TESTS + DOCS VERIFIED, COMMIT + PUSH PENDING USER
 **Branch**: `v3.26.0-prod-failure-triage` (on top of v3.27.0). Deployable unit.
@@ -672,6 +680,13 @@
 ---
 
 ## Session History
+
+### Session 21 (September 4, 2026) — SQLite partial-init self-heal + promote not-ready guard (v3.28.1, on branch `v3.26.0-prod-failure-triage`)
+- **Symptom**: after the v3.28.0 deploy to `main`, live "SQLite Not Ready" dashboard + `promoteNseToPrisma … no such table: daily_price` (and `chartink_screener_result`); daily rec jobs failing (deferred).
+- **Root cause (1 defect → both symptoms)**: `initSqliteBackup` (:970) set `state.db = db` (:976) BEFORE the schema loop (:979-982); a throw left `state.db` non-null (partially built) + `ready:false`, and the `if (state.db) return` early-return (:971) made the `ensureSqliteBackup()` retry a permanent no-op. `ensureNseColumns` is ALTER-only (can't create missing tables). promote only guarded non-null `state.db`, not `ready`.
+- **Fix (`lib/sqlite.ts`)**: (1) init catch now nulls `state.db` + `_instance` so the next call REBUILDS from scratch (self-healing); (2) `promoteNseToPrisma()`/`promoteTable()` now require `!state.ready ||` → partial mirror skipped (zero summary, no throw).
+- **Tests (+2 in `sqlite.test.ts`)**: partial-init repair (patched `MockDatabase.run` throws in schema loop → fallback null → next `ensureSqliteBackup()` ready); promote not-ready returns zero.
+- **Verification**: tsc **46 = exact baseline (0 new)**; sqlite 36/36 + daemon-sqlite-first/dbOpTiering/historical (31) green; full suite **998 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake — excluding it 71 suites / 998 pass / 4 skip / 0 fail). Docs: AGENTS.md v3.28.1 row, CHANGELOG index + `.agents/changelog/versions-v3.28.md`, Primer, agent-memory. **Commit pending user (no push/merge without approval).**
 
 ### Session 20 (August 28, 2026) — Professional Equity Research Decision Engine (v3.21.0, branch `feat/stock-analysis-skill`, session `2026-08-28-stock-analysis-skill`)
 - **8-level verdict + conviction**: STRONG_BUY/BUY/ACCUMULATE/HOLD/REDUCE/SELL/STRONG_SELL/AVOID + `conviction` /10 + `confidence` /100 (new `Verdict` enum in `intelligenceTypes.ts`).
