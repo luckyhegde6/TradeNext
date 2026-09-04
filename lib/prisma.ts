@@ -1,16 +1,24 @@
 // Prisma client singleton - only log in development for debugging
 import { PrismaClient } from '@prisma/client';
+import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import logger from './logger';
 import { otelSetup } from './otel';
+
+// The exported client is typed as the base PrismaClient (preserving all
+// model-method typing across 400+ call sites). The RUNTIME client is extended
+// with withAccelerate() (see construction above), so model reads support
+// `cacheStrategy` — but the base type declares it `never`. `withAccelerateCache`
+// adds it at the query boundary without degrading typing anywhere else.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AccelerateClient = PrismaClient;
 
 // OTel must be initialized BEFORE the PrismaClient singleton is constructed
 // so PrismaInstrumentation can wrap the query engine (opt-in via
 // PRISMA_OTEL_ENABLED=1; no-op otherwise — see lib/otel.ts).
 otelSetup();
 import {
-  isDbUnavailableError,
   isPlanLimitBreakerOpen,
   isPlanLimitHoldError,
   openPlanLimitBreaker,
@@ -20,12 +28,26 @@ import {
   type DbErrorType,
 } from './db-utils';
 
+// Default cache TTL for Accelerate edge caching (seconds).
+// Only effective when withAccelerate() is wired and cacheStrategy is used per-query.
+// Set to 0 to disable caching globally. Queries without cacheStrategy are NOT cached.
+export const ACCELERATE_CACHE_TTL =
+  Number(process.env.PRISMA_ACCELERATE_CACHE_TTL) || 300; // 5 min default
+
 // Determine environment from ENVIRONMENT env var (defaults to 'development')
 // Options: local, development, production
 const env = process.env.ENVIRONMENT || 'development';
 const isDev = env === 'development' || env === 'local';
 const isLocal = env === 'local';
 const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
+
+// Opt-in raw SQL query logging (diagnostics/observability). When PRISMA_QUERY_LOG=1
+// (local/dev only) the PrismaClient is constructed with `log: ['query']`, so every
+// SQL statement (with params + duration) is emitted to stdout as `prisma:query ...`.
+// Off by default — no production/CI impact. NOTE: the `$extends(query)` wrapper does
+// NOT propagate `$on('query')`, so raw SQL is observed via the constructor-level
+// stdout logger (verified working through the extension). Accelerate is unaffected.
+const enableQueryLog = isDev && process.env.PRISMA_QUERY_LOG === "1";
 
 // Database URL selection logic:
 // - ENVIRONMENT=local + USE_REMOTE_DB=true → use DATABASE_REMOTE (Prisma Accelerate)
@@ -76,15 +98,20 @@ if (isDev) {
 }
 
 // Create Prisma client singleton
-let prismaClient: PrismaClient;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let prismaClient: any;
 
 try {
   if (useAccelerate) {
-    // For Prisma Accelerate, use the accelerateUrl option
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prismaClient = new PrismaClient({ 
-      accelerateUrl: databaseUrl 
-    } as any);
+    // For Prisma Accelerate / Prisma Postgres — use the accelerateUrl option
+    // and activate built-in edge caching via withAccelerate().
+    // Extension order matters: withAccelerate() is applied FIRST so that
+    // the $allOperations extension (circuit breaker / op counting / timeout)
+    // wraps the Accelerate-extended client, not the other way around.
+    prismaClient = new PrismaClient({
+      accelerateUrl: databaseUrl,
+      ...(enableQueryLog ? { log: ["query" as const] } : {}),
+    }).$extends(withAccelerate());
   } else {
     const pool = new Pool({ 
       connectionString: databaseUrl,
@@ -94,7 +121,10 @@ try {
       connectionTimeoutMillis: 5000,
     });
     const adapter = new PrismaPg(pool);
-    prismaClient = new PrismaClient({ adapter });
+    prismaClient = new PrismaClient({
+      adapter,
+      ...(enableQueryLog ? { log: ["query" as const] } : {}),
+    });
   }
 } catch (error) {
   logger.error({ msg: "Prisma: Initialization failed", error: error instanceof Error ? error.message : String(error) });
@@ -104,7 +134,7 @@ try {
 }
 
 // Use global singleton to avoid multiple connections in development
-const globalForPrisma = globalThis as unknown as { prismaClient: PrismaClient | undefined };
+const globalForPrisma = globalThis as unknown as { prismaClient: AccelerateClient | undefined };
 
 // ─── DB operations counter + write budget limiter (v3.19.0) ──────────────
 // Tracks reads/writes per calendar day (IST). When writes exceed the budget,
@@ -209,6 +239,24 @@ export function getDbErrorLog(): DbErrorEntry[] {
   return [...dbErrorLog];
 }
 
+// v3.26.0: benign application-level unique-constraint conflicts (Prisma code
+// P2002) are NOT DB health faults. The most frequent source is the
+// leader-election "create-or-stand-by" race in lib/services/leader.ts: on a
+// cold-start burst several instances contend for the SAME workerId
+// (`leader-<role>`); every loser throws P2002, which the caller handles
+// gracefully by standing down. These must not be recorded in the DB Errors
+// panel / `other` bucket (they inflated the count on every multi-instance
+// restart). The error is still THROWN and propagates to the caller unchanged —
+// we only skip the diagnostic recording.
+function isBenignUniqueConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
 export const WRITE_BUDGET_CONFIG = WRITE_BUDGET;
 
 // ─── Plan-limit circuit breaker (v3.20.3) ──────────────────────────────────
@@ -256,7 +304,12 @@ function withQueryTimeout<T>(promise: Promise<T>, model: string, operation: stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
   query: {
-    $allOperations({ model, operation, args, query }) {
+    $allOperations({ model, operation, args, query }: {
+      model: string;
+      operation: string;
+      args: Record<string, unknown>;
+      query: (args: Record<string, unknown>) => Promise<unknown>;
+    }) {
       // Plan-limit circuit breaker — if open, fail fast WITHOUT hitting the
       // proxy (avoids the 120s per-query timeout during an account hold).
       if (isPlanLimitBreakerOpen()) {
@@ -303,13 +356,34 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
             return val;
           })
           .catch((err: unknown) => {
-            // Record failures in the ring buffer (fire-and-forget, non-blocking)
-            recordDbError(model ?? "?", operation, err);
-            // If this is a plan-limit hold / DB timeout, open the breaker so
-            // subsequent calls fail fast instead of waiting 120s each. Log the
-            // ACTUAL triggering error message (throttled) so a spurious trip
-            // on a healthy DB is diagnosable instead of invisible.
-            if (isPlanLimitHoldError(err) || isDbUnavailableError(err)) {
+            // Record failures in the ring buffer (fire-and-forget, non-blocking).
+            // SKIP benign application-level unique-constraint conflicts (P2002):
+            // e.g. the leader-election "create-or-stand-by" race in
+            // lib/services/leader.ts where multiple instances contend for the
+            // same workerId and every loser throws P2002 — handled gracefully by
+            // the caller, NOT a DB health fault, so it must not pollute the
+            // DB Errors panel / `other` bucket (v3.26.0).
+            if (!isBenignUniqueConflict(err)) {
+              recordDbError(model ?? "?", operation, err);
+            }
+            // If this is a genuine PLAN-LIMIT HOLD / query timeout, open the
+            // circuit breaker so subsequent calls fail fast instead of waiting
+            // 120s each. Log the ACTUAL triggering error message (throttled)
+            // so a spurious trip is diagnosable instead of invisible.
+            //
+            // v3.26.0: the breaker is tripped ONLY by isPlanLimitHoldError
+            // (P6003 / "hold on your account" / "planLimitReached" / query
+            // timeout) — NOT by isDbUnavailableError. Plain connection/network
+            // errors ("fetch failed", DNS, TLS, ECONNRESET…) are usually a
+            // transient Accelerate-proxy blip on a HEALTHY DB; tripping the
+            // 5-min breaker on one froze the whole app (prod logs: a "fetch
+            // failed" reap error → "Plan limit circuit breaker open" →
+            // "Swing analysis processor crashed" + "Cron daemon resync
+            // deferred" cascade with zero Prisma access for the cooldown).
+            // Transient comms errors still drive per-query graceful degradation
+            // (worker backoff + cached/empty fallbacks), they just don't
+            // freeze the global breaker.
+            if (isPlanLimitHoldError(err)) {
               openPlanLimitBreaker();
               if (Date.now() - g.__lastBreakerTripLog >= BREAKER_TRIP_LOG_THROTTLE_MS) {
                 g.__lastBreakerTripLog = Date.now();
@@ -329,10 +403,43 @@ const extendedClient = (globalForPrisma.prismaClient ?? prismaClient).$extends({
       return result;
     },
   },
-}) as PrismaClient;
+  }) as AccelerateClient;
 
 export const db = globalForPrisma.prismaClient ?? extendedClient;
 export const prisma = globalForPrisma.prismaClient ?? extendedClient;
+
+/**
+ * Add Accelerate edge caching to a single Prisma READ.
+ *
+ * The exported `prisma`/`db` is typed as the base PrismaClient for model-method
+ * safety, but the RUNTIME client is ONLY extended with withAccelerate() on the
+ * Accelerate / Prisma Postgres branch (useAccelerate=true), where reads accept
+ * `cacheStrategy` ({ttl}/{swr}/{tags}). Because the base type declares
+ * `cacheStrategy?: never`, passing it inline fails to type-check. This helper
+ * preserves Prisma's contextual typing for the args (via `Parameters<T>[0]`)
+ * while injecting `cacheStrategy` at the boundary ONLY when the client is
+ * Accelerate-extended. On the direct-PG / local fallback (useAccelerate=false)
+ * it passes the args through unchanged — the base client would otherwise reject
+ * `cacheStrategy` as an unknown argument (PrismaClientValidationError).
+ *
+ * @example
+ * await prisma.corporateAction.findMany(
+ *   withAccelerateCache({ ttl: 300, swr: 60 })({ where, orderBy, select }),
+ * );
+ */
+export function withAccelerateCache<T extends (args: any) => any>(
+  strategy: { ttl: number; swr?: number; tags?: string[] },
+) {
+  return (args: Parameters<T>[0]): ReturnType<T> => {
+    if (!useAccelerate) {
+      // Non-Accelerate client — cacheStrategy is an unknown arg, so pass through.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return args as any;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return { ...(args as any), cacheStrategy: strategy } as any;
+  };
+}
 
 // Default export for backward compatibility
 export default prisma;

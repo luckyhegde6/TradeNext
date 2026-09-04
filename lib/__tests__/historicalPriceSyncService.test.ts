@@ -35,6 +35,16 @@ jest.mock("@/lib/prisma", () => ({
   },
 }));
 
+jest.mock("@/lib/sqlite", () => {
+  // Dynamic import is used at runtime; make the module interceptable here so the
+  // real sql.js WASM isn't loaded in the test env.
+  return {
+    __esModule: true,
+    cacheDailyPriceBars: jest.fn(),
+    flushNseToPrisma: jest.fn().mockResolvedValue({}),
+  };
+});
+
 import {
   formatNseDate,
   buildDateRange,

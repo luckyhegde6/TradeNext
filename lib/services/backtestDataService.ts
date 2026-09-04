@@ -30,6 +30,7 @@ import {
   fetchSecurityWiseHistoricalData,
   securityWiseBarsToOHLCV,
 } from "@/lib/nse-api";
+import { cacheDailyPriceBars, getSqlitePriceRange } from "@/lib/sqlite";
 import type { OHLCV } from "@/lib/screener/technical-analysis";
 
 /** How long a temp-table row stays fresh before we refetch from NSE. */
@@ -114,7 +115,7 @@ export function defaultDateRange(): { from: string; to: string } {
 
 export interface BacktestDataResult {
   ohlcv: OHLCV[];
-  source: "memory" | "db" | "nse";
+  source: "memory" | "db" | "nse" | "sqlite";
   barCount: number;
   rangeStart: Date;
   rangeEnd: Date;
@@ -156,7 +157,35 @@ export async function getBacktestData(
     };
   }
 
-  // 2) Temp DB table (persistent across process restarts)
+  // 2) SQLite-first mirror (v3.28.0) — reads hit the local SQLite OHLCV mirror
+  // before any DB/NSE leg. Zero Prisma ops; falls through to the DB legs when
+  // the mirror has no data (cold mirror) or too few bars.
+  const sqliteRows = getSqlitePriceRange(`NSE:${sym}`);
+  if (sqliteRows.length >= 20) {
+    const ohlcv: OHLCV[] = sqliteRows.map((r) => ({
+      timestamp:
+        typeof r.trade_date === "string"
+          ? new Date(r.trade_date + "T00:00:00Z").getTime()
+          : Date.now(),
+      open: Number(r.open ?? 0),
+      high: Number(r.high ?? 0),
+      low: Number(r.low ?? 0),
+      close: Number(r.close ?? 0),
+      volume: Number(r.volume ?? 0),
+    }));
+    const fetchedAt = new Date();
+    historicalCache.set(cacheKey, { ohlcv, fetchedAt: fetchedAt.getTime() });
+    return {
+      ohlcv,
+      source: "sqlite",
+      barCount: ohlcv.length,
+      rangeStart: new Date(ohlcv[0].timestamp),
+      rangeEnd: new Date(ohlcv[ohlcv.length - 1].timestamp),
+      fetchedAt,
+    };
+  }
+
+  // 3) Temp DB table (persistent across process restarts)
   // Prod gap fix: ensure the table exists first — if the DB user can't create
   // it, skip the temp leg and degrade to daily_prices/NSE (never throw here).
   const tempReady = await ensureBacktestHistoryTable();
@@ -238,6 +267,24 @@ export async function getBacktestData(
 
   const ohlcv = securityWiseBarsToOHLCV(nseBars);
   const fetchedAt = new Date();
+
+  // v3.28.0 SQLite-first mirror: write the NSE bars to the local SQLite OHLCV
+  // mirror so subsequent backtest reads hit SQLite before any DB leg. Non-fatal.
+  try {
+    cacheDailyPriceBars(
+      `NSE:${sym}`,
+      ohlcv.map((b) => ({
+        tradeDate: new Date(b.timestamp).toISOString().slice(0, 10),
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      })),
+    );
+  } catch (err) {
+    logger.warn({ msg: "[BacktestData] SQLite mirror write failed (non-fatal)", symbol: sym, error: err instanceof Error ? err.message : String(err) });
+  }
 
   historicalCache.set(cacheKey, { ohlcv, fetchedAt: fetchedAt.getTime() });
 

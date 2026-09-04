@@ -1,22 +1,19 @@
 # Session Todos
 
-## Current (v3.21.1 — DB Health ops visibility: SQLite ops-counter persistence + Total Operations/Plan Usage UI + sql.js WASM fix + per-type DB-error summary + lazy SQLite re-init)
+## Current (v3.27.0 — Prisma Postgres Migration Phase 1-3: `withAccelerate()` wiring + `cacheStrategy` at 5 direct-Prisma read sites)
 
-Branch: `feat/db-health-ops-visibility` — base committed `4c47348` + docs `47e6677`, pushed (PR NOT created — user decision). Increment uncommitted.
+Branch: `v3.26.0-prod-failure-triage` (on top of v3.26.0 work). Code + tests + docs VERIFIED; **diff pending user commit** (no auto-commit/push/deploy).
 
-- [x] Live-site bug FIX — `/admin/utils/db-health` "SQLite Not Ready": sql.js WASM never located → `next.config.ts` `serverExternalPackages: ['sql.js']` + `lib/sqlite.ts` `resolveSqlWasm()` into `initSqlJs({ locateFile })` — DONE
-- [x] IO-count reconciliation (user-approved "Display + persist"): `lib/prisma.ts` exports `getIstDayKey`; `lib/sqlite.ts` `persistOpsCounter()`/`restoreOpsCounter()` (key `ops_counter` in `_backup_meta`, IST-day guard + `Math.max` merge) + 60s `startOpsCounterPersistence()` booted from `instrumentation.ts` — DONE
-- [x] `/api/admin/db-health` GET returns `totalOperations`/`planLimit` (`DB_PLAN_LIMIT_OPS` default 10,000)/`planOperationsRemaining` + persists (POST sync too) — DONE
-- [x] UI: 6th "Total Ops Today" stat card + "Plan Operations Usage" bar (reads vs writes vs plan, remaining, footnote) + "Plan Ops n% Used" badge > 80% — DONE
-- [x] Increment: `classifyDbError()` (`lib/db-utils.ts`, `DbErrorType` 6 buckets) + per-type `dbErrorCounts` (`__dbErrorCounts` globalThis, lazy IST-day rollover) in `recordDbError()` + `getDbErrorCounts()` — DONE
-- [x] Increment: `persistDbErrorCounts()`/`restoreDbErrorCounts()` (key `db_error_counts`, IST-day + per-key `Math.max` merge, same 60s tick) + `ensureSqliteBackup()` lazy on-demand init (`_initPromise` finally-reset) + `resetSqliteStateForTests()` in-place hook — DONE
-- [x] Increment: `/api/admin/db-health` GET returns `dbErrorSummary {day, counts}` (GET+POST ensure init); UI per-type chips + error total + IST-day footnote above Recent DB Errors — DONE
-- [x] Increment tests: `db-utils.test.ts` `classifyDbError` (7 cases) + `sqlite.test.ts` 5 new (error-count roundtrip, stale-day mock reassignment, Math.max merge, ensure-ready, re-init after reset) — **suite 932 pass / 4 skip (was 920/4), tsc 46 = baseline** — DONE
-- [x] Docs (increment): AGENTS.md/CHANGELOG/versions-v3.21.md/TODO/Primer/agent-memory/Lessons(#96)/session-todos + session decisions/flow — DONE
-- [ ] User decision: commit increment (base already committed `4c47348`) → push → PR to main — PENDING USER
+- [x] Phase 1 (`lib/prisma.ts`): `new PrismaClient({ accelerateUrl }).$extends(withAccelerate())` in the accelerate branch (order documented — `withAccelerate()` first so `$allOperations` wraps it); `let prismaClient: any`; `type AccelerateClient = PrismaClient`; NEW **`withAccelerateCache(strategy)(args)`** boundary helper (preserves contextual typing via `Parameters<T>[0]`/`ReturnType<T>` — base read-args hard-type `cacheStrategy: never`, intersections don't override it); NEW `ACCELERATE_CACHE_TTL = Number(process.env.PRISMA_ACCELERATE_CACHE_TTL) || 300` — DONE
+- [x] Phase 2 — `cacheStrategy` at 5 direct-Prisma reads: corp-actions `{ttl:300,swr:60}`; chartinkScreenerResult `{ttl:900,swr:300}`; recommendationTracker ×2 `{ttl:600,swr:60}`; dailyPrice ×2 `{ttl:60,swr:30}` (`lib/stock-service.ts`); marketCache `{ttl:300,swr:60}` — DONE
+- [x] Test coupling fixes: `withAccelerateCache` pure stub added to both `{__esModule, default}` mock factories (recommendationPerformanceService + chartinkScreenerService); chartink exact-args assertion → `expect.objectContaining({where, orderBy})` — DONE
+- [x] Phase 3 verification: tsc **46 = exact baseline (0 new)**; `prisma validate` valid + `prisma generate` ok; full suite **995 pass / 4 skip / 2 fail** (2 = pre-existing `intelligence.test.ts` async-cache flake, fails identically in isolation; excluding it 71 suites / **995 pass / 4 skip / 0 fail**) — DONE
+- [x] Docs: AGENTS.md v3.27.0 row, `.agents/CHANGELOG.md` index + `.agents/changelog/versions-v3.27.md`, TODO.md rows, Primer.md, agent-memory.md, Lessons.md #104, `.env.example` (`PRISMA_ACCELERATE_CACHE_TTL`), HANDOFF.md, session-todos; spec+plan `.agents/specs/05-prisma-postgres-migration.md` + `.agents/plans/05-prisma-postgres-migration.md` committed `db5a5cc` — DONE
+- [x] Pre-commit jazz: `git status` / `git diff` hygiene, no junk artifacts, no secrets — DONE
+- [ ] User decision: commit v3.27.0 diff (8 code files + doc files) — PENDING USER (no auto-commit/push/deploy)
+- [ ] PR #114 (v3.26.0 fixes + Accelerate docs) — still pending user merge against `main`
 
 ## Deferred / Other Workstreams
-- [ ] Separate: v3.21.0 (`feat/stock-analysis-skill`) — commit/push/PR pending (code + docs verified earlier)
-- [ ] Separate: PR #107 (`feat/plan-limit-resilience`) — merged via #108; v3.20.5 prod DIRECT_URL fix applied
-- [ ] Post-deploy: live-verify `/admin/utils/db-health` on Netlify (SQLite Ready + Total Ops restored)
+- [ ] **REQUIRED (Dec 1 2026 Accelerate retirement)**: Phase 0 — manual Prisma Postgres provisioning in Prisma Console at deploy-time (no code); post-move, `withAccelerate()` wrapper may be dropped (Prisma Postgres caches by default; `PRISMA_ACCELERATE_CACHE_TTL` remains the knob); `DATABASE_URL`+`DIRECT_URL` already documented (v3.20.5). See BUGS.md #14 + `.agents/specs/05-prisma-postgres-migration.md`
+- [ ] Post-deploy: live-verify `/admin/utils/db-health` on Netlify (SQLite Ready + Total Ops restored + Cache & Read-Tier Utilisation card)
 - [ ] Prod (post-hold): corporate-actions backfill; remove Prisma Postgres extension from Netlify Dashboard then deploy

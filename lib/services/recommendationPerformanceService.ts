@@ -18,7 +18,7 @@
  * @version 3.5.0
  */
 
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { recommendationsCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
@@ -252,11 +252,11 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
   const total = await prisma.recommendationTracker.count({ where });
 
   if (sort === "returnPercent") {
-    const all = await prisma.recommendationTracker.findMany({
+    const all = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
       where,
       orderBy,
       take: 5000, // safety bound; cache makes re-fetch cheap
-    });
+    }));
     const bridged = await bridgeMissingCurrentPrices(all);
     const allItems = bridged.map(toListItem);
     allItems.sort((a, b) => {
@@ -275,12 +275,12 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     return response;
   }
 
-  const rows = await prisma.recommendationTracker.findMany({
+  const rows = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
     where,
     orderBy,
     take: Math.min(limit, 200),
     skip: offset,
-  });
+  }));
 
   const bridged = await bridgeMissingCurrentPrices(rows);
   const items = bridged.map(toListItem);

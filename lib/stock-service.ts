@@ -5,7 +5,7 @@ import logger from "@/lib/logger";
 import { FinancialStatusDTO, CorpEventDTO, CorporateAnnouncementDTO, CorpActionDTO } from "@/lib/nse/dto";
 import * as syncService from "@/lib/services/sync-service";
 import { isMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
-import prisma, { getIstDayKey } from "@/lib/prisma";
+import prisma, { getIstDayKey, withAccelerateCache } from "@/lib/prisma";
 import {
   getSqliteDailyPriceSnapshot,
   cacheDailyPriceSnapshot,
@@ -134,11 +134,12 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
         }
 
         try {
-            // Get the latest price
-            const dbPrice = await prisma.dailyPrice.findFirst({
+            // Get the latest price (edge-cached: quotes are high-frequency and
+            // read-only; 60s TTL + 30s SWR near the user)
+            const dbPrice = await prisma.dailyPrice.findFirst(withAccelerateCache({ ttl: 60, swr: 30 })({
                 where: { ticker: symbol.toUpperCase() },
                 orderBy: { tradeDate: 'desc' }
-            });
+            }));
 
             // Get 52W high/low from DB (last 365 days)
             const oneYearAgo = new Date();
@@ -163,13 +164,13 @@ export async function getStockQuote(symbol: string, enablePolling: boolean = fal
                 const approximateValue = dailyVolume * dailyClose; // Approximate in rupees
 
                 // Calculate change and pChange from previous day's close
-                const prevDayPrice = await prisma.dailyPrice.findFirst({
+                const prevDayPrice = await prisma.dailyPrice.findFirst(withAccelerateCache({ ttl: 60, swr: 30 })({
                     where: { 
                         ticker: symbol.toUpperCase(),
                         tradeDate: { lt: dbPrice.tradeDate }
                     },
                     orderBy: { tradeDate: 'desc' }
-                });
+                }));
                 
                 const previousClose = prevDayPrice ? Number(prevDayPrice.close) : dailyClose;
                 const change = dailyClose - previousClose;

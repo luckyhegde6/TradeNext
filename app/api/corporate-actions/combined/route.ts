@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { nseFetch } from "@/lib/nse-client";
 import { getOrFetchNseData, forceRefreshCache, type DataType } from "@/lib/market-cache";
@@ -284,7 +284,7 @@ export async function GET(req: Request) {
   // --- v3.23.x: SQLite-mirror fast path during a plan-limit hold ---
   // Serve the SQLite corporate_action mirror directly WITHOUT any Prisma call
   // (even a fast-fail breaker throw generates log noise). Prisma is only
-  // touched again on the 12h recovery sync or a manual force.
+  // touched again on the 6h recovery sync or a manual force.
   if (isPlanLimitBreakerOpen()) {
     const sqlite = getSqliteFallback();
     const actions = sqlite?.isReady() ? sqlite.getCorporateActions(500) : [];
@@ -310,7 +310,9 @@ export async function GET(req: Request) {
     }
 
     const _ca = performance.now();
-    const actions = await prisma.corporateAction.findMany({
+    // Accelerate edge cache: 5 min TTL, 1 min stale-while-revalidate.
+    // Corporate actions change infrequently; serve cached reads at the edge.
+    const actions = await prisma.corporateAction.findMany(withAccelerateCache({ ttl: 300, swr: 60 })({
       where,
       orderBy: [
         { exDate: 'desc' },
@@ -338,7 +340,7 @@ export async function GET(req: Request) {
         announcementDate: true,
         source: true,
       },
-    });
+    }));
     recordRead("corp-actions.prisma", {
       source: "prisma",
       latencyMs: Math.max(0, Math.round(performance.now() - _ca)),

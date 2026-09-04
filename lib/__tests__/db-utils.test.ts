@@ -204,6 +204,36 @@ describe("plan-limit circuit breaker", () => {
     expect(isPlanLimitHoldError(null)).toBe(false);
   });
 
+  it("isPlanLimitHoldError does NOT match transient network/connection errors (v3.26.0 breaker trip guard)", () => {
+    // The breaker is now tripped ONLY by isPlanLimitHoldError — a transient
+    // Accelerate-proxy / connection blip (which prod logs as plain
+    // "fetch failed", ECONNREFUSED, etc.) must NOT open the 5-min breaker.
+    // These are NOT plan-hold or timeout signals; they drive per-query
+    // graceful degradation (worker backoff + cached/empty fallbacks) instead
+    // of freezing the global breaker. isDbUnavailableError still matches them
+    // (so fallback chains degrade), but isPlanLimitHoldError must NOT.
+    const transientErrs = [
+      Object.assign(new Error("fetch failed"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
+      Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      new Error("Connection refused"),
+      Object.assign(new Error("Can't reach database server"), { code: "P1001" }),
+      new Error("Accelerate experienced an error communicating with your Query Engine. Please contact Prisma support if this error persists."),
+      new Error("Bad Gateway"),
+    ];
+    for (const err of transientErrs) {
+      // graceful degradation still sees the DB as unavailable
+      expect(isDbUnavailableError(err)).toBe(true);
+      // ...but the plan-limit breaker must NOT trip
+      expect(isPlanLimitHoldError(err)).toBe(false);
+    }
+    // A benign P2002 unique-constraint error (leader-election race on
+    // cold-start burst) is neither a DB outage nor a plan-hold — so BOTH
+    // predicates must be false. It is recorded/logged, never breaker-latched.
+    const p2002 = Object.assign(new Error("Unique constraint failed on the fields: (`workerId`)"), { code: "P2002" });
+    expect(isDbUnavailableError(p2002)).toBe(false);
+    expect(isPlanLimitHoldError(p2002)).toBe(false);
+  });
+
   it("isPlanLimitBreakerOpen transitions with open/close", () => {
     jest.useFakeTimers();
     expect(isPlanLimitBreakerOpen()).toBe(false);

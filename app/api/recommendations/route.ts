@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     // v3.23.x: during a plan-limit hold the Prisma account is unavailable —
     // serve the SQLite mirror directly WITHOUT attempting any Prisma call
     // (even a fast-fail breaker throw generates log noise). Prisma is only
-    // touched again on the 12h recovery sync or a manual force.
+    // touched again on the 6h recovery sync or a manual force.
     if (isPlanLimitBreakerOpen()) {
       const sqlite = getSqliteFallback();
       const cached = sqlite?.isReady() ? sqlite.getLatestRecommendations() : null;

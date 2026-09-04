@@ -386,6 +386,26 @@ export async function runChartinkUnifiedScreeners(
     }
   }
 
+  // v3.28.0 SQLite-first mirror: persist each template's captured rows to the
+  // local SQLite mirror so reads hit SQLite before any DB leg. Non-fatal.
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    for (const run of runs) {
+      const rows = run.stocks.map((s) => ({
+        screener_id: run.template.id,
+        symbol: String(s.nse_script_code ?? "").toUpperCase(),
+        name: s.name ?? "",
+        close: s.close != null ? Number(s.close) : undefined,
+        change_percent: s.pChange != null ? Number(s.pChange) : undefined,
+        volume: s.volume != null ? Number(s.volume) : undefined,
+        raw: s._tvRow ? JSON.stringify(s._tvRow) : undefined,
+      }));
+      if (rows.length > 0) sqlite.cacheChartinkResults(run.template.id, rows);
+    }
+  } catch (err) {
+    logger.warn({ msg: "Chartink unified: SQLite mirror write failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
+  }
+
   // ── Merge + attribute ──────────────────────────────────────────────────
   const deduped = deduplicateResults(
     runs.map((r) => ({ stocks: r.stocks, screenerName: r.template.name })),

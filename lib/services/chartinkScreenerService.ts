@@ -25,7 +25,7 @@
 //     options.includeStale is set.
 
 import logger from "@/lib/logger";
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { staticCache } from "@/lib/cache";
 import { isDbUnavailableError } from "@/lib/db-utils";
@@ -432,10 +432,10 @@ export async function getChartinkScreenerResults(
   };
   if (!includeStale) where["expiresAt"] = { gt: new Date() };
 
-  const rows = await prisma.chartinkScreenerResult.findMany({
+  const rows = await prisma.chartinkScreenerResult.findMany(withAccelerateCache({ ttl: 900, swr: 300 })({
     where,
     orderBy: { symbol: "asc" },
-  });
+  }));
 
   return rows.map((r) => ({
     symbol: r.symbol,

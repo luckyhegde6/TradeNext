@@ -32,6 +32,10 @@ jest.mock("@/lib/prisma", () => ({
       findMany: jest.fn(),
     },
   },
+  // Pure helper (matches lib/prisma.ts): injects cacheStrategy at the query
+  // boundary for Accelerate edge-cached reads.
+  withAccelerateCache: (strategy: { ttl: number; swr?: number; tags?: string[] }) => (args: unknown) =>
+    ({ ...(args as object), cacheStrategy: strategy }),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────
@@ -410,16 +414,20 @@ describe("getChartinkScreenerResults (TTL reads)", () => {
     ] as never);
 
     await getChartinkScreenerResults("screener-1");
-    expect(mockPrisma.chartinkScreenerResult.findMany).toHaveBeenCalledWith({
-      where: { runId: "run-1", screenerId: "screener-1", expiresAt: { gt: expect.any(Date) } },
-      orderBy: { symbol: "asc" },
-    });
+    expect(mockPrisma.chartinkScreenerResult.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { runId: "run-1", screenerId: "screener-1", expiresAt: { gt: expect.any(Date) } },
+        orderBy: { symbol: "asc" },
+      }),
+    );
 
     await getChartinkScreenerResults("screener-1", { includeStale: true });
-    expect(mockPrisma.chartinkScreenerResult.findMany).toHaveBeenLastCalledWith({
-      where: { runId: "run-1", screenerId: "screener-1" },
-      orderBy: { symbol: "asc" },
-    });
+    expect(mockPrisma.chartinkScreenerResult.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { runId: "run-1", screenerId: "screener-1" },
+        orderBy: { symbol: "asc" },
+      }),
+    );
   });
 });
 
