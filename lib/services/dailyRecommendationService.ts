@@ -31,7 +31,7 @@ import { recordMetric } from "./systemHealthService";
 import { archiveRecommendations } from "./recommendationPerformanceService";
 import { createAuditLog } from "@/lib/audit";
 import { recommendationsCache } from "@/lib/cache";
-import prisma from "@/lib/prisma";
+import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError } from "@/lib/db-utils";
 
@@ -1270,30 +1270,36 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
   // stocks, NO verdict filter. All stocks (incl. HOLD) are returned so the
   // "Last updated" date always reflects the newest run (v3.10.1).
   try {
-    const latestRun = await prisma.dailyRecommendationRun.findFirst({
-      where: {
-        status: { in: ["completed", "failed"] },
-        uniqueStocks: { gt: 0 },
-      },
-      orderBy: { runDate: "desc" },
-      include: {
-        stocks: {
-          orderBy: { screenerCount: "desc" },
-          include: { tracker: true },
+    const latestRun = await prisma.dailyRecommendationRun.findFirst(
+      // v3.28.4: edge-cache the heavy stocks-include query (short TTL + SWR —
+      // the in-memory fingerprint guard above already returns early on hit).
+      withAccelerateCache({ ttl: 60, swr: 30 })({
+        where: {
+          status: { in: ["completed", "failed"] },
+          uniqueStocks: { gt: 0 },
         },
-      },
-    });
+        orderBy: { runDate: "desc" },
+        include: {
+          stocks: {
+            orderBy: { screenerCount: "desc" },
+            include: { tracker: true },
+          },
+        },
+      })
+    );
 
     // Overall newest run (even one with zero picks — a v3.11.1 AI-unavailable
     // failure). Lets the client show "AI unavailable on <latestRunDate> —
     // showing picks from <runDate>" while still displaying the last good run.
-    const newestRun = await prisma.dailyRecommendationRun.findFirst({
-      orderBy: { runDate: "desc" },
-      select: { id: true, runDate: true, status: true },
-    });
+    const newestRun = await prisma.dailyRecommendationRun.findFirst(
+      withAccelerateCache({ ttl: 60, swr: 30 })({
+        orderBy: { runDate: "desc" },
+        select: { id: true, runDate: true, status: true },
+      })
+    );
 
     // Convert BigInt fields to Number for JSON serialization
-    const serializedStocks = (latestRun?.stocks ?? []).map((s) => ({
+    const serializedStocks = ((latestRun as RunWithStocks | null)?.stocks ?? []).map((s) => ({
       ...s,
       volume: s.volume != null ? Number(s.volume) : null,
     }));

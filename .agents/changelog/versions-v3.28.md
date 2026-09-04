@@ -209,4 +209,64 @@ ipAddress / parsed metadata). Existing promotion tests only asserted call counts
 
 ---
 
-# v3.28.2 — Lost-leader engine stop (single-active-worker enforcement)
+# v3.28.4 — Read-first recommendations route + edge-cache the heavy latest-run reads
+
+- **Date**: Sep 05 2026
+- **On top of**: v3.28.3
+- **Status**: Code + tests + docs complete; commit/push pending user approval (no merge)
+- **Branch**: `fix/v3.28.1-sqlite-self-heal`
+
+## What was wrong (user directive + db-health signal)
+
+Two compounding issues:
+
+1. **Key collision (route ↔ service).** `app/api/recommendations/route.ts` wrote its serialized `responseBody`
+   under the **service's** `LATEST_KEY` (`"recommendations:latest"`) with a 600s TTL. But the service's
+   validated cache stores a `LatestCacheEntry` `{runId, newestRunId, data}` under that same key. Once the route
+   stored its flat `{run, latestRun, stocks, timestamp}` body, the service's cross-instance fingerprint check
+   read `cached.runId === undefined` on every request → **the heavy stocks-include query re-ran on EVERY
+   request** (db-health "Recent DB Errors"/read-tier showed `recommendations.prisma` 14/14 huge-query misses).
+2. **Fingerprint probes hit Prisma every request.** The read-first fast path is intentionally gated on the
+   two index-only fingerprint probes (`findFirst` `where id`), keeping the 15-min validated cache honest across
+   instances — but the heavy reads themselves had no edge caching on busy dashboards.
+
+## Fix (user-approved "Both")
+
+- **Route read-first fast path** (`app/api/recommendations/route.ts`):
+  - NEW route-contained `ROUTE_CACHE_KEY = "recommendations:api:latest"` (DISTINCT from the service key) +
+    `ROUTE_CACHE_TTL_SECONDS = 60` + typed `RouteRecommendationsCacheBody {success, stocks, timestamp}`.
+  - After the plan-limit breaker block, a read-first `recommendationsCache.get(ROUTE_CACHE_KEY)` serves the
+    serialized payload from memory (`servedFrom: "memory_cache"`, `recordRead("recommendations.memory", {hit:true})`,
+    `logger.debug`) with **zero Prisma reads** for up to 60s — then the existing Prisma path re-stamps the key.
+  - All three legacy `"recommendations:latest"` references (breaker memory fallback, response `set`, DB-error
+    memory fallback) switched to the route-contained key — the service key is never touched by the route anymore.
+- **Edge-cache the heavy reads** (`lib/services/dailyRecommendationService.ts`):
+  - `withAccelerateCache({ ttl: 60, swr: 30 })` (v3.27.0 boundary helper from `@/lib/prisma`) wraps BOTH heavy
+    `findFirst` reads in `getLatestRecommendations`: `latestRun` (stocks-include) and `newestRun` (lightweight
+    select) — the two queries that actually had the 14/14 problem.
+  - `T extends (args:any)=>any` on the helper cannot preserve `findFirst`+`include` payload typing (bare model
+    type falls back) → added the existing `as RunWithStocks | null` cast at the `serializedStocks` usage point
+    so the `.stocks` access keeps type-safety (matches the pre-existing cast at the `result` assembly).
+- **Fingerprint probes stay uncached** — they are the cross-instance staleness guard; short TTL is safe because
+  the 95-row query only re-runs when the fingerprint actually changed (or after 15-min cache expiry).
+
+## Tests (`lib/__tests__/dailyRecommendationService.test.ts` — +1 → 34)
+
+- Mock factory gains the pure `withAccelerateCache` stub (`(strategy) => (args) => ({...(args as object),
+  cacheStrategy: strategy})`, pattern from `recommendationPerformanceService.test.ts:61-62`) so the service's
+  named import is defined; spread preserves keys so existing `findFirst.mock.calls[0][0]?.where/select`
+  assertions still pass.
+- NEW regression **"v3.28.4: heavy latestRun/newestRun reads carry Accelerate cacheStrategy; fingerprint
+  probes stay uncached"** — stale cache → fingerprint unchanged → refetch; asserts 4 findFirst calls, `calls[0]`
+  and `calls[1]` (fingerprints) have **no** `cacheStrategy`, `calls[2]` and `calls[3]` (heavy reads) carry
+  `cacheStrategy: {ttl: 60, swr: 30}`.
+
+## Verification
+
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**; zero errors in route/service/prisma/readTier.
+- **Targeted** — `dailyRecommendationService.test.ts` **34/34** (+1); `readTier` + `recommendationPerformanceService`
+  **25/25** green (the boundary-helper provenance suites).
+- **Full suite** — **1004 pass / 4 skip / 2 fail** (2 = documented pre-existing `intelligence.test.ts` async
+  cache-flake, fails run-to-run, `intelligence.ts`/`cache.ts` untouched — excluding it: **72 suites /
+  1004 pass / 4 skip / 0 fail from these changes**).
+- No Prisma schema change → no migration.

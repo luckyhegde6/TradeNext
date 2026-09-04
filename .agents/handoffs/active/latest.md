@@ -1,66 +1,45 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260905-v3283-audit-wb-queued-at"
+session_id: "sess-20260905-v3284-recs-read-first"
 agent: "system"
 timestamp: "2026-09-05T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260904-v3282-lost-leader-stop"
+parent_session: "sess-20260905-v3283-audit-wb-queued-at"
 child_sessions: []
-checkpoint: "v3.28.3 audit write-behind promotion fix — strip queued_at before Prisma createMany — committed (separate commit, no push/merge); sqlite.test.ts 37/37 + tsc 46 exact baseline; docs updated (AGENTS.md, CHANGELOG index, versions-v3.28.md, session-todos, this file); merge/deploy of v3.28.1-3 + older-version commits + PR #114 still held pending user"
+checkpoint: "v3.28.4 read-first recommendations route + edge-cache heavy latest-run reads — code + regression test + docs complete & VERIFIED (tsc 46 exact baseline, recs 34/34, readTier/recPerf 25/25, full suite 1004 pass / 4 skip / 2 fail = pre-existing intelligence flake only); commit/push pending user (no merge)"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: Fix the pre-existing audit write-behind promotion bug reported in the v3.28.2 UI-verification findings — `AuditLog createMany — Unknown argument queued_at` (db-health DB Errors ring full of ~15-min repeats, audit rows never promoting). User approved "fix now": small surgical fix + regression test + separate commit on the current branch (no push/merge).
-- **Branch**: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.2 `5a63fc4`). **v3.28.3 COMMITTED (separate commit, no push)**. **Merge/deploy to `main`/prod still requires explicit user say-so; do not amend `718b5d2`/`8020dee`/`a6d902e`/`24e3586`/`3605c64`/`5a63fc4`/`c86f7ef` (or the new v3.28.3 commit)**.
+- **Task**: Fix the two compounding issues surfaced by db-health read-tier (`recommendations.prisma` 14/14 huge-query misses on every request): **(1) key collision** — `app/api/recommendations/route.ts` wrote its serialized `responseBody` under the **service's** `LATEST_KEY` (`"recommendations:latest"`), clobbering the `LatestCacheEntry {runId, newestRunId, data}` → `cached.runId === undefined` → the heavy stocks-include query re-ran on EVERY request; **(2) heavy latest-run reads unedge-cached** despite v3.27.0's `withAccelerateCache`. User approved the **"Both"** fix.
+- **Branch**: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.3 `a1dd094`). **v3.28.4 code + test + docs VERIFIED, commit/push PENDING USER (no merge).** Do not amend `718b5d2`/`8020dee`/`a6d902e`/`24e3586`/`3605c64`/`5a63fc4`/`c86f7ef`/`a1dd094`.
 
 ## Progress
-- [x] **v3.28.3 root cause**: `mapWbToPrisma` in `lib/sqlite.ts` (used by the write-behind flush `writeWbRowsToPrisma` :1629) has a `default` branch that passes same-name wb-row columns verbatim into `auditLog.createMany`; `queued_at` is a **SQLite wb-only bookkeeping column** (auto-added by `enqueueWriteBehind` :1434-1438) absent from the Prisma `AuditLog` model (`prisma/schema.prisma:481-505`) → every ~15-min flush threw → audit rows never promoted (sticky rows re-failed every flush, db-health logged each failure). Pre-existing since v3.22.0 promotion model.
-- [x] **Fix (surgical, `lib/sqlite.ts` only)**: `mapWbToPrisma` gains a `case "queued_at": break;` skip branch before `default:` (with a pre-v3.28.3 bug comment). Only `audit_log` is ever promoted (`server_log`/`api_request` hard-refused — SQLite-primary store) so no other wb-only column can leak; the `id` passthrough is correct (client-side UUID per wb row, idempotent via `INSERT OR REPLACE`).
-- [x] **Regression test (+1 → 37)**: "strips SQLite-only bookkeeping columns (queued_at) from the promoted Prisma createMany [v3.28.3]" — seeds an `audit_log` wb row, `mockClear()` on `createMany`, flushes, asserts flush not skipped, `flushed.audit_log >= 1`, **every** `createMany` data entry lacks `queued_at`, and mapped fields arrive (action/userId/userEmail/ipAddress/metadata parsed). Existing promotion tests only asserted call counts — why this slipped.
-- [x] **Verification**: `sqlite.test.ts` **37/37** green; tsc **46 = exact baseline (0 new)**. No schema change → no migration.
-- [x] **Docs (v3.28.3)**: AGENTS.md version-table row, `.agents/CHANGELOG.md` index row, `.agents/changelog/versions-v3.28.md` detail section, session-todos, this file.
-- [x] **Earlier branch state (unchanged, still pending user)**: v3.28.2 `5a63fc4` (committed + pushed), v3.28.1 `718b5d2` (uncommitted-to-main); v3.28.0 SQLite-first NSE store (uncommitted, incl. regression-fix `8020dee`); v3.27.0 Accelerate (spec/plan `db5a5cc`); v3.26.0 prod-failure triage (PR #114 merged `3605c64` — reconcile PR #114 doc status in next doc pass).
-- [x] **v3.28.2 findings recap**: (1) audit promotion `queued_at` failure — NOW FIXED by v3.28.3; (2) 4× benign `WorkerStatus create` P2002 — informational (leader claim races; v3.26.0 skip should filter once the running dev server hot-reloads the committed code — it predates it). Dev server PID 34672 pre-existing — do not kill/restart.
-- [x] **UI verification (:3000, prior session)**: all pages verified, 0 console errors/warnings; single-active enforced (3 leader rows, one per role, same instance, fresh heartbeats); db-health all green; `/recommendations` live data with direction-aware levels; dark mode + mobile 375px clean.
+- [x] **Root cause**: route wrote `{success, run, latestRun, stocks, timestamp}` under the service's `LATEST_KEY` → `LatestCacheEntry` replaced by flat body → fingerprint check `cached.runId === undefined` → stocks-include query (95 rows) ran on EVERY request; plus the heavy reads had no edge caching on busy dashboards.
+- [x] **Fix (route, `app/api/recommendations/route.ts`)**: `ROUTE_CACHE_KEY = "recommendations:api:latest"` (distinct from service key) + `ROUTE_CACHE_TTL_SECONDS = 60` + typed `RouteRecommendationsCacheBody {success, stocks, timestamp}`; read-first memory fast path AFTER the plan-limit breaker block (`recommendationsCache.get(ROUTE_CACHE_KEY)`, `recordRead("recommendations.memory", {source:"memory", latencyMs:0, rows, hit:true})`, `servedFrom: "memory_cache"`, zero Prisma); all three legacy `"recommendations:latest"` refs (breaker fallback, response `set`, DB-error fallback) switched to the route key — the service key is never touched by the route. Breaker-block ordering preserved → SQLite-mirror priority unchanged.
+- [x] **Fix (service, `lib/services/dailyRecommendationService.ts`)**: `import prisma, { withAccelerateCache }`; both heavy `findFirst` reads in `getLatestRecommendations` (`latestRun` stocks-include :1273-1289, `newestRun` lightweight select :1294-1299) wrapped in `withAccelerateCache({ ttl: 60, swr: 30 })`; **fingerprint probes stay uncached** (cross-instance staleness guard is load-bearing). The wrapper's `Parameters<T>[0]` generic cannot re-infer `findFirst`+`include` payload → added the existing `as RunWithStocks | null` cast at the `serializedStocks` usage wherever `.stocks` is accessed (matches the pre-existing cast at :1308).
+- [x] **Regression test (+1 → 34)**: factory (`dailyRecommendationService.test.ts`) gains the pure `withAccelerateCache` stub `(strategy) => (args) => ({...(args as object), cacheStrategy: strategy})` (pattern from `recommendationPerformanceService.test.ts:61-62`; spread preserves keys so existing `findFirst.mock.calls[0][0]?.where/select` assertions still pass). NEW **"v3.28.4: heavy latestRun/newestRun reads carry Accelerate cacheStrategy; fingerprint probes stay uncached"** — seeds cache `{runId,newestRunId}`, mocks 4 `findFirst` resolves, asserts calls length 4; `calls[0]`/`calls[1]` (fingerprints) lack `cacheStrategy`; `calls[2]`/`calls[3]` carry `cacheStrategy: {ttl: 60, swr: 30}`.
+- [x] **Verification**: tsc **46 = exact baseline (0 new)** (zero errors in route/service/prisma/readTier); targeted `dailyRecommendationService.test.ts` **34/34**; `readTier.test.ts` + `recommendationPerformanceService.test.ts` **25/25** (boundary-helper provenance suites); full suite **1004 pass / 4 skip / 2 fail** — both failures = documented pre-existing `intelligence.test.ts` async cache-flake (fails run-to-run, `intelligence.ts`/`cache.ts` untouched; excluding it: **72 suites / 1004 pass / 4 skip / 0 fail from these changes**). No schema change → no migration.
+- [x] **Docs (v3.28.4)**: AGENTS.md version-table row, `.agents/CHANGELOG.md` index row, `.agents/changelog/versions-v3.28.md` detail section (also removed the orphaned duplicate `# v3.28.2 — Lost-leader engine stop` header at EOF), session-todos, this file. (TODO.md/Primer/agent-memory pending in the same pass.)
+- [x] **Earlier branch state (unchanged, still pending user)**: v3.28.3 `a1dd094` (committed + pushed); v3.28.2 `5a63fc4` (committed + pushed); v3.28.1 `718b5d2` (committed); v3.28.0 SQLite-first NSE store (uncommitted, incl. regression-fix `8020dee`); v3.27.0 Accelerate (spec/plan `db5a5cc`); v3.26.0 prod-failure triage (PR #114 merged `3605c64` — reconcile PR #114 doc status in a later doc pass).
+- [x] **v3.28.2 findings recap**: (1) audit promotion `queued_at` failure — FIXED by v3.28.3; (2) 4× benign `WorkerStatus create` P2002 — informational (leader claim races; v3.26.0 skip filters once the running dev server hot-reloads — dev server PID 34672 pre-existing, do not kill/restart).
 
 ## Decisions
-- Fix scope = minimal surgical (`lib/sqlite.ts` `mapWbToPrisma` only: skip wb-only `queued_at` before default passthrough + one regression test + docs) — this is the confirmed defect behind the repeating db-health DB Errors + non-promoting audit rows.
-- Only `audit_log` is ever promoted (server_log/api_request hard-refused) so the single skip branch fully covers the wb-only leak; future wb-only bookkeeping columns should follow the same skip pattern.
-- The `id` passthrough is correct (client-side UUID per wb row, idempotent `INSERT OR REPLACE`) — preserved.
-- Verification gate = tsc 46 = exact baseline + targeted `sqlite.test.ts` 37/37.
+- Fix scope = "Both" per user: route read-first fast path under its own key (kills the collision → kills the per-request heavy query) + edge-cache the two heavy reads (`{ttl: 60, swr: 30}`). Route TTL 60s (not the earlier 600s) — the 95-row query only re-runs when the fingerprint actually changes or the 15-min service cache expires; fingerpprint probes intentionally uncached.
+- Route cache stores only `{success, stocks, timestamp}` (not the clobbered run/latestRun) — the service remains the sole owner of the validated `LatestCacheEntry`.
+- `invalidateRecommendationsCache()` = `flushAll()` clears both `"recommendations:api:latest"` and `"recommendations:latest"` — no stale-service-cache risk.
+- Type-safety: the `as RunWithStocks | null` cast is the same pattern already used at :1308 — acceptable, documented in code comment.
+- Verification gate = tsc 46 exact baseline + targeted suites + full suite with documented `intelligence.test.ts` flake excluded from attribution.
 - No auto commit/push/merge/deploy without explicit user approval.
 
 ## Blockers
-- **Merge/deploy of v3.28.1 + v3.28.2 + v3.28.3 (and older v3.28.0/v3.27.0/v3.26.0 diff + PR #114 reconciliation) await explicit user approval.** No schema change → no migration.
+- **Commit/push of v3.28.4 + merge/deploy of v3.28.1-4 (and older v3.28.0/v3.27.0/v3.26.0 diff + PR #114 reconciliation) await explicit user approval.** No schema change → no migration.
 - Deferred: **daily recommendation job failures** (Issue 3) — on the audit the primary persistence paths all verify; any remaining job-failure cause is a distinct follow-up.
 
 ## Next Move
-1. Report v3.28.3 result to user (fixed + committed; targeted sqlite 37/37 + tsc 46 baseline).
-2. Await explicit user approval to merge `fix/v3.28.1-sqlite-self-heal` → `main` and deploy (Netlify rebuild applies v3.28.1 + v3.28.2 + v3.28.3).
+1. Report v3.28.4 result to user (code + regression test + docs done; tsc 46 baseline, recs 34/34, readTier/recPerf 25/25, full suite 1004 pass / 4 skip / 2 fail = pre-existing flake only).
+2. Await explicit user approval to **commit + push** v3.28.4 (separate commit, no amend) and then to **merge** `fix/v3.28.1-sqlite-self-heal` → `main` + deploy (Netlify rebuild applies v3.28.1 + v3.28.2 + v3.28.3 + v3.28.4).
 3. Remind user of pending v3.28.0/v3.27.0/v3.26.0 commits + PR #114 doc reconcile + BUGS.md #14 (Prisma Postgres Phase 0 REQUIRED before Dec 1 2026 Accelerate retirement) + deferred daily-recommendation job failure investigation (Issue 3).
-4. After v3.28.x ships: investigate any remaining daily recommendation job failures (Issue 3).
-
-## Progress
-- [x] **v3.28.1 root cause**: `initSqliteBackup` (`lib/sqlite.ts` :970) sets `state.db = db` (:976) BEFORE the schema loop (:979-982). A schema statement throw left `state.db` non-null (partially built — `daily_price`/`chartink_screener_result` missing) + `ready:false`, and the `if (state.db) return` early-return (:971) made the `ensureSqliteBackup()` retry a **permanent no-op** → "SQLite Not Ready" (from `ready`) AND "no such table" (promote guarded only non-null `state.db`, not `ready`). `ensureNseColumns` is ALTER-only (can't create missing tables).
-- [x] **Fix #1 (self-healing)**: init catch now resets `state.db = null` + `_instance = null` so the next `ensureSqliteBackup()` REBUILDS from scratch. **Fix #2 (promote guard)**: `promoteNseToPrisma()`/`promoteTable()` now require `!state.ready ||` → partial mirror skipped (all-zero summary, no Prisma ops, no throw).
-- [x] **Tests (+2 in `sqlite.test.ts`)**: partial-init repair (patched `MockDatabase.run` throws in the schema loop → `getSqliteFallback()` null after the catch → next `ensureSqliteBackup()` ready); promote not-ready returns all-zero summary.
-- [x] **Verification**: tsc **46 = exact baseline (0 new)**; sqlite 36/36 (log `SQLite backup init failed, error=simulated schema-loop failure` confirms the path) + daemon-sqlite-first/dbOpTiering/historical (31) green; full suite **998 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` async cache-flake — excluding it 71 suites / 998 pass / 4 skip / 0 fail from these changes). No schema change → no migration.
-- [x] **Docs (v3.28.1)**: AGENTS.md version-table row, `.agents/CHANGELOG.md` index row, `.agents/changelog/versions-v3.28.md` detail section, Primer.md (Last Updated + Current Project Status + Session History entry), agent-memory.md activity-log entry, session-todos + this file.
-- [x] **Earlier branch state (unchanged, still pending user)**: v3.28.0 SQLite-first NSE store (code+tests+docs verified, uncommitted, incl. regression-fix commit `8020dee`); v3.27.0 Accelerate `withAccelerate()` + `cacheStrategy` ×5 (committed-`db5a5cc` spec/plan, code verified); v3.26.0 prod-failure triage (PR #114 pending merge).
-
-## Decisions
-- Fix scope = minimal surgical (2 files + docs): (1) self-heal null-out on init failure; (2) promote requires `state.ready`. Spec `.agents/specs/06-sqlite-first-nse-store.md` unchanged (operational self-heal defect, not a design change).
-- Verification gate = tsc 46 = exact baseline + sqlite suite + full suite; documented pre-existing `intelligence.test.ts` flake excluded from this change's attribution.
-- No auto commit/push/merge/deploy without explicit user approval.
-
-## Blockers
-- **Commit/push of v3.28.1 (and v3.28.0/v3.27.0/v3.26.0) diff await explicit user approval.** No schema change → no migration.
-- Deferred: **daily recommendation job failures** (Issue 3) — investigate after this ships.
-
-## Next Move
-1. Present the v3.28.1 diff for user commit approval (`git diff --stat` = sqlite.test.ts +57, sqlite.ts +16/-2, plus AGENTS.md/CHANGELOG/versions-v3.28.md/Primer/agent-memory/session-todos/HANDOFF).
-2. After v3.28.1 ships: investigate daily recommendation job failures (Issue 3).
-3. Remind user of pending v3.28.0/v3.27.0/v3.26.0 commits + PR #114 merge + BUGS.md #14 (Prisma Postgres Phase 0 REQUIRED before Dec 1 2026 Accelerate retirement).
+4. Optional post-push live-verify via running dev server PID 34672 + db-health: `recommendations.memory` readTier hits appearing, `recommendations.prisma` no longer 14/14.

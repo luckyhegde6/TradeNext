@@ -1,15 +1,24 @@
 # Session Todos
 
-## Current (v3.28.3 — Audit write-behind promotion fix, strip `queued_at`)
+## Current (v3.28.4 — Read-first recommendations route + edge-cache the heavy latest-run reads)
 
-Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.2 `5a63fc4`). v3.28.3 VERIFIED (tsc **46 = exact baseline (0 new)**, targeted `sqlite.test.ts` **37/37**) and committed (separate commit, no push/merge). No schema change → no migration.
+Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.3 `a1dd094`, committed + pushed). v3.28.4 VERIFIED (tsc **46 = exact baseline (0 new)**, `dailyRecommendationService.test.ts` **34/34**, readTier + recPerf **25/25**, full suite **1004 pass / 4 skip / 2 fail** with the 2 = documented pre-existing `intelligence.test.ts` flake) and docs updated; **commit pending user (no push/merge)**. No schema change → no migration.
 
-- [x] v3.28.3 root cause: `AuditLog createMany — Unknown argument queued_at` — `mapWbToPrisma` (`lib/sqlite.ts`) `default` branch passes SQLite wb-only `queued_at` verbatim into Prisma `auditLog.createMany` (wb-only column auto-added by `enqueueWriteBehind`, absent on Prisma `AuditLog`) → ~15-min flush throws, audit rows never promote (sticky rows re-fail every flush, db-health DB Errors full of repeats). Pre-existing since v3.22.0 promotion model — DONE
-- [x] v3.28.3 fix (surgical, `lib/sqlite.ts` only): `mapWbToPrisma` gains `case "queued_at": break;` skip branch before `default:` (pre-v3.28.3 bug comment). Only audit_log is ever promoted (server_log/api hard-refused) so no other wb column leaks; id passthrough correct (client-side UUID, idempotent INSERT OR REPLACE) — DONE
-- [x] v3.28.3 regression test (+1 in `sqlite.test.ts` → **37**): seeds an audit_log wb row, flushes, asserts flush not skipped, `flushed.audit_log >= 1`, **every** `createMany` data entry lacks `queued_at`, and mapped fields arrive (action/userId/userEmail/ipAddress/metadata parsed). Existing promotion tests only asserted call counts — why this slipped — DONE
+- [x] v3.28.4 root cause: `app/api/recommendations/route.ts` wrote `responseBody` under the **service's** `LATEST_KEY` (`"recommendations:latest"`) → clobbered the `LatestCacheEntry {runId, newestRunId, data}` → fingerprint check read `cached.runId === undefined` → heavy stocks-include query re-ran on **EVERY request** (db-health read-tier `recommendations.prisma` 14/14 misses) + heavy reads unedge-cached — DONE
+- [x] v3.28.4 fix (route + service): route gains `ROUTE_CACHE_KEY = "recommendations:api:latest"` + `ROUTE_CACHE_TTL_SECONDS = 60` + typed `RouteRecommendationsCacheBody` + read-first memory fast path after the breaker (`servedFrom: "memory_cache"`, `recordRead("recommendations.memory", {hit:true})`, zero Prisma); all 3 legacy `"recommendations:latest"` refs switched to the route key; `getLatestRecommendations` heavy `latestRun`/`newestRun` `findFirst` wrapped in `withAccelerateCache({ttl: 60, swr: 30})`; fingerprint probes stay uncached (cross-instance guard); `findFirst`+`include` payload falls back to bare model through the wrapper → re-used the existing `as RunWithStocks | null` cast at the `serializedStocks` usage — DONE
+- [x] v3.28.4 regression test (+1 in `dailyRecommendationService.test.ts` → **34**): factory gains the pure `withAccelerateCache` stub (spread preserves keys — existing `where/select` assertions still pass); NEW test asserts fingerprint calls lack `cacheStrategy` while heavy calls[2]/[3] carry `{ttl:60, swr:30}` — DONE
+- [x] v3.28.4 verification: tsc **46 = exact baseline (0 new)**; targeted recs 34/34 + readTier/recPerf 25/25; full suite **1004 pass / 4 skip / 2 fail** (2 = pre-existing `intelligence.test.ts` flake only) — DONE
+- [x] v3.28.4 docs: AGENTS.md row, CHANGELOG index + versions-v3.28.md (also removed orphaned duplicate `# v3.28.2` header at EOF), session-todos, HANDOFF — DONE
+- [ ] v3.28.4 commit (code + test + docs, separate commit, no push/merge) — PENDING USER
+
+## Completed earlier (v3.28.3 — Audit write-behind promotion fix, strip `queued_at`)
+
+- [x] v3.28.3 root cause: `AuditLog createMany — Unknown argument queued_at` — `mapWbToPrisma` (`lib/sqlite.ts`) `default` branch passes SQLite wb-only `queued_at` verbatim into Prisma `auditLog.createMany` → ~15-min flush throws, audit rows never promote. Pre-existing since v3.22.0 — DONE
+- [x] v3.28.3 fix (surgical, `lib/sqlite.ts` only): `mapWbToPrisma` gains `case "queued_at": break;` skip branch before `default:` — DONE
+- [x] v3.28.3 regression test (+1 in `sqlite.test.ts` → **37**) — seeds an audit_log wb row, asserts every `createMany` data entry lacks `queued_at` + mapped fields arrive — DONE
 - [x] v3.28.3 verification: tsc **46 = exact baseline (0 new)**; targeted `sqlite.test.ts` **37/37** green — DONE
 - [x] v3.28.3 docs: AGENTS.md row, CHANGELOG index + versions-v3.28.md, session-todos, HANDOFF — DONE
-- [x] v3.28.3 commit (code + test + docs, separate commit) — DONE (no push/merge)
+- [x] v3.28.3 commit (code + test + docs, separate commit, no push/merge) — DONE
 
 ## Completed earlier (v3.28.2 — Lost-leader engine stop, single-active-worker enforcement)
 
@@ -25,7 +34,8 @@ Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.2 `5a63fc4`). v3.28.3 VE
 - [ ] FINDING (minor, likely pre-fix server): 4× `WorkerStatus create` P2002 in ring buffer at "1m ago" — benign leader-claim races; v3.26.0 `isBenignUniqueConflict` skip should filter (running server hot-reload may predate it; dev server PID 34672 must not be killed / restarting it would apply current code)
 
 ## Pending (held by user)
-- [ ] User decision: merge/deploy v3.28.1 + v3.28.2 + v3.28.3 (`fix/v3.28.1-sqlite-self-heal` → `main`/prod) — PENDING USER (held; do not amend `718b5d2`/`8020dee`/`a6d902e`/`24e3586`/`3605c64`/`5a63fc4`/`c86f7ef`)
+- [ ] User decision: commit + push v3.28.4 (route + service + test + docs) — PENDING USER (held; separate commit, do not amend `a1dd094` or older)
+- [ ] User decision: merge/deploy v3.28.4 + v3.28.3 + v3.28.2 + v3.28.1 (`fix/v3.28.1-sqlite-self-heal` → `main`/prod) — PENDING USER (held; do not amend `718b5d2`/`8020dee`/`a6d902e`/`24e3586`/`3605c64`/`5a63fc4`/`c86f7ef`/`a1dd094`)
 - [ ] Post-ship: investigate **daily recommendation job failures** (Issue 3, deferred from earlier triage) — PENDING
 - [ ] v3.28.0 commit (code + docs, incl. regression-fix commit `8020dee`) — PENDING USER (still uncommitted after v3.27.0)
 - [ ] v3.27.0 Accelerate diff commit — PENDING USER (uncommitted code beyond spec/plan `db5a5cc`)
