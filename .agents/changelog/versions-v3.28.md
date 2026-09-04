@@ -113,3 +113,50 @@ with `ready:false`. This is deterministic and **self-perpetuating**:
 - **Targeted** — `sqlite.test.ts` 36/36 incl. both new, `daemon-sqlite-first`, `dbOpTiering`,
   `historicalPriceSyncService` (31 combined) all green.
 - No Prisma schema change → no migration.
+
+---
+
+# v3.28.2 — Lost-leader engine stop (single-active-worker enforcement)
+
+- **Date**: Sep 04 2026
+- **On top of**: v3.28.1
+- **Status**: Code + tests + docs complete; commit pending user approval
+
+## Audit results (persistence paths — all verified)
+
+| Concern | Verdict | Evidence |
+|---|---|---|
+| AI-call tracking persists post-analysis | ✅ | `trackAiCall` → memory ring buffer + `enqueueWriteBehind("server_log")` to SQLite (zero Prisma per call); `getPersistedAiCalls` merges Prisma-promoted + SQLite write-behind rows (v3.24.0 two-tier merge). Request handlers `await` it. |
+| Recommendations persist after analysis | ✅ | Run create → `recommendationTracker.createMany` → `dailyRecommendationStock.createMany` → run.update (v3.11.1 no-fake-HOLD deleteMany intact). |
+| Performance tracking persists | ✅ | Status updates + `RecommendationStatusHistory` creates + 360-day `archiveRecommendations` sweep. |
+| IPO details persist | ✅ | Generate via OpenRouter → persist DB (`market_cache` ipo_analysis) + memory; cleanup + stale prune exist. |
+| Swing trackers persist post-analysis | ✅ | `persistSwingTrackers` (RecommendationTracker swing rows) + `patchSwingSignalAnalysis` (SwingSignal levels) run on `analysisStatus === "done"` (non-fatal). |
+| Crons synced during normal sync | ✅ | `syncFromPrisma` pulls `cron_job`; `reconcileControlToPrisma` (6h sync) pushes back `nextRun`/`lastRun`/counters + `worker_status` heartbeats + completed/failed `worker_task` statuses. |
+
+## Defect found and fixed
+
+**Symptom**: multiple workers executing different tasks concurrently — "only 1 worker / task is active at a time".
+
+**Root cause**: `instrumentation.ts` `onLost` callbacks (lines 42-44, 54-56) only `logger.warn` — they never call `stopWorkerEngine()` / `stopCronDaemon()`. Combined with `acquireLeaderLock` **fail-open on DB-unavailable** (returns `true` on every instance during a DB blip, so all instances start a worker poll loop + cron daemon), when the DB recovered: only one instance kept the leader row, but the other instances' `renewLeaderLock` returned false → `onLost` fired → they logged and **kept polling forever** → N workers executing different tasks concurrently.
+
+**Fix** (surgical — `instrumentation.ts` only):
+- Worker `onLost` → call `stopWorkerEngine()` (poll timeout + heartbeat + scheduler intervals cleared)
+- Cron `onLost` → call `stopCronDaemon()` (node-cron tasks destroyed + intervals cleared)
+- sqlite-sync `onLost` → keep log-only (sync is gated per-run by `isLeader` at runtime; nothing long-running to stop)
+
+Both stop functions already existed and are safe. Pruning idle `worker_status` rows is unnecessary — dead-instance rows are informational/harmless (reaper ignores stale); the multi-worker polling WAS the pruning problem.
+
+## Tests (`lib/__tests__/instrumentation.test.ts` — NEW, 5 tests)
+
+1. **starts worker + cron daemon when elected leader for all three roles** — `acquireLeaderLock` returns true → `startWorker` + `startCronDaemon` called, three `startLeaderHeartbeat` registrations.
+2. **worker onLost → `stopWorkerEngine()` fired** — captures the `onLost` callback from `startLeaderHeartbeat("worker", cb)`, invokes it, asserts `stopWorkerEngine()` called once.
+3. **cron onLost → `stopCronDaemon()` fired** — same pattern for the `cron-daemon` role.
+4. **not-leader → no start** — `acquireLeaderLock` returns false for `worker` → `startWorker` not called; `stopWorkerEngine` not called.
+5. **non-Node runtime → returns early** — `NEXT_RUNTIME` unset → `register()` returns before any dynamic imports; `acquireLeaderLock` not called.
+
+## Verification
+
+- **Targeted** — `instrumentation.test.ts` 5/5, `sqlite.test.ts` 36/36, `daemon-sqlite-first` + `dbOpTiering` + `historical` + `leader` = 85/85 total.
+- **Full suite** — 1003 pass / 4 skip / 1 fail (1003 = 998 + 5 new; 1 fail = documented pre-existing `intelligence.test.ts` async cache-flake, `intelligence.ts` untouched — excluding it: **72 suites / 1003 pass / 4 skip / 0 fail**).
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**.
+- No Prisma schema change → no migration.
