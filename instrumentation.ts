@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush, startNsePromoteFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
@@ -96,6 +96,10 @@ export async function register() {
     // deploys). Closes the old gap where queued logs only reached Prisma on a
     // manual admin flush — but stays op-cheap (≤1 createMany per kind/window).
     startWriteBehindFlush();
+
+    // v3.28.0: periodically promote the SQLite NSE market mirror (corp actions,
+    // OHLCV bars, Chartink captures, symbols) to Prisma (leader-gated, ~60s).
+    startNsePromoteFlush();
 
     logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite + price cache started via instrumentation", self: leader.LEADER_SELF });
   } catch (error) {

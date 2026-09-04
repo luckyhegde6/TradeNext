@@ -41,6 +41,14 @@ const isDev = env === 'development' || env === 'local';
 const isLocal = env === 'local';
 const useRemoteDb = process.env.USE_REMOTE_DB === 'true';
 
+// Opt-in raw SQL query logging (diagnostics/observability). When PRISMA_QUERY_LOG=1
+// (local/dev only) the PrismaClient is constructed with `log: ['query']`, so every
+// SQL statement (with params + duration) is emitted to stdout as `prisma:query ...`.
+// Off by default — no production/CI impact. NOTE: the `$extends(query)` wrapper does
+// NOT propagate `$on('query')`, so raw SQL is observed via the constructor-level
+// stdout logger (verified working through the extension). Accelerate is unaffected.
+const enableQueryLog = isDev && process.env.PRISMA_QUERY_LOG === "1";
+
 // Database URL selection logic:
 // - ENVIRONMENT=local + USE_REMOTE_DB=true → use DATABASE_REMOTE (Prisma Accelerate)
 // - ENVIRONMENT=local + USE_REMOTE_DB=false → use DATABASE_URL (local PostgreSQL)  
@@ -102,6 +110,7 @@ try {
     // wraps the Accelerate-extended client, not the other way around.
     prismaClient = new PrismaClient({
       accelerateUrl: databaseUrl,
+      ...(enableQueryLog ? { log: ["query" as const] } : {}),
     }).$extends(withAccelerate());
   } else {
     const pool = new Pool({ 
@@ -112,7 +121,10 @@ try {
       connectionTimeoutMillis: 5000,
     });
     const adapter = new PrismaPg(pool);
-    prismaClient = new PrismaClient({ adapter });
+    prismaClient = new PrismaClient({
+      adapter,
+      ...(enableQueryLog ? { log: ["query" as const] } : {}),
+    });
   }
 } catch (error) {
   logger.error({ msg: "Prisma: Initialization failed", error: error instanceof Error ? error.message : String(error) });

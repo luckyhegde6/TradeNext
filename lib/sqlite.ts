@@ -77,6 +77,7 @@ if (!g.__sqliteBackup) {
     wbLastPromoted: {} as Record<string, number>,
     wbLastRetained: {} as Record<string, number>,
     wbFlushTimer: null as ReturnType<typeof setInterval> | null,
+    nsePromoteTimer: null as ReturnType<typeof setInterval> | null,
   };
 }
 const state: {
@@ -96,6 +97,7 @@ const state: {
   wbLastPromoted: Record<string, number>;
   wbLastRetained: Record<string, number>;
   wbFlushTimer: ReturnType<typeof setInterval> | null;
+  nsePromoteTimer: ReturnType<typeof setInterval> | null;
 } = g.__sqliteBackup;
 
 // ---------------------------------------------------------------------------
@@ -245,6 +247,44 @@ export interface SqliteFallback {
     table: "worker_task" | "worker_status" | "cron_job",
     maxAgeMs: number,
   ): boolean;
+
+  // ── v3.28.0 NSE-backed data store (SQLite-first) ──────────────────────────
+  /** Upsert a stock (Symbol) row into SQLite. */
+  upsertSymbol(row: {
+    symbol: string;
+    companyName: string;
+    series?: string;
+    industry?: string;
+    isActive?: boolean;
+    lastPrice?: number;
+    lastUpdated?: string;
+  }): void;
+  /** Get symbol rows (optionally filtered by a symbol subset). */
+  getSymbols(limit?: number): Array<Record<string, unknown>>;
+  /** Insert/upsert OHLCV bars for one ticker into `daily_price`. */
+  setDailyPriceBars(
+    ticker: string,
+    bars: Array<{
+      tradeDate: string;
+      open?: number;
+      high?: number;
+      low?: number;
+      close?: number;
+      volume?: number;
+      vwap?: number;
+    }>,
+  ): void;
+  /** Range query over `daily_price` for a ticker (ascending by trade_date). */
+  getDailyPriceRange(ticker: string, from?: string, to?: string): Array<Record<string, unknown>>;
+  /** Upsert corporate-action rows into SQLite. */
+  setCorporateActions(rows: Array<Record<string, unknown>>): void;
+  /** Replace (delete + insert) captured Chartink result rows for a screener. */
+  replaceChartinkResults(
+    templateId: string,
+    rows: Array<Record<string, unknown>>,
+  ): void;
+  /** Get captured Chartink result rows for a screener (fresh, non-expired). */
+  getChartinkResults(templateId: string): Array<Record<string, unknown>>;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -352,6 +392,105 @@ export function cacheDailyPriceSnapshot(rec: DailyPriceSnapshot): void {
     return;
   }
   getSqliteFallback()?.setDailyPriceSnapshot(rec);
+}
+
+// ---------------------------------------------------------------------------
+// NSE-backed data store (v3.28.0 SQLite-first) — module-level helpers
+// ---------------------------------------------------------------------------
+// These are the SQLite-first WRITE + READ entry points for NSE market data.
+// Reads return the cached SQLite copy (never a Prisma read fallback for NSE
+// data); writes are best-effort and never throw. The promote engine
+// (promoteNseToPrisma / flushNseToPrisma) keeps Prisma durable+shared from the
+// ~60s timer + explicit end-of-task flushes.
+
+export interface SymbolRow {
+  symbol: string;
+  companyName: string;
+  series?: string;
+  industry?: string;
+  isActive?: boolean;
+  lastPrice?: number;
+  lastUpdated?: string;
+}
+
+export interface DailyPriceBar {
+  tradeDate: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  vwap?: number;
+}
+
+/** SQLite-first stock write. Zero Prisma ops. */
+export function cacheSymbol(row: SymbolRow): void {
+  const s = getSqliteFallback();
+  if (!s) {
+    ensureSqliteBackup().then((f) => f?.upsertSymbol(row)).catch(() => {});
+    return;
+  }
+  s.upsertSymbol(row);
+}
+
+/** SQLite-first OHLCV write for one ticker. Zero Prisma ops. */
+export function cacheDailyPriceBars(ticker: string, bars: DailyPriceBar[]): void {
+  if (!bars || bars.length === 0) return;
+  const s = getSqliteFallback();
+  if (!s) {
+    ensureSqliteBackup().then((f) => f?.setDailyPriceBars(ticker, bars)).catch(() => {});
+    return;
+  }
+  s.setDailyPriceBars(ticker, bars);
+}
+
+/** SQLite-first OHLCV range read for a ticker (ascending). */
+export function getSqlitePriceRange(
+  ticker: string,
+  from?: string,
+  to?: string,
+): Array<Record<string, unknown>> {
+  const s = getSqliteFallback();
+  if (!s) return [];
+  return s.getDailyPriceRange(ticker, from, to);
+}
+
+/** SQLite-first corporate-actions write. Zero Prisma ops. */
+export function cacheCorporateActions(rows: Array<Record<string, unknown>>): void {
+  if (!rows || rows.length === 0) return;
+  const s = getSqliteFallback();
+  if (!s) {
+    ensureSqliteBackup().then((f) => f?.setCorporateActions(rows)).catch(() => {});
+    return;
+  }
+  s.setCorporateActions(rows);
+}
+
+/** SQLite-first captured Chartink result write (replaces the screener's rows). */
+export function cacheChartinkResults(
+  templateId: string,
+  rows: Array<Record<string, unknown>>,
+): void {
+  const s = getSqliteFallback();
+  if (!s) {
+    ensureSqliteBackup().then((f) => f?.replaceChartinkResults(templateId, rows)).catch(() => {});
+    return;
+  }
+  s.replaceChartinkResults(templateId, rows);
+}
+
+/** SQLite-first captured Chartink result read (fresh, non-expired). */
+export function getSqliteChartinkResults(templateId: string): Array<Record<string, unknown>> {
+  const s = getSqliteFallback();
+  if (!s) return [];
+  return s.getChartinkResults(templateId);
+}
+
+/** SQLite-first stock-list read. */
+export function getSqliteSymbols(limit?: number): Array<Record<string, unknown>> {
+  const s = getSqliteFallback();
+  if (!s) return [];
+  return s.getSymbols(limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,12 +632,25 @@ const SCHEMA_SQL = `
     action_type      TEXT,
     ex_date          TEXT,
     record_date      TEXT,
+    effective_date   TEXT,
     face_value       TEXT,
+    old_fv           TEXT,
+    new_fv           TEXT,
     ratio            TEXT,
     dividend_per_share REAL,
     dividend_yield   REAL,
-    source           TEXT
+    isin             TEXT,
+    book_closure_start_date TEXT,
+    book_closure_end_date   TEXT,
+    announcement_date TEXT,
+    source           TEXT,
+    created_at       TEXT,
+    updated_at       TEXT
   );
+  CREATE INDEX IF NOT EXISTS idx_corp_action_symbol ON corporate_action (symbol);
+  CREATE INDEX IF NOT EXISTS idx_corp_action_exdate ON corporate_action (ex_date);
+  CREATE INDEX IF NOT EXISTS idx_corp_action_type ON corporate_action (action_type);
+  CREATE INDEX IF NOT EXISTS idx_corp_action_source ON corporate_action (source);
 
   CREATE TABLE IF NOT EXISTS chartink_screener (
     id           TEXT PRIMARY KEY,
@@ -507,11 +659,19 @@ const SCHEMA_SQL = `
     category_id  TEXT,
     category_name TEXT,
     scan_clause  TEXT,
+    debug_clause TEXT,
+    column_clause TEXT,
+    scanlink_id  TEXT,
+    backtest_url TEXT,
     enabled      INTEGER,
-    result_count INTEGER,
     last_run_at  TEXT,
-    next_run_at  TEXT
+    next_run_at  TEXT,
+    result_count INTEGER,
+    created_at   TEXT,
+    updated_at   TEXT
   );
+  CREATE INDEX IF NOT EXISTS idx_chartink_category ON chartink_screener (category_id);
+  CREATE INDEX IF NOT EXISTS idx_chartink_enabled ON chartink_screener (enabled);
 
   CREATE TABLE IF NOT EXISTS worker_status (
     worker_id      TEXT PRIMARY KEY,
@@ -646,6 +806,60 @@ const SCHEMA_SQL = `
     error_message   TEXT,
     queued_at       TEXT
   );
+
+  -- ── NSE-backed data store (v3.28.0 SQLite-first): mirrors the Prisma models
+  -- used by the NSE syncs. SQLite is the PRIMARY write/read store for NSE
+  -- market data; Prisma is kept in sync via the instant promote. Schema
+  -- mirrors Prisma camelCase → snake_case columns with hot-path indexes. ──
+  CREATE TABLE IF NOT EXISTS symbols (
+    symbol       TEXT PRIMARY KEY,
+    company_name TEXT,
+    series       TEXT,
+    industry     TEXT,
+    is_active    INTEGER DEFAULT 1,
+    last_price   REAL,
+    last_updated TEXT,
+    created_at   TEXT,
+    updated_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_symbols_company ON symbols (company_name);
+
+  -- Full OHLCV history for backtest/analysis/swing (distinct from the
+  -- latest-per-symbol daily_price_snapshot quote tier). Mirrors DailyPrice.
+  CREATE TABLE IF NOT EXISTS daily_price (
+    ticker     TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    open       REAL,
+    high       REAL,
+    low        REAL,
+    close      REAL,
+    volume     INTEGER,
+    vwap       REAL,
+    PRIMARY KEY (ticker, trade_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_daily_price_ticker ON daily_price (ticker);
+
+  -- Captured Chartink scan rows (mirrors ChartinkScreenerResult). Populated
+  -- from live captures during a full run; served SQLite-first on reads.
+  CREATE TABLE IF NOT EXISTS chartink_screener_result (
+    id             TEXT PRIMARY KEY,
+    run_id         TEXT,
+    screener_id    TEXT,
+    symbol         TEXT,
+    name           TEXT,
+    bsecode        TEXT,
+    close          REAL,
+    change_percent REAL,
+    condition_flag INTEGER,
+    volume         REAL,
+    raw            TEXT,
+    captured_at    TEXT,
+    expires_at     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_chartink_result_screener ON chartink_screener_result (screener_id);
+  CREATE INDEX IF NOT EXISTS idx_chartink_result_symbol ON chartink_screener_result (symbol);
+  CREATE INDEX IF NOT EXISTS idx_chartink_result_expires ON chartink_screener_result (expires_at);
+  CREATE INDEX IF NOT EXISTS idx_chartink_result_captured ON chartink_screener_result (captured_at);
 `;
 
 // ---------------------------------------------------------------------------
@@ -691,6 +905,65 @@ function ensureControlColumns(db: any): void {
 }
 
 /**
+ * v3.28.0: add the NSE-store columns the older SQLite mirror DBs are missing
+ * (they were created before the schema grew to mirror Prisma). Idempotent +
+ * `PRAGMA table_info`-guarded like ensureControlColumns. SQLite-only — NO
+ * Prisma schema change / NO migration.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureNseColumns(db: any): void {
+  const ADD: Record<string, string[]> = {
+    corporate_action: [
+      "effective_date TEXT",
+      "old_fv TEXT",
+      "new_fv TEXT",
+      "isin TEXT",
+      "book_closure_start_date TEXT",
+      "book_closure_end_date TEXT",
+      "announcement_date TEXT",
+      "created_at TEXT",
+      "updated_at TEXT",
+    ],
+    chartink_screener: [
+      "debug_clause TEXT",
+      "column_clause TEXT",
+      "scanlink_id TEXT",
+      "backtest_url TEXT",
+      "created_at TEXT",
+      "updated_at TEXT",
+    ],
+  };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addIfMissing = (table: string, col: string, ddl: string): void => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec(`PRAGMA table_info(${table})`);
+      if (!res || !res.length) return;
+      const existing = new Set<string>();
+      const vals: unknown[][] = res[0].values;
+      const nameIdx = res[0].columns.indexOf("name");
+      vals.forEach((row) => {
+        if (nameIdx >= 0) existing.add(String((row as string[])[nameIdx]));
+      });
+      if (!existing.has(col)) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    };
+    for (const [table, cols] of Object.entries(ADD)) {
+      for (const c of cols) {
+        const colName = c.split(" ")[0];
+        addIfMissing(table, colName, c);
+      }
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: ensureNseColumns failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize the SQLite backup database. Called once from instrumentation.ts
  * or on first request. Non-blocking -- sync happens in background.
  */
@@ -710,6 +983,9 @@ export async function initSqliteBackup(): Promise<void> {
     // v3.25.x: add the control-plane columns the daemons need (idempotent,
     // SQLite-only — no Prisma schema change, no migration).
     ensureControlColumns(db);
+    // v3.28.0: add the NSE-store columns older mirror DBs are missing
+    // (idempotent, SQLite-only).
+    ensureNseColumns(db);
 
     state.ready = true;
     _instance = createFallback(db);
@@ -1684,6 +1960,249 @@ export function stopWriteBehindFlush(): void {
 }
 
 // ---------------------------------------------------------------------------
+// NSE store promote: SQLite -> Prisma
+// ---------------------------------------------------------------------------
+// SQLite is the PRIMARY write store for NSE market data (stocks, corp actions,
+// daily OHLCV, chartink results); this promote engine pushes those writes up to
+// Prisma so it stays the durable/shared truth (perf runs, recommendation
+// updates, auth, cross-instance coordination read Prisma). Driven by a ~60s
+// leader+breaker-gated timer AND an explicit end-of-task flush so a long sync
+// task never waits for the next tick. Best-effort — failures are logged, never
+// thrown to the caller (the SQLite copy is already durable).
+
+const NSE_PROMOTE_FLUSH_INTERVAL_MS = 60_000;
+
+let nsePromoteInFlight = false;
+
+/**
+ * Best-effort parse of a JSON-encoded string back into a JSON value for Prisma
+ * `Json?` fields. Falls back to a plain string so promote never throws.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseJsonLoose(s: string): any {
+  const trimmed = s.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Promote a single NSE-store table from SQLite to Prisma in chunks. Best-effort,
+ * returns a summary. Only called when the breaker is closed (see
+ * promoteNseToPrisma).
+ */
+async function promoteTable(
+  table: "symbols" | "daily_price" | "corporate_action" | "chartink_screener_result",
+): Promise<number> {
+  const s = getSqliteFallback();
+  if (!s || !state.db) return 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = state.db as any;
+  let promoted = 0;
+  const CHUNK = 500;
+  try {
+    if (table === "symbols") {
+      const rows = s.getSymbols(100000);
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const chunk = rows.slice(i, i + CHUNK);
+        const data = chunk
+          .filter((r) => r.symbol)
+          .map((r) => ({
+            symbol: String(r.symbol).toUpperCase(),
+            companyName: r.company_name ? String(r.company_name) : "",
+            industry: r.industry != null ? String(r.industry) : null,
+            series: r.series != null ? String(r.series) : null,
+          }));
+        if (!data.length) continue;
+        await prisma.symbol.upsert({
+          where: { symbol: data[0].symbol },
+          create: data[0],
+          update: data[0],
+        });
+        // bulk path via createMany skipDuplicates is not used because Symbol
+        // conflicts need updates; a per-row upsert is fine at promote cadence.
+        promoted += 1;
+      }
+    } else if (table === "daily_price") {
+      // distinct tickers, promote per-ticker last bars (bounded)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec("SELECT DISTINCT ticker FROM daily_price");
+      const tickers: string[] = [];
+      if (res && res.length) {
+        res[0].values.forEach((row: unknown[]) => tickers.push(String(row[0])));
+      }
+      for (const t of tickers.slice(0, 500)) {
+        const bars = s.getDailyPriceRange(t);
+        if (!bars.length) continue;
+        const data = bars.map((b) => ({
+          ticker: t,
+          tradeDate: new Date(String(b.trade_date)),
+          open: b.open != null ? Number(b.open) : 0,
+          high: b.high != null ? Number(b.high) : 0,
+          low: b.low != null ? Number(b.low) : 0,
+          close: b.close != null ? Number(b.close) : 0,
+          volume: b.volume != null ? Number(b.volume) : 0,
+        }));
+        for (let i = 0; i < data.length; i += CHUNK) {
+          const chunk = data.slice(i, i + CHUNK);
+          await prisma.dailyPrice.createMany({
+            data: chunk,
+            skipDuplicates: true,
+          });
+          promoted += chunk.length;
+        }
+      }
+    } else if (table === "corporate_action") {
+      const rows = s.getCorporateActions(100000);
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const chunk = rows.slice(i, i + CHUNK);
+        const data = chunk
+          .filter((r) => r.symbol && r.action_type)
+          .map((r) => ({
+            symbol: String(r.symbol).toUpperCase(),
+            companyName: r.company_name ? String(r.company_name) : "",
+            actionType: String(r.action_type || "OTHER"),
+            exDate: r.ex_date ? new Date(String(r.ex_date)) : null,
+            recordDate: r.record_date ? new Date(String(r.record_date)) : null,
+            subject: r.subject != null ? String(r.subject) : null,
+            faceValue: r.face_value != null ? String(r.face_value) : null,
+          }));
+        if (!data.length) continue;
+        await prisma.corporateAction.createMany({
+          data,
+          skipDuplicates: true,
+        });
+        promoted += data.length;
+      }
+    } else {
+      // chartink_screener_result — promote each screener's captured rows
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec("SELECT DISTINCT screener_id FROM chartink_screener_result");
+      const ids: string[] = [];
+      if (res && res.length) {
+        res[0].values.forEach((row: unknown[]) => ids.push(String(row[0])));
+      }
+      for (const id of ids.slice(0, 200)) {
+        const rows = s.getChartinkResults(id);
+        if (!rows.length) continue;
+        const data = rows.map((r) => ({
+          runId: r.run_id != null ? String(r.run_id) : "sqlite",
+          screenerId: id,
+          symbol: String(r.symbol || "").toUpperCase(),
+          name: r.name != null ? String(r.name) : null,
+          bsecode: r.bsecode != null ? String(r.bsecode) : null,
+          close: r.close != null ? Number(r.close) : null,
+          changePercent: r.change_percent != null ? Number(r.change_percent) : null,
+          conditionFlag: r.condition_flag != null ? Number(r.condition_flag) : null,
+          volume: r.volume != null ? Number(r.volume) : null,
+          raw: (() => {
+            if (r.raw == null) return undefined;
+            return parseJsonLoose(String(r.raw));
+          })(),
+          capturedAt: r.captured_at ? new Date(String(r.captured_at)) : new Date(),
+          expiresAt: r.expires_at
+            ? ((): Date => {
+                const d = new Date(String(r.expires_at));
+                return Number.isNaN(d.getTime()) ? new Date(Date.now() + 72 * 60 * 60 * 1000) : d;
+              })()
+            : new Date(Date.now() + 72 * 60 * 60 * 1000),
+        }));
+        await prisma.chartinkScreenerResult.createMany({ data, skipDuplicates: true });
+        promoted += data.length;
+      }
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: promoteNseToPrisma partial failure",
+      table,
+      promoted,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return promoted;
+}
+
+/**
+ * Promote ALL changed NSE-store tables from SQLite to Prisma. Leader + breaker
+ * gated (only the sqlite-sync leader promotes, and never while the Prisma
+ * plan-limit breaker is open). Non-fatal.
+ */
+export async function promoteNseToPrisma(): Promise<Record<string, number>> {
+  const summary: Record<string, number> = {
+    symbols: 0,
+    daily_price: 0,
+    corporate_action: 0,
+    chartink_screener_result: 0,
+  };
+  if (!state.db || isPlanLimitBreakerOpen()) return summary;
+  if (nsePromoteInFlight) return summary;
+  nsePromoteInFlight = true;
+  try {
+    const leader = await import("@/lib/services/leader");
+    if (!(await leader.isLeader("sqlite-sync"))) return summary;
+    summary.symbols = await promoteTable("symbols");
+    summary.daily_price = await promoteTable("daily_price");
+    summary.corporate_action = await promoteTable("corporate_action");
+    summary.chartink_screener_result = await promoteTable("chartink_screener_result");
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: promoteNseToPrisma failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    nsePromoteInFlight = false;
+  }
+  return summary;
+}
+
+/**
+ * Explicit end-of-task flush (await, non-fatal). Returns the promote summary.
+ * Used by the NSE sync tasks so a long run promotes to Prisma immediately
+ * instead of waiting for the next ~60s timer tick.
+ */
+export async function flushNseToPrisma(): Promise<Record<string, number>> {
+  return promoteNseToPrisma();
+}
+
+/**
+ * Start the periodic ~60s NSE-store promote timer (leader + breaker gated).
+ * Returns a stop handle for graceful shutdown / tests.
+ */
+export function startNsePromoteFlush(): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  if (state.nsePromoteTimer) {
+    clearInterval(state.nsePromoteTimer);
+    state.nsePromoteTimer = null;
+  }
+  timer = setInterval(() => {
+    void (async () => {
+      try {
+        await promoteNseToPrisma();
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: periodic NSE promote skipped",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  }, NSE_PROMOTE_FLUSH_INTERVAL_MS);
+  if (timer && typeof timer.unref === "function") timer.unref();
+  state.nsePromoteTimer = timer;
+  return () => stopNsePromoteFlush();
+}
+
+/** Stop the periodic NSE-store promote timer. For graceful shutdown / tests. */
+export function stopNsePromoteFlush(): void {
+  if (state.nsePromoteTimer) {
+    clearInterval(state.nsePromoteTimer);
+    state.nsePromoteTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sync Prisma -> SQLite
 // ---------------------------------------------------------------------------
 
@@ -2389,6 +2908,233 @@ function createFallback(db: Database): SqliteFallback {
         stmt.free();
       } catch (err) {
         logger.error({ msg: "SQLite: setDailyPriceSnapshot failed", symbol: rec.symbol, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    // --- NSE-backed store (v3.28.0 SQLite-first) ---
+
+    // Symbols (mirrors Prisma Symbol -> `symbols`)
+    upsertSymbol(row): void {
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO symbols (symbol, company_name, series, industry, is_active, last_price, last_updated, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol) DO UPDATE SET
+             company_name = excluded.company_name,
+             series = excluded.series,
+             industry = excluded.industry,
+             is_active = excluded.is_active,
+             last_price = excluded.last_price,
+             last_updated = excluded.last_updated,
+             updated_at = excluded.updated_at`,
+        );
+        const now = new Date().toISOString();
+        stmt.run([
+          (row.symbol || "").toUpperCase(),
+          row.companyName ?? "",
+          row.series ?? null,
+          row.industry ?? null,
+          row.isActive === false ? 0 : 1,
+          row.lastPrice ?? null,
+          row.lastUpdated ?? null,
+          now,
+          now,
+        ]);
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: upsertSymbol failed", symbol: row.symbol, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    getSymbols(limit = 2000): Array<Record<string, unknown>> {
+      try {
+        const rows = db.exec("SELECT * FROM symbols ORDER BY symbol ASC LIMIT ?", [limit]);
+        if (!rows.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) => {
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return obj;
+        });
+      } catch {
+        return [];
+      }
+    },
+
+    // Full OHLCV bars (mirrors Prisma DailyPrice -> `daily_price`)
+    setDailyPriceBars(ticker, bars): void {
+      if (!bars || bars.length === 0) return;
+      const T = (ticker || "").toUpperCase();
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO daily_price (ticker, trade_date, open, high, low, close, volume, vwap)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(ticker, trade_date) DO UPDATE SET
+             open = excluded.open,
+             high = excluded.high,
+             low = excluded.low,
+             close = excluded.close,
+             volume = excluded.volume,
+             vwap = excluded.vwap`,
+        );
+        for (const b of bars) {
+          stmt.run([
+            T,
+            b.tradeDate,
+            b.open ?? null,
+            b.high ?? null,
+            b.low ?? null,
+            b.close ?? null,
+            b.volume ?? null,
+            b.vwap ?? null,
+          ]);
+        }
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: setDailyPriceBars failed", ticker, n: bars.length, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    getDailyPriceRange(ticker, from?, to?): Array<Record<string, unknown>> {
+      try {
+        const T = (ticker || "").toUpperCase();
+        let sql = "SELECT * FROM daily_price WHERE ticker = ?";
+        const params: Array<string> = [T];
+        if (from) {
+          sql += " AND trade_date >= ?";
+          params.push(from);
+        }
+        if (to) {
+          sql += " AND trade_date <= ?";
+          params.push(to);
+        }
+        sql += " ORDER BY trade_date ASC";
+        const rows = db.exec(sql, params);
+        if (!rows.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) => {
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return obj;
+        });
+      } catch {
+        return [];
+      }
+    },
+
+    // Corporate actions upsert (mirrors Prisma CorporateAction)
+    setCorporateActions(rows): void {
+      if (!rows || rows.length === 0) return;
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO corporate_action
+             (symbol, company_name, series, subject, action_type, ex_date, record_date,
+              effective_date, face_value, old_fv, new_fv, ratio, dividend_per_share,
+              dividend_yield, isin, book_closure_start_date, book_closure_end_date,
+              announcement_date, source, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const now = new Date().toISOString();
+        // Convert an unknown row value into a sql.js SqlValue-compatible scalar.
+        const sv = (v: unknown): string | number | null => {
+          if (v == null) return null;
+          if (typeof v === "string" || typeof v === "number") return v;
+          if (typeof v === "boolean") return v ? 1 : 0;
+          if (v instanceof Date) return v.toISOString();
+          return String(v);
+        };
+        for (const r of rows) {
+          stmt.run([
+            sv(r.symbol) ?? "",
+            sv(r.company_name ?? r.companyName) ?? "",
+            sv(r.series),
+            sv(r.subject),
+            sv(r.action_type ?? r.actionType) ?? "OTHER",
+            sv(r.ex_date ?? r.exDate),
+            sv(r.record_date ?? r.recordDate),
+            sv(r.effective_date ?? r.effectiveDate),
+            sv(r.face_value ?? r.faceValue),
+            sv(r.old_fv ?? r.oldFV),
+            sv(r.new_fv ?? r.newFV),
+            sv(r.ratio),
+            sv(r.dividend_per_share ?? r.dividendPerShare),
+            sv(r.dividend_yield ?? r.dividendYield),
+            sv(r.isin),
+            sv(r.book_closure_start_date ?? r.bookClosureStartDate),
+            sv(r.book_closure_end_date ?? r.bookClosureEndDate),
+            sv(r.announcement_date ?? r.announcementDate),
+            sv(r.source) ?? "nse",
+            now,
+            now,
+          ]);
+        }
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: setCorporateActions failed", n: rows.length, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    // Captured Chartink result rows (mirrors ChartinkScreenerResult)
+    replaceChartinkResults(templateId, rows): void {
+      const T = (templateId || "").toString();
+      try {
+        db.run("DELETE FROM chartink_screener_result WHERE screener_id = ?", [T]);
+        if (!rows || rows.length === 0) return;
+        const stmt = db.prepare(
+          `INSERT INTO chartink_screener_result
+             (id, run_id, screener_id, symbol, name, bsecode, close, change_percent,
+              condition_flag, volume, raw, captured_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const now = new Date().toISOString();
+        const sv = (v: unknown): string | number | null => {
+          if (v == null) return null;
+          if (typeof v === "string" || typeof v === "number") return v;
+          if (typeof v === "boolean") return v ? 1 : 0;
+          if (v instanceof Date) return v.toISOString();
+          return String(v);
+        };
+        for (const r of rows) {
+          const sym = String(r.symbol ?? r.SYMBOL ?? "").toUpperCase();
+          stmt.run([
+            sv(r.id ?? r._id) ?? `${T}:${sym}`,
+            sv(r.runId ?? r.run_id) ?? "sqlite",
+            T,
+            sym,
+            sv(r.name),
+            sv(r.bsecode),
+            sv(r.close),
+            sv(r.changePercent ?? r.change_percent),
+            sv(r.conditionFlag ?? r.condition_flag),
+            sv(r.volume),
+            r.raw != null ? (typeof r.raw === "string" ? r.raw : JSON.stringify(r.raw)) : null,
+            sv(r.capturedAt ?? r.captured_at) ?? now,
+            sv(r.expiresAt ?? r.expires_at) ?? new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+          ]);
+        }
+        stmt.free();
+      } catch (err) {
+        logger.error({ msg: "SQLite: replaceChartinkResults failed", templateId, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    getChartinkResults(templateId): Array<Record<string, unknown>> {
+      try {
+        const T = (templateId || "").toString();
+        const now = new Date().toISOString();
+        const rows = db.exec(
+          "SELECT * FROM chartink_screener_result WHERE screener_id = ? AND expires_at >= ? ORDER BY symbol ASC",
+          [T, now],
+        );
+        if (!rows.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) => {
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return obj;
+        });
+      } catch {
+        return [];
       }
     },
 

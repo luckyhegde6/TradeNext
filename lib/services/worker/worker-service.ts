@@ -189,6 +189,28 @@ export async function executeStockSync(payload?: Record<string, unknown>): Promi
     throw new Error(syncResult.message || "Stock sync failed");
   }
 
+  // v3.28.0 SQLite-first mirror: write the fetched stock list into SQLite so
+  // the stock read path serves from the (cached) SQLite mirror, then instant-
+  // promote to Prisma. Non-fatal — Prisma is the shared truth and the mirror
+  // is best-effort.
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    for (const s of stocks) {
+      const symbol = s.symbol || s.SYMBOL;
+      if (!symbol) continue;
+      sqlite.cacheSymbol({
+        symbol,
+        companyName: s.meta?.companyName || s.companyName || s.company_name || s.issuerName || s.symbol,
+        series: s.series || s.SERIES || "EQ",
+        isActive: true,
+        lastUpdated: new Date().toISOString(),
+      });
+    }
+    await sqlite.flushNseToPrisma();
+  } catch (err) {
+    logger.warn({ msg: "Stock sync: SQLite mirror write failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
+  }
+
   logger.info({ msg: "Stock sync completed", count: stocks.length, synced: syncResult.synced });
 
   return {
@@ -294,6 +316,33 @@ export async function executeCorpActionsSync(payload?: Record<string, unknown>):
       logger.warn({ msg: "Error syncing corporate action", symbol: action.symbol, error });
       created++;
     }
+  }
+
+  // v3.28.0 SQLite-first mirror: write the fetched corporate actions into
+  // SQLite so the corp-actions read path serves SQLite-first, then instant-
+  // promote to Prisma. Non-fatal.
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    const mirrored = (actions as any[])
+      .filter((a) => a.symbol && a.exDate)
+      .map((a) => {
+        const { actionType, dividendAmount } = parseActionPurpose(a.purpose || "");
+        return {
+          symbol: a.symbol,
+          company_name: a.companyName || a.symbol,
+          series: a.series || "EQ",
+          subject: a.purpose,
+          action_type: actionType,
+          ex_date: a.exDate ? new Date(a.exDate).toISOString() : null,
+          record_date: a.recordDate ? new Date(a.recordDate).toISOString() : null,
+          dividend_per_share: dividendAmount ?? null,
+          source: "nse",
+        };
+      });
+    sqlite.cacheCorporateActions(mirrored);
+    await sqlite.flushNseToPrisma();
+  } catch (err) {
+    logger.warn({ msg: "Corporate actions: SQLite mirror write failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
   }
 
   logger.info({ msg: "Corporate actions sync completed", total: actions.length, created, updated });

@@ -219,6 +219,26 @@ export async function syncHistoricalPrices(options: HistoricalPriceSyncOptions =
       barsFetched += bars.length;
 
       if (!dryRun) {
+        // v3.28.0 SQLite-first mirror: also write the same bars to the SQLite
+        // mirror so the OHLCV read path serves SQLite-first, then instant-
+        // promote to Prisma. Non-fatal.
+        try {
+        const sqlite = await import("@/lib/sqlite");
+        sqlite.cacheDailyPriceBars(
+          `NSE:${symbol}`,
+          bars.map((b: SecurityWiseHistoricalBar) => ({
+            tradeDate: b.date || new Date(b.timestamp).toISOString().slice(0, 10),
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+            volume: b.volume,
+            vwap: b.vwap,
+          })),
+        );
+        } catch (err) {
+          logger.warn({ msg: "Historical price sync: SQLite mirror write failed (non-fatal)", symbol, error: err instanceof Error ? err.message : String(err) });
+        }
         for (let j = 0; j < bars.length; j += UPSERT_CHUNK_SIZE) {
           const chunk = bars.slice(j, j + UPSERT_CHUNK_SIZE);
           const { sql, values } = buildUpsertSql(chunk);
@@ -232,6 +252,17 @@ export async function syncHistoricalPrices(options: HistoricalPriceSyncOptions =
     }
 
     if (fetchDelayMs > 0 && i < scope.length - 1) await sleep(fetchDelayMs);
+  }
+
+  // v3.28.0 end-of-task flush: promote the SQLite OHLCV mirror to Prisma.
+  // Non-fatal — the 60s timer also drains it.
+  if (!dryRun) {
+    try {
+      const sqlite = await import("@/lib/sqlite");
+      await sqlite.flushNseToPrisma();
+    } catch (err) {
+      logger.warn({ msg: "Historical price sync: end-of-task flush failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   const result: HistoricalPriceSyncResult = {
