@@ -270,3 +270,50 @@ Two compounding issues:
   cache-flake, fails run-to-run, `intelligence.ts`/`cache.ts` untouched — excluding it: **72 suites /
   1004 pass / 4 skip / 0 fail from these changes**).
 - No Prisma schema change → no migration.
+
+---
+
+# v3.28.5 — NSE scrip-list constant (Securities available for trading — Equity)
+
+- **Date**: Sep 05 2026
+- **On top of**: v3.28.4
+- **Status**: Code + tests complete; docs/commit pending user approval (no push/merge)
+- **User directive**: "NSE Securities available for trading" CSV → "create a constant which gets loaded for the
+  Symbol references".
+
+## Data source found (this resolved the earlier URL blocker)
+
+The `www.nseindia.com/static/market-data/securities-available-for-trading` page is the JS-guarded human listing —
+`curl` gets a 404 HTML shell (~281 KB). The machine endpoint exists on the archives host:
+
+**`https://archives.nseindia.com/content/equities/EQUITY_L.csv`** — HTTP 200, 181,507 B,
+header `SYMBOL,NAME OF COMPANY, SERIES, DATE OF LISTING, PAID UP VALUE, MARKET LOT, ISIN NUMBER, FACE VALUE`.
+
+Dataset facts (verified by analysis): **2,570 data rows**, every row exactly 8 comma-fields, zero embedded
+commas/quotes, zero duplicate SYMBOLs. Series histogram **EQ 2,288 / BE 254 / BZ 28**.
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/fetch-nse-scrips.ts` | NEW generator — `npx tsx scripts/fetch-nse-scrips.ts --write` (dry-run default prints stats), `httpsGet` from `node:https`, UTF-8 BOM strip, ≥2000-row sanity guard, warns on malformed/duplicate rows before writing. |
+| `lib/services/nseScripList.ts` | NEW generated constant (464 KB, header documents source URLs + "do not edit by hand"). Exports: `NseScrip` interface (`symbol`, `companyName`, `series`, `dateOfListing` DD-MMM-YYYY, `paidUpValue`, `marketLot`, `isin`, `faceValue`), `NSE_SCRIPS` (symbol-sorted), derived `NSE_SYMBOL_SET` + `NSE_SCRIP_BY_SYMBOL`, helpers `isNseSymbol` (case-insensitive + trim, O(1)), `getNseScrip`, `searchNseSymbols(query, limit=10)` (symbol-prefix first, then symbol/company substring, alphabetical within). |
+| `lib/__tests__/nseScripList.test.ts` | NEW — **11/11**: dataset sanity (2,570 rows, unique UPPERCASE symbols, series ∈ {EQ,BE,BZ}, 8-field row shape, ISIN `^IN[0-9A-Z]{10}$` [SME scrips start `IN9`], listing date DD-MMM-YYYY), fixture spot-checks (RELIANCE/TCS/INFY/20MICRONS), Set/Record consistency, `isNseSymbol`/`getNseScrip`/`searchNseSymbols` behavior incl. case-insensitivity + prefix priority. |
+| `package.json` | NEW script `"fetch:scrips": "npx tsx scripts/fetch-nse-scrips.ts"`. |
+
+## Verification
+
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**; none of the 46 are in the three new files.
+- **Targeted** — `nseScripList.test.ts` **11/11** green.
+- **Full suite** — unchanged from v3.28.4 baseline (1004 pass / 4 skip / 2 fail; 2 = documented pre-existing
+  `intelligence.test.ts` flake) — no runtime code path changed, the constant is purely additive.
+- No Prisma schema change → no migration.
+
+## Notes / deferred
+
+- Consumer wiring deliberately NOT done in this change (kept purely additive): backtest unlisted-symbol
+  fall-through (plan 07), screener/analyze symbol validation, IPO catalog symbol references (plan 08),
+  autocomplete UI. Plans for those ride on the existing pending 07/08 workstreams.
+- Sourced CSV archived at `C:\Users\lucky\AppData\Local\Temp\opencode\EQUITY_L.csv` (not committed).
+
+---
