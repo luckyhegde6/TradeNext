@@ -311,9 +311,61 @@ commas/quotes, zero duplicate SYMBOLs. Series histogram **EQ 2,288 / BE 254 / BZ
 
 ## Notes / deferred
 
-- Consumer wiring deliberately NOT done in this change (kept purely additive): backtest unlisted-symbol
-  fall-through (plan 07), screener/analyze symbol validation, IPO catalog symbol references (plan 08),
-  autocomplete UI. Plans for those ride on the existing pending 07/08 workstreams.
+- Original v3.28.5 was kept purely additive (constant + generator + helpers only). The consumer wiring below
+  landed as a follow-up increment in the same pending version.
 - Sourced CSV archived at `C:\Users\lucky\AppData\Local\Temp\opencode\EQUITY_L.csv` (not committed).
+
+---
+
+## v3.28.5 increment — consumer wiring (backtest fall-through, symbol search merge, IPO listed flag)
+
+- **On top of**: the v3.28.5 constant commit (all code above)
+- **Status**: Code + tests complete; docs/commit pending user approval (no push/merge)
+- **Why**: the user directive said the constant is "loaded for the Symbol references" — wire it into the three
+  symbol-reference surfaces now instead of waiting for plans 07/08.
+
+### Design (single source for pure logic)
+
+NEW `lib/services/symbolReference.ts` — both consumers import from here (routes are auth/prisma-heavy, so the
+pure logic is directly unit-testable):
+
+- `mergeSymbolSuggestions(constantMatches: NseScrip[], dbMatches: {symbol; companyName?}[], limit = 15):
+  {symbol; companyName}[]` — constant-first, dedupe on uppercased+trimmed symbol (constant's companyName wins),
+  DB branch uppercases + trims too, result capped.
+- `isBacktestSymbolAllowed(symbol: string, hasDbRecord: boolean): boolean` — `hasDbRecord || isNseSymbol(symbol)`.
+
+### Files Changed (increment)
+
+| File | Change |
+|------|--------|
+| `lib/services/symbolReference.ts` | NEW pure helpers above (≈40 lines, documented). |
+| `app/api/symbols/search/route.ts` | Constant-first autocomplete: `searchNseSymbols(search, 15)` → DB `findMany`
+  (contains symbol/companyName, isActive, take 15) → `mergeSymbolSuggestions(..., 15)` → merge non-empty returns
+  `{symbols, source}` with source `"merged" | "constant" | "db"`. The existing NSE fallback block
+  (`getIndexStocks` + `syncStocksToDatabase` + re-query) now runs ONLY when the merged result is empty.
+  Response shape unchanged — both consumers (`Autocomplete.tsx` L43, `MarketAnalyticsTabs.tsx` L497) read only
+  `data.symbols || []`. |
+| `app/api/backtest/run/route.ts` | Hard-404 gate: existing `prisma.symbol.findUnique` record check (L76, the only
+  call site in the repo) is now `if (!isBacktestSymbolAllowed(symbolUpper, Boolean(symbolRecord))) → 404`.
+  A listed-but-unsynced symbol now falls through to the existing `getBacktestData` chain (SQLite → daily_prices →
+  NSE fetch) instead of 404ing. |
+| `lib/services/nseIpoService.ts` | `IpoIssue` gains optional `listed?: boolean`; NEW private `enrichIpoIssue(r)`
+  resolves `getNseScrip(symbol.trim().toUpperCase())` → `listed: true/false` (false on empty/unknown); IPO catalog
+  rows now `.filter(isIpoIssue).map(enrichIpoIssue)` — no rows dropped, series untouched. |
+| `app/components/recommendations/IposTab.tsx` | "Listed" emerald pill next to the symbol when `issue.listed`
+  (title "Symbol is already listed on NSE — tradeable now"). Client imports `IpoIssue` as type only → no bundle impact. |
+| `lib/__tests__/symbolReference.test.ts` | NEW — 11 tests: merge semantics (constant-first, uppercase dedupe
+  + trim, constant companyName wins, caps, constant-only/DB-only/empty), backtest gate truth table
+  (constant+no-DB → allowed, constant+DB → allowed, unknown+no-DB → rejected, unknown+DB → allowed) + a real-dataset
+  sanity check via `NSE_SCRIP_BY_SYMBOL` (RELIANCE). |
+| `lib/__tests__/nseIpoService.test.ts` | MODIFIED — the pre-existing v3.6.4 suite (11: getUpcomingIpoIssues, issue-size parsers, getIpoIssueDetail) preserved + NEW `getUpcomingIpoIssues — scrip-list enrichment` describe (4): RELIANCE → `listed: true`, `NEWIPOXYZ` → `false`, `"  reliance  "` → `true` (trim + case-insensitive, `""` → false), 3-row attach `[true,false,true]` (RELIANCE/NEWIPOXYZ/TCS). Shape-exact L129 assertion updated to expect the `listed` field (SHIPROCKET genuinely in the scrip list; NACL SME not). File total **15**. |
+
+### Verification (increment)
+
+- **Targeted** — `symbolReference.test.ts` (11) + `nseIpoService.test.ts` (15 = 11 pre-existing v3.6.4 + 4 enrichment)
+  + `nseScripList.test.ts` (11) — 37 green
+- **tsc** — `npx tsc --noEmit` = **46 = exact baseline (0 new)**; none of the 46 touch the new/edited files
+  (pre-existing DataFetcher/LoadingSpinner jest-dom + client-cache/enhanced-cache/validation/filter-engine/userService test typing).
+- No Prisma schema change → no migration.
 
 ---

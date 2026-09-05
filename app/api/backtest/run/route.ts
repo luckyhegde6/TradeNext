@@ -24,6 +24,7 @@ import { auth } from "@/lib/auth";
 import { filterGroupSchema } from "@/lib/screener/condition-tree";
 import { runBacktest } from "@/lib/screener/backtest-engine";
 import { getBacktestData } from "@/lib/services/backtestDataService";
+import { isBacktestSymbolAllowed } from "@/lib/services/symbolReference";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -72,12 +73,15 @@ export async function POST(request: Request) {
 
     const symbolUpper = symbol.toUpperCase();
 
-    // --- Verify symbol exists ---
+    // --- Verify symbol exists (DB record OR valid NSE scrip) ---
+    // A valid NSE scrip missing from the `symbols` table (fresh listing,
+    // BE/BZ series) falls through to the getBacktestData chain
+    // (memory → backtest_history → daily_prices → NSE) instead of a hard 404.
     const symbolRecord = await prisma.symbol.findUnique({
       where: { symbol: symbolUpper },
     });
 
-    if (!symbolRecord) {
+    if (!isBacktestSymbolAllowed(symbolUpper, Boolean(symbolRecord))) {
       return NextResponse.json({ error: `Symbol "${symbol}" not found` }, { status: 404 });
     }
 

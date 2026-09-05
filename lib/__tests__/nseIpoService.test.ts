@@ -126,7 +126,12 @@ describe("getUpcomingIpoIssues", () => {
     ]);
 
     const res = await getUpcomingIpoIssues();
-    expect(res.data).toEqual([nseIpoRow, nseIpoRow2]);
+    // Each surviving row is now enriched with the `listed` flag (v3.28.5):
+    // SHIPROCKET is in the committed scrip list, NACL (SME) is not.
+    expect(res.data).toEqual([
+      { ...nseIpoRow, listed: true },
+      { ...nseIpoRow2, listed: false },
+    ]);
     expect(res.changed).toBe(true);
   });
 
@@ -255,5 +260,60 @@ describe("getIpoIssueDetail", () => {
 
     const res = await getIpoIssueDetail("SHIPROCKET");
     expect(res).toMatchObject({ data: persisted, source: "db", changed: false });
+  });
+});
+
+// ─── Scrip-list enrichment (`listed` flag from the committed NSE constant) ──
+// v3.28.5 consumer wiring: every issue row gains `listed` (tradeable-now flag)
+// resolved from the committed scrip reference via `getNseScrip` — NOT from NSE.
+
+describe("getUpcomingIpoIssues — scrip-list enrichment", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.marketCache.findUnique.mockResolvedValue(null);
+    prisma.marketCache.upsert.mockResolvedValue({});
+  });
+
+  it("tags a listed symbol (present in the scrip constant) as listed: true", async () => {
+    // RELIANCE is in the committed scrip constant (real dataset sanity check).
+    nseFetch.mockResolvedValue([{ ...nseIpoRow, symbol: "RELIANCE" }]);
+
+    const res = await getUpcomingIpoIssues(true);
+
+    expect(res.data).toHaveLength(1);
+    expect(res.data[0].symbol).toBe("RELIANCE");
+    expect(res.data[0].listed).toBe(true);
+  });
+
+  it("tags a brand-new (not yet in the scrip list) symbol as listed: false", async () => {
+    nseFetch.mockResolvedValue([{ ...nseIpoRow, symbol: "NEWIPOXYZ" }]);
+
+    const res = await getUpcomingIpoIssues(true);
+
+    expect(res.data[0].listed).toBe(false);
+  });
+
+  it("is case-insensitive and trims the symbol before lookup", async () => {
+    nseFetch.mockResolvedValue([
+      { ...nseIpoRow, symbol: "  reliance  " },
+      { ...nseIpoRow2, symbol: "" },
+    ]);
+
+    const res = await getUpcomingIpoIssues(true);
+
+    expect(res.data[0].listed).toBe(true); // "  reliance  " → RELIANCE
+    expect(res.data[1].listed).toBe(false); // empty symbol → false
+  });
+
+  it("attaches listed to every mapped row (no rows dropped by enrichment)", async () => {
+    nseFetch.mockResolvedValue([
+      { ...nseIpoRow, symbol: "RELIANCE" },
+      { ...nseIpoRow, symbol: "NEWIPOXYZ" },
+      { ...nseIpoRow2, symbol: "TCS" },
+    ]);
+
+    const res = await getUpcomingIpoIssues(true);
+
+    expect(res.data.map((r) => r.listed)).toEqual([true, false, true]);
   });
 });
