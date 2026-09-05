@@ -344,7 +344,17 @@ export default function IposTab({ loading = false }: IposTabProps) {
                               {issue.companyName}
                             </a>
                           </div>
-                          <div className="text-xs text-gray-500">{issue.symbol}</div>
+                          <div className="text-xs text-gray-500 flex items-center gap-2">
+                            {issue.symbol}
+                            {issue.listed && (
+                              <span
+                                className="rounded-full border border-emerald-600/40 bg-emerald-600/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400"
+                                title="Symbol is already listed on NSE — tradeable now"
+                              >
+                                Listed
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-gray-400">{issue.series}</td>
                         <td className="px-4 py-3 text-gray-300">{issue.issueStartDate}</td>

@@ -16,6 +16,8 @@ interface AiActionButtonProps {
   size?: "normal" | "small";
   /** Optional className override */
   className?: string;
+  /** Optional error text rendered as a small red status line under the button */
+  error?: string | null;
 }
 
 /**
@@ -34,6 +36,7 @@ export default function AiActionButton({
   disabled: externalDisabled,
   size = "normal",
   className,
+  error,
 }: AiActionButtonProps) {
   const [internalLoading, setInternalLoading] = useState(false);
   const [rateInfo, setRateInfo] = useState<{
@@ -104,6 +107,13 @@ export default function AiActionButton({
           {isRateLimited
             ? "Rate limit reached — wait 1 min"
             : `${rateInfo.remaining}/${rateInfo.limit} AI calls left`}
+        </span>
+      )}
+
+      {/* Error status line (AI failure surfaced from the caller) */}
+      {error && !isLoading && (
+        <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded max-w-xs text-right bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
+          {error}
         </span>
       )}
     </div>

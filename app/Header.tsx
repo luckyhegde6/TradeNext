@@ -330,9 +330,14 @@ export default function Header() {
             )}
 
             {isLoggedIn && (
-              <MobileNavLink href="/fo" active={isActive("/fo")} onClick={() => setIsMobileMenuOpen(false)}>
-                F&O Analytics
-              </MobileNavLink>
+              <>
+                <MobileNavLink href="/fo" active={isActive("/fo")} onClick={() => setIsMobileMenuOpen(false)}>
+                  F&O Analytics
+                </MobileNavLink>
+                <MobileNavLink href="/alerts" active={isActive("/alerts")} onClick={() => setIsMobileMenuOpen(false)}>
+                  Alerts
+                </MobileNavLink>
+              </>
             )}
           </div>
 

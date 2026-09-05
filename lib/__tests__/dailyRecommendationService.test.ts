@@ -62,7 +62,15 @@ jest.mock("@/lib/prisma", () => {
     $queryRaw: jest.fn(),
     $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
   };
-  return { __esModule: true, default: mock };
+  // Pure stub — injects cacheStrategy at the query boundary (mirrors the
+  // recommendationPerformanceService.test.ts stub). Backward-compatible with
+  // existing findFirst.mock.calls[0][0]?.where/select assertions (spread
+  // preserves keys) and lets the v3.28.4 regression test assert cacheStrategy.
+  return {
+    __esModule: true,
+    default: mock,
+    withAccelerateCache: (strategy: any) => (args: any) => ({ ...(args as object), cacheStrategy: strategy }),
+  };
 });
 
 jest.mock("@/lib/logger", () => {
@@ -793,6 +801,38 @@ describe("dailyRecommendationService", () => {
         expect(key).toBe("recommendations:latest");
         expect(entry).toMatchObject({ runId: "run-new", newestRunId: "run-new" });
         expect(ttl).toBe(15 * 60);
+      });
+
+      test("v3.28.4: heavy latestRun/newestRun reads carry Accelerate cacheStrategy; fingerprint probes stay uncached", async () => {
+        cache.get.mockReturnValue({
+          runId: "run-old",
+          newestRunId: "run-old",
+          data: { run: { id: "run-old" }, stocks: [], latestRun: { id: "run-old" } },
+        });
+        mockPrisma.dailyRecommendationRun.findFirst
+          .mockResolvedValueOnce({ id: "run-new" }) // fingerprint: qualifying run
+          .mockResolvedValueOnce({ id: "run-new" }) // fingerprint: newest run
+          .mockResolvedValueOnce({
+            // latestRun (heavy include query — edge-cacheable)
+            id: "run-new",
+            status: "completed",
+            runDate: new Date(),
+            stocks: [{ symbol: "RELIANCE", screenerCount: 2, tracker: { id: "t1" } }],
+          })
+          .mockResolvedValueOnce({ id: "run-new", runDate: new Date(), status: "completed" });
+
+        await getLatestRecommendations();
+
+        const calls = mockPrisma.dailyRecommendationRun.findFirst.mock.calls;
+        expect(calls).toHaveLength(4);
+        // Fingerprint probes stay uncached — they are the cross-instance
+        // staleness guard and must always hit Prisma.
+        expect(calls[0][0]).not.toHaveProperty("cacheStrategy");
+        expect(calls[1][0]).not.toHaveProperty("cacheStrategy");
+        // Heavy stocks-include query + lightweight newest-run row are the two
+        // edge-cached reads (v3.28.4).
+        expect(calls[2][0]).toHaveProperty("cacheStrategy", { ttl: 60, swr: 30 });
+        expect(calls[3][0]).toHaveProperty("cacheStrategy", { ttl: 60, swr: 30 });
       });
 
       test("refetches when only the newest run changed (AI-unavailable failure on another instance)", async () => {

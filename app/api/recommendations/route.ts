@@ -8,6 +8,23 @@ import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
 
+// Route-level memory cache. DISTINCT from the service's LATEST_KEY
+// ("recommendations:latest"): writing the responseBody shape under the service
+// key previously destroyed the service's LatestCacheEntry ({runId, newestRunId,
+// data}) → the run-id fingerprint check always read cached.runId === undefined
+// → the heavy stocks-include query ran on EVERY request (db-health 14/14
+// huge-query misses). The key split fixes the collision; the read-first fast
+// path below then serves the serialized payload from memory with ZERO Prisma
+// reads for up to TTL seconds.
+const ROUTE_CACHE_KEY = "recommendations:api:latest";
+const ROUTE_CACHE_TTL_SECONDS = 60;
+
+interface RouteRecommendationsCacheBody {
+  success: boolean;
+  stocks: unknown[];
+  timestamp: string;
+}
+
 // GET /api/recommendations — Get latest daily recommendations
 export async function GET(req: NextRequest) {
   const requestId = req.headers.get("x-request-id") || "none";
@@ -34,7 +51,7 @@ export async function GET(req: NextRequest) {
         });
       }
       // No SQLite mirror yet — fall through to memory cache / Prisma attempt.
-      const memCached = recommendationsCache.get("recommendations:latest");
+      const memCached = recommendationsCache.get<RouteRecommendationsCacheBody>(ROUTE_CACHE_KEY);
       if (memCached) {
         logger.warn({
           msg: "Recommendations: plan-limit breaker open — serving memory cache",
@@ -42,6 +59,25 @@ export async function GET(req: NextRequest) {
         });
         return NextResponse.json({ ...memCached, servedFrom: "memory_cache" });
       }
+    }
+
+    // v3.28.4 — read-first fast path: the serialized payload was already
+    // cached under the ROUTE-CONTAINED key in a prior request (60s TTL).
+    // Serve it from memory WITHOUT touching the service's validated cache or
+    // Prisma. This is the collision-fix companion: the previous code wrote the
+    // responseBody under the service's "recommendations:latest" key, which
+    // corrupted the service's LatestCacheEntry shape and forced the heavy
+    // stocks-include query on EVERY request.
+    const memCached = recommendationsCache.get<RouteRecommendationsCacheBody>(ROUTE_CACHE_KEY);
+    if (memCached) {
+      recordRead("recommendations.memory", {
+        source: "memory",
+        latencyMs: 0,
+        rows: memCached.stocks.length,
+        hit: true,
+      });
+      logger.debug({ msg: "Recommendations served from route memory cache" });
+      return NextResponse.json({ ...memCached, servedFrom: "memory_cache" });
     }
 
     const _recStart = performance.now();
@@ -116,8 +152,9 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for SQLite fallback + in-memory
-    recommendationsCache.set("recommendations:latest", responseBody, 600);
+    // Cache under the route-contained key (v3.28.4 — was "recommendations:latest",
+    // which collided with the service's LATEST_KEY and destroyed its fingerprint)
+    recommendationsCache.set(ROUTE_CACHE_KEY, responseBody, ROUTE_CACHE_TTL_SECONDS);
 
     // Background: sync to SQLite for future DB-outage fallback
     const sqlite = getSqliteFallback();
@@ -143,7 +180,7 @@ export async function GET(req: NextRequest) {
 
     // --- Memory cache fallback (covers both DB + network errors) ---
     if (isDbUnavailableError(error)) {
-      const memCached = recommendationsCache.get("recommendations:latest");
+      const memCached = recommendationsCache.get<RouteRecommendationsCacheBody>(ROUTE_CACHE_KEY);
       if (memCached) {
         logger.warn({ msg: "Recommendations: DB unavailable — serving memory cache" });
         return NextResponse.json(memCached);

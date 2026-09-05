@@ -695,6 +695,63 @@ describe("SQLite backup fallback", () => {
       expect(fb!.isReady()).toBe(true);
       expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
     });
+
+    it("v3.28.1 — repairs a partial init (state.db set but ready=false) on the next retry", async () => {
+      // Simulate the prod failure: initSqliteBackup assigns state.db, then the
+      // schema loop throws partway, leaving state.db non-null + ready:false.
+      // Before the fix, the `if (state.db) return` guard made the retry a
+      // permanent no-op → "SQLite Not Ready" + promoteNseToPrisma "no such
+      // table". After the fix, the catch nulls state.db so the retry rebuilds.
+      const sqljsModule: any = require("sql.js");
+      const { Database } = await sqljsModule.default();
+      const proto = Database.prototype;
+      const origRun = proto.run;
+      let failed = false;
+      proto.run = function (...args: any[]) {
+        if (!failed) {
+          failed = true;
+          throw new Error("simulated schema-loop failure");
+        }
+        return origRun.apply(this, args);
+      };
+      try {
+        sqljsModule.__resetStore();
+        const { initSqliteBackup, resetSqliteStateForTests, getSqliteFallback } = await import("../sqlite");
+        resetSqliteStateForTests();
+
+        // First init FAILS partway — the fix must reset state.db so the layer
+        // is not left stuck: getSqliteFallback() returns null after the catch.
+        await initSqliteBackup();
+        expect(getSqliteFallback()).toBeNull();
+
+        // The next ensureSqliteBackup() rebuilds from scratch → ready.
+        const { ensureSqliteBackup } = await import("../sqlite");
+        const fb = await ensureSqliteBackup();
+        expect(fb).not.toBeNull();
+        expect(fb!.isReady()).toBe(true);
+        expect(fb!.getHealthStatus().sqlite.ready).toBe(true);
+      } finally {
+        proto.run = origRun;
+      }
+    });
+
+    it("v3.28.1 — promoteNseToPrisma on a not-ready mirror returns zero without touching tables", async () => {
+      // A not-ready mirror (db unset OR partially built) must never be promoted:
+      // reading missing NSE-store tables would throw "no such table". The guard
+      // returns the zero summary instead (no Prisma ops, no throw).
+      const sqljsModule: any = require("sql.js");
+      sqljsModule.__resetStore();
+      const { promoteNseToPrisma, resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests(); // ready:false, state.db:null → skip
+
+      const summary = await promoteNseToPrisma();
+      expect(summary).toEqual({
+        symbols: 0,
+        daily_price: 0,
+        corporate_action: 0,
+        chartink_screener_result: 0,
+      });
+    });
   });
 
   // ── v3.22.0: write-behind logging queue ─────────────────────────────────
@@ -796,6 +853,50 @@ describe("SQLite backup fallback", () => {
       expect(after.lastFlushAt).not.toBeNull();
       expect(after.lastRetained.server_log).toBeGreaterThanOrEqual(1);
       expect(after.lastRetained.api_request).toBeGreaterThanOrEqual(2);
+    });
+
+    it("strips SQLite-only bookkeeping columns (queued_at) from the promoted Prisma createMany [v3.28.3 regression]", async () => {
+      mockPrisma.auditLog.createMany.mockClear();
+      const fb = getSqliteFallback()!;
+      // enqueueWriteBehind AUTO-ADDS `queued_at` to every stored row — the
+      // pre-v3.28.3 mapWbToPrisma passed it through verbatim, so
+      // auditLog.createMany threw "Unknown argument queued_at" and audit rows
+      // were NEVER promoted (sticky wb rows re-failed every 15-min flush,
+      // spamming db-health DB Errors — observed 2026-09-05).
+      fb.enqueueWriteBehind("audit_log", {
+        id: "a-map-1",
+        user_id: 7,
+        user_email: "who@example.com",
+        action: "ADMIN_DB_SYNC",
+        resource: "db-health",
+        resource_id: "x",
+        method: "POST",
+        path: "/api/admin/db-health",
+        response_status: 200,
+        response_time: 42,
+        ip_address: "127.0.0.1",
+        metadata: { ok: true, n: 3 },
+      });
+
+      const res = await fb.flushWriteBehind();
+      expect(res.skipped).toBe(false);
+      expect(res.flushed.audit_log).toBeGreaterThanOrEqual(1);
+      expect(mockPrisma.auditLog.createMany).toHaveBeenCalled();
+
+      const data = mockPrisma.auditLog.createMany.mock.calls.flatMap(
+        (call: unknown[]) => (call[0] as { data: Array<Record<string, unknown>> }).data,
+      );
+      expect(data.length).toBeGreaterThanOrEqual(1);
+      for (const entry of data) {
+        // The wb-only bookkeeping column must NEVER reach Prisma.
+        expect(entry).not.toHaveProperty("queued_at");
+        // Mapped fields still arrive correctly for Prisma.
+        expect(entry.action).toBe("ADMIN_DB_SYNC");
+        expect(entry.userId).toBe(7);
+        expect(entry.userEmail).toBe("who@example.com");
+        expect(entry.ipAddress).toBe("127.0.0.1");
+        expect(entry.metadata).toEqual({ ok: true, n: 3 });
+      }
     });
 
     it("leaves rows queued when the DB is unavailable (skip, not 500)", async () => {

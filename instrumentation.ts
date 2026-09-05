@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon }, { startWorker }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush, startNsePromoteFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush, startNsePromoteFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
@@ -39,8 +39,13 @@ export async function register() {
     if (workerLeader) {
       // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
       startWorker(30_000);
+      // v3.28.2: actually stop the poll loop when leadership is lost. Without
+      // this, a fail-open DB blip lets EVERY instance start a worker; when the
+      // DB recovers only one keeps the leader row but the losers kept polling
+      // forever → multiple active workers/tasks.
       leader.startLeaderHeartbeat("worker", () => {
-        logger.warn({ msg: "Lost worker leadership — stopping", self: leader.LEADER_SELF });
+        logger.warn({ msg: "Lost worker leadership — stopping poll loop", self: leader.LEADER_SELF });
+        stopWorkerEngine();
       });
     } else {
       logger.warn({ msg: "Worker engine NOT started (another instance is worker leader)", self: leader.LEADER_SELF });
@@ -52,7 +57,8 @@ export async function register() {
         logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
       );
       leader.startLeaderHeartbeat("cron-daemon", () => {
-        logger.warn({ msg: "Lost cron leadership — stopping", self: leader.LEADER_SELF });
+        logger.warn({ msg: "Lost cron leadership — stopping daemon", self: leader.LEADER_SELF });
+        stopCronDaemon();
       });
     } else {
       logger.warn({ msg: "Cron daemon NOT started (another instance is cron leader)", self: leader.LEADER_SELF });

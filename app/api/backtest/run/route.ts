@@ -72,13 +72,22 @@ export async function POST(request: Request) {
 
     const symbolUpper = symbol.toUpperCase();
 
-    // --- Verify symbol exists ---
+    // --- Derive symbol presence for source labeling (no hard 404) ---
+    // A symbol missing from the `symbols` table (fresh listing, BE/BZ series,
+    // or an unknown ticker) falls through to the getBacktestData chain
+    // (memory → backtest_history → daily_prices → NSE); the only "no data"
+    // failure is the barCount guard below.
     const symbolRecord = await prisma.symbol.findUnique({
       where: { symbol: symbolUpper },
     });
+    const symbolSource = symbolRecord ? "known" : "unlisted";
 
     if (!symbolRecord) {
-      return NextResponse.json({ error: `Symbol "${symbol}" not found` }, { status: 404 });
+      logger.warn({
+        msg: "Backtest fall-through: symbol not in static table, using data chain",
+        symbol: symbolUpper,
+        symbolSource,
+      });
     }
 
     // --- Fetch historical OHLCV data (memory → temp table → NSE API) ---
@@ -166,6 +175,7 @@ export async function POST(request: Request) {
       trades: result.trades,
       barCount: result.barCount,
       dataSource: data.source,
+      symbolSource,
     });
   } catch (error) {
     logger.error({ msg: "Backtest failed", error: error instanceof Error ? error.message : String(error) });

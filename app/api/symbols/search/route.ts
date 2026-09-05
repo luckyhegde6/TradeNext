@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getIndexStocks, syncStocksToDatabase } from "@/lib/index-service";
+import { searchNseSymbols } from "@/lib/services/nseScripList";
+import { mergeSymbolSuggestions } from "@/lib/services/symbolReference";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -40,8 +42,14 @@ export async function GET(req: Request) {
 
         const search = query.toUpperCase();
 
-        // First, try to get from database
-        const symbols = await prisma.symbol.findMany({
+        // Constant first — the committed NSE equity-scrip reference
+        // (2,570 scrips, SYMBOL-prefix priority). Covers fresh listings and
+        // BE/BZ-series symbols not yet in the `symbols` table without any
+        // NSE round-trip or DB write. DB rows supplement + dedupe below.
+        const constantMatches = searchNseSymbols(search, 15);
+
+        // Supplement from database
+        const dbMatches = await prisma.symbol.findMany({
             where: {
                 OR: [
                     { symbol: { contains: search } },
@@ -59,9 +67,14 @@ export async function GET(req: Request) {
             ]
         });
 
-        // If we have results, return them
+        const symbols = mergeSymbolSuggestions(constantMatches, dbMatches, 15);
+
+        // If we have results, return them (constant / db / merged)
         if (symbols.length > 0) {
-            return NextResponse.json({ symbols, source: 'db' });
+            const source = constantMatches.length > 0 && dbMatches.length > 0
+                ? 'merged'
+                : constantMatches.length > 0 ? 'constant' : 'db';
+            return NextResponse.json({ symbols, source });
         }
 
         // No results in DB - try to fetch from NSE and sync

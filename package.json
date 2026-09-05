@@ -41,7 +41,8 @@
     "dbprod:build": "cross-env NODE_ENV=production USE_REMOTE_DB=true npm run quickbuild",
     "db:enable-timescale": "npx ts-node scripts/enable_timescale.ts",
     "docker:terminate:win": "powershell -ExecutionPolicy Bypass -File scripts/docker-terminate.ps1",
-    "docker:terminate": "node scripts/docker-terminate-cross.cjs"
+    "docker:terminate": "node scripts/docker-terminate-cross.cjs",
+    "fetch:scrips": "npx tsx scripts/fetch-nse-scrips.ts"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

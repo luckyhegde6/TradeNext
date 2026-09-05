@@ -1,38 +1,45 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20260902-db-health-ops-visibility"
+session_id: "sess-20260905-v3290-uiux-audit-fixes"
 agent: "system"
-timestamp: "2026-09-02T00:00:00Z"
+timestamp: "2026-09-05T00:00:00Z"
 status: "in_progress"
 priority: "high"
-parent_session: "sess-20260828-stock-analysis-skill"
+parent_session: "sess-20260905-v3285-nse-scrip-list"
 child_sessions: []
-checkpoint: "v3.21.2-committed-7409616 + v3.21.3-otel+p1001-diagnosis-docs-verified-commit-pending-user"
+checkpoint: "v3.29.0 UI/UX audit fixes — backtest symbol-gate softening + AI-failure error surfacing (extractErrorMessage) + mobile-nav Alerts + [object Object] throw-site fix — code + tests + verification + docs complete: tsc 46 exact baseline, targeted 23/23, full suite 1043 pass / 4 skip / 1 fail (= documented pre-existing intelligence flake only); Playwright live-verified; commit pending user (push carries v3.28.5 6700076 — do not amend)"
 ---
 
 # Active Session Handoff
 
 ## Context
-- **Task**: DB-health ops-visibility + DB-op-tiering workstream on branch `feat/db-health-ops-visibility`. Now THREE increments are on the branch (in commit order): **v3.21.1** (base `4c47348` + docs `47e6677` — SQLite ops-counter persistence + Total Ops/Plan Usage UI + sql.js WASM fix + per-type DB-error summary + lazy SQLite re-init), **v3.21.2** (committed `7409616` + pushed — stock-quote tiering cache→SQLite→Prisma + TTL ms→s fix + SQLite backup/restore), **v3.21.3** (UNCOMMITTED — Prisma OTel tracing opt-in + Prisma Compute P1001 false-alarm diagnosis). No schema change → no migration. Commit/push pending user for v3.21.3.
-- **Branch**: `feat/db-health-ops-visibility`. v3.21.0 (`feat/stock-analysis-skill`) is a SEPARATE workstream awaiting user commit/PR decision; 2 Dependabot high-severity advisories pending user.
+- **Task**: v3.29.0 — UI/UX audit fixes (spec/plan 07) on top of v3.28.5 `6700076` (committed, unpushed): (1) **backtest symbol-gate softening** — v3.28.5's `isBacktestSymbolAllowed` 404-gate removed so unknown/unlisted symbols fall through to `getBacktestData` instead of a misleading 404; (2) **AI-failure error surfacing** — watchlist AI-panel 500s were swallowed and the throw-site rendered `[object Object]`; NEW `extractErrorMessage` helper + `AiActionButton` `error` prop fix both; (3) **mobile-nav Alerts** — logged-in quick-access grid gains F&O Analytics + Alerts.
+- **Branch**: `fix/v3.28.1-sqlite-self-heal` (HEAD = v3.28.5 `6700076`, 17 files, unpushed). Do not amend `6700076` or `c90f052`; the plan-07 push carries `6700076` along.
 
 ## Progress
-- [x] **v3.21.1** (committed `4c47348` + docs `47e6677`, pushed): SQLite WASM fix (serverExternalPackages + resolveSqlWasm), ops-counter persistence (`ops_counter`, IST-day + Math.max), `/api/admin/db-health` Total Operations/Plan usage, per-type DB-error summary (`classifyDbError` + `db_error_counts`), `ensureSqliteBackup()` lazy init + `resetSqliteStateForTests()`. Suite **932 pass / 4 skip**.
-- [x] **v3.21.2** (committed `7409616` + pushed): Fix A `stock-service.ts` `syncDailyPriceOnce` (market-open + seed-once/IST-day via globalThis Set); Fix B `lib/sqlite.ts` `daily_price_snapshot` table + snapshot get/set + DISTINCT ON seed, closed-market hotCache→SQLite (zero Prisma) → on miss 2-3 reads; Fix C `enhanced-cache.ts` TTL ms→s (`Math.ceil(ms/1000)`); Fix D `priceSyncService.ts` gate by `isMarketAccumulationWindow()` + snapshot warm; Fix E db-health `opsSnapshot` before probe; SQLite backup/restore (`exportSqliteBackup`/`restoreSqliteBackup`: 50MB cap + magic header + required tables + live swap) + POST `backup`/`restore` + Backup & Restore card. NEW `dbOpTiering.test.ts` (9). Suite **941 pass / 4 skip**; tsc 46 = baseline.
-- [x] **v3.21.3 (UNCOMMITTED)**: installed `@prisma/instrumentation` (7.10.0) + 8 `@opentelemetry/*` (25 pkgs). NEW `lib/otel.ts` `otelSetup()` — strictly opt-in (`PRISMA_OTEL_ENABLED=1` else no-op), AsyncHooksContextManager + NodeTracerProvider + PrismaInstrumentation via registerInstrumentations + SimpleSpanProcessor → OTLP/HTTP exporter (console fallback), idempotent `__tnPrismaOtelReady`, try/catch never crashes. Wired `lib/prisma.ts` module-top BEFORE singleton. `.env.example` docs. NEW `otel.test.ts` (4 no-op guards). Suite **945 pass / 4 skip**; tsc **46 = baseline**; no errors in `lib/otel.ts`/`lib/prisma.ts`. **P1001 diagnosis (no code fix — user applies Console toggle)**: Netlify healthy (latest `main` deploy ready; build = prisma generate + quickbuild, no migrate deploy); the "Prisma Compute Deploy failed P1001" (#21) = auto-schema-apply sandbox running `migrate deploy` in a network-isolated sandbox that can't reach direct-TCP `db.prisma.io:5432`; verified `migrate status` = 36 migrations up to date, **ZERO pending** → false alarm. FIX (user-approved): Prisma Console → DB → toggle OFF "apply schema changes automatically"; future migrations via v3.20.5 runbook (`prisma migrate deploy` + DIRECT_URL from an env with egress). **BUGS.md #13**.
-- [x] **Docs (v3.21.2 + v3.21.3)**: AGENTS.md version table (v3.21.2/v3.21.3 rows), `.agents/CHANGELOG.md` index + `.agents/changelog/versions-v3.21.md` (v3.21.2 + v3.21.3 sections), `.env.example`, `BUGS.md` (#13), plan doc `04-db-op-tiering-cache-sqlite-prisma.md` (q4), Primer.md (status sections + Last Updated), agent-memory.md (v3.21.2 + v3.21.3 entries), Lessons.md (#97, #98 + update log), session `2026-09-02-db-health-ops-visibility/` (decisions + flow).
+- [x] **P1 backtest gate softened** (`app/api/backtest/run/route.ts`): no symbol 404 — `symbolUpper` :73, `findUnique` :80, `symbolSource = symbolRecord ? "known" : "unlisted"` :83 (labeling only), warn fall-through log :85-91, `getBacktestData(symbolUpper)` :97, only no-data failure = `barCount < 50 → 400` :99-103, `symbolSource` echoed :178, `runtime="nodejs"` :29. `isBacktestSymbolAllowed` REMOVED from `lib/services/symbolReference.ts` (dead code; file now exports only `mergeSymbolSuggestions`). `symbolReference.test.ts` **11 → 7** (4 gate tests removed with the helper).
+- [x] **P2 AI-failure surfacing**: NEW `lib/aiErrorMessage.ts` `extractErrorMessage(err, fallback = "AI analysis failed")` (unwraps `Error.message` string / nested `{error:{message}}`); `app/components/AiActionButton.tsx` gains `error?: string | null` :20 → red status line :114-116 (hidden while loading); `app/watchlist/page.tsx` import :8, throw-site normalization `err.error || HTTP <status>` :254 (was `[object Object]` when `err.error` was an object), `setAiError(extractErrorMessage(err))` :268, passes `error={aiError}`.
+- [x] **P3 mobile nav** (`app/Header.tsx`): logged-in quick-access `grid-cols-2` :312 → Dashboard / Portfolio / **F&O Analytics** :334 / **Alerts** :337 (desktop `/alerts` :141, `/fo` :147). Live-verified 375×812.
+- [x] **Tests (NEW)**: `lib/__tests__/backtestSymbolFallthrough.test.ts` 4 (node-env; unlisted+enough bars → 200 `symbolSource:"unlisted"`; unlisted <50 bars → 400; listed → 200 `symbolSource:"known"`; unauthenticated → 401); `lib/__tests__/watchlistAiError.test.ts` 8 (error normalization incl. nested `{error:{message}}` shapes, `[object Object]` regression); `app/components/__tests__/AiActionButton.test.tsx` 4 (path deviation from convention; uses plain `test(` not `it(`).
+- [x] **Verification**: tsc **46 = exact baseline (0 new)**; targeted 4 suites **23/23**; full suite **1043 pass / 4 skip / 1 fail** — 1 = documented pre-existing `intelligence.test.ts` async flake (excluding it: **72 suites / 1043 pass / 4 skip / 0 fail from these changes**). Net suite delta **+12** (16 new, 4 removed) vs the 1031 pre-v3.29.0 observed baseline. No schema change → no migration.
+- [x] **Live verification (Playwright, :3000, admin session)**: `RBLBANK` backtest → **200** `symbolSource:"unlisted"`, 70 bars; simulated AI 500 `{error:{message:"AI provider unavailable (simulated 500)"}}` → red line shows extracted text, button stays enabled; 375×812 hamburger grid shows Dashboard/Portfolio/F&O Analytics/Alerts; `[object Object]` regression re-verified fixed; test watchlist deleted via UI. Dev server PID 34672 pre-existing, left running (do not kill).
+- [x] **Docs (v3.29.0)**: NEW `.agents/changelog/versions-v3.29.md`; `.agents/CHANGELOG.md` index row; `AGENTS.md` version-table row; `TODO.md` quick-ref row; `Primer.md` (Last Updated + Current Project Status); `agent-memory.md` entry; `.agents/session-todos.md`; this file; NEW `.agents/sessions/2026-09-05-fix-v3.28.1-sqlite-self-heal/decisions.md` + `flow.md`.
+- [x] **Earlier branch state (unchanged)**: v3.28.5 `6700076` committed, unpushed (17 files); v3.28.4 `c90f052` committed + pushed; v3.28.3 `a1dd094` committed + pushed; v3.28.2 `5a63fc4` committed + pushed; v3.28.1 `718b5d2` committed; v3.28.0 SQLite-first NSE store uncommitted (incl. regression-fix `8020dee`); v3.27.0 Accelerate (spec/plan `db5a5cc`); v3.26.0 PR #114 merged `3605c64`.
+- [x] **Notes from verification**: pre-existing LSP diagnostics unrelated to v3.29.0 (ignore): `scripts/test-prod-db.ts` (`datasources` not in `PrismaClientOptions`); `lib/__tests__/db-utils.test.ts`, `lib/__tests__/document-normalize.test.ts`, `lib/__tests__/stock-analysis-prompt.test.ts` (module-alias resolution while the dev server holds the module graph).
 
 ## Decisions
-- v3.21.2 in ONE increment (Fix A–E + backup/restore) per user directive — committed `7409616` + pushed (no PR).
-- v3.21.3 = OTel tracing (user-approved "Full OTel set + OTLP exporter" question) → `lib/otel.ts` opt-in `otelSetup()`; strictly env-gated so prod/test unchanged when `PRISMA_OTEL_ENABLED` unset.
-- P1001: diagnosed as FALSE ALARM — Prisma Compute auto-schema-apply sandbox can't reach direct-TCP host; user applies the Console "apply schema changes automatically" OFF toggle (user-side action, no repo change). BUGS.md #13.
-- No auto commit/push/merge/deploy without explicit user say-so. Version = v3.21.3 (commit pending).
+- Do NOT rewrite historical v3.28.5 doc rows that mention `isBacktestSymbolAllowed` — they describe v3.28.5 state; the removal/supersession is documented in the v3.29.0 changelog instead.
+- Backtest route: a static-table miss (fresh listing / BE-BZ series / unsynced row) is NOT proof of a bad ticker → always fall through to the data chain; `symbolSource` is a label, never a gate. Only `<50 bars` fails.
+- AI errors: extract at the throw site with `extractErrorMessage` (never render raw `err.error` objects) and surface via the button's `error` prop; button stays enabled after a failure so the user can retry.
+- Test convention deviation accepted (documented): `app/components/__tests__/AiActionButton.test.tsx` lives under `app/components/__tests__/` with plain `test(` — intentional, noted so future convention-driven refactors don't "normalize" it away.
+- Verification gate = tsc 46 exact baseline + targeted suites + full suite with documented `intelligence.test.ts` flake excluded from attribution.
+- No auto commit/push/merge/deploy without explicit user approval.
 
 ## Blockers
-- (none for v3.21.2 — committed + pushed). **v3.21.3 commit + push await explicit user approval.** P1001 fix requires USER to toggle Prisma Console "apply schema changes automatically" OFF (cannot be done from terminal).
-- Separate workstream (unrelated): v3.21.0 (`feat/stock-analysis-skill`) awaiting user commit/PR decision; 2 Dependabot high-severity advisories pending user.
+- **v3.29.0 commit + push pending explicit user approval** (push carries v3.28.5 `6700076`; do not amend). Merge/deploy of the whole v3.28.x chain still held by user; v3.28.0/v3.27.0 diffs + PR #114 doc reconcile + BUGS.md #14 (Prisma Postgres Phase 0, Dec 1 2026 Accelerate retirement) remain pending.
+- Deferred: **daily recommendation job failures** (Issue 3) — distinct follow-up.
 
 ## Next Move
-1. Finishing docs for v3.21.2 + v3.21.3 (AGENTS.md/CHANGELOG/Primer/agent-memory/Lessons/handoff — all done above; TODO.md v3.21.2 row noted in plan doc but NOT yet in the top-level TODO Quick Reference — verify/add if needed).
-2. Present to user: v3.21.2 committed `7409616` (941 pass, tsc 46); v3.21.3 OTel + P1001 diagnosis code+tests+docs verified (945 pass, tsc 46). **Request explicit approval to commit + push the v3.21.3 increment** (`lib/otel.ts`, `lib/prisma.ts`, `.env.example`, `otel.test.ts`, `BUGS.md`, plan doc, AGENTS.md, CHANGELOG, Primer, agent-memory, Lessons, handoff) on `feat/db-health-ops-visibility`.
-3. Remind user re: P1001 Console toggle (BUGS.md #13), v3.21.0 `feat/stock-analysis-skill` PR, and 2 Dependabot advisories.
+1. Commit plan-07 changes (code + tests + docs) and push `fix/v3.28.1-sqlite-self-heal` (carries `6700076`) — only on explicit user approval.
+2. Await explicit user approval to merge `fix/v3.28.1-sqlite-self-heal` → `main` + deploy.
+3. Remind user: v3.28.0/v3.27.0/v3.26.0 commits + PR #114 doc reconcile + BUGS.md #14 Phase 0 + deferred daily-recommendation failure investigation (Issue 3).

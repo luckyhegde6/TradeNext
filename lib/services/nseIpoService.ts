@@ -11,6 +11,7 @@ import {
   type SyncedFetchOptions,
   type SyncedFetchResult,
 } from "@/lib/services/syncedDataService";
+import { getNseScrip } from "@/lib/services/nseScripList";
 // Client-safe pure helpers (no prisma/pg chain) — re-exported for compatibility
 // with server-side callers + tests that import them from here. `parseSharesPerLot`
 // is also imported locally for parseIpoDetail below.
@@ -36,6 +37,12 @@ export interface IpoIssue {
   issueSize: string; // shares count string, e.g. "94436030"
   lotSize?: string;
   priceBand?: string;
+  /**
+   * True when the symbol is already in the committed NSE equity scrip list
+   * (i.e. tradeable on NSE now — typically a just-listed or repeat issue).
+   * Sourced from the generated scrip constant, not NSE.
+   */
+  listed?: boolean;
 }
 
 /** Parsed per-issue detail from GET /api/ipo-detail?symbol=X */
@@ -67,6 +74,12 @@ function isIpoIssue(value: unknown): value is IpoIssue {
   return typeof v.companyName === "string" && typeof v.issueEndDate === "string";
 }
 
+/** Attach scrip-reference metadata (tradeability) from the NSE scrip constant. */
+function enrichIpoIssue(r: IpoIssue): IpoIssue {
+  const upper = r.symbol?.trim().toUpperCase();
+  return { ...r, listed: upper ? Boolean(getNseScrip(upper)) : false };
+}
+
 /* ─── Fetcher ─── */
 
 /**
@@ -96,7 +109,7 @@ export async function getUpcomingIpoIssues(
       )) as unknown;
 
       const rows = Array.isArray(raw) ? raw : [];
-      return rows.filter(isIpoIssue);
+      return rows.filter(isIpoIssue).map(enrichIpoIssue);
     },
   };
 
