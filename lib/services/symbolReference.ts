@@ -2,15 +2,11 @@
 //
 // Thin wiring layer over the committed NSE scrip-list constant
 // (lib/services/nseScripList.ts — generated from the NSE "Securities
-// available for trading (Equity)" CSV). Keeps constant consumers (backtest
-// fall-through, symbol autocomplete/search) thin and pure — no Prisma/auth
-// deps here, so both helpers are directly unit-testable.
+// available for trading (Equity)" CSV). Keeps symbol autocomplete/search
+// consumers thin and pure — no Prisma/auth deps here, so mergeSymbolSuggestions
+// is directly unit-testable.
 
-import {
-  isNseSymbol,
-  searchNseSymbols,
-  type NseScrip,
-} from "@/lib/services/nseScripList";
+import type { NseScrip } from "@/lib/services/nseScripList";
 
 /** One autocomplete row — shape shared by constant matches and DB rows. */
 export interface SymbolSuggestion {
@@ -43,14 +39,4 @@ export function mergeSymbolSuggestions(
     out.push({ symbol: s, companyName: d.companyName ?? "" });
   }
   return out.slice(0, limit);
-}
-
-/**
- * Backtest gate — a symbol may proceed when it has a DB record OR it is a
- * valid NSE scrip in the constant (fresh/unlisted symbols then fall through
- * to the getBacktestData memory → temp-table → NSE chain instead of a hard
- * 404). Case-insensitive, whitespace-trimmed via isNseSymbol.
- */
-export function isBacktestSymbolAllowed(symbol: string, hasDbRecord: boolean): boolean {
-  return hasDbRecord || isNseSymbol(symbol);
 }

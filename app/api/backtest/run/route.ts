@@ -24,7 +24,6 @@ import { auth } from "@/lib/auth";
 import { filterGroupSchema } from "@/lib/screener/condition-tree";
 import { runBacktest } from "@/lib/screener/backtest-engine";
 import { getBacktestData } from "@/lib/services/backtestDataService";
-import { isBacktestSymbolAllowed } from "@/lib/services/symbolReference";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -73,16 +72,22 @@ export async function POST(request: Request) {
 
     const symbolUpper = symbol.toUpperCase();
 
-    // --- Verify symbol exists (DB record OR valid NSE scrip) ---
-    // A valid NSE scrip missing from the `symbols` table (fresh listing,
-    // BE/BZ series) falls through to the getBacktestData chain
-    // (memory → backtest_history → daily_prices → NSE) instead of a hard 404.
+    // --- Derive symbol presence for source labeling (no hard 404) ---
+    // A symbol missing from the `symbols` table (fresh listing, BE/BZ series,
+    // or an unknown ticker) falls through to the getBacktestData chain
+    // (memory → backtest_history → daily_prices → NSE); the only "no data"
+    // failure is the barCount guard below.
     const symbolRecord = await prisma.symbol.findUnique({
       where: { symbol: symbolUpper },
     });
+    const symbolSource = symbolRecord ? "known" : "unlisted";
 
-    if (!isBacktestSymbolAllowed(symbolUpper, Boolean(symbolRecord))) {
-      return NextResponse.json({ error: `Symbol "${symbol}" not found` }, { status: 404 });
+    if (!symbolRecord) {
+      logger.warn({
+        msg: "Backtest fall-through: symbol not in static table, using data chain",
+        symbol: symbolUpper,
+        symbolSource,
+      });
     }
 
     // --- Fetch historical OHLCV data (memory → temp table → NSE API) ---
@@ -170,6 +175,7 @@ export async function POST(request: Request) {
       trades: result.trades,
       barCount: result.barCount,
       dataSource: data.source,
+      symbolSource,
     });
   } catch (error) {
     logger.error({ msg: "Backtest failed", error: error instanceof Error ? error.message : String(error) });

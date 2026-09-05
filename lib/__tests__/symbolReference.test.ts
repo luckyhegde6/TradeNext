@@ -1,14 +1,12 @@
 // lib/__tests__/symbolReference.test.ts
 //
 // Pure wiring-layer tests for the NSE scrip-list constant consumers:
-//   - mergeSymbolSuggestions  (used by /api/symbols/search autocomplete)
-//   - isBacktestSymbolAllowed (used by /api/backtest/run gate)
+//   - mergeSymbolSuggestions (used by /api/symbols/search autocomplete)
+//
+// The v3.28.5 `isBacktestSymbolAllowed` gate tests were removed with the
+// v3.29.0 backtest softening (the route no longer 404s on symbol presence).
 
-import {
-  mergeSymbolSuggestions,
-  isBacktestSymbolAllowed,
-} from "@/lib/services/symbolReference";
-import { NSE_SCRIP_BY_SYMBOL } from "@/lib/services/nseScripList";
+import { mergeSymbolSuggestions } from "@/lib/services/symbolReference";
 
 const scrip = (symbol: string) => ({
   symbol,
@@ -62,27 +60,5 @@ describe("mergeSymbolSuggestions", () => {
     const db = [{ symbol: "  azure  ", companyName: "Azure" }];
     const out = mergeSymbolSuggestions([], db);
     expect(out[0].symbol).toBe("AZURE");
-  });
-});
-
-describe("isBacktestSymbolAllowed", () => {
-  it("allows any DB-recorded symbol regardless of the scrip list", () => {
-    expect(isBacktestSymbolAllowed("QQQXYZ", true)).toBe(true);
-  });
-
-  it("allows a valid NSE scrip without a DB record (unlisted/synced-later)", () => {
-    // RELIANCE is in the committed scrip constant — real dataset sanity check.
-    expect(NSE_SCRIP_BY_SYMBOL["RELIANCE"]).toBeDefined();
-    expect(isBacktestSymbolAllowed("RELIANCE", false)).toBe(true);
-  });
-
-  it("is case-insensitive and trims whitespace", () => {
-    expect(isBacktestSymbolAllowed("reliance", false)).toBe(true);
-    expect(isBacktestSymbolAllowed("  RELIANCE  ", false)).toBe(true);
-  });
-
-  it("rejects an unknown symbol with no DB record (404 fall-through stays)", () => {
-    expect(isBacktestSymbolAllowed("QQQXYZ", false)).toBe(false);
-    expect(isBacktestSymbolAllowed("NOT-A-REAL-SCRIP12", false)).toBe(false);
   });
 });

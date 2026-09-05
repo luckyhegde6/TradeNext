@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import Autocomplete from "@/app/components/ui/Autocomplete";
 import AiActionButton from "@/app/components/AiActionButton";
 import { useLivePrices } from "@/lib/hooks/useLivePrices";
+import { extractErrorMessage } from "@/lib/aiErrorMessage";
 
 interface WatchlistItem {
   id: string;
@@ -249,7 +250,10 @@ export default function WatchlistPage() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error || `HTTP ${res.status}`);
+        const raw = err.error || `HTTP ${res.status}`;
+        throw new Error(
+          typeof raw === "string" ? raw : typeof raw?.message === "string" ? raw.message : `HTTP ${res.status}`
+        );
       }
 
       const data = await res.json();
@@ -261,7 +265,7 @@ export default function WatchlistPage() {
         setAiResult(data.analysis || "No analysis returned.");
       }
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : String(err));
+      setAiError(extractErrorMessage(err));
     } finally {
       setAiLoading(false);
     }
@@ -363,6 +367,7 @@ export default function WatchlistPage() {
                       return await analyzeWithAI(watchlist.id, wl.items.map(i => i.symbol));
                     }}
                     size="small"
+                    error={aiError}
                   >
                     Analyze
                   </AiActionButton>
