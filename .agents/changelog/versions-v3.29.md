@@ -107,3 +107,70 @@ normalization + `extractErrorMessage`), `app/Header.tsx` (mobile grid F&O/Alerts
 handoff).
 
 **Commit**: pending user. Branch push will carry v3.28.5 `6700076` (still unpushed, 17 files) alongside.
+
+---
+
+# v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix (browser/DevTools visual-verification batch)
+
+- **Date**: Sep 06 2026
+- **Branch**: `main` (on top of merged v3.29.0 `d7e54cf`)
+- **Status**: Complete (code + tests + live-browser verification + docs); commit pending user approval
+- **Spec/Plan**: follow-up increment to `.agents/specs/07-ui-ux-audit-fixes.md` / `.agents/plans/07-ui-ux-audit-fixes.md` (carried over the watchlist visual-verification phase the v3.29.0 plan subset touched on)
+
+## Design
+
+### Phase 1 — Header overflow fix (`app/Header.tsx`, CSS-only)
+
+The logged-in nav overflowed at partial widths (`lg`: 1024–1279px hides the center cluster, but the left
+cluster + right auth cluster could still wrap/overflow at 1440–1600px). Fix is CSS-only — `hidden xl:flex`
+groups kept, container/grid tuned so the clusters stay on one row. Verified with Playwright audit probes:
+**372 DOM overflow checks + a 9-width quick-check loop — 0 overflow** at 1440 and at 375 on
+watchlist/alerts/screener/advanced-screener; full e2e **87 passed / 2 flaky / 0 failed**.
+
+### Phase 2 — Watchlist logged-out infinite-skeleton FIX (`app/watchlist/page.tsx`, 1 line)
+
+Found during the user-requested browser + Chrome DevTools visual observation of `/watchlist` logged-out.
+The render guard `if (status === "loading" || loading)` (:303) was supposed to fall through to the
+"Please sign in to view your watchlist." card when `status === "unauthenticated"` — but the local
+`loading` state (`useState(true)`) is ONLY cleared inside `fetchWatchlists()`, which runs only when
+`status === "authenticated"` → for logged-out visitors `loading` stayed `true` forever and the
+`unauthenticated` branch was **dead code** (infinite skeleton). E2E never caught it: the watchlist spec
+logs in first, so no spec exercised the logged-out view.
+
+Fix: `if (status === "loading" || (status === "authenticated" && loading))` — the local flag is now gated
+to the authenticated path. Authenticated UX unchanged.
+
+### Phase 3 — Live verification (Chrome DevTools)
+
+- **Logged-out** (isolated browser context): `/watchlist` → "Please sign in to view your watchlist." +
+  SIGN IN header; **0 skeletons**.
+- **Logged-in** (demo): "Demo AI Watchlist" — RELIANCE **● LIVE** ₹1,310.90 / -23.90 (-1.79%); OHLC
+  columns (VOLUME/OPEN/HIGH/LOW); Analyze / + Add Symbol / Delete / ✕ actions; **0 console errors**
+  (Web Vitals GOOD: TTFB 228ms, CLS 0.00, LCP 1180ms); **no overflow** at 375×812 (table scrolls inside
+  `overflow-x-auto`, mobile menu present) or at 2696.
+
+## Tests
+
+**NEW `app/watchlist/__tests__/page.test.tsx` (3/3, TSX path deviation like the AiActionButton test)**:
+unauthenticated → sign-in prompt + **no skeleton** (regression — fails pre-fix); loading → skeleton;
+authenticated-empty → "You haven't created any watchlists yet." + CTA. Mocks: `next-auth/react`
+`useSession`, global `fetch`, `AiActionButton`, `Autocomplete`, `useLivePrices`.
+
+## Verification
+
+- **tsc**: `npx tsc --noEmit` **46 = exact baseline (0 new)**.
+- **Targeted**: watchlist page test **3/3**.
+- **Baselines (this session)**: full jest suite **1043 pass / 4 skip / 1 fail** (1 = documented
+  pre-existing `intelligence.test.ts` flake); full e2e **87 passed / 2 flaky / 0 failed**.
+- **No schema change → no migration.**
+- Live-browser verified both auth states + mobile (see Design Phase 3).
+
+## Files
+
+**Created**: `app/watchlist/__tests__/page.test.tsx`.
+
+**Modified**: `app/Header.tsx` (CSS-only overflow fix), `app/watchlist/page.tsx` (:303 loading-guard fix),
+plus this doc set (AGENTS.md, CHANGELOG index + versions-v3.29.md, TODO.md, Primer, agent-memory,
+Lessons, session-todos, handoff).
+
+**Commit**: pending user (no push/merge without approval).

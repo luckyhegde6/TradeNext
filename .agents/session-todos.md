@@ -1,6 +1,18 @@
 # Session Todos
 
-## Current (v3.29.0 — UI/UX audit fixes: backtest symbol-gate softening + AI-failure error surfacing + mobile-nav Alerts)
+## Current (v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix)
+
+On `main`, on top of merged v3.29.0 `d7e54cf` (HEAD). v3.29.1 VERIFIED — header overflow fix (`app/Header.tsx` CSS-only: 372 DOM overflow checks + 9-width quick-check loop, 0 overflow @1440/@375 on watchlist/alerts/screener/advanced-screener; e2e **87 passed / 2 flaky / 0 failed**), watchlist logged-out skeleton FIX (`app/watchlist/page.tsx` :303 — found during user-requested browser + Chrome DevTools visual observation), NEW `app/watchlist/__tests__/page.test.tsx` **3/3** (unauthenticated → sign-in + no skeleton [fails pre-fix], loading → skeleton, authenticated-empty → CTA; mocks useSession/fetch/AiActionButton/Autocomplete/useLivePrices), tsc **46 = exact baseline (0 new)**, full jest **1043 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake), live-verified logged-out + logged-in (0 console errors, no overflow @375×812/@2696). No schema change → no migration. Docs updated (AGENTS.md, CHANGELOG index + versions-v3.29.md, TODO.md, Primer, agent-memory, Lessons #107, session-todos (this), latest.md handoff, HANDOFF.md, `.agents/sessions/2026-09-06-v3.29.1-header-watchlist/`). **Commit pending user (no push/merge/deploy without approval)**.
+
+- [x] v3.29.1 header overflow fix verified: `app/Header.tsx` CSS-only — 372 DOM overflow checks + 9-width quick-check loop → 0 overflow @1440 + @375 on watchlist/alerts/screener/advanced-screener; full e2e 87 passed / 2 flaky / 0 failed — DONE
+- [x] v3.29.1 watchlist logged-out infinite-skeleton FIX: `app/watchlist/page.tsx` :303 `if (status === "loading" || loading)` dead-coded the `unauthenticated` sign-in card (local `loading` only clears inside `fetchWatchlists()` = authenticated-only) → `status === "loading" || (status === "authenticated" && loading)`; found via user-requested browser + Chrome DevTools visual observation; e2e missed it (watchlist spec logs in first) — DONE
+- [x] v3.29.1 regression test: NEW `app/watchlist/__tests__/page.test.tsx` 3/3 (unauthenticated → sign-in prompt + no skeleton [fails pre-fix]; loading → skeleton; authenticated-empty → CTA; mocks useSession/fetch/AiActionButton/Autocomplete/useLivePrices) — DONE
+- [x] v3.29.1 verification: tsc **46 = exact baseline (0 new)**; full jest **1043 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake) — DONE
+- [x] v3.29.1 live verification (Chrome DevTools :3000): logged-out isolated context → "/watchlist — sign in" card, 0 skeletons; logged-in demo → Demo AI Watchlist (RELIANCE ● LIVE ₹1,310.90 / -23.90 (-1.79%), OHLC table, Analyze/+ Add/Delete), 0 console errors (Web Vitals GOOD), no overflow @375×812 / @2696 — DONE
+- [x] v3.29.1 docs: AGENTS.md v3.29.1 row, CHANGELOG index + `.agents/changelog/versions-v3.29.md` v3.29.1 section, TODO.md row, Primer, agent-memory, Lessons #107 + Update Log bullet, session-todos (this file), latest.md handoff rewrite, HANDOFF.md Current-State yaml refresh, `.agents/sessions/2026-09-06-v3.29.1-header-watchlist/` (decisions + flow) — DONE
+- [ ] v3.29.1 commit (code + tests + docs) — PENDING USER APPROVAL (no push/merge — v3.29.0 already merged `d7e54cf`)
+
+## Completed earlier (v3.29.0 — UI/UX audit fixes: backtest symbol-gate softening + AI-failure error surfacing + mobile-nav Alerts)
 
 Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.5 `6700076`, committed unpushed). v3.29.0 VERIFIED (tsc **46 = exact baseline (0 new)**, targeted **23/23**, full suite **1043 pass / 4 skip / 1 fail** with the 1 = documented pre-existing `intelligence.test.ts` flake) and docs updated; **commit pending user (no push/merge — push will carry v3.28.5 `6700076` too, do not amend)**. No schema change → no migration.
 

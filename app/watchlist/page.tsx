@@ -300,7 +300,7 @@ export default function WatchlistPage() {
     return `${sign}${change.toFixed(2)} (${sign}${pChange.toFixed(2)}%)`;
   };
 
-  if (status === "loading" || loading) {
+  if (status === "loading" || (status === "authenticated" && loading)) {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Watchlist</h1>
