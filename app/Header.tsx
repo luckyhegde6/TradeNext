@@ -98,22 +98,22 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full backdrop-blur-lg bg-surface/80 border-b border-border transition-colors duration-200">
-      <div className="w-full px-4 sm:px-6 lg:px-8">
+      <div className="w-full px-4 sm:px-6 xl:px-6">
         <div className="flex justify-between items-center h-16">
           {/* Brand */}
           <div className="flex-shrink-0 flex items-center">
-            <Link href="/" className="flex items-center gap-2 group">
+            <Link href="/" className="flex items-center gap-1.5 sm:gap-2 group">
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
                 <span className="text-white font-black text-xl sm:text-2xl">T</span>
               </div>
-              <span className="text-xl sm:text-2xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-indigo-600 dark:from-primary dark:to-indigo-400 hidden sm:block">
+              <span className="text-xl sm:text-2xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-indigo-600 dark:from-primary dark:to-indigo-400 hidden min-[1700px]:block">
                 TradeNext
               </span>
             </Link>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden xl:flex items-center space-x-1">
+          <nav className="hidden xl:flex items-center space-x-0.5 min-[1700px]:space-x-1">
             <NavLink href="/" active={isActive("/")}>
               Dashboard
             </NavLink>
@@ -129,7 +129,7 @@ export default function Header() {
             ) : (
               <button
                 onClick={openLoginModal}
-                className="px-4 py-2 text-sm font-bold rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-900 hover:bg-gray-100/80 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+                className="px-1 py-2 text-sm font-bold rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-900 hover:bg-gray-100/80 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
               >
                 Portfolio
               </button>
@@ -182,7 +182,7 @@ export default function Header() {
             </NavLink>
 
             {isAdmin && (
-              <div className="ml-4 pl-4 border-l border-border flex items-center space-x-1">
+              <div className="ml-1 pl-1 min-[1700px]:ml-4 min-[1700px]:pl-4 border-l border-border flex items-center space-x-1">
                 <NavLink href="/admin/utils" active={pathname?.startsWith("/admin/utils") || false}>
                   Admin
                 </NavLink>
@@ -194,14 +194,14 @@ export default function Header() {
           </nav>
 
           {/* Action Area */}
-          <div className="flex items-center space-x-2 sm:space-x-4">
+          <div className="flex items-center space-x-1 sm:space-x-2 min-[1700px]:space-x-4">
             {isLoggedIn ? (
-              <div className="flex items-center gap-2 sm:gap-4">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-[1700px]:gap-4">
                 {/* Notifications */}
                 <div className="relative">
                   <button
                     onClick={() => setShowNotifications(!showNotifications)}
-                    className="relative p-2 text-surface-foreground/60 hover:text-surface-foreground hover:bg-surface/50 rounded-lg transition-colors"
+                    className="relative p-1.5 sm:p-2 text-surface-foreground/60 hover:text-surface-foreground hover:bg-surface/50 rounded-lg transition-colors"
                   >
                     <BellIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                     {unreadCount > 0 && (
@@ -254,8 +254,8 @@ export default function Header() {
                   )}
                 </div>
 
-                <div className="hidden md:flex items-center gap-3">
-                  <div className="text-right flex flex-col">
+                <div className="hidden md:flex items-center gap-1.5 min-[1700px]:gap-3">
+                  <div className="hidden min-[1700px]:flex flex-col text-right">
                     <span className="text-xs font-black text-gray-900 dark:text-white truncate max-w-[120px]">
                       {user?.name || user?.email?.split('@')[0]}
                     </span>
@@ -265,13 +265,13 @@ export default function Header() {
                   </div>
                   <button
                     onClick={() => setIsProfileModalOpen(true)}
-                    className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-slate-800 border-2 border-transparent hover:border-primary/30 flex items-center justify-center text-sm font-black text-primary transition-all shadow-sm"
+                    className="w-9 h-9 min-[1700px]:w-10 min-[1700px]:h-10 rounded-xl bg-gray-100 dark:bg-slate-800 border-2 border-transparent hover:border-primary/30 flex items-center justify-center text-sm font-black text-primary transition-all shadow-sm"
                   >
                     {user?.name?.[0] || 'U'}
                   </button>
                   <button
                     onClick={() => handleSignOut()}
-                    className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors group"
+                    className="p-2 min-[1700px]:p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors group"
                     title="Sign Out"
                   >
                     <ArrowRightOnRectangleIcon className="h-5 w-5" />
@@ -428,7 +428,7 @@ function NavLink({
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      className={`px-4 py-2 text-sm font-bold rounded-xl transition-all duration-200 ${active
+      className={`px-1 py-2 text-sm font-bold rounded-xl transition-all duration-200 ${active
         ? "bg-primary/10 text-primary"
         : "text-gray-500 hover:text-gray-900 hover:bg-gray-100/80 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
         }`}
