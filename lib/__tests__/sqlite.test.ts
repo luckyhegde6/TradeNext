@@ -1118,24 +1118,75 @@ describe("SQLite backup fallback", () => {
 
   // ── v3.22.0: sqlite-sync leader gate ───────────────────────────────────
   describe("sqlite-sync leader gate", () => {
-    it("skips the full sync when this instance is not the sqlite-sync leader", async () => {
-      // Flip the mock: not the leader. Reset SQLite to a fresh empty state so
-      // we can unambiguously assert the sync never ran (lastSyncAt stays null).
+    it("boot hydration bypasses the leader gate; explicit syncs stay gated", async () => {
+      // Plan 09 Phase 2: boot hydration (leaderBypass via initSqliteBackup) is
+      // the ONLY Prisma->SQLite flow (spec v2) — it runs on EVERY instance
+      // regardless of the sqlite-sync leader (pulling is read-only on Prisma).
+      // The single-leader gate still applies to explicit probe/periodic syncs.
+      const sqlModule = require("sql.js") as any;
       const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      const ledgerRows = () => (sqlModule.__getStore()["sync_history"]?.rows ?? []) as unknown[][];
+
+      // Flip the mock: NOT the leader. Reset SQLite to a fresh empty state so
+      // the boot path is unambiguous (pre-Phase-2 the non-leader boot was a
+      // no-op — the ledger stayed empty and lastSyncAt stayed null).
       mockLeader.isLeader.mockResolvedValue(false);
+      sqlModule.__resetStore();
       resetSqliteStateForTests();
+      const rowsBeforeBoot = ledgerRows().length;
       await ensureSqliteBackup();
 
-      // ensureSqliteBackup() calls syncFromPrisma() during init; the leader
-      // gate should make it a no-op, so no sync timestamp is recorded.
+      // Boot hydration ran despite not being the leader -> a NEW durably
+      // recorded prisma_to_sqlite row (leaderGated=false reflects the bypass).
       const fb = getSqliteFallback()!;
-      expect(fb.getHealthStatus().sqlite.lastSyncAt).toBeNull();
+      expect(ledgerRows().length).toBeGreaterThan(rowsBeforeBoot);
+      expect(fb.getHealthStatus().sqlite.lastSyncAt).not.toBeNull();
+      const bootRow = fb.getHealthStatus().sqlite.recentSyncs[0];
+      expect(bootRow).toBeDefined();
+      expect(bootRow!.direction).toBe("prisma_to_sqlite");
+      expect(bootRow!.trigger).toBe("boot");
+      expect(bootRow!.leaderGated).toBe(false);
 
-      // An explicit syncFromPrisma() call is likewise gated.
+      // An explicit syncFromPrisma() call from a non-leader is STILL gated ->
+      // no additional ledger row is recorded.
+      const rowsAfterBoot = ledgerRows().length;
       await fb.syncFromPrisma();
-      expect(fb.getHealthStatus().sqlite.lastSyncAt).toBeNull();
+      expect(ledgerRows().length).toBe(rowsAfterBoot);
       // Restore the default for later tests.
       mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("boot hydration skips the SQLite->Prisma reconcile (skipReconcile)", async () => {
+      // Plan 09 Phase 2: boot calls syncFromPrisma({ skipReconcile: true }) —
+      // the SQLite->Prisma control-plane push (worker_status/cron_job/
+      // worker_task upserts) is reserved for the 6h probe / admin force job,
+      // per the user directive "only write to prisma during the 6h sync job".
+      // The seeded worker_status MIRROR row gives reconcile something to push —
+      // the assertion is that boot NEVER performs that push.
+      const sqlModule = require("sql.js") as any;
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+
+      // Default isLeader = TRUE (factory) — pre-Phase-2 a full boot sync would
+      // reach the reconcile and upsert this row into Prisma (breaking the
+      // not.toHaveBeenCalled assertion); Phase 2's skipReconcile skips it.
+      // Columns mirror the SQLite SCHEMA_SQL worker_status table.
+      sqlModule.__resetStore();
+      resetSqliteStateForTests();
+      mockPrisma.workerStatus.upsert = jest.fn().mockResolvedValue({});
+      sqlModule.__getStore()["worker_status"] = {
+        columns: [
+          "worker_id", "worker_name", "status", "current_task_id",
+          "tasks_completed", "tasks_failed", "last_heartbeat", "cpu_usage",
+          "memory_usage", "created_at",
+        ],
+        rows: [["worker-1", "host-1", "idle", null, 0, 0, "2026-09-08T05:30:00.000Z", null, null, "2026-09-08T05:30:00.000Z"]],
+      };
+      jest.clearAllMocks();
+      await ensureSqliteBackup();
+
+      // Boot hydration pulls Prisma -> SQLite ONLY (read-only on Prisma); the
+      // SQLite -> Prisma control-plane push never runs at boot.
+      expect(mockPrisma.workerStatus.upsert).not.toHaveBeenCalled();
     });
 
     it("runs the full sync when force is passed even if not the leader", async () => {

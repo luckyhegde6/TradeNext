@@ -228,8 +228,10 @@ export interface SqliteFallback {
   getWorkerTasks(limit?: number): Array<Record<string, unknown>>;
   /** Get full health status for admin dashboard. */
   getHealthStatus(): HealthStatus;
-  /** Trigger a sync from Prisma -> SQLite (leader-gated unless `force`). */
-  syncFromPrisma(opts?: { force?: boolean }): Promise<void>;
+  /** Trigger a sync from Prisma -> SQLite. Single-leader gated unless `force` or
+   *  `leaderBypass` (boot hydration — EVERY instance pulls its own mirror);
+   *  `skipReconcile` skips the SQLite->Prisma control-plane push (boot never pushes). */
+  syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrigger; skipReconcile?: boolean; leaderBypass?: boolean }): Promise<void>;
   /** Persist the Prisma ops counter snapshot into SQLite (`_backup_meta`). */
   persistOpsCounter(): void;
   /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
@@ -1063,7 +1065,12 @@ export async function initSqliteBackup(): Promise<void> {
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
     // after the sync completes so the dashboard reflects the latest state.
-    await syncFromPrisma().catch((err) => {
+    // Plan 09 Phase 2: boot hydration runs on EVERY instance (leaderBypass) —
+    // pulling Prisma → SQLite is read-only on Prisma. The plan-limit breaker
+    // still applies (graceful skip during a hold; retried at the 6h probe).
+    // skipReconcile: boot NEVER pushes SQLite → Prisma (that is the 6h probe /
+    // admin force job).
+    await syncFromPrisma({ reason: "boot", skipReconcile: true, leaderBypass: true }).catch((err) => {
       logger.error({ msg: "SQLite initial sync failed", error: err instanceof Error ? err.message : String(err) });
     });
     try {
@@ -2293,22 +2300,40 @@ export function stopNsePromoteFlush(): void {
  * Leader gate (v3.22.0): when called with `opts.force`, always sync (used by
  * the admin "Sync Now" button / manual trigger). Otherwise, only the instance
  * that holds the `sqlite-sync` leader lock performs the sync, so a
- * multi-instance deploy doesn't run N concurrent full synchs at boot. If the
- * DB is unavailable the gate degrades (leader.ts returns true) and sync
- * proceeds only as far as individual tables allow.
+ * multi-instance deploy doesn't run N concurrent full synchs at boot — EXCEPT
+ * Plan 09 Phase 2 boot hydration (`leaderBypass`), the ONLY Prisma->SQLite
+ * flow (spec v2): it runs on EVERY instance (pulling is read-only on Prisma,
+ * so cold-start bursts each hydrate their own mirror instead of waiting on the
+ * single leader). `skipReconcile` makes boot never perform the SQLite->Prisma
+ * control-plane push. If the DB is unavailable the gate degrades (leader.ts
+ * returns true) and sync proceeds only as far as individual tables allow.
  */
-export async function syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrigger }): Promise<void> {
+export async function syncFromPrisma(opts?: {
+  force?: boolean;
+  reason?: SyncTrigger;
+  // Plan 09 Phase 2: `leaderBypass` = boot hydration — the ONLY Prisma->SQLite
+  // flow per spec v2 — runs on EVERY instance (pulling is read-only on Prisma,
+  // so cold-start bursts each hydrate their own mirror instead of waiting on
+  // the single sqlite-sync leader). `skipReconcile` = boot never runs the
+  // SQLite->Prisma control-plane push (that is the 6h probe / admin force job).
+  skipReconcile?: boolean;
+  leaderBypass?: boolean;
+}): Promise<void> {
   if (!state.db || state.syncing) return;
   if (!opts?.force) {
     // lazy require to keep the module graph light at init (avoids a hard cycle)
     const leader = await import("@/lib/services/leader");
-    const isSyncLeader = await leader.isLeader("sqlite-sync");
-    if (!isSyncLeader) {
-      logger.info({
-        msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
-        self: leader.LEADER_SELF,
-      });
-      return;
+    // Plan 09 Phase 2: the single-leader gate applies ONLY to probe/periodic
+    // syncs — boot hydration (leaderBypass) pulls on every instance.
+    if (!opts?.leaderBypass) {
+      const isSyncLeader = await leader.isLeader("sqlite-sync");
+      if (!isSyncLeader) {
+        logger.info({
+          msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
+          self: leader.LEADER_SELF,
+        });
+        return;
+      }
     }
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
     // (account on hold / DB down), do NOT touch Prisma at all — the SQLite
@@ -2341,7 +2366,12 @@ export async function syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrig
     // Prisma — this is the ONLY Prisma write to these tables, per the user
     // directive ("only write to prisma during the 6h sync job"). Then the
     // pulls below re-sync Prisma→SQLite with the reconciled values (idempotent).
-    await reconcileControlToPrisma(db, opts?.reason ?? "boot", !opts?.force);
+    // Plan 09 Phase 2: this SQLite→Prisma push runs only when NOT
+    // `skipReconcile` (probe/admin/force). Boot hydration never pushes — every
+    // instance pulls; the mirror is filled from Prisma (read-only on Prisma).
+    if (!opts?.skipReconcile) {
+      await reconcileControlToPrisma(db, opts?.reason ?? "boot", !opts?.leaderBypass && !opts?.force);
+    }
 
     // --- Sync daily price snapshots (latest row per ticker) ---
     totalRows += await syncTable(db, "daily_price_snapshot", async () => {
@@ -2649,7 +2679,7 @@ export async function syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrig
     recordSyncHistory(db, {
       direction: "prisma_to_sqlite",
       trigger: opts?.reason ?? "boot",
-      leaderGated: !opts?.force,
+      leaderGated: !opts?.leaderBypass && !opts?.force,
       rowsSynced: totalRows,
       durationMs,
     });
@@ -2677,7 +2707,7 @@ export async function syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrig
     recordSyncHistory(state.db, {
       direction: "prisma_to_sqlite",
       trigger: opts?.reason ?? "boot",
-      leaderGated: !opts?.force,
+      leaderGated: !opts?.leaderBypass && !opts?.force,
       rowsSynced: totalRows,
       durationMs,
       error: errorMsg,
