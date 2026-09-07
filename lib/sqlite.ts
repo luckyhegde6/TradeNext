@@ -67,7 +67,15 @@ if (!g.__sqliteBackup) {
     prismaAvailable: true as boolean,
     lastSyncAt: null as string | null,
     lastProbeAt: null as string | null,
-    syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
+    syncHistory: [] as Array<{
+      at: string;
+      rowsSynced: number;
+      durationMs: number;
+      error?: string;
+      direction?: SyncDirection;
+      trigger?: SyncTrigger;
+      leaderGated?: boolean;
+    }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
     opsPersistTimer: null as ReturnType<typeof setInterval> | null,
     sqliteBytes: 0 as number,
@@ -87,7 +95,15 @@ const state: {
   prismaAvailable: boolean;
   lastSyncAt: string | null;
   lastProbeAt: string | null;
-  syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
+  syncHistory: Array<{
+    at: string;
+    rowsSynced: number;
+    durationMs: number;
+    error?: string;
+    direction?: SyncDirection;
+    trigger?: SyncTrigger;
+    leaderGated?: boolean;
+  }>;
   probeTimer: ReturnType<typeof setInterval> | null;
   opsPersistTimer: ReturnType<typeof setInterval> | null;
   sqliteBytes: number;
@@ -104,10 +120,32 @@ const state: {
 // Types
 // ---------------------------------------------------------------------------
 
+/** Plan 09: which store initiated the sync. */
+export type SyncDirection = "prisma_to_sqlite" | "sqlite_to_prisma";
+
+/** What triggered a sync attempt (Phase 2 wires probe/admin call sites). */
+export type SyncTrigger = "boot" | "probe" | "admin";
+
 export interface SyncResult {
   at: string;
   rowsSynced: number;
   durationMs: number;
+  error?: string;
+  /** Plan 09: direction of the sync (set only when read from the durable `sync_history` ledger). */
+  direction?: SyncDirection;
+  /** Plan 09: what triggered the sync (set only when read from the durable ledger). */
+  trigger?: SyncTrigger;
+  /** Plan 09: whether the sync was leader-gated (set only when read from the durable ledger). */
+  leaderGated?: boolean;
+}
+
+/** Plan 09 Phase 1: durable ledger row payload for `recordSyncHistory`. */
+export interface SyncHistoryInput {
+  direction: SyncDirection;
+  trigger: SyncTrigger;
+  leaderGated?: boolean;
+  rowsSynced?: number;
+  durationMs?: number;
   error?: string;
 }
 
@@ -869,6 +907,21 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_chartink_result_symbol ON chartink_screener_result (symbol);
   CREATE INDEX IF NOT EXISTS idx_chartink_result_expires ON chartink_screener_result (expires_at);
   CREATE INDEX IF NOT EXISTS idx_chartink_result_captured ON chartink_screener_result (captured_at);
+
+  -- Plan 09 Phase 1 (durable sync ledger): db-health "recent syncs" read
+  -- survives restarts because real sync activity is recorded here, not just
+  -- in the in-memory ring. Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS sync_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           TEXT NOT NULL,
+    direction    TEXT NOT NULL,
+    trigger      TEXT,
+    leader_gated INTEGER DEFAULT 1,
+    rows_synced  INTEGER DEFAULT 0,
+    duration_ms  INTEGER DEFAULT 0,
+    error        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_history_at ON sync_history (at);
 `;
 
 // ---------------------------------------------------------------------------
@@ -2244,7 +2297,7 @@ export function stopNsePromoteFlush(): void {
  * DB is unavailable the gate degrades (leader.ts returns true) and sync
  * proceeds only as far as individual tables allow.
  */
-export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> {
+export async function syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrigger }): Promise<void> {
   if (!state.db || state.syncing) return;
   if (!opts?.force) {
     // lazy require to keep the module graph light at init (avoids a hard cycle)
@@ -2288,7 +2341,7 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     // Prisma — this is the ONLY Prisma write to these tables, per the user
     // directive ("only write to prisma during the 6h sync job"). Then the
     // pulls below re-sync Prisma→SQLite with the reconciled values (idempotent).
-    await reconcileControlToPrisma(db);
+    await reconcileControlToPrisma(db, opts?.reason ?? "boot", !opts?.force);
 
     // --- Sync daily price snapshots (latest row per ticker) ---
     totalRows += await syncTable(db, "daily_price_snapshot", async () => {
@@ -2592,6 +2645,15 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     state.syncHistory.push({ at: now, rowsSynced: totalRows, durationMs });
     if (state.syncHistory.length > 20) state.syncHistory.shift();
 
+    // Plan 09 Phase 1: durable row (direction/trigger/leader-gated metadata).
+    recordSyncHistory(db, {
+      direction: "prisma_to_sqlite",
+      trigger: opts?.reason ?? "boot",
+      leaderGated: !opts?.force,
+      rowsSynced: totalRows,
+      durationMs,
+    });
+
     // Refresh the in-memory size probe once per hydration (cheap: only runs on
     // deploy/recovery, never on the read path).
     try {
@@ -2610,6 +2672,16 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     const errorMsg = err instanceof Error ? err.message : String(err);
     state.syncHistory.push({ at: new Date().toISOString(), rowsSynced: totalRows, durationMs, error: errorMsg });
     if (state.syncHistory.length > 20) state.syncHistory.shift();
+
+    // Plan 09 Phase 1: durable error row (state.db — `db` is scoped to the try).
+    recordSyncHistory(state.db, {
+      direction: "prisma_to_sqlite",
+      trigger: opts?.reason ?? "boot",
+      leaderGated: !opts?.force,
+      rowsSynced: totalRows,
+      durationMs,
+      error: errorMsg,
+    });
     logger.error({ msg: "SQLite: sync failed", error: errorMsg });
   } finally {
     state.syncing = false;
@@ -2622,8 +2694,14 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
 // Pushes the SQLite-only daemon writes into Prisma. Called ONLY from the 6h
 // `syncFromPrisma` job (leader-gated), per the user's "write to prisma only
 // during the 6h sync" directive. Non-fatal — a failure never fails the sync.
-async function reconcileControlToPrisma(db: Database): Promise<void> {
+async function reconcileControlToPrisma(
+  db: Database,
+  trigger: SyncTrigger = "boot",
+  leaderGated = true,
+): Promise<void> {
   if (!db) return;
+  const reconcileStart = Date.now();
+  let rowsSynced = 0;
   try {
     // --- Worker status heartbeats (few rows per instance) ---
     const wsRes = db.exec("SELECT * FROM worker_status");
@@ -2660,6 +2738,7 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
             memoryUsage: obj.memory_usage != null ? Number(obj.memory_usage) : undefined,
           },
         });
+        rowsSynced++;
       }
     }
 
@@ -2682,6 +2761,7 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
         if (obj.failure_count != null) data.failureCount = Number(obj.failure_count);
         if (Object.keys(data).length) {
           await prisma.cronJob.updateMany({ where: { id }, data });
+          rowsSynced++;
         }
       }
     }
@@ -2705,13 +2785,91 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
         if (obj.error != null) patch.error = String(obj.error);
         if (obj.assigned_to) patch.assignedTo = String(obj.assigned_to);
         await prisma.workerTask.updateMany({ where: { id }, data: patch });
+        rowsSynced++;
       }
     }
+
+    // Plan 09 Phase 1: durable success row for this SQLite->Prisma push.
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger,
+      leaderGated,
+      rowsSynced,
+      durationMs: Date.now() - reconcileStart,
+    });
   } catch (err) {
     logger.warn({
       msg: "SQLite: reconcileControlToPrisma failed",
       error: err instanceof Error ? err.message : String(err),
     });
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger,
+      leaderGated,
+      rowsSynced,
+      durationMs: Date.now() - reconcileStart,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sync-history ledger (Plan 09 Phase 1)
+// ---------------------------------------------------------------------------
+
+/** Append one durable row to `sync_history` and prune to the last 100 rows.
+ *  Never throws — the ledger is best-effort and must not break a sync. */
+export function recordSyncHistory(db: Database | null | undefined, rec: SyncHistoryInput): void {
+  if (!db) return;
+  try {
+    db.run(
+      "INSERT INTO sync_history (at, direction, trigger, leader_gated, rows_synced, duration_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        new Date().toISOString(),
+        rec.direction,
+        rec.trigger,
+        rec.leaderGated === false ? 0 : 1,
+        rec.rowsSynced ?? 0,
+        rec.durationMs ?? 0,
+        rec.error ?? null,
+      ],
+    );
+    db.run(
+      "DELETE FROM sync_history WHERE id NOT IN (SELECT id FROM sync_history ORDER BY id DESC LIMIT 100)",
+    );
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: recordSyncHistory failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Read the durable ledger newest-first (LIMIT 10), falling back to the
+ *  in-memory ring when the table is unavailable or empty. */
+function getDurableSyncHistory(db: Database | null | undefined): SyncResult[] {
+  try {
+    if (!db) return [...state.syncHistory].reverse().slice(0, 10);
+    const res = db.exec(
+      "SELECT at, direction, trigger, leader_gated, rows_synced, duration_ms, error FROM sync_history ORDER BY id DESC LIMIT 10",
+    );
+    if (!res.length || !res[0].values.length) return [...state.syncHistory].reverse().slice(0, 10);
+    const cols = res[0].columns;
+    return res[0].values.map((row) => {
+      const o: Record<string, unknown> = {};
+      cols.forEach((c, i) => (o[c] = row[i]));
+      return {
+        at: String(o.at ?? ""),
+        rowsSynced: Number(o.rows_synced ?? 0),
+        durationMs: Number(o.duration_ms ?? 0),
+        error: o.error != null && o.error !== "" ? String(o.error) : undefined,
+        direction: o.direction != null ? (String(o.direction) as SyncDirection) : undefined,
+        trigger: o.trigger != null ? (String(o.trigger) as SyncTrigger) : undefined,
+        leaderGated: o.leader_gated != null ? Number(o.leader_gated) === 1 : undefined,
+      };
+    });
+  } catch {
+    return [...state.syncHistory].reverse().slice(0, 10);
   }
 }
 
@@ -3605,7 +3763,7 @@ function createFallback(db: Database): SqliteFallback {
           syncing: state.syncing,
           lastSyncAt: state.lastSyncAt,
           tables,
-          recentSyncs: [...state.syncHistory].reverse().slice(0, 10),
+          recentSyncs: getDurableSyncHistory(db),
           // In-memory footprint of the sql.js mirror (refreshed at sync time via
           // db.export().byteLength — cheap because it only runs on hydration).
           memoryBytes: state.sqliteBytes,

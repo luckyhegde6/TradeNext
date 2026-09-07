@@ -42,16 +42,29 @@ jest.mock("sql.js", () => {
           if (m && store[m[1]]) {
             // DELETE ... WHERE <pk> IN (?, ...) — remove only the listed rows.
             const t = store[m[1]];
-            const inM = stmt.match(/WHERE\s+(\w+)\s+IN\s*\(/i);
-            if (inM && _params.length > 0) {
-              const pkIdx = t.columns.indexOf(inM[1]);
-              if (pkIdx >= 0) {
-                const ids = new Set(_params.map(String));
-                t.rows = t.rows.filter((r) => !ids.has(String(r[pkIdx])));
-              }
+            // Prune DELETE (Plan 09 `recordSyncHistory` ledger trim):
+            // `WHERE id NOT IN (SELECT id FROM <t> ORDER BY id DESC LIMIT n)`
+            // keeps only the newest n rows. The mock rows have no `id` column,
+            // so insertion order == auto-increment order. Must be matched
+            // BEFORE the generic `IN` check — `NOT IN (SELECT...)` doesn't fit
+            // that regex and would otherwise wipe the whole table below.
+            const pruneM = stmt.match(
+              /WHERE\s+\w+\s+NOT\s+IN\s*\(\s*SELECT\s+\w+\s+FROM\s+(\w+)\s+ORDER\s+BY\s+\w+\s+DESC\s+LIMIT\s+(\d+)\s*\)/i,
+            );
+            if (pruneM && store[pruneM[1]]) {
+              t.rows = t.rows.slice(-parseInt(pruneM[2], 10));
             } else {
-              // Unscoped DELETE (no WHERE) wipes the whole table.
-              t.rows = [];
+              const inM = stmt.match(/WHERE\s+(\w+)\s+IN\s*\(/i);
+              if (inM && _params.length > 0) {
+                const pkIdx = t.columns.indexOf(inM[1]);
+                if (pkIdx >= 0) {
+                  const ids = new Set(_params.map(String));
+                  t.rows = t.rows.filter((r) => !ids.has(String(r[pkIdx])));
+                }
+              } else {
+                // Unscoped DELETE (no WHERE) wipes the whole table.
+                t.rows = [];
+              }
             }
           }
         } else if (upper.startsWith("INSERT")) {
@@ -138,6 +151,11 @@ jest.mock("sql.js", () => {
             const vb = b[idx] ?? "";
             return desc ? (vb > va ? 1 : -1) : (va > vb ? 1 : -1);
           });
+        } else if (orderM[1].toLowerCase() === "id") {
+          // `ORDER BY id DESC/ASC`: the mock rows have no `id` column, but
+          // INSERT pushes in auto-increment order, so insertion order IS id
+          // order. DESC (e.g. `getDurableSyncHistory` newest-first) reverses.
+          if (orderM[2].toUpperCase() === "DESC") rows.reverse();
         }
       }
 
@@ -175,6 +193,7 @@ jest.mock("sql.js", () => {
       // so tests start from a clean queue.
       for (const k of Object.keys(store)) store[k] = { columns: [], rows: [] };
     },
+    __getStore: () => store,
   };
 });
 
@@ -1163,6 +1182,77 @@ describe("SQLite backup fallback", () => {
 
       // Restore the default (breaker CLOSED) for later tests.
       mockDbUtils.isPlanLimitBreakerOpen.mockReturnValue(false);
+    });
+  });
+
+  // ── Plan 09 Phase 1: durable sync_history ledger ────────────────────────
+  describe("sync_history ledger", () => {
+    const sqlModule = require("sql.js") as any;
+
+    // Start each test from a clean mirror AND a clean store so the ledger is
+    // deterministic (the store persists across tests — real sql.js keeps the
+    // in-memory DB until the process exits).
+    const resetAndInit = async () => {
+      sqlModule.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      jest.clearAllMocks();
+      await ensureSqliteBackup();
+    };
+
+    it("records a prisma_to_sqlite boot row with trigger/leader metadata", async () => {
+      await resetAndInit();
+
+      await syncFromPrisma();
+
+      const status = getSqliteFallback()!.getHealthStatus();
+      const row = status.sqlite.recentSyncs[0];
+      expect(row).toBeDefined();
+      expect(row!.direction).toBe("prisma_to_sqlite");
+      expect(row!.trigger).toBe("boot");
+      expect(row!.leaderGated).toBe(true);
+      expect(typeof row!.durationMs).toBe("number");
+      expect(status.sqlite.recentSyncs.length).toBeLessThanOrEqual(10);
+    });
+
+    it("records sqlite_to_prisma error rows and prunes the ledger to 100 rows", async () => {
+      await resetAndInit();
+
+      // Seed the worker_status MIRROR so the reconcile pass has a row to
+      // push. `lastHeartbeat` must be a real Date — syncTable calls
+      // `.toISOString()` on it. `workerStatus.upsert` is NOT part of the
+      // mock Prisma, so reconcile's upsert throws (caught, non-fatal).
+      mockPrisma.workerStatus.findMany.mockResolvedValue([
+        {
+          workerId: "worker-1",
+          workerName: "host-1",
+          status: "idle",
+          tasksCompleted: 0,
+          tasksFailed: 0,
+          lastHeartbeat: new Date(),
+        },
+      ]);
+      mockPrisma.workerStatus.upsert = jest.fn().mockRejectedValue(new Error("reconcile boom"));
+
+      // Sync 1 seeds the mirror (reconcile sees 0 rows first); sync 2's
+      // reconcile finds the seeded row and hits the failing upsert.
+      await syncFromPrisma();
+      await syncFromPrisma();
+
+      const errRow = getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.find((r) => r.error != null);
+      expect(errRow).toBeDefined();
+      expect(errRow!.direction).toBe("sqlite_to_prisma");
+      expect(errRow!.error).toContain("reconcile boom");
+
+      // 105 more syncs → every sync adds 2 rows (1 reconcile + 1 success),
+      // but the durable ledger is pruned to the newest 100; the read still
+      // caps at 10.
+      for (let i = 0; i < 105; i++) {
+        await syncFromPrisma();
+      }
+      const tableRows: unknown[][] = sqlModule.__getStore()["sync_history"]?.rows ?? [];
+      expect(tableRows.length).toBeLessThanOrEqual(100);
+      expect(getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.length).toBeLessThanOrEqual(10);
     });
   });
 });
