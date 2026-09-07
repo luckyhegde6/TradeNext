@@ -628,16 +628,23 @@ const SCHEMA_SQL = `
     run_date       TEXT,
     status         TEXT,
     total_screeners INTEGER,
+    successful_screeners INTEGER,
+    total_stocks    INTEGER,
     unique_stocks   INTEGER,
     ai_processed    INTEGER,
+    ai_failed       INTEGER,
     execution_time_ms INTEGER,
+    error_message   TEXT,
     triggered_by    TEXT,
-    metadata        TEXT
+    metadata        TEXT,
+    created_at      TEXT,
+    completed_at    TEXT
   );
 
   CREATE TABLE IF NOT EXISTS daily_recommendation_stock (
     id                TEXT PRIMARY KEY,
     run_id            TEXT,
+    tracker_id        TEXT,
     symbol            TEXT,
     price             REAL,
     change_val        REAL,
@@ -652,6 +659,10 @@ const SCHEMA_SQL = `
     risk_factors      TEXT,
     screener_attribution TEXT,
     screener_count    INTEGER,
+    ai_tokens_used    INTEGER,
+    ai_execution_ms   INTEGER,
+    ai_success        INTEGER DEFAULT 0,
+    ai_error          TEXT,
     created_at        TEXT
   );
 
@@ -910,6 +921,120 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_chartink_result_expires ON chartink_screener_result (expires_at);
   CREATE INDEX IF NOT EXISTS idx_chartink_result_captured ON chartink_screener_result (captured_at);
 
+  -- Plan 09 Phase 6 (jobs write SQLite-first): recommendation / swing / perf
+  -- job tables mirrored so the write-through helpers round-trip full rows and
+  -- the 6h push can promote them to Prisma. Columns mirror the Prisma models
+  -- (camelCase to snake_case). Json/arrays stored as TEXT (serialized).
+  -- Comments must stay semicolon-free (schema split).
+  -- Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS recommendation_tracker (
+    id                  TEXT PRIMARY KEY,
+    symbol              TEXT,
+    status              TEXT,
+    entry_price         REAL,
+    current_price       REAL,
+    target_price        REAL,
+    stop_loss           REAL,
+    time_horizon        TEXT,
+    confidence          REAL,
+    ai_recommendation   TEXT,
+    reasoning           TEXT,
+    risk_factors        TEXT,
+    screener_attribution TEXT,
+    last_checked_at     TEXT,
+    created_at          TEXT,
+    updated_at          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_tracker_symbol ON recommendation_tracker (symbol);
+
+  CREATE TABLE IF NOT EXISTS recommendation_status_history (
+    id              TEXT PRIMARY KEY,
+    tracker_id      TEXT,
+    previous_status TEXT,
+    new_status      TEXT,
+    trigger_source  TEXT,
+    metadata        TEXT,
+    created_at      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_status_tracker ON recommendation_status_history (tracker_id);
+
+  CREATE TABLE IF NOT EXISTS recommendation_archive (
+    id                   TEXT PRIMARY KEY,
+    symbol               TEXT,
+    tracker_id           TEXT,
+    last_run_id          TEXT,
+    run_date             TEXT,
+    entry_price          REAL,
+    current_price        REAL,
+    target_price         REAL,
+    stop_loss            REAL,
+    category             TEXT,
+    ai_recommendation    TEXT,
+    confidence           REAL,
+    reasoning            TEXT,
+    risk_factors         TEXT,
+    screener_attribution TEXT,
+    final_status         TEXT,
+    return_percent       REAL,
+    days_tracked         INTEGER,
+    status_history       TEXT,
+    archived_reason      TEXT,
+    archived_at          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_archive_symbol ON recommendation_archive (symbol);
+  CREATE INDEX IF NOT EXISTS idx_rec_archive_final ON recommendation_archive (final_status);
+
+  CREATE TABLE IF NOT EXISTS swing_analysis_job (
+    id             TEXT PRIMARY KEY,
+    status         TEXT,
+    payload        TEXT,
+    generated_at   TEXT,
+    started_at     TEXT,
+    completed_at   TEXT,
+    error          TEXT,
+    stock_count    INTEGER,
+    analyzed_count INTEGER,
+    attempt_count  INTEGER,
+    template_count INTEGER,
+    total_raw      INTEGER,
+    created_at     TEXT,
+    updated_at     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_job_status ON swing_analysis_job (status, created_at);
+
+  CREATE TABLE IF NOT EXISTS swing_signal (
+    id                TEXT PRIMARY KEY,
+    job_id            TEXT,
+    symbol            TEXT,
+    name              TEXT,
+    price             REAL,
+    change            REAL,
+    change_percent    REAL,
+    volume            REAL,
+    market_cap        REAL,
+    screener_names    TEXT,
+    screener_count    INTEGER,
+    families          TEXT,
+    template_ids      TEXT,
+    source            TEXT,
+    indicators        TEXT,
+    momentum_score    INTEGER,
+    analysis          TEXT,
+    ai_recommendation TEXT,
+    confidence        REAL,
+    target_price      REAL,
+    stop_loss         REAL,
+    current_price     REAL,
+    return_percent    REAL,
+    status            TEXT,
+    last_checked_at   TEXT,
+    posted_at         TEXT,
+    created_at        TEXT,
+    updated_at        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_signal_symbol ON swing_signal (symbol);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_swing_signal_job_symbol ON swing_signal (job_id, symbol);
+
   -- Plan 09 Phase 1 (durable sync ledger): db-health "recent syncs" read
   -- survives restarts because real sync activity is recorded here, not just
   -- in the in-memory ring. Comments must stay semicolon-free (schema split).
@@ -1042,6 +1167,62 @@ function ensureNseColumns(db: any): void {
 }
 
 /**
+ * Plan 09 Phase 6: extend the recommendation-mirror columns so the jobs
+ * write-through helpers + 6h push can round-trip FULL rows (the v3.19-era
+ * mirror schema predates fields like successfulScreeners / aiTokensUsed).
+ * Idempotent + `PRAGMA table_info`-guarded like ensureControlColumns.
+ * SQLite-only — NO Prisma schema change / NO migration.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureRecommendationColumns(db: any): void {
+  const ADD: Record<string, string[]> = {
+    daily_recommendation_run: [
+      "successful_screeners INTEGER",
+      "total_stocks INTEGER",
+      "ai_failed INTEGER",
+      "error_message TEXT",
+      "created_at TEXT",
+      "completed_at TEXT",
+    ],
+    daily_recommendation_stock: [
+      "tracker_id TEXT",
+      "ai_tokens_used INTEGER",
+      "ai_execution_ms INTEGER",
+      "ai_success INTEGER",
+      "ai_error TEXT",
+    ],
+  };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addIfMissing = (table: string, col: string, ddl: string): void => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec(`PRAGMA table_info(${table})`);
+      if (!res || !res.length) return;
+      const existing = new Set<string>();
+      const vals: unknown[][] = res[0].values;
+      const nameIdx = res[0].columns.indexOf("name");
+      vals.forEach((row) => {
+        if (nameIdx >= 0) existing.add(String((row as string[])[nameIdx]));
+      });
+      if (!existing.has(col)) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    };
+    for (const [table, cols] of Object.entries(ADD)) {
+      for (const c of cols) {
+        const colName = c.split(" ")[0];
+        addIfMissing(table, colName, c);
+      }
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: ensureRecommendationColumns failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize the SQLite backup database. Called once from instrumentation.ts
  * or on first request. Non-blocking -- sync happens in background.
  */
@@ -1064,6 +1245,9 @@ export async function initSqliteBackup(): Promise<void> {
     // v3.28.0: add the NSE-store columns older mirror DBs are missing
     // (idempotent, SQLite-only).
     ensureNseColumns(db);
+    // Plan 09 Phase 6: add the recommendation/job columns older mirror DBs
+    // are missing (idempotent, SQLite-only).
+    ensureRecommendationColumns(db);
 
     state.ready = true;
     _instance = createFallback(db);
@@ -2436,18 +2620,24 @@ export async function syncFromPrisma(opts?: {
         take: 30,
       });
       return {
-        columns: "id, run_date, status, total_screeners, unique_stocks, ai_processed, execution_time_ms, triggered_by, metadata",
-        placeholders: "?,?,?,?,?,?,?,?,?",
+        columns: "id, run_date, status, total_screeners, successful_screeners, total_stocks, unique_stocks, ai_processed, ai_failed, execution_time_ms, error_message, triggered_by, metadata, created_at, completed_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: runs.map((r) => [
           r.id,
           r.runDate?.toISOString() ?? null,
           r.status,
           r.totalScreeners,
+          r.successfulScreeners,
+          r.totalStocks,
           r.uniqueStocks,
           r.aiProcessed,
+          r.aiFailed,
           r.executionTimeMs,
+          r.errorMessage ?? null,
           r.triggeredBy ?? null,
           r.metadata ? JSON.stringify(r.metadata) : null,
+          r.createdAt?.toISOString() ?? null,
+          r.completedAt?.toISOString() ?? null,
         ]),
       };
     });
@@ -2464,11 +2654,12 @@ export async function syncFromPrisma(opts?: {
         orderBy: { symbol: "asc" },
       });
       return {
-        columns: "id, run_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning, risk_factors, screener_attribution, screener_count, created_at",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, run_id, tracker_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning, risk_factors, screener_attribution, screener_count, ai_tokens_used, ai_execution_ms, ai_success, ai_error, created_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: stocks.map((s) => [
           s.id,
           s.runId,
+          s.trackerId ?? null,
           s.symbol,
           s.price,
           s.change,
@@ -2483,6 +2674,10 @@ export async function syncFromPrisma(opts?: {
           s.riskFactors != null ? JSON.stringify(s.riskFactors) : null,
           s.screenerAttribution != null ? JSON.stringify(s.screenerAttribution) : null,
           s.screenerCount,
+          s.aiTokensUsed,
+          s.aiExecutionMs,
+          s.aiSuccess ? 1 : 0,
+          s.aiError ?? null,
           s.createdAt?.toISOString() ?? null,
         ]),
       };
@@ -3968,6 +4163,11 @@ function createFallback(db: Database): SqliteFallback {
       const tableNames = [
         "daily_recommendation_run",
         "daily_recommendation_stock",
+        "recommendation_tracker",
+        "recommendation_status_history",
+        "recommendation_archive",
+        "swing_analysis_job",
+        "swing_signal",
         "corporate_action",
         "chartink_screener",
         "worker_status",

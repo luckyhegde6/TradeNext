@@ -33,8 +33,11 @@ jest.mock("sql.js", () => {
         if (upper.startsWith("CREATE TABLE")) {
           const m = stmt.match(/CREATE TABLE IF NOT EXISTS (\w+)/i);
           if (m && !store[m[1]]) store[m[1]] = { columns: [], rows: [] };
-        } else if (upper.startsWith("CREATE INDEX")) {
-          // Index DDL is a no-op in the mock (tables carry no indexes).
+        } else if (upper.startsWith("CREATE INDEX") || upper.startsWith("CREATE UNIQUE INDEX")) {
+          // Index DDL (incl. UNIQUE — e.g. idx_swing_signal_job_symbol) is a
+          // no-op in the mock (tables carry no indexes). `CREATE UNIQUE INDEX`
+          // must not fall through to the syntax-error branch: real SQLite
+          // accepts it, so a valid SCHEMA_SQL statement would abort init.
         } else if (upper.startsWith("ALTER TABLE")) {
           // Column-add DDL is a no-op; tables are flexibly shaped by INSERT.
         } else if (upper.startsWith("DELETE")) {
