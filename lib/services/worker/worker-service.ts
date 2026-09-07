@@ -206,7 +206,6 @@ export async function executeStockSync(payload?: Record<string, unknown>): Promi
         lastUpdated: new Date().toISOString(),
       });
     }
-    await sqlite.flushNseToPrisma();
   } catch (err) {
     logger.warn({ msg: "Stock sync: SQLite mirror write failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
   }
@@ -340,7 +339,6 @@ export async function executeCorpActionsSync(payload?: Record<string, unknown>):
         };
       });
     sqlite.cacheCorporateActions(mirrored);
-    await sqlite.flushNseToPrisma();
   } catch (err) {
     logger.warn({ msg: "Corporate actions: SQLite mirror write failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
   }

@@ -2275,9 +2275,16 @@ export async function flushNseToPrisma(): Promise<Record<string, number>> {
 /**
  * Start the periodic ~60s NSE-store promote timer (leader + breaker gated).
  * Returns a stop handle for graceful shutdown / tests.
+ *
+ * v3.30.0 Plan 09 Phase 5: the NSE→Prisma promote is now driven by the 6h
+ * push engine (pushSqliteToPrisma) draining the outbox, so this timer is
+ * OFF by default — only starts when NSE_PROMOTE_ENABLED === "1".
  */
 export function startNsePromoteFlush(): () => void {
   let timer: ReturnType<typeof setInterval> | null = null;
+  if (process.env.NSE_PROMOTE_ENABLED !== "1") {
+    return () => stopNsePromoteFlush();
+  }
   if (state.nsePromoteTimer) {
     clearInterval(state.nsePromoteTimer);
     state.nsePromoteTimer = null;

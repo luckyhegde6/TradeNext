@@ -254,16 +254,8 @@ export async function syncHistoricalPrices(options: HistoricalPriceSyncOptions =
     if (fetchDelayMs > 0 && i < scope.length - 1) await sleep(fetchDelayMs);
   }
 
-  // v3.28.0 end-of-task flush: promote the SQLite OHLCV mirror to Prisma.
-  // Non-fatal — the 60s timer also drains it.
-  if (!dryRun) {
-    try {
-      const sqlite = await import("@/lib/sqlite");
-      await sqlite.flushNseToPrisma();
-    } catch (err) {
-      logger.warn({ msg: "Historical price sync: end-of-task flush failed (non-fatal)", error: err instanceof Error ? err.message : String(err) });
-    }
-  }
+  // v3.30.0 Plan 09 Phase 5: no end-of-task SQLite→Prisma promote — the 6h
+  // push engine (pushSqliteToPrisma) drains the outbox; SQLite captures stay.
 
   const result: HistoricalPriceSyncResult = {
     scope,
