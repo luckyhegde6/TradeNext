@@ -247,6 +247,15 @@ export interface SqliteFallback {
     table: "worker_task" | "worker_status" | "cron_job",
     maxAgeMs: number,
   ): boolean;
+  /**
+   * v3.30.0: Re-mark a control-plane table's "last control write" timestamp as
+   * NOW (best-effort, never throws). Used by `discoverPendingTask` when a Prisma
+   * fallback CONFIRMED the shared queue is empty but the local mirror still has
+   * rows — so the daemon trusts the (non-empty, confirmed-empty) mirror for
+   * `maxAgeMs` instead of re-reading Prisma every poll. No-op when the table is
+   * empty (mirrors `isControlMirrorFresh`'s non-empty gate).
+   */
+  touchControlMirror(table: "worker_task" | "worker_status" | "cron_job"): void;
 
   // ── v3.28.0 NSE-backed data store (SQLite-first) ──────────────────────────
   /** Upsert a stock (Symbol) row into SQLite. */
@@ -807,10 +816,10 @@ const SCHEMA_SQL = `
     queued_at       TEXT
   );
 
-  -- ── NSE-backed data store (v3.28.0 SQLite-first): mirrors the Prisma models
+  -- NSE-backed data store (v3.28.0 SQLite-first): mirrors the Prisma models
   -- used by the NSE syncs. SQLite is the PRIMARY write/read store for NSE
-  -- market data; Prisma is kept in sync via the instant promote. Schema
-  -- mirrors Prisma camelCase → snake_case columns with hot-path indexes. ──
+  -- market data, and Prisma is kept in sync via the instant promote. Schema
+  -- mirrors Prisma camelCase -> snake_case columns with hot-path indexes.
   CREATE TABLE IF NOT EXISTS symbols (
     symbol       TEXT PRIMARY KEY,
     company_name TEXT,
@@ -840,7 +849,7 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_daily_price_ticker ON daily_price (ticker);
 
   -- Captured Chartink scan rows (mirrors ChartinkScreenerResult). Populated
-  -- from live captures during a full run; served SQLite-first on reads.
+  -- from live captures during a full run, served SQLite-first on reads.
   CREATE TABLE IF NOT EXISTS chartink_screener_result (
     id             TEXT PRIMARY KEY,
     run_id         TEXT,
@@ -3520,6 +3529,23 @@ function createFallback(db: Database): SqliteFallback {
         return Date.now() - at <= maxAgeMs;
       } catch {
         return false;
+      }
+    },
+
+    touchControlMirror(table: "worker_task" | "worker_status" | "cron_job"): void {
+      if (!db) return;
+      try {
+        // Same non-empty gate as isControlMirrorFresh: an EMPTY mirror must stay
+        // stale so daemons keep falling back to Prisma until something seeds it.
+        const countRes = db.exec(`SELECT COUNT(*) AS cnt FROM ${table}`);
+        const cnt = countRes.length ? Number(countRes[0].values[0][0]) : 0;
+        if (cnt <= 0) return;
+        db.run(`INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)`, [
+          `control_write_at:${table}`,
+          new Date().toISOString(),
+        ]);
+      } catch {
+        // best-effort — leaving the mirror stale only costs a Prisma reread
       }
     },
 

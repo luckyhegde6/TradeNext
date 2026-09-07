@@ -34,6 +34,13 @@ export const DAEMON_ID = `cron-daemon-${os.hostname()}-${process.pid}`;
 // by expression, so a stale nextRun in the mirror is irrelevant to registration;
 // nextRun/spawn correctness stays on Prisma via spawnDueCronJob.
 const CONTROL_TTL_MS = 5 * 60_000; // cron mirror trusted for 5 min, then reseed
+// v3.30.x: the swing-analysis queue drain used to run on EVERY 5-min resync
+// tick, issuing 3 Prisma statements (2 stale-recovery updateMany + 1 pending
+// findFirst) even when the queue was idle (~36 ops/hr → ~12/hr). Cross-instance
+// crash recovery still works — a wedged "running" job is picked up within
+// SWING_JOB_STALE_MS (45 min) + this drain window; force=1 and the Swing API
+// path also call maybeProcessSwingAnalysis directly.
+const SWING_DRAIN_INTERVAL_MS = 900_000; // swing drain throttled to once per 15 min
 
 /** Parse a SQLite-stored config column (JSON string) back to an object. */
 function parseConfig(value: unknown): Record<string, unknown> | undefined {
@@ -66,6 +73,7 @@ let running = false;
 let resyncInterval: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let lastHeartbeatAt: Date | null = null;
+let lastSwingDrainAt = 0;
 const tasks = new Map<string, RegisteredTask>();
 
 /**
@@ -111,15 +119,18 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
         logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) });
       }
     });
-    // v3.13.0: drain the swing analysis job queue every tick. The DB-backed
-    // job survives instance recycle — when the process that created it dies
-    // mid-analysis, the stale-running recovery + claim here picks it back up
-    // (never throws; module-guarded in-flight).
-    import("@/lib/services/swingRecommendationService")
-      .then((m) => m.maybeProcessSwingAnalysis())
-      .catch((error) =>
-        logger.error({ msg: "Swing analysis drain failed", error: error instanceof Error ? error.message : String(error) }),
-      );
+    // v3.13.0: drain the swing analysis job queue (throttled to 1/15min since
+    // v3.30.x). The DB-backed job survives instance recycle — when the process
+    // that created it dies mid-analysis, the stale-running recovery + claim
+    // here picks it back up (never throws; module-guarded in-flight).
+    if (Date.now() - lastSwingDrainAt >= SWING_DRAIN_INTERVAL_MS) {
+      lastSwingDrainAt = Date.now();
+      import("@/lib/services/swingRecommendationService")
+        .then((m) => m.maybeProcessSwingAnalysis())
+        .catch((error) =>
+          logger.error({ msg: "Swing analysis drain failed", error: error instanceof Error ? error.message : String(error) }),
+        );
+    }
   }, RESYNC_INTERVAL_MS);
 
   heartbeatInterval = setInterval(() => {

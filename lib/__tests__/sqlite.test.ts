@@ -27,11 +27,16 @@ jest.mock("sql.js", () => {
           .map((l) => l.trim())
           .filter((l) => !l.startsWith("--"))
           .join(" ");
-        const stmt = raw;
+        const stmt = raw.trim();
         const upper = stmt.toUpperCase();
+        if (!stmt) continue;
         if (upper.startsWith("CREATE TABLE")) {
           const m = stmt.match(/CREATE TABLE IF NOT EXISTS (\w+)/i);
           if (m && !store[m[1]]) store[m[1]] = { columns: [], rows: [] };
+        } else if (upper.startsWith("CREATE INDEX")) {
+          // Index DDL is a no-op in the mock (tables carry no indexes).
+        } else if (upper.startsWith("ALTER TABLE")) {
+          // Column-add DDL is a no-op; tables are flexibly shaped by INSERT.
         } else if (upper.startsWith("DELETE")) {
           const m = stmt.match(/DELETE FROM (\w+)/i);
           if (m && store[m[1]]) {
@@ -63,6 +68,15 @@ jest.mock("sql.js", () => {
             }
             t.rows.push([..._params]);
           }
+        } else {
+          // Real sql.js throws `near "<token>": syntax error` when a fragment's
+          // first token isn't a valid SQL statement. Match that behavior so a
+          // semicolon sneaking into a `--` comment inside SCHEMA_SQL (v3.30.0
+          // regression: "near \"Prisma\": syntax error" at init, leaving the
+          // SQLite-first store inert) fails `creates and initializes SQLite`
+          // instead of being silently ignored by this mock.
+          const firstToken = (/^[A-Za-z]+/.exec(stmt) || [])[0] || "";
+          throw new Error(`near "${firstToken}": syntax error`);
         }
       }
     }
@@ -202,8 +216,8 @@ jest.mock("@/lib/services/leader", () => ({
   getLeaderInfo: jest.fn().mockResolvedValue(null),
   leaderWorkerId: jest.fn((role: string) => `leader-${role}`),
   LEADER_SELF: "unit-test-host-1",
-  LEADER_STALENESS_MS: 5 * 60_000,
-  LEADER_HEARTBEAT_MS: 60_000,
+  LEADER_STALENESS_MS: 15 * 60_000,
+  LEADER_HEARTBEAT_MS: 300_000,
 }));
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const mockLeader = require("@/lib/services/leader");
@@ -254,6 +268,24 @@ describe("SQLite backup fallback", () => {
       const fb = getSqliteFallback();
       expect(fb).not.toBeNull();
       expect(fb!.isReady()).toBe(true);
+    });
+
+    it("schema init tolerates semicolons in SQL comments (v3.30.0 regression)", async () => {
+      // Regression: SCHEMA_SQL is split on ";" (initSqliteBackup) and each
+      // fragment is run as one statement. A ";" inside a `--` comment cut a
+      // fragment whose first token was a bare word (e.g. "Prisma", "served"),
+      // so real sql.js threw `near "Prisma": syntax error` at boot → SQLite
+      // never became ready → every SQLite-first read fell back to Prisma
+      // (the F1 worker poll degraded to ~20 Prisma SELECTs / 30s).
+      // The mock Database.run mirrors sql.js and throws on such fragments,
+      // so a re-introduced comment semicolon fails this (and the init) test.
+      const { initSqliteBackup } = await import("../sqlite");
+      await initSqliteBackup();
+      const fb = getSqliteFallback();
+      expect(fb).not.toBeNull();
+      expect(fb!.isReady()).toBe(true);
+      // Spot-check the previously-broken tables actually exist in the mirror.
+      expect(fb!.getWorkerTasks().length).toBeGreaterThanOrEqual(0);
     });
 
     it("returns null recs when empty", () => {

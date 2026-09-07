@@ -66,17 +66,19 @@ function freshFallback(opts: { workerRows?: unknown[]; cronRows?: unknown[] } = 
     getCronJobs: jest.fn(() => opts.cronRows ?? []),
     upsertWorkerTask: jest.fn(),
     upsertCronJob: jest.fn(),
+    touchControlMirror: jest.fn(),
   };
 }
 
-function staleFallback() {
+function staleFallback(opts: { workerRows?: unknown[] } = {}) {
   return {
     isReady: () => true,
     isControlMirrorFresh: jest.fn(() => false), // never fresh
-    getWorkerTasks: jest.fn(() => []),
+    getWorkerTasks: jest.fn(() => opts.workerRows ?? []),
     getCronJobs: jest.fn(() => []),
     upsertWorkerTask: jest.fn(),
     upsertCronJob: jest.fn(),
+    touchControlMirror: jest.fn(),
   };
 }
 
@@ -159,6 +161,42 @@ describe("discoverPendingTask — SQLite-first read", () => {
 
     expect(task).toBeNull();
     expect(prisma.workerTask.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  test("stale mirror + Prisma CONFIRMS empty + mirror non-empty → touchControlMirror re-marks it fresh (v3.30.x)", async () => {
+    mockSqlite = staleFallback({
+      workerRows: [
+        {
+          id: "w3",
+          name: "Completed: old task",
+          task_type: "recommendations",
+          status: "done",
+          priority: 3,
+          created_at: "2026-09-03T04:00:00.000Z",
+        },
+      ],
+    });
+    (prisma.workerTask.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const task = await discoverPendingTask();
+
+    expect(task).toBeNull();
+    expect(prisma.workerTask.findFirst).toHaveBeenCalledTimes(1);
+    // Confirmed-empty → re-mark the mirror fresh so the next CONTROL_TTL_MS of
+    // polls trust SQLite (steady state ~12 reads/hr) instead of re-reading
+    // Prisma every poll (~120/hr). Nothing to seed on a null task.
+    expect(sqlite.getSqliteFallback().touchControlMirror).toHaveBeenCalledWith("worker_task");
+    expect(sqlite.getSqliteFallback().upsertWorkerTask).not.toHaveBeenCalled();
+  });
+
+  test("fresh mirror is trusted → touchControlMirror NOT invoked on the idle path", async () => {
+    mockSqlite = freshFallback({ workerRows: [] });
+
+    const task = await discoverPendingTask();
+
+    expect(task).toBeNull();
+    expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+    expect(sqlite.getSqliteFallback().touchControlMirror).not.toHaveBeenCalled();
   });
 });
 
