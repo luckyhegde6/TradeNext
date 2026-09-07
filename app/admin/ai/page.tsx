@@ -12,6 +12,8 @@ interface AIConfigData {
   maxTokens: number;
   enabled: boolean;
   availableModels: { id: string; name: string; description?: string }[];
+  /** True built-ins (non-removable) — e.g. ["openrouter/free", "openrouter/auto"] */
+  builtinModelIds?: string[];
   customModels: { id: string; name: string; description?: string }[];
   envModel: string;
 }
@@ -361,13 +363,26 @@ export default function AdminAIPage() {
               >
                 <optgroup label="Built-in Models">
                   {config.availableModels
-                    .filter((m) => !config.customModels.some((c) => c.id === m.id))
+                    .filter((m) => (config.builtinModelIds ?? []).includes(m.id))
                     .map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name}
                       </option>
                     ))}
                 </optgroup>
+                {config.availableModels
+                  .filter((m) => !(config.builtinModelIds ?? []).includes(m.id) && !config.customModels.some((c) => c.id === m.id))
+                  .length > 0 && (
+                  <optgroup label="Available Models">
+                    {config.availableModels
+                      .filter((m) => !(config.builtinModelIds ?? []).includes(m.id) && !config.customModels.some((c) => c.id === m.id))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.id})
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
                 {config.customModels.length > 0 && (
                   <optgroup label="Custom Models">
                     {config.customModels.map((m) => (
@@ -493,9 +508,11 @@ export default function AdminAIPage() {
 
           {/* Custom Models */}
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 border border-gray-200 dark:border-slate-700 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Custom Models</h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Model Library</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Add any OpenRouter model (e.g., <code>openrouter/auto-beta</code>, <code>nvidia/nemotron-3-embed-1b:free</code>, <code>tencent/hy3:free</code>)
+              Built-in models (<code>openrouter/free</code>, <code>openrouter/auto</code>) cannot be removed.
+              All catalog and custom models below are removable. Add any OpenRouter model
+              (e.g., <code>openrouter/auto-beta</code>, <code>nvidia/nemotron-3-embed-1b:free</code>, <code>tencent/hy3:free</code>)
             </p>
 
             {/* Add form */}
@@ -541,28 +558,52 @@ export default function AdminAIPage() {
               </div>
             </div>
 
-            {/* Custom models list */}
-            {config.customModels.length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {config.customModels.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">{m.name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">{m.id}</div>
-                      {m.description && <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{m.description}</div>}
-                    </div>
-                    <button
-                      onClick={() => removeCustomModel(m.id)}
-                      className="px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 dark:text-gray-500 italic">No custom models added yet.</p>
-            )}
+            {/* Removable models list (catalog + custom, never built-ins) */}
+            {(() => {
+              const removable = config.availableModels.filter(
+                (m) => !(config.builtinModelIds ?? []).includes(m.id)
+              );
+              if (removable.length === 0) {
+                return (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 italic">
+                    No removable models — the built-ins (<code>openrouter/free</code>, <code>openrouter/auto</code>) are the only ones available.
+                  </p>
+                );
+              }
+              return (
+                <div className="mt-3 space-y-2">
+                  {removable.map((m) => {
+                    const isCustom = config.customModels.some((c) => c.id === m.id);
+                    return (
+                      <div key={m.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{m.name}</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                isCustom
+                                  ? "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300"
+                                  : "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                              }`}
+                            >
+                              {isCustom ? "CUSTOM" : "CATALOG"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">{m.id}</div>
+                          {m.description && <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{m.description}</div>}
+                        </div>
+                        <button
+                          onClick={() => removeCustomModel(m.id)}
+                          className="px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Discover Free Models */}

@@ -174,3 +174,105 @@ plus this doc set (AGENTS.md, CHANGELOG index + versions-v3.29.md, TODO.md, Prim
 Lessons, session-todos, handoff).
 
 **Commit**: pending user (no push/merge without approval).
+
+---
+
+# v3.29.2 — Admin AI model management: true built-ins are permanently locked (`openrouter/free` + `openrouter/auto`), catalog + custom models stay removable (Sep 07 2026)
+
+- **Date**: Sep 07 2026
+- **Branch**: `fix/v3.29.1-header-watchlist` (on top of committed v3.29.1 `6e8db23` — v3.29.1 itself is now committed `6e8db23`, NOT `main` as its section below states)
+- **Status**: Complete (code + tests + live-browser verification + docs); commit pending user approval
+- **Spec/Plan**: small bug-fix + UI-clarity increment to the admin AI model-management workspace — no new spec (follows the v3.28.x model-catalog work and the admin AI page's custom-model section)
+
+## User directive (confirmed)
+
+"A built-in model cannot be removed." The admin AI page's per-model Remove button must NEVER apply to the
+two true built-ins (`openrouter/free`, `openrouter/auto`) — they are the foundation of the AI fallback
+chain (`AI_FALLBACK_MODELS`) and are re-selected automatically whenever the active model is removed or
+becomes unviable. Catalog models (the 8 `AVAILABLE_MODELS`) and user-added `customModels` remain
+removable (hide).
+
+## Design
+
+### Phase 1 — API enforcement (authoritative, `app/api/admin/ai/config/route.ts`)
+
+DELETE `/api/admin/ai/config` now:
+- zod-validates `modelId` (NOT `id` — verified live that `{id}` → 400 `"modelId is required"`);
+- **builtin → 400 `"Cannot remove built-in models"`**, nothing persisted (regression lock);
+- unknown id (not builtin/catalog/custom) → 404;
+- catalog model → hidden (removed from the GET listing);
+- custom model → removed outright;
+- removing the ACTIVE model also resets `ai_config.model` to `DEFAULT_MODEL` (`openrouter/free`) +
+  `resetLLM()` so the live LLM cache follows.
+
+POST: add custom model via `app/api/admin/ai/custom-models/route.ts` (regex
+`^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+(:[a-zA-Z0-9_-]+)?$`); adding a hidden CATALOG id re-adds it through the
+catalog path (un-hide + `CATALOG` badge) and does NOT push it into the custom collection (no duplicates).
+
+### Phase 2 — Config constants (`lib/services/ai/config.ts`)
+
+`BUILTIN_MODELS` (full metadata list) + `BUILTIN_MODEL_IDS = ["openrouter/free", "openrouter/auto"]`
+exported; `AVAILABLE_MODELS` (8 catalog entries) contains neither built-in; `isValidModel` accepts
+built-ins + catalog ids and rejects everything else; `DEFAULT_MODEL` unchanged. Sync-guard: `BUILTIN_MODEL_IDS`
+must stay ⊇ `AI_FALLBACK_MODELS` (test-verified so the fallback chain can never be removed through the UI).
+
+### Phase 3 — UI (`app/admin/ai/page.tsx`)
+
+- Custom-model section renamed → **"Model Library"** (level-3 heading + locked-note subtitle: built-ins are
+  locked; catalog + custom models can be removed/restored).
+- Active-model `<select>` split into **3 optgroups**: Built-in Models / Available Models / Custom Models
+  (`available = availableModels − builtins − customs`; builtins = `availableModels ∩ builtinModelIds`;
+  customs = customModels already in the active model's own section).
+- Per-model Remove-button list = catalog ∪ custom **minus builtins** (IIFE guard on `builtinModelIds`) —
+  built-ins never render a Remove button client-side AND are rejected by the API (400).
+
+### Phase 4 — Live verification (Playwright, :3000 admin)
+
+- `DELETE /api/admin/ai/config {modelId:"openrouter/free"}` → **400 "Cannot remove built-in models"**.
+- UI remove `openai/gpt-oss-20b:free` → toast `Model "openai/gpt-oss-20b:free" removed.`; re-add → toast
+  `Model "openai/gpt-oss-20b:free" added successfully.` + **CATALOG** badge; persists across reload and is
+  NOT pushed into the Custom collection (desired restore semantics).
+- Combobox renders **all 11 options** across the 3 optgroups (2 Built-in + 7 Available incl. the selected
+  GPT-OSS + 2 Custom: Poolside Laguna XS 2.1, Google Gemma 4 31B) — an earlier page-level a11y snapshot that
+  suggested "7 options" was snapshot truncation, not missing options (targeted re-snapshot of the combobox
+  confirmed all 11).
+- **0 console errors**; pre/post session DB state identical (no pollution — gpt-oss restored; the custom pair
+  `poolside/laguna-xs-2.1:free` + `google/gemma-4-31b-it:free` was pre-existing).
+- Built-in option label quirk "OpenRouter Free (Auto-Router)" is pre-existing BUILTIN_MODELS metadata — left
+  untouched (surgical rule).
+
+## Tests
+
+**NEW `lib/__tests__/aiModelCatalog.test.ts` (4)**: sync-guard `BUILTIN_MODEL_IDS` ⊇ `AI_FALLBACK_MODELS`;
+exactly the two non-removable built-ins with full metadata; the editable catalog contains neither built-in;
+`isValidModel` truth table (builtins + catalog ids accepted, everything else rejected).
+
+**NEW `lib/__tests__/adminAiConfigModelManagement.test.ts` (10)**: GET admin shape (builtins first + full
+catalog + `builtinModelIds`); GET 403 for non-admin; builtin DELETE → 400 nothing persisted (regression);
+catalog DELETE hides (GET stops listing it); unknown id → 404; removing the ACTIVE model resets to
+`openrouter/free` + `resetLLM()`; custom add-then-remove outright; re-adding a hidden catalog id un-hides it
+(restore); POST accepts a built-in model and persists it; POST rejects an invalid model format. (Note: a prior
+draft of this unit mis-stated the count as "11 route tests" — the route file actually holds 10 `it(` and the
+5th file in the run is `modelChain.test.ts` using `test(`.)
+
+**Guard-run `lib/__tests__/modelChain.test.ts` (5, pre-existing)**: `AI_FALLBACK_MODELS` matches the
+connection-test routes; primary-first order; dedupe; empty/undefined primary; fresh-array mutation isolation.
+
+**Run**: 3 suites / **19/19 green** (NEW 14 + modelChain 5 guard); tsc `npx tsc --noEmit` **46 = exact
+baseline (0 new)**; **no schema change → no migration**.
+
+## Files
+
+**Created**: `lib/__tests__/aiModelCatalog.test.ts`, `lib/__tests__/adminAiConfigModelManagement.test.ts`,
+`.agents/sessions/2026-09-07-admin-ai-model-management/` (decisions + flow).
+
+**Modified**: `app/admin/ai/page.tsx` ("Model Library" heading + locked-note subtitle; 3-optgroup active-model
+select; builtin-excluding removable list), `app/api/admin/ai/config/route.ts` (DELETE `modelId` zod + builtin
+400 + active-model reset + `resetLLM`), `app/api/admin/ai/custom-models/route.ts` (add/remove + catalog restore
+un-hide), `lib/services/ai/config.ts` (`BUILTIN_MODELS` / `BUILTIN_MODEL_IDS`), plus this doc set (AGENTS.md,
+CHANGELOG index, TODO.md, Primer, agent-memory, Lessons, session-todos).
+
+**Commit**: pending user. NOTE — the working tree also carries unrelated pending v3.28.x-era changes
+(`lib/sqlite.ts`, `lib/services/leader.ts`, `lib/services/worker/worker-engine.ts` +
+`cron-daemon.ts`, `lib/__tests__/daemon-sqlite-first.test.ts` + `leader.test.ts` + `sqlite.test.ts`,
+`package.json`) that are NOT part of v3.29.2 — do not mix them into the v3.29.2 commit.

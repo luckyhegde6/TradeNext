@@ -5,6 +5,8 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-07 (v3.29.2 — Admin AI model management: true built-ins permanently locked — `openrouter/free` + `openrouter/auto` can NEVER be removed (API 400 + UI), catalog (8) + custom models stay removable; "Model Library" UI + 3-optgroup active-model select; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.1 `6e8db23`; see Current Project Status below)
+
 2026-09-06 (v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix; browser/DevTools visual-verification batch on `main`, on top of merged v3.29.0 `d7e54cf`; see Current Project Status below)
 
 2026-09-05 (v3.29.0 — UI/UX audit fixes: backtest symbol-gate softening + AI-failure error surfacing + mobile-nav Alerts + `[object Object]` throw-site fix, on top of v3.28.5 `6700076` on branch `fix/v3.28.1-sqlite-self-heal`; see Current Project Status below)
@@ -16,6 +18,15 @@
 ---
 
 ## Current Project Status
+
+### v3.29.2 — Admin AI model management: true built-ins permanently locked (Sep 07 2026) — ✅ CODE + TESTS + LIVE-VERIFIED, COMMIT PENDING USER
+**User directive**: "a built-in model cannot be removed" — built-ins are the `AI_FALLBACK_MODELS` foundation (`lib/services/ai/modelChain.ts`) re-selected whenever the active model is removed/becomes unviable.
+**API** (`app/api/admin/ai/config/route.ts` DELETE): zod-validates `modelId` (NOT `id` — `{id}` → 400 "modelId is required"); **builtin → 400 "Cannot remove built-in models"** (nothing persisted); unknown → 404; catalog → hidden from GET; custom → removed outright; removing the ACTIVE model resets `ai_config.model` → `DEFAULT_MODEL` + `resetLLM()`. `app/api/admin/ai/custom-models/route.ts`: add/remove, and adding a hidden catalog id **restores via the catalog path** (CATALOG badge, not pushed into the custom collection).
+**Constants** (`lib/services/ai/config.ts`): NEW `BUILTIN_MODELS` + `BUILTIN_MODEL_IDS` (the two true built-ins `openrouter/free` + `openrouter/auto`); `AVAILABLE_MODELS` (8) contains no built-ins; sync-guard test ties `AI_FALLBACK_MODELS` ⊆ `BUILTIN_MODEL_IDS`. **UI** (`app/admin/ai/page.tsx`): Custom-model section → **"Model Library"** + locked-note subtitle ("OpenRouter Free / Auto are built-ins and cannot be removed"); active-model select → **3 optgroups (Built-in / Available / Custom)**; per-model Remove list = catalog ∪ custom **minus builtins**.
+**Tests**: NEW `aiModelCatalog.test.ts` **4** + `adminAiConfigModelManagement.test.ts` **10** (builtin 400 regression, hide/remove/404/active-reset/restore, POST valid/invalid) = **14 new**; guard-run `modelChain.test.ts` (5 pre-existing) → **19/19**.
+**Verification**: tsc **46 = exact baseline (0 new)**; no schema change → no migration.
+**Live verified** (Playwright :3000 admin): builtin DELETE → 400; UI remove/re-add gpt-oss toasts + CATALOG badge persists across reload; combobox = **all 11 options** across 3 optgroups (an earlier "7 options" read was an a11y-snapshot truncation — re-snapshot the combobox element with a target ref); 0 console errors; pre/post DB state identical (no pollution).
+**Docs**: AGENTS.md v3.29.2 row, CHANGELOG index + `.agents/changelog/versions-v3.29.md` v3.29.2 section, TODO.md row, Primer (this), agent-memory, Lessons #108, session-todos, `.agents/sessions/2026-09-07-admin-ai-model-management/` (decisions + flow). ⚠️ Working tree ALSO carries unrelated pending v3.28.x-era changes (sqlite/leader/worker files, `package.json`) — do NOT mix into the v3.29.2 commit. **Commit pending user (no push/merge without explicit approval).**
 
 ### v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix (Sep 06 2026) — ✅ CODE + TESTS + LIVE-BROWSER VERIFIED, COMMIT PENDING USER
 **Fixes** (on `main`, on top of merged v3.29.0 `d7e54cf`): **(1) Header overflow** (`app/Header.tsx`, CSS-only) — logged-in nav no longer overflows at 1440–1600px (Playwright audit: 372 DOM overflow checks + 9-width quick-check loop, 0 overflow @1440 + @375 on watchlist/alerts/screener/advanced-screener; e2e **87 passed / 2 flaky / 0 failed**). **(2) Watchlist logged-out infinite-skeleton FIX (found during user-requested browser + Chrome DevTools visual observation)** — `app/watchlist/page.tsx` :303 guard `if (status === "loading" || loading)` dead-coded the `unauthenticated` "Please sign in to view your watchlist." card: the local `loading` (`useState(true)`) only clears inside `fetchWatchlists()` (authenticated-only) → logged-out visitors saw an eternal skeleton (e2e missed it — the watchlist spec logs in first). Fix: `status === "loading" || (status === "authenticated" && loading)`.

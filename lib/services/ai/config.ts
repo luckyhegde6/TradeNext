@@ -29,7 +29,35 @@ export interface ModelInfo {
 }
 
 /**
- * Available free models on OpenRouter.
+ * TRUE built-in models — non-removable, always selectable.
+ *
+ * These are the platform's routing fallbacks (see `AI_FALLBACK_MODELS` in
+ * `lib/services/ai/modelChain.ts` — the two lists MUST stay in sync; the
+ * catalog test `aiModelCatalog.test.ts` guards equality). Every OTHER model
+ * (catalog + admin-added custom) is editable/removable by an admin.
+ */
+export const BUILTIN_MODELS: ModelInfo[] = [
+  {
+    id: "openrouter/free",
+    name: "OpenRouter Free (Auto-Router)",
+    description: "Routes to random free model. Unreliable quotas.",
+    contextLength: 200_000,
+    billingPeriod: "auto",
+  },
+  {
+    id: "openrouter/auto",
+    name: "OpenRouter Auto (Auto-Router)",
+    description: "Automatically routes to the best available model.",
+    contextLength: 200_000,
+    billingPeriod: "auto",
+  },
+];
+
+/** Builtin model IDs — non-removable in the admin model manager. */
+export const BUILTIN_MODEL_IDS: ReadonlyArray<string> = BUILTIN_MODELS.map((m) => m.id);
+
+/**
+ * Available free models on OpenRouter (the editable catalog).
  *
  * Selection criteria:
  * - pricing.prompt = $0, pricing.completion = $0
@@ -96,14 +124,6 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     description: "Cohere agentic coding model, 256K context",
     contextLength: 256_000,
     billingPeriod: "daily",
-  },
-  // ── Auto Router ───────────────────────────────────────────────────────
-  {
-    id: "openrouter/free",
-    name: "OpenRouter Free (Auto-Router)",
-    description: "Routes to random free model. Unreliable quotas.",
-    contextLength: 200_000,
-    billingPeriod: "auto",
   },
 ];
 
@@ -177,8 +197,8 @@ export function hasValidConfig(config?: AIConfig): boolean {
 }
 
 /**
- * Validate that a model ID is in our allowed list.
+ * Validate that a model ID is in our allowed list (builtins + catalog).
  */
 export function isValidModel(modelId: string): boolean {
-  return AVAILABLE_MODELS.some((m) => m.id === modelId);
+  return BUILTIN_MODEL_IDS.includes(modelId) || AVAILABLE_MODELS.some((m) => m.id === modelId);
 }
