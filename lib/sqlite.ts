@@ -3442,6 +3442,15 @@ function createFallback(db: Database): SqliteFallback {
       if (!db) return;
       try {
         const now = new Date().toISOString();
+        // v3.30.0: Prisma CronJob rows carry real `Date` instances for
+        // lastRun / nextRun / createdAt (caller: cron-daemon.ts re-seed loop).
+        // NEVER bind them raw — `String(Date)` yields a locale-formatted value
+        // like "Sat Sep 06 2026 10:30:00 GMT+0530 (India Standard Time)" that
+        // breaks the ISO read-back (`reconcileControlToPrisma` does
+        // `new Date(String(col))`). syncFromPrisma already ISO-normalises
+        // (:2524-2525); this path must too.
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
         db.run(
           `INSERT INTO cron_job (
              id, name, description, task_type, cron_expression, is_active,
@@ -3471,12 +3480,12 @@ function createFallback(db: Database): SqliteFallback {
               const v = row.isActive ?? row.is_active;
               return v == null ? 1 : v ? 1 : 0;
             })(),
-            (row.lastRun ?? row.last_run) as string | null,
-            (row.nextRun ?? row.next_run ?? now) as string,
+            (toIso(row.lastRun ?? row.last_run) ?? null) as string | null,
+            (toIso(row.nextRun ?? row.next_run) ?? now) as string,
             Number(row.runCount ?? row.run_count ?? 0),
             Number(row.successCount ?? row.success_count ?? 0),
             Number(row.failCount ?? row.failure_count ?? row.fail_count ?? 0),
-            (row.createdAt ?? row.created_at ?? now) as string,
+            (toIso(row.createdAt ?? row.created_at) ?? now) as string,
             row.config != null ? JSON.stringify(row.config) : null,
           ],
         );

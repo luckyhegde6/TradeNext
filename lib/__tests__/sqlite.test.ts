@@ -55,15 +55,20 @@ jest.mock("sql.js", () => {
             }
           }
         } else if (upper.startsWith("INSERT")) {
-          const m = stmt.match(/INSERT OR REPLACE INTO (\w+)/i);
+          // Handle both `INSERT OR REPLACE INTO` (write-behind) and plain
+          // `INSERT INTO ... ON CONFLICT(...) DO UPDATE` (control-plane
+          // upserts e.g. upsertCronJob) so those rows reach the read-back
+          // helpers in tests instead of being silently dropped.
+          const m = stmt.match(/INSERT(?:\s+OR\s+REPLACE)?\s+INTO\s+(\w+)/i);
           if (m && store[m[1]]) {
             const t = store[m[1]];
             if (t.columns.length === 0) {
               const colM = stmt.match(/\(([^)]+)\)/);
               if (colM) t.columns = colM[1].split(",").map((c: string) => c.trim());
             }
-            // INSERT OR REPLACE: remove existing rows with same PK (first column)
-            if (upper.includes("OR REPLACE") && _params.length > 0) {
+            // OR REPLACE wipe + ON CONFLICT both mean "replace on PK (first
+            // column)" — mimic as remove-then-push so re-upserts don't dup.
+            if ((upper.includes("OR REPLACE") || upper.includes("ON CONFLICT")) && _params.length > 0) {
               t.rows = t.rows.filter((r) => r[0] !== _params[0]);
             }
             t.rows.push([..._params]);
@@ -783,6 +788,77 @@ describe("SQLite backup fallback", () => {
         corporate_action: 0,
         chartink_screener_result: 0,
       });
+    });
+  });
+
+  // ── v3.30.0: upsertCronJob Date binding (control-plane re-seed path) ────
+  describe("upsertCronJob Date binding (v3.30.0)", () => {
+    beforeEach(async () => {
+      // The sql.js mock store is shared/global across mock DB instances — clear
+      // it + re-init so each test starts from a clean mirror.
+      const sqljs: any = require("sql.js");
+      sqljs.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      await ensureSqliteBackup();
+    });
+
+    it("binds Prisma Date objects as ISO strings, not locale String(Date)", () => {
+      const fb = getSqliteFallback()!;
+      const id = "cron-date-bind";
+      fb.upsertCronJob({
+        id,
+        name: "Daily Recommendations (System)",
+        taskType: "recommendations",
+        cronExpression: "0 4 * * 1-5",
+        isActive: true,
+        lastRun: new Date("2026-09-06T10:30:00.000Z"),
+        nextRun: new Date("2026-09-07T05:00:00.000Z"),
+        runCount: 3,
+        successCount: 2,
+        failureCount: 1,
+        createdAt: new Date("2026-09-06T09:00:00.000Z"),
+        config: { timezone: "Asia/Kolkata" },
+      });
+
+      const rows = fb.getCronJobs().filter((r) => r.id === id);
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      // Regression: pre-fix bound Date objects raw (`as string` cast — no
+      // runtime conversion), storing `String(Date)` = locale format like
+      // "Sat Sep 06 2026 10:30:00 GMT+0530 (India Standard Time)" which
+      // corrupts the read-back in reconcileControlToPrisma
+      // (`new Date(String(col))` → Invalid Date). Must be ISO, matching the
+      // syncFromPrisma path (:2524-2525).
+      expect(row.last_run).toBe("2026-09-06T10:30:00.000Z");
+      expect(row.next_run).toBe("2026-09-07T05:00:00.000Z");
+      expect(row.created_at).toBe("2026-09-06T09:00:00.000Z");
+      expect(row.is_active).toBe(true);
+      expect(row.config).toBe(JSON.stringify({ timezone: "Asia/Kolkata" }));
+    });
+
+    it("re-upserting the same id replaces the row (ON CONFLICT upsert semantics)", () => {
+      const fb = getSqliteFallback()!;
+      const id = "cron-date-bind";
+      fb.upsertCronJob({
+        id,
+        name: "v1",
+        cronExpression: "0 4 * * 1-5",
+        isActive: true,
+        nextRun: new Date("2026-09-07T05:00:00.000Z"),
+      });
+      fb.upsertCronJob({
+        id,
+        name: "v2",
+        cronExpression: "0 5 * * 1-5",
+        isActive: true,
+        nextRun: new Date("2026-09-08T05:00:00.000Z"),
+      });
+      const rows = fb.getCronJobs().filter((r) => r.id === id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe("v2");
+      expect(rows[0].cron_expression).toBe("0 5 * * 1-5");
+      expect(rows[0].next_run).toBe("2026-09-08T05:00:00.000Z");
     });
   });
 

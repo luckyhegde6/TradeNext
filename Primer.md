@@ -5,6 +5,8 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-07 (v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.2 `1e907f1`; see Current Project Status below)
+
 2026-09-07 (v3.29.2 — Admin AI model management: true built-ins permanently locked — `openrouter/free` + `openrouter/auto` can NEVER be removed (API 400 + UI), catalog (8) + custom models stay removable; "Model Library" UI + 3-optgroup active-model select; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.1 `6e8db23`; see Current Project Status below)
 
 2026-09-06 (v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix; browser/DevTools visual-verification batch on `main`, on top of merged v3.29.0 `d7e54cf`; see Current Project Status below)
@@ -19,7 +21,18 @@
 
 ## Current Project Status
 
-### v3.29.2 — Admin AI model management: true built-ins permanently locked (Sep 07 2026) — ✅ CODE + TESTS + LIVE-VERIFIED, COMMIT PENDING USER
+### v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging (Sep 07 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `8af65cc` + DOC COMMIT
+**User directive**: "i don't want to see this every time — defaults in `.env` on Netlify" — the recurring db-health noise traced to root causes fixed here (schema-init failure was making SQLite never-ready → every SQLite-first read silently fell back to Prisma). Also "Commit fix + doc the whole v3.30.0".
+**(1) Cadence** (`lib/services/leader.ts`, `cron-daemon.ts`, `worker-engine.ts`): `LEADER_STALENESS_MS` 5min→**15min** + `LEADER_HEARTBEAT_MS` 60s→**300s**; NEW `SWING_DRAIN_INTERVAL_MS = 900s` (swing drain off the 60s resync tick); `REAP_INTERVAL_MS` 60s→**300s**.
+**(2) Mirror freshness**: NEW `SqliteFallback.touchControlMirror(table)` re-marks `control_write_at:<table>` = NOW (non-empty gate, best-effort); `discoverPendingTask()` touches on the ready-DB path so an idle system's mirror freshness tracks poll cadence.
+**(3) Schema-init root cause**: SCHEMA_SQL stray `;` inside `--` comments → sql.js `near "Prisma": syntax error` every boot → SQLite never ready.
+**(4) Netlify WASM staging**: NEW `scripts/copy-sql-wasm-netlify.mjs` copies `public/sql-wasm.wasm` → `.next/sql-wasm.wasm` post-build (publish dir = .next; quickbuild/build wired; non-fatal).
+**(5) `upsertCronJob` Date-binding fix** (`lib/sqlite.ts`): Prisma `CronJob` rows carry real `Date` instances — raw bind → locale string breaks the ISO read-back (`new Date(String(col))` in `reconcileControlToPrisma`, 12h reconcile could write corrupt `nextRun`); NEW `toIso(v)` on lastRun/nextRun/createdAt binds.
+**Tests**: NEW Date-binding describe (2: ISO not locale — fails pre-fix; re-upsert same id replaces) + mock INSERT regex/OR REPLACE semantics; daemon-sqlite-first +2 (touch); leader constants; targeted **96/96**.
+**Verification**: tsc **46 = exact baseline (0 new)**; no schema change → no migration.
+**Commits**: `8af65cc` (Phases 1–4) + doc commit (Phase 5 + docs). PR #114 (v3.29.2 pre-merge) stays held. **No push/merge/deploy without explicit approval.**
+
+### v3.29.2 — Admin AI model management: true built-ins permanently locked (Sep 07 2026) — ✅ CODE + TESTS + LIVE-VERIFIED, COMMITTED `1e907f1`
 **User directive**: "a built-in model cannot be removed" — built-ins are the `AI_FALLBACK_MODELS` foundation (`lib/services/ai/modelChain.ts`) re-selected whenever the active model is removed/becomes unviable.
 **API** (`app/api/admin/ai/config/route.ts` DELETE): zod-validates `modelId` (NOT `id` — `{id}` → 400 "modelId is required"); **builtin → 400 "Cannot remove built-in models"** (nothing persisted); unknown → 404; catalog → hidden from GET; custom → removed outright; removing the ACTIVE model resets `ai_config.model` → `DEFAULT_MODEL` + `resetLLM()`. `app/api/admin/ai/custom-models/route.ts`: add/remove, and adding a hidden catalog id **restores via the catalog path** (CATALOG badge, not pushed into the custom collection).
 **Constants** (`lib/services/ai/config.ts`): NEW `BUILTIN_MODELS` + `BUILTIN_MODEL_IDS` (the two true built-ins `openrouter/free` + `openrouter/auto`); `AVAILABLE_MODELS` (8) contains no built-ins; sync-guard test ties `AI_FALLBACK_MODELS` ⊆ `BUILTIN_MODEL_IDS`. **UI** (`app/admin/ai/page.tsx`): Custom-model section → **"Model Library"** + locked-note subtitle ("OpenRouter Free / Auto are built-ins and cannot be removed"); active-model select → **3 optgroups (Built-in / Available / Custom)**; per-model Remove list = catalog ∪ custom **minus builtins**.
