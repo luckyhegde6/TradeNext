@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Professional Equity Research Decision Engine (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Professional Equity Research Decision Engine</h1>
+  <p>Deep upgrade of the v3.18.0 AI Investment Intelligence: an <b>8-level verdict</b> (with conviction /10 + confidence /100), a <b>12-section institutional memo</b> with evidence-labeled findings, <b>honest data-gap reporting</b> (never fabricated), and optional <b>raw-text document ingestion</b> (annual report / concall) — fully backward compatible, no DB migration.</p>
+  <div class="badges">
+    <span class="badge green">v3.21.0</span>
+    <span class="badge">branch feat/stock-analysis-skill</span>
+    <span class="badge">8-level verdict contract</span>
+    <span class="badge">conviction /10 · confidence /100</span>
+    <span class="badge amber">data-gap honesty</span>
+    <span class="badge">document ingestion 50KB cap</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: VERDICT CONTRACT ======================= -->
+<section>
+  <h2>1 · The 8-Level Verdict Contract</h2>
+  <p class="sub">NEW <code class="inline">Verdict</code> enum in <code class="inline">lib/services/intelligenceTypes.ts</code> — the model must pick ONE verdict and support it with <code class="inline">conviction</code> (/10) and <code class="inline">confidence</code> (/100), scored across six pillars.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    SB["STRONG_BUY"] --> B["BUY"] --> A["ACCUMULATE"] --> H["HOLD"] --> R["REDUCE"] --> S["SELL"] --> SS["STRONG_SELL"] --> AV["AVOID"]
+    style SB fill:#065f46,color:#d1fae5
+    style B fill:#065f46,color:#d1fae5
+    style A fill:#1e3a8a,color:#dbeafe
+    style H fill:#78350f,color:#fef3c7
+    style R fill:#7c2d12,color:#ffedd5
+    style S fill:#7f1d1d,color:#fee2e2
+    style SS fill:#7f1d1d,color:#fee2e2
+    style AV fill:#450a0a,color:#fee2e2
+    </pre>
+  </div>
+  <table>
+    <tr><th>Pillar</th><th>What it scores</th></tr>
+    <tr><td class="mono">Fundamentals</td><td>Margins, growth, cash flow, balance sheet — each finding tagged with an evidence label.</td></tr>
+    <tr><td class="mono">Management</td><td>Management DNA — capital allocation, track record, insider behavior.</td></tr>
+    <tr><td class="mono">Valuation</td><td>Attractive / fair / overvalued zones with the current-price marker positioned.</td></tr>
+    <tr><td class="mono">Technicals</td><td>Trend, momentum, volume structure + <code class="inline">marketPhase</code>.</td></tr>
+    <tr><td class="mono">Shareholding</td><td>Promoter/FII/DII trends (null when data absent — never inferred).</td></tr>
+    <tr><td class="mono">Risk & Catalysts</td><td>Risk matrix (category / probability / impact / pricedIn), catalysts, scenario analysis.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: PIPELINE ======================= -->
+<section>
+  <h2>2 · Orchestrator Pipeline</h2>
+  <p class="sub"><code class="inline">lib/services/ai/intelligence.ts</code> — cache-first, then 8 parallel NSE adapters (each try/catch → null), structured JSON prompt, fallback model chain, never-throwing parser, write-through cache + audit.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    R["POST /api/company/[ticker]/intelligence"] --> C{"cache hit?<br/>(memory → DB 7d TTL)"}
+    C -->|"yes"| OUT["serve cached report"]
+    C -->|"no"| AD["8 adapters in parallel<br/>quote · technicals · valuation · fundamentals<br/>shareholding · corporate · news · peers<br/>(null on failure)"]
+    AD --> PR["buildStockAnalysisPrompt(input, docs?)<br/>6 pillars + evidence labels + data-gap honesty"]
+    PR --> AI["directPrompt → modelFallbackChain"]
+    AI --> P["parseStockAnalysisResponse<br/>(never throws · legacy JSON → 8-level)"]
+    P --> W["write-through cache + audit<br/>(conviction + verdict in metadata)"]
+    P -->|"dataGaps present"| G["DataGapsBanner in UI — honesty, not filler"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 3: 12-SECTION MEMO ======================= -->
+<section>
+  <h2>3 · The Institutional Memo</h2>
+  <table>
+    <tr><th style="width:34%">Section</th><th>Highlights</th></tr>
+    <tr><td class="mono">Executive thesis</td><td>One-paragraph decision thesis.</td></tr>
+    <tr><td class="mono">Fundamental score</td><td>Findings with evidence labels <code class="inline">CALCULATED_METRIC</code> / <code class="inline">FACT</code> / <code class="inline">MANAGEMENT</code> / <code class="inline">INFERENCE</code> / <code class="inline">INTERPRETATION</code>.</td></tr>
+    <tr><td class="mono">Management DNA</td><td>Qualitative management assessment.</td></tr>
+    <tr><td class="mono">Valuation zones</td><td>Attractive / fair / over + current-price marker.</td></tr>
+    <tr><td class="mono">Technical structure</td><td>Trend + <code class="inline">marketPhase</code> (280-day window so <code class="inline">sma200</code> computes best-effort).</td></tr>
+    <tr><td class="mono">Shareholding analysis</td><td>Trends, or explicit null.</td></tr>
+    <tr><td class="mono">Risk matrix</td><td><code class="inline">RiskItem[]</code> — category / probability / impact / pricedIn.</td></tr>
+    <tr><td class="mono">Catalysts</td><td>Upcoming events that could move the price.</td></tr>
+    <tr><td class="mono">Bull / base / bear scenario</td><td>Three explicit scenarios.</td></tr>
+    <tr><td class="mono">Contrarian view + WMCMM</td><td>The other side + “what would change my mind”.</td></tr>
+    <tr><td class="mono">Portfolio action</td><td><code class="inline">positionSizing</code>: CORE / SATELLITE / SPECULATIVE / WATCHLIST / NONE.</td></tr>
+    <tr><td class="mono">Invalidation zones</td><td>Prices/conditions that invalidate the thesis.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 4: DOCUMENT INGESTION ======================= -->
+<section>
+  <h2>4 · Optional Document Ingestion</h2>
+  <p class="sub">Company page textareas accept pasted annual-report / concall text; <code class="inline">normalizeDocumentText(content, maxLen = 50_000)</code> (<code class="inline">lib/services/document/normalize.ts</code>, server-only, zero deps) trims, collapses whitespace, truncates with <code class="inline">…[truncated]</code>, and returns <code class="inline">""</code> when empty. Documents are appended to the prompt as <b>secondary-unverified sections</b> — the model must treat them as context, never as verified fact.</p>
+  <ul>
+    <li><b>Route</b> — POST Zod schema <code class="inline">{ force?, documents?: { annualReport?, concall? } }</code> with ~50KB per-field cap; oversized → <span class="x">400</span>; unauth → <span class="x">401</span>; audit metadata gains <code class="inline">hasDocuments</code>.</li>
+    <li><b>UI</b> — textareas in <code class="inline">CompanyIntelligence.tsx</code>; document chip shown when provided.</li>
+    <li><span class="warn">⚠</span> Documents are secondary — missing data is still reported in <code class="inline">dataGaps</code>, never fabricated from the pasted text.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 5: BACKWARD COMPAT + VERIFICATION ======================= -->
+<section>
+  <h2>5 · Backward Compatibility & Verification</h2>
+  <ul>
+    <li><b>Legacy paths untouched</b> — <code class="inline">buildIntelligencePrompt</code> / <code class="inline">parseIntelligenceResponse</code> kept unchanged (18 tests pass); all NEW <code class="inline">IntelligenceAnalysis</code> fields are optional <code class="inline">?</code> so legacy cached rows + existing test literals stay type-valid; legacy 3-verdict JSON parses onto the 8-level enum.</li>
+    <li><b>Parser robustness</b> — full JSON, markdown fence, or bare braces all parse; missing → defaults + <code class="inline">dataGaps</code>; malformed → null, never throws.</li>
+  </ul>
+  <div class="callout ok"><b>Verification:</b> suite <b>915 pass / 4 skip</b> (was 883/4, +32 — NEW <code class="inline">stock-analysis-prompt.test.ts</code> 21 + <code class="inline">document-normalize.test.ts</code> 9 + <code class="inline">intelligence.test.ts</code> +3); tsc <b>46 = baseline (0 new production errors)</b>; no schema change → no migration.</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Professional Equity Research Decision Engine · Spec <code class="inline">.agents/specs/03-stock-analysis-skill.md</code> · Plan <code class="inline">.agents/plans/03-stock-analysis-skill.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

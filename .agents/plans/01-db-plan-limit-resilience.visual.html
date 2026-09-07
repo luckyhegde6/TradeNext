@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — DB Plan-Limit Resilience (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — DB Plan-Limit Resilience</h1>
+  <p>Prisma's <b>monthly operation limit</b> was exceeded and hot routes returned 500s. Mitigation: <b>graceful degradation</b> (SQLite / memory / cached-last-good fallbacks), <b>op reduction</b> (scope + heartbeats + TTLs), and a <b>write-budget guard</b> — plus an <b>admin OTP bypass</b> so admins can always log in.</p>
+  <div class="badges">
+    <span class="badge green">v3.19.0 / v3.20.3</span>
+    <span class="badge red">monthly quota exceeded → 500s</span>
+    <span class="badge">isDbUnavailableError recognition</span>
+    <span class="badge amber">circuit breaker (5-min cooldown)</span>
+    <span class="badge">dbOpsCounter write budget</span>
+    <span class="badge">admin OTP fallback</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: SYMPTOMS ======================= -->
+<section>
+  <h2>1 · Broken vs Working Routes (prod evidence)</h2>
+  <table>
+    <tr><th style="width:50%">Broken (exceeded-limit 500s)</th><th>Working (NSE-only / cached)</th></tr>
+    <tr><td class="mono">/api/recommendations — fingerprint check hits DB despite cache; findFirst ×2</td><td class="mono">NSE-only MCP fns (getMarketIndices / getGainers / getLosers / getMostActive / getMarquee / getHeatmap / getAnnouncements / getCorporateActions / getCorporateInfo)</td></tr>
+    <tr><td class="mono">/api/recommendations/swing (cold start)</td><td class="mono">/api/dividends/calendar</td></tr>
+    <tr><td class="mono">/api/recommendations/performance</td><td class="mono">/api/fo/expiries</td></tr>
+    <tr><td class="mono">/api/screener/chartink (no cache)</td><td class="mono">homepage dashboard (market-cache chain)</td></tr>
+    <tr><td class="mono">/api/corporate-actions/combined</td><td></td></tr>
+    <tr><td class="mono">/api/recommendations/ipos</td><td></td></tr>
+    <tr><td class="mono">/api/events</td><td></td></tr>
+  </table>
+  <div class="callout"><b>Note:</b> the plan's own wording says "10K ops/day" — the live Prisma plan is a <b>monthly</b> op window; later versions (spec 09) surface "Total Ops (Monthly Window)" + "Recent 7 Days" in db-health. This explainer reflects the original <b>mitigation plan</b>, shipped as v3.19.0 → v3.20.3.</div>
+</section>
+
+<!-- ======================= SECTION 2: DEGRADATION ======================= -->
+<section>
+  <h2>2 · Graceful Degradation Chain</h2>
+  <p class="sub">Every DB-touching route resolves through (1) memory cache → (2) SQLite mirror → (3) Prisma last-resort. When the DB is unavailable, services return the cached last-good run / stale data / graceful empty — never a raw 500.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant R as Route
+    participant M as Memory (NodeCache)
+    participant SQ as SQLite fallback
+    participant P as Prisma
+
+    C->>R: GET /api/recommendations
+    R->>R: loadConfig() + fingerprint check
+    alt fingerprint cache hit
+        R-->>C: cached last-good run
+    else DB error
+        R->>M: recommendationsCache hit?
+        alt memory hit
+            M-->>C: cached payload
+        else miss
+            R->>SQ: getLatestRecommendations from SQLite mirror
+            alt sqlite hit
+                SQ-->>C: payload (source: sqlite)
+            else miss
+                R-->>C: 200 + warning (graceful empty)
+            end
+        end
+    end
+    Note over R,P: isDbUnavailableError() catches Prisma's known<br/>failure shapes (P6003 / hold / connection / timeout)
+    </pre>
+  </div>
+  <ul>
+    <li><span class="check">✓</span> <code class="inline">dailyRecommendationService</code> — fingerprint bypass on DB error → cached last good run</li>
+    <li><span class="check">✓</span> <code class="inline">chartinkScreenerService</code> + corp-actions combined — NodeCache + DB-error fallback serves stale</li>
+    <li><span class="check">✓</span> <code class="inline">/api/events</code> + <code class="inline">/api/recommendations/ipos</code> — 200 with <code class="inline">warning</code> field, not 500</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 3: OP REDUCTION ======================= -->
+<section>
+  <h2>3 · Operation Reduction & Write-Budget Guard</h2>
+  <table>
+    <tr><th>Change</th><th>Ops saved</th></tr>
+    <tr><td class="mono">Historical sync scope 300 → NIFTY 50 only</td><td>~2,500–5,500 / day</td></tr>
+    <tr><td class="mono">Heartbeat 60s → 300s (worker + cron)</td><td>1,152 / day</td></tr>
+    <tr><td class="mono">MarketCache TTLs ↑ (open 300→600s, closed 3600→7200s)</td><td>fewer re-fetches</td></tr>
+    <tr><td class="mono">dbOpsCounter + isDbWriteBudgetExceeded()</td><td>rejects non-critical writes past budget (default 8,000/day, env <code class="inline">DB_WRITE_BUDGET</code>)</td></tr>
+    <tr><td class="mono">Admin OTP bypass (ADMIN_OTP env)</td><td>admin login never depends on DB</td></tr>
+  </table>
+  <div class="diagram">
+    <pre class="mermaid">
+stateDiagram-v2
+    [*] --> CLOSED
+    CLOSED --> CLOSED: success (counter resets)
+    CLOSED --> OPEN: 3 failures (P6003 / hold / timeout)
+    OPEN --> HALF_OPEN: 5-min cooldown elapsed
+    HALF_OPEN --> CLOSED: probe success (auto-recovery)
+    HALF_OPEN --> OPEN: probe fails again
+    OPEN --> [*]: admin bypass / new deploy
+    Note right of OPEN: while open: $allOperations fail-fast<br/>(no 120s proxy wait) + SQLite/memory serve
+    </pre>
+  </div>
+  <div class="callout ok"><b>Later hardening (v3.20.4):</b> the breaker now trips ONLY on REAL hold/unavailability — benign <code class="inline">PrismaClientKnownRequestError</code>s (P2021/P2002/P2025) no longer open it (was a false-positive regression).</div>
+</section>
+
+<!-- ======================= SECTION 4: VERIFY ======================= -->
+<section>
+  <h2>4 · Verification</h2>
+  <ul>
+    <li><span class="check">✓</span> NEW <code class="inline">lib/__tests__/db-utils.test.ts</code> (14) — error-shape recognition + breaker state transitions + regression (real P2021/P2002/P2025 → false, P1001/P2024/P6003 → true).</li>
+    <li><span class="check">✓</span> Full suite 883 pass / 4 skip (was 869/4, +14); tsc 57 = baseline (0 new production errors).</li>
+    <li><span class="check">✓</span> Admin DB usage dashboard — <code class="inline">GET /api/admin/db-usage</code> (reads / writes / budget / remaining).</li>
+    <li><span class="check">✓</span> Graceful-degrade <b>live-tested</b>: local PG stopped → all routes 200 with warning/empty; PG restart → full recovery.</li>
+  </ul>
+  <details>
+    <summary>Follow-up evolution</summary>
+    <ul>
+      <li>v3.21.x: db-health ops visibility, SQLite ops-counter persistence, per-type error summary, plan-usage bar.</li>
+      <li>v3.22.0+: leader election + write-behind (see <code class="inline">01-db-ops-reduction.visual.html</code>) target &lt;1000 ops/day.</li>
+      <li>This plan has NO spec file — generated from <code class="inline">.agents/plans/01-db-plan-limit-resilience.md</code>.</li>
+    </ul>
+  </details>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — DB Plan-Limit Resilience · Plan <code class="inline">.agents/plans/01-db-plan-limit-resilience.md</code> (no spec — generated from plan)
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

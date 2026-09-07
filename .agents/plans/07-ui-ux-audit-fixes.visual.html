@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Screener / Backtest / Watchlist UI/UX Audit Fixes (v3.29.0) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Screener / Backtest / Watchlist UI/UX Audit Fixes</h1>
+  <p>Three user-facing audit fixes: <b>(1)</b> the backtest route stops 404-ing on listed-but-unsynced / unlisted symbols — <code class="inline">symbolSource</code> labels the fall-through and the only no-data failure stays <code class="inline">barCount &lt; 50</code>; <b>(2)</b> watchlist AI failures finally surface a readable red error line instead of a swallowed 500 or a rendered <code class="inline">[object Object]</code>; <b>(3)</b> the mobile nav gains the Alerts link.</p>
+  <div class="badges">
+    <span class="badge green">v3.29.0</span>
+    <span class="badge">branch fix/v3.28.1-sqlite-self-heal</span>
+    <span class="badge">backtest gate softened</span>
+    <span class="badge red">AI-error surfacing</span>
+    <span class="badge green">mobile nav Alerts</span>
+    <span class="badge amber">no migration · no new deps</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problems</h2>
+  <table>
+    <tr><th style="width:28%">Surface</th><th>Issue</th><th>User impact</th></tr>
+    <tr><td class="mono">GET /api/backtest/run</td><td><span class="x">✕</span> Hard gate: no <code class="inline">prisma.symbol</code> record → 404, even when NSE has data (listed-but-unsynced symbols fell through to 404).</td><td>Backtesting a valid NSE symbol that simply isn't mirrored in Prisma failed outright.</td></tr>
+    <tr><td class="mono">Watchlist "Analyze with AI"</td><td><span class="x">✕</span> <code class="inline">/api/ai/query</code> 500 errors were swallowed to a blank state; the throw-site rendered <code class="inline">[object Object]</code> when an Error object surfaced.</td><td>Silent failure / ugly raw-object render — no feedback, button state misleading.</td></tr>
+    <tr><td class="mono">Header mobile menu</td><td><span class="x">✕</span> Quick-access grid had F&amp;O Analytics but no Alerts link at 375px.</td><td>Alerts unreachable from the mobile nav.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: BACKTEST GATE ======================= -->
+<section>
+  <h2>2 · Backtest Symbol-Gate Softening</h2>
+  <p class="sub">The <code class="inline">if (!symbolRecord) → 404</code> gate is removed from <code class="inline">app/api/backtest/run/route.ts</code>. The <code class="inline">prisma.symbol.findUnique</code> lookup is kept ONLY to derive <code class="inline">symbolSource</code> (<code class="inline">"known"</code> vs <code class="inline">"unlisted"</code>) for labeling; fall-through is logged via <code class="inline">logger.warn</code>. The existing <code class="inline">barCount &lt; 50 → 400</code> guard remains the ONLY no-data failure.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    REQ["POST /api/backtest/run?symbol=RBLBANK"] --> LOOKUP["prisma.symbol.findUnique (label only)"]
+    LOOKUP -->|"found"| K["symbolSource = known"]
+    LOOKUP -->|"missing"| U["symbolSource = unlisted<br/>logger.warn fall-through"]
+    K --> DATA["getBacktestData(symbolUpper)"]
+    U --> DATA
+    DATA -->|"barCount >= 50"| OK["200 + trades + symbolSource + dataSource"]
+    DATA -->|"barCount < 50"| BAD["400 — the ONLY no-data failure"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>Live-verified</b> — unlisted <code class="inline">RBLBANK</code> → <b>200</b>, <code class="inline">symbolSource:"unlisted"</code>, 70 bars; responses echo <code class="inline">symbolSource</code> so the UI can hint WHY data may be missing.</li>
+    <li><b>Dead code removed</b> — v3.28.5's <code class="inline">isBacktestSymbolAllowed</code> helper deleted with the gate (<code class="inline">symbolReference.ts</code> now exports only <code class="inline">mergeSymbolSuggestions</code>); <code class="inline">symbolReference.test.ts</code> 11 → 7.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 3: AI-ERROR SURFACING ======================= -->
+<section>
+  <h2>3 · Watchlist AI-Failure Surfacing</h2>
+  <p class="sub">NEW pure zero-dependency <code class="inline">lib/aiErrorMessage.ts</code> extractor + an optional <code class="inline">error</code> prop on <code class="inline">AiActionButton</code> render a small red status line under the button (rate-limit badge + spinner behavior unchanged).</p>
+  <table>
+    <tr><th style="width:36%">Input shape (err)</th><th>extractErrorMessage()</th></tr>
+    <tr><td class="mono">{ error: "AI provider unavailable" }</td><td>string branch → <code class="inline">"AI provider unavailable"</code></td></tr>
+    <tr><td class="mono">{ error: { message: "…" } }</td><td>nested message → the real <code class="inline">/api/ai/query</code> 500 shape</td></tr>
+    <tr><td class="mono">new Error("…") / "…"</td><td><code class="inline">err.message</code> → message</td></tr>
+    <tr><td class="mono">null / undefined</td><td>fallback <code class="inline">"AI analysis failed"</code></td></tr>
+  </table>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    CLICK["Watchlist → Analyze with AI"] --> POST["POST /api/ai/query"]
+    POST -->|"500 {error:{message}}"| CATCH["analyzeWithAI catch"]
+    CATCH --> EX1["extractErrorMessage(err)"]
+    EX1 --> ER["aiError state"]
+    ER --> BTN["AiActionButton error={aiError}<br/>red status line under button"]
+    POST -->|"ok"| ES["error cleared, results render"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>Live-verified</b> — simulated 500 <code class="inline">{error:{message:"AI provider unavailable (simulated 500)"}}</code> → red line shows the extracted text; button stays enabled.</li>
+    <li><b>Spec note honored</b> — pure tiny module (not a page export) so tests stay light and never mount the page.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 4: MOBILE NAV ======================= -->
+<section>
+  <h2>4 · Mobile Nav — Alerts Link</h2>
+  <p class="sub">The logged-in mobile quick-access grid in <code class="inline">app/Header.tsx</code> (grid-cols-2) now includes <b>F&amp;O Analytics + Alerts</b>, using the exact href/icon convention of the neighbouring mobile links. Desktop header untouched — verified unchanged at 1440px.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    M["Mobile menu (375px)"] --> Q["Logged-in quick-access grid"]
+    Q --> D["Dashboard"]
+    Q --> P["Portfolio"]
+    Q --> F["F&amp;O Analytics (added v3.29.0)"]
+    Q --> A["Alerts (NEW)"]
+    A --> R["/alerts — reachable at 375px"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 5: VERIFICATION ======================= -->
+<section>
+  <h2>5 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> targeted <b>23/23</b> (NEW <code class="inline">backtestSymbolFallthrough.test.ts</code> 4 + <code class="inline">watchlistAiError.test.ts</code> 8 + <code class="inline">app/components/__tests__/AiActionButton.test.tsx</code> 4 — path deviation from convention, plain <code class="inline">test(</code>); adjacent suites green). Full suite <b>1043 pass / 4 skip / 1 fail</b> (1 = documented pre-existing <code class="inline">intelligence.test.ts</code> flake). tsc <b>46 = exact baseline (0 new)</b>. No schema change → no migration.</div>
+  <ul>
+    <li><b>Route-level backtest tests</b> — unlisted + ≥50 bars → 200 <code class="inline">unlisted</code>; unlisted + &lt;50 bars → 400; listed → 200 <code class="inline">known</code>; unauth → 401.</li>
+    <li><b>Extractor truth table</b> — string <code class="inline">err.error</code>, nested <code class="inline">{error:{message}}</code>, both missing → fallback, null/undefined err.</li>
+    <li><b>AiActionButton</b> — error line renders; absent error → no line; rate badge unchanged.</li>
+  </ul>
+  <div class="callout"><b>Follow-up increment (v3.29.1):</b> the same audit batch later fixed the watchlist logged-out <b>eternal-skeleton</b> bug — <code class="inline">app/watchlist/page.tsx</code> :303 guard became <code class="inline">status === "loading" || (status === "authenticated" && loading)</code> so unauthenticated visitors see the sign-in card immediately. Explicitly out of v3.29.0 scope: per-row source badge / dead AI modal removal (spec OUT list).</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Screener / Backtest / Watchlist UI/UX Audit Fixes · Spec <code class="inline">.agents/specs/07-ui-ux-audit-fixes.md</code> · Plan <code class="inline">.agents/plans/07-ui-ux-audit-fixes.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

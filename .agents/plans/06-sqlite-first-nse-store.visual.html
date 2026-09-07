@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — SQLite-First NSE Data Store (Schema Mirror + Read-First + Write-Through + Instant Promote) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — SQLite-First NSE Data Store</h1>
+  <p>SQLite becomes the <b>primary store for NSE-backed market data</b> — stock list, corporate actions, daily OHLCV/backtest bars and Chartink captures — with a hot memory cache on top. Read path: <b>cache → SQLite → live NSE/Chartink fetch</b> (Prisma is NOT a read fallback for NSE data). Every NSE sync writes SQLite-first, and a SQLite→Prisma <b>instant promote</b> (a ~1 min background timer + an end-of-task flush) keeps Prisma durable/shared for cross-instance consumers.</p>
+  <div class="badges">
+    <span class="badge green">v3.28.0</span>
+    <span class="badge">branch v3.26.0-prod-failure-triage</span>
+    <span class="badge red">reads: cache → SQLite → live</span>
+    <span class="badge red">syncs write SQLite-first</span>
+    <span class="badge">promote → Prisma</span>
+    <span class="badge amber">no Prisma migration</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problem</h2>
+  <p class="sub">NSE-backed reads and every NSE sync task used Prisma directly — every quote-adjacent read, corp-action refresh, OHLCV/backtest fetch and Chartink capture racked up Accelerate ops on a plan-limit watch. User directives (2026-09-04): syncs trigger against SQLite; all things cached; reads hit SQLite FIRST and only then live-fetch; add a Prisma-mirrored SQLite schema with indexes; and promote SQLite→Prisma instantly for the required tables.</p>
+  <table>
+    <tr><th style="width:40%">Path today</th><th>Problem</th></tr>
+    <tr><td class="mono">getStockQuote / daily-price reads</td><td><span class="x">✕</span> Read Prisma after cache miss — NSE data should never fall back to Prisma reads.</td></tr>
+    <tr><td class="mono">executeStockSync / executeCorpActionsSync</td><td><span class="x">✕</span> Wrote straight to Prisma (createMany/updateMany) per sync run.</td></tr>
+    <tr><td class="mono">executeHistoricalPriceSync</td><td><span class="x">✕</span> Bulk OHLCV upserts hit Prisma table <code class="inline">daily_prices</code> directly.</td></tr>
+    <tr><td class="mono">runChartinkUnifiedScreeners</td><td><span class="x">✕</span> Captured screen results written to Prisma <code class="inline">chartink_screener_results</code> directly.</td></tr>
+  </table>
+  <div class="callout"><b>Confirmed architecture (user-approved Q&amp;A):</b> SQLite-first <b>write-through</b>; Prisma stays the shared truth and the home for perf-runs / recommendation updates / auth / cross-instance coordination. Scope = <b>all</b> NSE syncs. Promote cadence = <b>both</b> (~1 min timer + end-of-task flush).</div>
+</section>
+
+<!-- ======================= SECTION 2: SCHEMA MIRROR ======================= -->
+<section>
+  <h2>2 · Prisma-Mirrored SQLite Schema</h2>
+  <p class="sub">Additive SQLite-only DDL added to <code class="inline">SCHEMA_SQL</code> (idempotent <code class="inline">CREATE TABLE IF NOT EXISTS</code>); column adds via an <code class="inline">ensureNseColumns(db)</code> PRAGMA-guarded ALTER. No Prisma schema change → <b>no migration</b>. Column sets map Prisma camelCase → SQLite snake_case (existing convention).</p>
+  <table>
+    <tr><th>SQLite table</th><th>Mirrors (Prisma)</th><th>New / extended</th><th>Indexes</th></tr>
+    <tr><td class="mono">symbols</td><td class="mono">Symbol / symbols</td><td>new</td><td><code class="inline">PRIMARY KEY(symbol)</code>; idx on <code class="inline">company_name</code></td></tr>
+    <tr><td class="mono">daily_price</td><td class="mono">DailyPrice / daily_prices</td><td>new — full OHLCV for backtest/analysis; distinct from the latest-per-symbol <code class="inline">daily_price_snapshot</code>; keyed <code class="inline">NSE:${SYMBOL}</code></td><td><code class="inline">PRIMARY KEY(ticker, trade_date)</code>; idx on <code class="inline">ticker</code></td></tr>
+    <tr><td class="mono">corporate_action</td><td class="mono">CorporateAction / corporate_actions</td><td>extended (+8 cols)</td><td>idx on <code class="inline">symbol</code>, <code class="inline">ex_date</code>, <code class="inline">action_type</code>, <code class="inline">source</code></td></tr>
+    <tr><td class="mono">chartink_screener</td><td class="mono">ChartinkScreener / chartink_screeners</td><td>extended (+5 cols: <code class="inline">scan_clause</code>, <code class="inline">enabled</code>, <code class="inline">result_count</code>, <code class="inline">last_run_at</code>, <code class="inline">next_run_at</code>)</td><td>idx on <code class="inline">category_id</code>, <code class="inline">enabled</code></td></tr>
+    <tr><td class="mono">chartink_screener_result</td><td class="mono">ChartinkScreenerResult / chartink_screener_results</td><td>new — captured rows</td><td>idx on <code class="inline">screener_id</code>, <code class="inline">symbol</code>, <code class="inline">captured_at</code>, <code class="inline">expires_at</code></td></tr>
+  </table>
+  <details>
+    <summary>New SqliteFallback primitives (7 + promote)</summary>
+    <ul>
+      <li><code class="inline">upsertSymbol</code> / <code class="inline">getSymbols(limit)</code></li>
+      <li><code class="inline">upsertDailyPriceBars(bars)</code> / <code class="inline">getDailyPriceRange(ticker, from, to)</code></li>
+      <li><code class="inline">upsertCorporateActions(rows)</code></li>
+      <li><code class="inline">replaceChartinkResults(templateId, rows)</code> / <code class="inline">getChartinkResults(templateId)</code></li>
+      <li><code class="inline">promoteNseTablesToPrisma()</code> — generic batched promote</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ======================= SECTION 3: WRITE-THROUGH ======================= -->
+<section>
+  <h2>3 · Write-Through: Syncs Land in SQLite First</h2>
+  <p class="sub">Every NSE sync task now writes SQLite-first, then flushes to Prisma (instant promote). Module-level exported helpers (<code class="inline">setSymbols</code>, <code class="inline">setDailyPriceBars</code>, <code class="inline">setCorporateActions</code>, <code class="inline">setChartinkResults</code>, <code class="inline">setBacktestBars</code>, <code class="inline">getBacktestBars</code>) delegate to the singleton fallback.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    A["executeStockSync"] --> W1["cacheSymbol → symbols"]
+    B["executeCorpActionsSync"] --> W2["cacheCorporateActions → corporate_action"]
+    C["executeHistoricalPriceSync (dryRun=false)"] --> W3["cacheDailyPriceBars NSE:SYM → daily_price"]
+    D["runChartinkUnifiedScreeners"] --> W4["cacheChartinkResults(templateId, rows)"]
+    W1 --> F["flushNseToPrisma() — end-of-task instant promote"]
+    W2 --> F
+    W3 --> F
+    W4 --> F
+    F --> P["Prisma batched upsert (chunked createMany + update)"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 4: READ-FIRST ======================= -->
+<section>
+  <h2>4 · Read Chain: cache → SQLite → live</h2>
+  <p class="sub">Hot NSE reads attempt memory cache, then SQLite, then live NSE/Chartink fetch; on live success the data is written through to SQLite + cache. <b>Prisma is never consulted in these read paths</b> (it stays for perf runs, recommendation updates, auth, cross-instance coordination).</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    R["GET /api/corporate-actions/combined<br/>GET /api/screener/chartink<br/>GET /api/recommendations/swing<br/>backtest getBacktestData / MCP getHistoricalData"]
+    R --> M{"memory cache?"}
+    M -->|"hit"| MC["serve cached"]
+    M -->|"miss"| S{"SQLite mirror?"}
+    S -->|"hit"| SC["serve SQLite<br/>(getSqlitePriceRange ≥20 bars → source sqlite)"]
+    S -->|"miss"| L["live NSE / Chartink fetch"]
+    L -->|"success"| WT["write-through SQLite + cache"]
+    L -->|"failure"| FB["DB / empty fallback<br/>(not NSE reads' fallback)"]
+    </pre>
+  </div>
+  <div class="callout"><b>Scope guard:</b> everything else stays on Prisma — leader locks, atomic <code class="inline">updateMany</code> claims, reaper liveness, <code class="inline">fireJob</code> re-fetch, auth, performance-run and recommendation-update writes. Prisma remains the shared truth for cross-instance consistency (SQLite is per-instance by nature).</div>
+</section>
+
+<!-- ======================= SECTION 5: PROMOTE ENGINE ======================= -->
+<section>
+  <h2>5 · Instant Promote: SQLite → Prisma</h2>
+  <p class="sub"><code class="inline">promoteNseToPrisma()</code> reads each table's fresh SQLite rows in chunks and batched-upserts into Prisma (<code class="inline">createMany</code> + <code class="inline">skipDuplicates</code>, <code class="inline">$transaction</code>-chunked <code class="inline">update</code> for existing keys). Leader-gated + plan-breaker-gated (mirrors <code class="inline">startWriteBehindFlush</code>/<code class="inline">syncFromPrisma</code> guards).</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant T as startNsePromoteFlush (60s unref'd)
+    participant S as SQLite mirror
+    participant P as Prisma
+    participant I as instrumentation.ts
+
+    Note over I,T: booted alongside startWriteBehindFlush()
+    I->>T: startNsePromoteFlush()
+    loop every ~60s (leader + breaker gated)
+        T->>S: read fresh rows (chunked per table)
+        S->>P: symbols / daily_price / corporate_action / chartink_screener_result upserts
+    end
+    Note over S,P: end-of-task path: sync tasks call flushNseToPrisma() directly (no timer wait)
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 6: VERIFICATION ======================= -->
+<section>
+  <h2>6 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> full suite <b>995 pass / 4 skip</b> (2 <code class="inline">intelligence.test.ts</code> failures = pre-existing async cache-flake — excluding it: 71 suites / 995 / 4 / 0 from these changes). tsc <b>46 = exact baseline (0 new)</b>. No schema change → no migration. Observation run with quoted <code class="inline">PRISMA_QUERY_LOG=1</code> (dev-only constructor <code class="inline">log:["query"]</code>) confirms sync writes land in SQLite and promote reaches Prisma.</div>
+  <ul>
+    <li><b>Local dev-gated Prisma query logger</b> — <code class="inline">PRISMA_QUERY_LOG=1</code> enables constructor query logging in dev only; zero prod impact.</li>
+    <li><b>Tests</b> — NEW <code class="inline">sqliteNseStore.test.ts</code>/extended <code class="inline">sqlite.test.ts</code> (schema/indexes presence, stock upsert+get, OHLCV bar upsert+range query, corp-action upsert+get, chartink result replace+get, promote copy with createMany + skipDuplicates, both flush triggers); worker-service sync tests extended for SQLite-first write-through + end-of-task flush.</li>
+    <li><b>Test coupling fixed</b> — <code class="inline">historicalPriceSyncService.test.ts</code> mock of <code class="inline">@/lib/sqlite</code> updated for <code class="inline">cacheDailyPriceBars</code> + <code class="inline">flushNseToPrisma</code>; backtest/chartink/worker suites unaffected.</li>
+    <li><b>Risk</b> — <code class="inline">daily_price</code> full OHLCV in sql.js can grow; reads are range-scoped per symbol and index-bound (the 72h-relevant backtest/swing slices dominate).</li>
+  </ul>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — SQLite-First NSE Data Store · Spec <code class="inline">.agents/specs/06-sqlite-first-nse-store.md</code> · Plan <code class="inline">.agents/plans/06-sqlite-first-nse-store.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

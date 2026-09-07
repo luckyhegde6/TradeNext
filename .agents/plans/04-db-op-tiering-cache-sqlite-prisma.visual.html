@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Cache → SQLite → Prisma Stock-Quote Tiering (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Cache → SQLite → Prisma Stock-Quote Tiering</h1>
+  <p>Live Prisma monitoring showed <b>2.0 QPS</b> even in a closed after-market window and <b>14,166 Total Operations / day</b>. User directives: <b>“do not do a db write for every NSE fetch during after market hours … only write to cache”</b> and <b>“make the 1st hit be cache, then sqlite and then eventually the prisma db”</b>. Fix: gate the market-hours-only write to once-per-symbol-per-trading-day, tier closed-market reads cache → SQLite → Prisma, fix a TTL ms-vs-seconds bug, and gate the price accumulator.</p>
+  <div class="badges">
+    <span class="badge green">v3.21.2</span>
+    <span class="badge">feat/db-health-ops-visibility</span>
+    <span class="badge amber">DRAFT — no spec<br/>(generated from plan)</span>
+    <span class="badge red">Fix A · write gate</span>
+    <span class="badge red">Fix B · read chain</span>
+    <span class="badge">Fix C · TTL ms→s</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problems (live evidence)</h2>
+  <table>
+    <tr><th style="width:34%">#</th><th>Symptom</th><th>Root cause</th></tr>
+    <tr><td class="mono">A · Write flood</td><td>~12K upserts/day during market hours</td><td><code class="inline">getStockQuote</code> L184-212 fire-and-forget IIFE runs <code class="inline">prisma.dailyPrice.upsert</code> on EVERY NSE fetch — the 10s SSE poll × up to 50 symbols bypasses the v3.20.x <code class="inline">DailyPriceAccumulator</code> built to batch exactly this.</td></tr>
+    <tr><td class="mono">B · Read flood</td><td>“2 QPS every ~10s” closed-market</td><td>When <code class="inline">!isMarketOpen()</code>, a cache-miss triggers <b>3 Prisma reads/symbol</b> (L51 <code class="inline">findFirst</code> latest · L60 <code class="inline">aggregate</code> 52W · L79 <code class="inline">findFirst</code> prev-day).</td></tr>
+    <tr><td class="mono">C · TTL unit bug</td><td>Stale quotes ~33h</td><td>NodeCache <code class="inline">set()</code> TTL is <b>seconds</b>; <code class="inline">getWithCache</code> (<code class="inline">lib/enhanced-cache.ts</code> L50/99) passes <code class="inline">getRecommendedTTL(ttl)</code> which returns <b>milliseconds</b> → <code class="inline">120000</code> seconds ≈ 33h.</td></tr>
+    <tr><td class="mono">D · Accumulator leak</td><td>Map never drains cleanly</td><td><code class="inline">cacheDailyPrice</code> runs unconditionally each poll tick (<code class="inline">priceSyncService.ts</code> L175) even after the 4PM window closes.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: FIX A — WRITE GATE ======================= -->
+<section>
+  <h2>2 · Fix A — one write per symbol per trading day (market-open only)</h2>
+  <p class="sub">The IIFE moves into a guarded helper <code class="inline">syncDailyPriceOnce(quote)</code>: <b>zero DB writes when the market is closed</b>, and a seed-once <code class="inline">globalThis</code> Set keyed <code class="inline">${getIstDayKey()}:${symbol}</code> limits market-open writes to one per symbol per IST day (the day-rollover auto-empties the Set; upsert failure removes the key so it retries).</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    Q["NSE fetch → getStockQuote"] --> W{"isMarketOpen()?"}
+    W -->|"no"| NONE["0 Prisma writes<br/>(cache only — user directive)"]
+    W -->|"yes"| K{"seen ${getIstDayKey()}:${symbol}<br/>in globalThis Set?"}
+    K -->|"already seeded"| NONE2["no-op — one write/day guaranteed"]
+    K -->|"not yet"| U["prisma.dailyPrice.upsert"]
+    U -->|"ok"| ADD["add key to Set"]
+    U -->|"error"| REM["remove key → retry later"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 3: FIX B — READ CHAIN ======================= -->
+<section>
+  <h2>3 · Fix B — closed-market read chain: cache → SQLite → Prisma</h2>
+  <p class="sub">Tier 1 stays <code class="inline">hotCache</code>; NEW tier 2 = SQLite <code class="inline">daily_price_snapshot</code> table (<code class="inline">symbol, tradeDate, open, high, low, close, volume, updatedAt</code> — Prisma-agnostic, seeded by <code class="inline">syncFromPrisma</code> from the latest <code class="inline">daily_prices</code> rows on the same IST day); tier 3 = Prisma ONLY when SQLite is not ready or has no row.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C as hotCache (tier 1)
+    participant S as SQLite daily_price_snapshot (tier 2)
+    participant P as Prisma daily_prices (tier 3)
+
+    Q["getStockQuote — market CLOSED"]->>C: cache hit?
+    alt cache hit
+        C-->>Q: serve (0 DB reads)
+    else cache miss
+        Q->>S: getDailyPriceSnapshot(symbol)
+        alt SQLite row found
+            S-->>Q: partial quote (0 Prisma reads)
+        else no row / not ready
+            Q->>P: findFirst latest + aggregate 52W + findFirst prev-day
+            P-->>Q: full quote (legacy 3-read path)
+        end
+    end
+    Note over C,S: closed-market path: 3 Prisma reads/symbol → 0
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 4: FIXES C/D/E ======================= -->
+<section>
+  <h2>4 · TTL Unit Fix, Accumulator Gate, Health Snapshot</h2>
+  <ul>
+    <li><b>Fix C</b> — <code class="inline">getWithCache</code> converts <code class="inline">getRecommendedTTL(ttl)</code> ms → seconds (<code class="inline">Math.ceil(ms/1000)</code>) before <code class="inline">cacheInstance.set</code>; restores “cache until next open” intent. (<code class="inline">stock-service.ts</code> L111 already correct — keep.)</li>
+    <li><b>Fix D</b> — <code class="inline">cacheDailyPrice</code> only when <code class="inline">isMarketAccumulationWindow()</code>; post-4PM the accumulator stops refilling so the 5-min flush drains once, cleanly.</li>
+    <li><b>Fix E</b> — <code class="inline">GET /api/admin/db-health</code> snapshots <code class="inline">dbOpsCounter</code> BEFORE its own probe + table counts so the displayed total stops growing on refresh.</li>
+  </ul>
+  <div class="callout"><b>Carried increment (same branch):</b> SQLite <b>backup / restore</b> (<code class="inline">exportSqliteBackup</code> / <code class="inline">restoreSqliteBackup</code> — 50MB cap + magic header + required tables + live DB swap) with a Backup &amp; Restore card on db-health. OTel attribution shipped separately as v3.21.3.</div>
+</section>
+
+<!-- ======================= SECTION 5: VERIFICATION ======================= -->
+<section>
+  <h2>5 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> suite <b>941 pass / 4 skip</b> (was 932/4, +9 — NEW <code class="inline">dbOpTiering.test.ts</code>); tsc <b>46 = baseline (0 new)</b>; no Prisma schema change → no migration (SQLite addition is in-memory, additive). Live check after deploy: after-hours Prisma QPS → near-zero; <code class="inline">daily_prices</code> writes ≈ unique symbols tracked per trading day, not per fetch.</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Cache → SQLite → Prisma Stock-Quote Tiering · Plan <code class="inline">.agents/plans/04-db-op-tiering-cache-sqlite-prisma.md</code> (DRAFT — no spec; generated from plan content)
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>
