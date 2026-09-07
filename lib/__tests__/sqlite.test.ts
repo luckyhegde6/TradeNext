@@ -206,7 +206,11 @@ jest.mock("@/lib/prisma", () => ({
       findFirst: jest.fn().mockResolvedValue(null),
     },
     dailyRecommendationStock: { findMany: jest.fn().mockResolvedValue([]) },
-    corporateAction: { findMany: jest.fn().mockResolvedValue([]) },
+    corporateAction: {
+      findMany: jest.fn().mockResolvedValue([]),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     chartinkScreener: { findMany: jest.fn().mockResolvedValue([]) },
     workerStatus: { findMany: jest.fn().mockResolvedValue([]) },
     serverLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
@@ -214,6 +218,17 @@ jest.mock("@/lib/prisma", () => ({
     aPIRequestLog: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     cronJob: { findMany: jest.fn().mockResolvedValue([]) },
     workerTask: { findMany: jest.fn().mockResolvedValue([]) },
+    // Plan 09 Phase 4: SQLite→Prisma push sink targets
+    symbol: {
+      upsert: jest.fn().mockResolvedValue({ id: "sym-1", symbol: "RELIANCE" }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    dailyPrice: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    chartinkScreenerResult: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
   },
   dbOpsCounter: { reads: 42, writes: 8, _day: "2026-08-25" },
   getIstDayKey: () => "2026-08-25",
@@ -1304,6 +1319,253 @@ describe("SQLite backup fallback", () => {
       const tableRows: unknown[][] = sqlModule.__getStore()["sync_history"]?.rows ?? [];
       expect(tableRows.length).toBeLessThanOrEqual(100);
       expect(getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.length).toBeLessThanOrEqual(10);
+    });
+  });
+
+  // ── Plan 09 Phase 4: _sync_outbox + SQLite→Prisma push engine ───────────
+  // The four mirror WRITE methods record an outbox row per mutation
+  // (op='upsert' only — the sync direction never writes through them), and
+  // `pushSqliteToPrisma` drains the outbox to Prisma at the 6h probe tick.
+  describe("Plan 09 Phase 4 — sync outbox + pushSqliteToPrisma", () => {
+    const sqlModule = require("sql.js") as any;
+
+    // Same clean-start pattern as the sync_history ledger describe: wipe the
+    // mock store (outbox + mirror tables) AND the module state, restore the
+    // boot-reconcile workerStatus.upsert stub (jest.clearAllMocks preserves
+    // implementations but earlier tests may have repointed it), and re-init.
+    const resetAndInit = async () => {
+      sqlModule.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      jest.clearAllMocks();
+      mockPrisma.workerStatus.upsert = jest.fn().mockResolvedValue({ count: 1 });
+      await ensureSqliteBackup();
+    };
+
+    const outboxRows = (): any[][] => sqlModule.__getStore()["_sync_outbox"]?.rows ?? [];
+
+    it("creates _sync_outbox at init and records writer mutations with op=upsert", async () => {
+      await resetAndInit();
+      expect(sqlModule.__getStore()["_sync_outbox"]).toBeDefined();
+
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Industries Ltd", series: "EQ", isActive: true });
+
+      const rows = outboxRows();
+      expect(rows.length).toBe(1);
+      expect(sqlModule.__getStore()["_sync_outbox"].columns).toEqual(["table_name", "row_id", "op", "at"]);
+      expect(rows[0][0]).toBe("symbols");
+      expect(rows[0][1]).toBe("RELIANCE");
+      expect(rows[0][2]).toBe("upsert");
+    });
+
+    it("records one outbox row per daily_price bar keyed on ticker+tradeDate", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.setDailyPriceBars("NSE:TCS", [
+        { tradeDate: "2026-08-25", open: 120, high: 122, low: 119, close: 121, volume: 1000, vwap: 120.5 },
+        { tradeDate: "2026-08-26", open: 121, high: 123, low: 120, close: 122, volume: 1100, vwap: 121.5 },
+      ]);
+
+      const rows = outboxRows();
+      expect(rows.length).toBe(2);
+      expect(rows.map((r) => r[1])).toEqual([
+        JSON.stringify(["NSE:TCS", "2026-08-25"]),
+        JSON.stringify(["NSE:TCS", "2026-08-26"]),
+      ]);
+      expect(rows.every((r) => r[2] === "upsert")).toBe(true);
+    });
+
+    it("records corporate_action outbox rows on the natural key (symbol+type+exDate)", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.setCorporateActions([
+        {
+          symbol: "TCS",
+          companyName: "Tata Consultancy Services",
+          actionType: "DIVIDEND",
+          exDate: new Date("2026-08-20"),
+          recordDate: new Date("2026-08-21"),
+          dividendPerShare: 10,
+        },
+      ]);
+
+      const rows = outboxRows();
+      expect(rows.length).toBe(1);
+      expect(rows[0][0]).toBe("corporate_action");
+      expect(rows[0][1]).toBe(JSON.stringify(["TCS", "DIVIDEND", "2026-08-20T00:00:00.000Z"]));
+      expect(rows[0][2]).toBe("upsert");
+    });
+
+    it("records chartink_screener_result outbox rows keyed on the result id", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.replaceChartinkResults("swing-momentum", [
+        { id: "r-1", runId: "run-9", symbol: "RELIANCE", close: 1310 },
+        { id: "r-2", runId: "run-9", symbol: "TCS", close: 4100 },
+      ]);
+
+      const rows = outboxRows();
+      expect(rows.length).toBe(2);
+      expect(rows.map((r) => r[1])).toEqual(["r-1", "r-2"]);
+      expect(rows.every((r) => r[0] === "chartink_screener_result" && r[2] === "upsert")).toBe(true);
+    });
+
+    it("drains the outbox latest-op-wins, clears rows, and records sqlite_to_prisma history", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance One", series: "EQ", isActive: true });
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Two", series: "EQ", isActive: true });
+      fb.setCorporateActions([
+        { symbol: "TCS", companyName: "TCS Ltd", actionType: "DIVIDEND", exDate: new Date("2026-08-20") },
+      ]);
+      expect(outboxRows().length).toBe(3);
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      // synced counts consumed ROWS (symbols 1 + corporate_action 1), not tables.
+      expect(summary).not.toBeNull();
+      expect(summary!.ran).toBe(true);
+      expect(summary!.synced).toBe(2);
+      expect(summary!.failed).toBe(0);
+
+      // Latest op wins: the second upsert replaces the first.
+      expect(mockPrisma.symbol.upsert).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.symbol.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { symbol: "RELIANCE" },
+          create: expect.objectContaining({ companyName: "Reliance Two" }),
+        }),
+      );
+      expect(mockPrisma.corporateAction.createMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.corporateAction.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({ symbol: "TCS" })]),
+          skipDuplicates: true,
+        }),
+      );
+
+      // Outbox fully drained + a sync-ledger row with the pushed count.
+      expect(outboxRows().length).toBe(0);
+      const syncedRow = getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.find(
+        (r: any) => r.direction === "sqlite_to_prisma",
+      );
+      expect(syncedRow).toBeDefined();
+      expect(syncedRow!.rowsSynced).toBe(2);
+    });
+
+    it("pushes daily_price rows via a single bulk raw upsert", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.setDailyPriceBars("NSE:TCS", [
+        { tradeDate: "2026-08-25", open: 120, high: 122, low: 119, close: 121, volume: 1000, vwap: 120.5 },
+      ]);
+      fb.setDailyPriceBars("NSE:INFY", [
+        { tradeDate: "2026-08-25", open: 1800, high: 1810, low: 1790, close: 1805, volume: 900, vwap: 1802 },
+      ]);
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      expect(summary!.synced).toBe(2);
+      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+      const [sql, ...params] = mockPrisma.$executeRawUnsafe.mock.calls[0];
+      expect(typeof sql).toBe("string");
+      expect(sql.toUpperCase()).toContain("INSERT INTO DAILY_PRICES");
+      expect(sql.toUpperCase()).toContain("ON CONFLICT");
+      expect(params.length).toBeGreaterThanOrEqual(4);
+      expect(outboxRows().length).toBe(0);
+    });
+
+    it("pushes chartink rows to prisma createMany and clears their outbox rows", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.replaceChartinkResults("swing-momentum", [
+        { id: "r-1", runId: "run-9", symbol: "RELIANCE", close: 1310 },
+      ]);
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      expect(summary!.synced).toBe(1);
+      expect(mockPrisma.chartinkScreenerResult.createMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.chartinkScreenerResult.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({ id: "r-1", symbol: "RELIANCE" })]),
+          skipDuplicates: true,
+        }),
+      );
+      expect(outboxRows().length).toBe(0);
+    });
+
+    it("partial failure retains the failed table's outbox rows, clears owners, records error", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Industries", series: "EQ", isActive: true });
+      fb.setCorporateActions([
+        { symbol: "TCS", companyName: "TCS Ltd", actionType: "DIVIDEND", exDate: new Date("2026-08-20") },
+      ]);
+      mockPrisma.corporateAction.createMany.mockRejectedValue(new Error("corp boom"));
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      expect(summary!.failed).toBe(1);
+      expect(summary!.synced).toBe(1);
+      expect(summary!.errors[0]).toContain("corporate_action");
+      // symbols consumed + cleared; corporate_action retained for the next tick.
+      expect(mockPrisma.symbol.upsert).toHaveBeenCalledTimes(1);
+      expect(outboxRows().map((r) => r[0])).toEqual(["corporate_action"]);
+
+      // Restore the default for later tests.
+      mockPrisma.corporateAction.createMany.mockResolvedValue({ count: 0 });
+    });
+
+    it("drains op=delete rows to prisma deleteMany with parsed natural keys", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      // Seed the column shape via a real writer mutation, then inject a delete
+      // op directly into the mock store (real writes only emit op=upsert today,
+      // but the sink must handle a retained delete row defensively).
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Industries", series: "EQ", isActive: true });
+      sqlModule.__getStore()["_sync_outbox"].rows.push(["symbols", "RELIANCE", "delete", "2026-08-25T00:00:00.000Z"]);
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      expect(summary!.synced).toBe(1);
+      // The upsert row is dropped by latest-op-wins (the delete wins), so only
+      // the deleteMany fires — with the parsed natural key.
+      expect(mockPrisma.symbol.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.symbol.deleteMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.symbol.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { symbol: "RELIANCE" } }),
+      );
+      expect(outboxRows().length).toBe(0);
+    });
+
+    it("returns null when the store is not ready, the breaker is OPEN, or not the sqlite-sync leader", async () => {
+      const { pushSqliteToPrisma, resetSqliteStateForTests } = await import("../sqlite");
+
+      // Store not ready (reset, no init).
+      resetSqliteStateForTests();
+      expect(await pushSqliteToPrisma()).toBeNull();
+
+      // Ready but breaker OPEN → refuse without touching Prisma.
+      await resetAndInit();
+      mockDbUtils.isPlanLimitBreakerOpen.mockReturnValue(true);
+      expect(await pushSqliteToPrisma()).toBeNull();
+      expect(mockPrisma.symbol.upsert).not.toHaveBeenCalled();
+
+      // Ready, breaker closed, but not the sqlite-sync leader → refuse too.
+      mockDbUtils.isPlanLimitBreakerOpen.mockReturnValue(false);
+      mockLeader.isLeader.mockResolvedValue(false);
+      expect(await pushSqliteToPrisma()).toBeNull();
+      expect(mockPrisma.symbol.upsert).not.toHaveBeenCalled();
+
+      // Restore defaults for later tests.
+      mockLeader.isLeader.mockResolvedValue(true);
     });
   });
 });

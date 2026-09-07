@@ -924,6 +924,20 @@ const SCHEMA_SQL = `
     error        TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_sync_history_at ON sync_history (at);
+
+  -- Plan 09 Phase 4 (one-way push outbox): SQLite mirror write methods that
+  -- must reach Prisma (symbols, daily_price, corporate_action, chartink)
+  -- record rows here. The 6h probe push drains them to Prisma via
+  -- lib/sqlitePushSinks.ts. row_id is a per-table natural key, op is
+  -- 'upsert' | 'delete'. Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS _sync_outbox (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name   TEXT NOT NULL,
+    row_id       TEXT NOT NULL,
+    op           TEXT NOT NULL DEFAULT 'upsert',
+    at           TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_outbox_table ON _sync_outbox (table_name);
 `;
 
 // ---------------------------------------------------------------------------
@@ -1161,6 +1175,10 @@ function startRecoveryProbe(): void {
         logger.info({ msg: "SQLite: Prisma recovered, triggering re-sync" });
       }
       await syncFromPrisma();
+
+      // Plan 09 Phase 4: drain _sync_outbox one-way to Prisma on the same
+      // probe cadence (leader + breaker gated inside pushSqliteToPrisma).
+      await pushSqliteToPrisma();
     } catch (err) {
       if (isDbUnavailableError(err)) {
         state.prismaAvailable = false;
@@ -2904,6 +2922,170 @@ function getDurableSyncHistory(db: Database | null | undefined): SyncResult[] {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 09 Phase 4: SQLite -> Prisma one-way push (sync outbox)
+// ---------------------------------------------------------------------------
+
+/** Append one outbox row for a changed mirror row. Best-effort, never throws:
+ *  the mirror write itself must not fail because bookkeeping failed. */
+function recordSyncOutbox(
+  db: Database | null | undefined,
+  tableName: string,
+  rowId: string,
+  op: "upsert" | "delete" = "upsert",
+): void {
+  if (!db || !state.ready) return;
+  try {
+    db.run("INSERT INTO _sync_outbox (table_name, row_id, op, at) VALUES (?, ?, ?, ?)", [
+      tableName,
+      rowId,
+      op,
+      new Date().toISOString(),
+    ]);
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: recordSyncOutbox failed",
+      tableName,
+      rowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+const OUTBOX_DRAIN_LIMIT = 50_000;
+const OUTBOX_DELETE_CHUNK = 200;
+const OUTBOX_TABLES = ["symbols", "daily_price", "corporate_action", "chartink_screener_result"] as const;
+
+type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
+
+/** Read pending outbox rows oldest-first, latest-op-wins per (table, row_id).
+ *  Only the push-eligible mirror tables are returned. */
+function drainSyncOutbox(db: Database): OutboxItem[] {
+  try {
+    const res = db.exec(
+      "SELECT table_name, row_id, op FROM _sync_outbox ORDER BY id ASC LIMIT ?",
+      [OUTBOX_DRAIN_LIMIT],
+    );
+    if (!res.length || !res[0].values.length) return [];
+    const cols = res[0].columns;
+    const iTable = cols.indexOf("table_name");
+    const iRow = cols.indexOf("row_id");
+    const iOp = cols.indexOf("op");
+    const latest = new Map<string, OutboxItem>();
+    for (const row of res[0].values) {
+      const tableName = String(row[iTable] ?? "");
+      if (!(OUTBOX_TABLES as readonly string[]).includes(tableName)) continue;
+      const rowId = String(row[iRow] ?? "");
+      const op: OutboxItem["op"] = String(row[iOp] ?? "upsert") === "delete" ? "delete" : "upsert";
+      latest.set(`${tableName}\u0000${rowId}`, { tableName, rowId, op });
+    }
+    return [...latest.values()];
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: drainSyncOutbox failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+/** Delete the drained outbox rows for one table (chunked so bound params stay
+ *  well under sql.js parameter limits for large drains). */
+function deleteSyncOutboxRows(db: Database, tableName: string, rowIds: string[]): void {
+  if (!rowIds.length) return;
+  for (let i = 0; i < rowIds.length; i += OUTBOX_DELETE_CHUNK) {
+    const chunk = rowIds.slice(i, i + OUTBOX_DELETE_CHUNK);
+    const placeholders = chunk.map(() => "?").join(", ");
+    db.run(`DELETE FROM _sync_outbox WHERE row_id IN (${placeholders}) AND table_name = ?`, [
+      ...chunk,
+      tableName,
+    ]);
+  }
+}
+
+/** In-flight push promise. Module-scope so every concurrent caller (and every
+ *  module graph copy in Next.js dev) shares one drain at a time. */
+let sqlitePushInFlight: Promise<PushSqliteToPrismaResult | null> | null = null;
+
+export type PushSqliteToPrismaResult = {
+  ran: boolean;
+  synced: number;
+  failed: number;
+  errors: string[];
+};
+
+/**
+ * Plan 09 Phase 4: one-way SQLite -> Prisma push engine. Drains `_sync_outbox`
+ * through lib/sqlitePushSinks.ts under the `sqlite-sync` leader lock and the
+ * plan-limit breaker guard. Called from every periodic probe tick (6h). Sinks
+ * are idempotent, so a failed table keeps its outbox rows and is retried next
+ * cycle; successful tables are removed immediately.
+ */
+export async function pushSqliteToPrisma(): Promise<PushSqliteToPrismaResult | null> {
+  if (sqlitePushInFlight) return sqlitePushInFlight;
+  sqlitePushInFlight = doPushSqliteToPrisma().finally(() => {
+    sqlitePushInFlight = null;
+  });
+  return sqlitePushInFlight;
+}
+
+async function doPushSqliteToPrisma(): Promise<PushSqliteToPrismaResult | null> {
+  const started = Date.now();
+  if (!state.db || !state.ready || state.syncing) return null;
+  if (isPlanLimitBreakerOpen()) return null;
+  const { isLeader } = await import("@/lib/services/leader");
+  if (!(await isLeader("sqlite-sync"))) return null;
+  const db = state.db;
+
+  const pending = drainSyncOutbox(db);
+  if (!pending.length) {
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger: "probe",
+      leaderGated: true,
+      rowsSynced: 0,
+      durationMs: Date.now() - started,
+    });
+    return { ran: true, synced: 0, failed: 0, errors: [] };
+  }
+
+  const sinks = await import("@/lib/sqlitePushSinks");
+  const byTable = new Map<string, OutboxItem[]>();
+  for (const p of pending) {
+    const list = byTable.get(p.tableName) ?? [];
+    list.push(p);
+    byTable.set(p.tableName, list);
+  }
+
+  const errors: string[] = [];
+  let synced = 0;
+  for (const [tableName, rows] of byTable) {
+    try {
+      const applied = await sinks.pushTable(db, tableName, rows);
+      deleteSyncOutboxRows(
+        db,
+        tableName,
+        rows.map((r) => r.rowId),
+      );
+      synced += applied;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${tableName}: ${msg}`);
+      logger.error({ msg: "SQLite: pushTable failed — outbox retained for retry", tableName, error: msg });
+    }
+  }
+
+  recordSyncHistory(db, {
+    direction: "sqlite_to_prisma",
+    trigger: "probe",
+    leaderGated: true,
+    rowsSynced: synced,
+    durationMs: Date.now() - started,
+    error: errors.length ? errors.join("; ") : undefined,
+  });
+  return { ran: true, synced, failed: errors.length, errors };
+}
+
+// ---------------------------------------------------------------------------
 // Sync helper: delete-then-insert for a single table
 // ---------------------------------------------------------------------------
 
@@ -3156,6 +3338,7 @@ function createFallback(db: Database): SqliteFallback {
           now,
         ]);
         stmt.free();
+        recordSyncOutbox(db, "symbols", (row.symbol || "").toUpperCase());
       } catch (err) {
         logger.error({ msg: "SQLite: upsertSymbol failed", symbol: row.symbol, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3205,6 +3388,9 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const b of bars) {
+          recordSyncOutbox(db, "daily_price", JSON.stringify([T, String(b.tradeDate ?? "")]));
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: setDailyPriceBars failed", ticker, n: bars.length, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3284,6 +3470,17 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const r of rows) {
+          recordSyncOutbox(
+            db,
+            "corporate_action",
+            JSON.stringify([
+              sv(r.symbol) ?? "",
+              sv(r.action_type ?? r.actionType) ?? "OTHER",
+              sv(r.ex_date ?? r.exDate),
+            ]),
+          );
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: setCorporateActions failed", n: rows.length, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3328,6 +3525,13 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const r of rows) {
+          recordSyncOutbox(
+            db,
+            "chartink_screener_result",
+            String(sv(r.id ?? r._id) ?? `${T}:${String(r.symbol ?? r.SYMBOL ?? "").toUpperCase()}`),
+          );
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: replaceChartinkResults failed", templateId, error: err instanceof Error ? err.message : String(err) });
       }
