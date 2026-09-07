@@ -11,7 +11,7 @@ Branch `fix/v3.29.1-header-watchlist`, on top of committed v3.29.1 `6e8db23`. v3
 - [x] v3.29.2 tests: NEW `aiModelCatalog.test.ts` 4 + `adminAiConfigModelManagement.test.ts` 10 (builtin 400 regression, hide/remove/404/active-reset/restore, POST valid/invalid); guard-run `modelChain.test.ts` 5 → **19/19**; tsc **46 = exact baseline (0 new)**; no migration — DONE
 - [x] v3.29.2 live verification (Playwright :3000 admin): builtin DELETE 400; UI remove/re-add gpt-oss toasts + CATALOG badge persists across reload; combobox = all 11 options across 3 optgroups (a11y-snapshot truncation — re-snapshot element); 0 console errors; pre/post DB identical — DONE
 - [x] v3.29.2 docs: AGENTS.md v3.29.2 row, CHANGELOG index + versions-v3.29.md v3.29.2 section, TODO.md row, Primer, agent-memory, Lessons #108 + Update Log bullet, session-todos (this file), `.agents/sessions/2026-09-07-admin-ai-model-management/` (decisions + flow) — DONE
-- [ ] v3.29.2 commit (code + tests + docs) — PENDING USER APPROVAL (no push/merge; do NOT mix unrelated v3.28.x-era working-tree changes)
+- [x] v3.29.2 commit (code + tests + docs) — DONE `1e907f1` on `fix/v3.29.1-header-watchlist` (no push/merge; unrelated v3.28.x-era working-tree changes kept unstaged)
 
 ## Completed earlier (v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix)
 
@@ -23,7 +23,7 @@ On `main`, on top of merged v3.29.0 `d7e54cf` (HEAD). v3.29.1 VERIFIED — heade
 - [x] v3.29.1 verification: tsc **46 = exact baseline (0 new)**; full jest **1043 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake) — DONE
 - [x] v3.29.1 live verification (Chrome DevTools :3000): logged-out isolated context → "/watchlist — sign in" card, 0 skeletons; logged-in demo → Demo AI Watchlist (RELIANCE ● LIVE ₹1,310.90 / -23.90 (-1.79%), OHLC table, Analyze/+ Add/Delete), 0 console errors (Web Vitals GOOD), no overflow @375×812 / @2696 — DONE
 - [x] v3.29.1 docs: AGENTS.md v3.29.1 row, CHANGELOG index + `.agents/changelog/versions-v3.29.md` v3.29.1 section, TODO.md row, Primer, agent-memory, Lessons #107 + Update Log bullet, session-todos (this file), latest.md handoff rewrite, HANDOFF.md Current-State yaml refresh, `.agents/sessions/2026-09-06-v3.29.1-header-watchlist/` (decisions + flow) — DONE
-- [ ] v3.29.1 commit (code + tests + docs) — PENDING USER APPROVAL (no push/merge — v3.29.0 already merged `d7e54cf`)
+- [x] v3.29.1 commit (code + tests + docs) — DONE `6e8db23` (parent of v3.29.2 `1e907f1`; no push/merge)
 
 ## Completed earlier (v3.29.0 — UI/UX audit fixes: backtest symbol-gate softening + AI-failure error surfacing + mobile-nav Alerts)
 
