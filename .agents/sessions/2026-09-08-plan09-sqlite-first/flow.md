@@ -78,6 +78,43 @@ SqliteFallback CRUD helpers (`listAlerts/upsertAlert/deleteAlert` etc.);
 flip admin CRUD routes (`app/api/admin/{announcements,corporate-actions,alerts,
 holdings}/route.ts`); re-point admin route tests.
 
+## Phase 7 — Admin long-lived datasets SQLite-first (DONE)
+
+- `lib/sqlite.ts` +7 helpers: `deleteCorporateAction` (:4037, SELECT natural
+  key → DELETE → outbox natural-key delete → boolean), `upsertAnnouncement`
+  (:5077, returns id), `deleteAnnouncement` (:5133), `upsertAlert` (:5146,
+  id = row.id ?? randomUUID()), `deleteAlert` (:5187), `upsertTransaction`
+  (:5274, ticker uppercased), `deleteTransaction` (:5321); interface additions
+  (:385-407). Table names: `admin_announcement`, `alert` (NOT `admin_alert`),
+  `transaction`, `corporate_action` (mirror exists).
+- 4 admin routes flipped mirror-first with Prisma fallback (`if (sqlite)`):
+  `app/api/admin/{announcements,corporate-actions,alerts,holdings}/route.ts`.
+  corporate-actions POST = check-then-insert (natural-key dedupe
+  `symbol|actionType|exDateKey` → `setCorporateActions(existing + new)`);
+  DELETE = mirror per-id with Prisma `deleteMany` fallback.
+- `lib/__tests__/sqlite.test.ts`: Phase 7 describe (:1589) — 4 tests
+  (announcement upsert/replace + outbox upsert/delete; alert round-trip +
+  delete outbox; transaction round-trip + filters + uppercased ticker +
+  delete outbox; corporate_action delete by id + natural-key outbox delete +
+  second-delete false).
+- **Mock executor**: added single-value `DELETE ... WHERE <col> = ?` equality
+  branch (~:67) — previously fell to whole-table wipe. delete tests assert real
+  sql.js semantics (1 row remains).
+- **Test-only AUTOINCREMENT simulation** in the corporate_action delete test:
+  `sqlModule.__getStore()["corporate_action"]` columns/rows patched to prepend
+  `id = i + 1` — real sql.js assigns ids on INSERT, mock derives columns from
+  INSERTs and would otherwise ignore `WHERE id = ?`.
+
+Verification: **sqlite.test.ts 57/57**; full suite **1093 pass / 4 skip /
+2 fail** (2 = pre-existing `intelligence.test.ts` async cache-flake only);
+`npx tsc --noEmit` **46 = exact baseline, 0 new** (admin routes + lib/sqlite.ts
+clean); no schema change → no migration.
+
+## Next (Phase 8)
+
+Per plan 09 §Phase 8 (`.agents/plans/09-sqlite-first-read-architecture.md`
+L92-99) — read the plan's exact Phase 8 target list before starting.
+
 ## Relevant refs
 
 - Plan: `.agents/plans/09-sqlite-first-read-architecture.md` (Phase 6 §68-77;

@@ -65,8 +65,22 @@ jest.mock("sql.js", () => {
                   t.rows = t.rows.filter((r) => !ids.has(String(r[pkIdx])));
                 }
               } else {
-                // Unscoped DELETE (no WHERE) wipes the whole table.
-                t.rows = [];
+                // DELETE ... WHERE <col> = ? — remove only the matching row
+                // (Plan 09 Phase 7 `deleteAnnouncement`/`deleteAlert`/
+                // `deleteTransaction`/`deleteCorporateAction` single-value
+                // deletes; matches real sql.js semantics — the row with that
+                // value goes, everything else stays).
+                const eqM = stmt.match(/WHERE\s+(\w+)\s*=\s*\?/i);
+                if (eqM && _params.length > 0) {
+                  const pkIdx = t.columns.indexOf(eqM[1]);
+                  if (pkIdx >= 0) {
+                    const val = String(_params[0]);
+                    t.rows = t.rows.filter((r) => String(r[pkIdx]) !== val);
+                  }
+                } else {
+                  // Unscoped DELETE (no WHERE) wipes the whole table.
+                  t.rows = [];
+                }
               }
             }
           }
@@ -1569,6 +1583,191 @@ describe("SQLite backup fallback", () => {
 
       // Restore defaults for later tests.
       mockLeader.isLeader.mockResolvedValue(true);
+    });
+  });
+
+  describe("Plan 09 Phase 7 — admin long-lived datasets mirror helpers", () => {
+    const sqlModule = require("sql.js") as any;
+
+    const resetAndInit = async () => {
+      sqlModule.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      jest.clearAllMocks();
+      mockPrisma.workerStatus.upsert = jest.fn().mockResolvedValue({ count: 1 });
+      await ensureSqliteBackup();
+    };
+
+    const outboxRows = (): any[][] => sqlModule.__getStore()["_sync_outbox"]?.rows ?? [];
+    const tableRows = (name: string): any[][] => sqlModule.__getStore()[name]?.rows ?? [];
+    const outboxOps = (table: string) =>
+      outboxRows().filter((r) => r[0] === table).map((r) => [r[1], r[2]]);
+
+    it("upsertAnnouncement assigns an id, replaces on conflict, and emits outbox upsert/delete", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+
+      const id1 = fb.upsertAnnouncement({ title: "First", message: "Hello", type: "info", target: "all" });
+      expect(id1).toBe(1);
+      expect(tableRows("admin_announcement").length).toBe(1);
+      expect(tableRows("admin_announcement")[0][1]).toBe("First");
+
+      // Explicit id: upsert returns it unchanged and replaces any existing row.
+      const id2 = fb.upsertAnnouncement({ id: 7, title: "Second", message: "World", type: "maintenance" });
+      expect(id2).toBe(7);
+      expect(tableRows("admin_announcement").length).toBe(2);
+      fb.upsertAnnouncement({ id: 7, title: "Second v2", message: "World", type: "maintenance" });
+      expect(tableRows("admin_announcement").filter((r) => r[0] === 7).length).toBe(1);
+      expect(tableRows("admin_announcement").filter((r) => r[0] === 7)[0][1]).toBe("Second v2");
+
+      expect(outboxOps("admin_announcement")).toEqual([
+        ["1", "upsert"],
+        ["7", "upsert"],
+        ["7", "upsert"],
+      ]);
+
+      fb.deleteAnnouncement(7);
+      expect(tableRows("admin_announcement").filter((r) => r[0] === 7).length).toBe(0);
+      expect(outboxOps("admin_announcement")).toEqual([
+        ["1", "upsert"],
+        ["7", "upsert"],
+        ["7", "upsert"],
+        ["7", "delete"],
+      ]);
+    });
+
+    it("upsertAlert round-trips through getAlerts and deleteAlert emits outbox delete", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+
+      fb.upsertAlert({
+        id: "al-1",
+        userId: 3,
+        type: "price",
+        symbol: "RELIANCE",
+        condition: { op: ">", value: 1500 },
+        triggered: true,
+        seen: false,
+        createdAt: new Date("2026-09-08T06:00:00.000Z"),
+      });
+
+      const alerts = fb.getAlerts({ limit: 100 });
+      expect(alerts.length).toBe(1);
+      const a = alerts[0] as any;
+      expect(a.id).toBe("al-1");
+      expect(a.userId).toBe(3);
+      expect(a.symbol).toBe("RELIANCE");
+      expect(a.condition).toEqual({ op: ">", value: 1500 });
+      expect(a.createdAt).toEqual(new Date("2026-09-08T06:00:00.000Z"));
+      expect(a.triggered).toBeTruthy();
+      expect(a.seen).toBeFalsy();
+      expect(outboxOps("alert")).toEqual([["al-1", "upsert"]]);
+
+      fb.deleteAlert("al-1");
+      expect(fb.getAlerts({ limit: 100 }).length).toBe(0);
+      expect(outboxOps("alert")).toEqual([
+        ["al-1", "upsert"],
+        ["al-1", "delete"],
+      ]);
+    });
+
+    it("upsertTransaction round-trips through getTransactions (filters + uppercased ticker) and deleteTransaction emits outbox delete", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+
+      fb.upsertTransaction({
+        id: "tx-1",
+        portfolioId: "pf-1",
+        userId: 3,
+        portfolioName: "Main",
+        tradeDate: new Date("2026-09-01"),
+        ticker: "reliance",
+        side: "BUY",
+        quantity: 10,
+        price: 1310.9,
+        fees: 20,
+        notes: "init",
+      });
+      fb.upsertTransaction({
+        id: "tx-2",
+        portfolioId: "pf-2",
+        userId: 9,
+        portfolioName: "Other",
+        tradeDate: new Date("2026-09-02"),
+        ticker: "tcs",
+        side: "SELL",
+        quantity: 5,
+        price: 4200,
+        fees: 15,
+      });
+
+      const all = fb.getTransactions({ limit: 5000 });
+      expect(all.length).toBe(2);
+      // ticker uppercased on write; tradeDate rehydrated as a Date via the alias.
+      const tx1 = all.find((t) => (t as any).id === "tx-1") as any;
+      expect(tx1.ticker).toBe("RELIANCE");
+      expect(tx1.tradeDate).toEqual(new Date("2026-09-01"));
+      expect(tx1.quantity).toBe(10);
+      expect(tx1.price).toBe(1310.9);
+      expect(tx1.portfolioName).toBe("Main");
+
+      // portfolioId + userId filters apply in-SQL.
+      expect(fb.getTransactions({ portfolioId: "pf-2" }).length).toBe(1);
+      expect(fb.getTransactions({ userId: 3 }).map((t) => (t as any).id)).toEqual(["tx-1"]);
+      expect(outboxOps("transaction")).toEqual([
+        ["tx-1", "upsert"],
+        ["tx-2", "upsert"],
+      ]);
+
+      fb.deleteTransaction("tx-1");
+      expect(fb.getTransactions({ limit: 5000 }).length).toBe(1);
+      expect(outboxOps("transaction")).toEqual([
+        ["tx-1", "upsert"],
+        ["tx-2", "upsert"],
+        ["tx-1", "delete"],
+      ]);
+    });
+
+    it("deleteCorporateAction removes by id and emits the natural-key delete outbox row", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.setCorporateActions([
+        {
+          symbol: "TCS",
+          companyName: "Tata Consultancy Services",
+          actionType: "DIVIDEND",
+          exDate: new Date("2026-08-20"),
+          recordDate: new Date("2026-08-21"),
+          dividendPerShare: 10,
+        },
+      ]);
+
+      const naturalKey = JSON.stringify(["TCS", "DIVIDEND", "2026-08-20T00:00:00.000Z"]);
+      expect(outboxOps("corporate_action")).toEqual([[naturalKey, "upsert"]]);
+
+      // The mock derives table columns from INSERTs, but `setCorporateActions`
+      // intentionally omits the auto-increment `id` (real sql.js AUTOINCREMENT
+      // assigns 1, 2, ... on a NULL/absent id). Simulate that here so the
+      // `WHERE id = ?` SELECT + DELETE resolve the row by its real id —
+      // without an `id` column the mock ignores the WHERE filter (a known
+      // sql.js-mock limitation, not a production behaviour).
+      const caStore = sqlModule.__getStore()["corporate_action"];
+      caStore.columns = ["id", ...caStore.columns];
+      caStore.rows = caStore.rows.map((r: unknown[], i: number) => [i + 1, ...r]);
+
+      expect(fb.deleteCorporateAction(1)).toBe(true);
+      expect(tableRows("corporate_action").length).toBe(0);
+      expect(outboxOps("corporate_action")).toEqual([
+        [naturalKey, "upsert"],
+        [naturalKey, "delete"],
+      ]);
+
+      // Second delete: row already gone → false, no extra outbox row.
+      expect(fb.deleteCorporateAction(1)).toBe(false);
+      expect(outboxOps("corporate_action")).toEqual([
+        [naturalKey, "upsert"],
+        [naturalKey, "delete"],
+      ]);
     });
   });
 });

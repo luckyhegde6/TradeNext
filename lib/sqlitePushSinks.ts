@@ -14,6 +14,8 @@
 //   Plan 09 Phase 6 job tables (daily_recommendation_run, daily_recommendation_stock,
 //     recommendation_tracker, recommendation_status_history, recommendation_archive,
 //     swing_analysis_job, swing_signal) -> mirror row id (Prisma id passthrough)
+//   Plan 09 Phase 7 admin tables (admin_announcement, alert, transaction) -> mirror row id
+//     (Prisma id passthrough; transaction user_id/portfolio_name are display-only, never pushed)
 
 import type { Database } from "sql.js";
 import prisma from "@/lib/prisma";
@@ -509,6 +511,63 @@ async function pushSwingSignals(db: Database, rows: OutboxRow[]): Promise<number
   return pushByIdUpsert(db, "swing_signal", "swing_signals", cols, rows);
 }
 
+// ---------------------------------------------------------------------------
+// Plan 09 Phase 7 sinks — admin long-lived datasets (announcements / alerts /
+// holdings). Mirror rows are full Prisma-shaped rows; the admin table uses the
+// @@map name "admin_announcements", while Alert/Transaction have NO @@map so
+// the raw table names ("Alert"/"Transaction") must be quoted. user_id +
+// portfolio_name on the transaction mirror are DISPLAY-ONLY denormalized
+// columns and are never pushed.
+// ---------------------------------------------------------------------------
+
+async function pushAdminAnnouncements(db: Database, rows: OutboxRow[]): Promise<number> {
+  const cols: GenCol[] = [
+    { sql: "id", val: (m) => String(sv(m.id) ?? "") },
+    { sql: "title", val: (m) => String(sv(m.title) ?? "") },
+    { sql: "message", val: (m) => String(sv(m.message) ?? "") },
+    { sql: "type", val: (m) => String(sv(m.type) ?? "info") },
+    { sql: "target", val: (m) => String(sv(m.target) ?? "all") },
+    { sql: '"isActive"', bool: true, val: (m) => (sv(m.is_active) === 1 || sv(m.is_active) === "1" ? 1 : 0) },
+    { sql: '"startsAt"', val: (m) => sv(m.starts_at) },
+    { sql: '"endsAt"', val: (m) => sv(m.ends_at) },
+    { sql: "link", val: (m) => sv(m.link) },
+    { sql: '"createdBy"', val: (m) => Number(sv(m.created_by) ?? 0) },
+    { sql: '"createdAt"', val: (m) => sv(m.created_at) },
+    { sql: '"updatedAt"', val: (m) => sv(m.updated_at) },
+  ];
+  return pushByIdUpsert(db, "admin_announcement", "admin_announcements", cols, rows);
+}
+
+async function pushAlerts(db: Database, rows: OutboxRow[]): Promise<number> {
+  const cols: GenCol[] = [
+    { sql: "id", val: (m) => String(sv(m.id) ?? "") },
+    { sql: '"userId"', val: (m) => sv(m.user_id) },
+    { sql: "type", val: (m) => String(sv(m.type) ?? "") },
+    { sql: "symbol", val: (m) => sv(m.symbol) },
+    { sql: "condition", json: true, val: (m) => sv(m.condition) },
+    { sql: "triggered", bool: true, val: (m) => (sv(m.triggered) === 1 || sv(m.triggered) === "1" ? 1 : 0) },
+    { sql: '"triggeredAt"', val: (m) => sv(m.triggered_at) },
+    { sql: "seen", bool: true, val: (m) => (sv(m.seen) === 1 || sv(m.seen) === "1" ? 1 : 0) },
+    { sql: '"createdAt"', val: (m) => sv(m.created_at) },
+  ];
+  return pushByIdUpsert(db, "alert", "Alert", cols, rows);
+}
+
+async function pushTransactions(db: Database, rows: OutboxRow[]): Promise<number> {
+  const cols: GenCol[] = [
+    { sql: "id", val: (m) => String(sv(m.id) ?? "") },
+    { sql: '"portfolioId"', val: (m) => String(sv(m.portfolio_id) ?? "") },
+    { sql: '"tradeDate"', val: (m) => sv(m.trade_date) },
+    { sql: "ticker", val: (m) => String(sv(m.ticker) ?? "") },
+    { sql: "side", val: (m) => String(sv(m.side) ?? "BUY") },
+    { sql: "quantity", val: (m) => sv(m.quantity) },
+    { sql: "price", val: (m) => sv(m.price) },
+    { sql: "fees", val: (m) => sv(m.fees) },
+    { sql: "notes", val: (m) => sv(m.notes) },
+  ];
+  return pushByIdUpsert(db, "transaction", "Transaction", cols, rows);
+}
+
 /** Apply one mirror table's drained outbox slice to Prisma. Returns the
  *  number of outbox rows consumed (rows that should be removed from the
  *  outbox). Throws on a table-level failure so the caller retains the rows. */
@@ -538,6 +597,13 @@ export async function pushTable(db: Database, tableName: string, rows: OutboxRow
       return pushSwingAnalysisJobs(db, rows);
     case "swing_signal":
       return pushSwingSignals(db, rows);
+    // Plan 09 Phase 7 — admin long-lived datasets.
+    case "admin_announcement":
+      return pushAdminAnnouncements(db, rows);
+    case "alert":
+      return pushAlerts(db, rows);
+    case "transaction":
+      return pushTransactions(db, rows);
     default:
       throw new Error(`lib/sqlitePushSinks: no sink for table "${tableName}"`);
   }

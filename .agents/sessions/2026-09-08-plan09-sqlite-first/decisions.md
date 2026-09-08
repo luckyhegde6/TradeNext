@@ -105,3 +105,46 @@ Step 4-5 (THIS commit — swaps + re-pointed suites):
    `toBeGreaterThanOrEqual(2)`, never `toHaveLength(2)`.
 8. Perf "bridges" assertions are per-id on the mirror upsert: t2 → 555,
    t1 → 2500; `recommendationTracker.update` NOT called.
+
+## Phase 7 — Admin long-lived datasets SQLite-first (announcements / corp-actions / alerts / holdings)
+
+1. §4.8 implemented exactly: admin GET = mirror-only; admin writes = mirror +
+   `_sync_outbox` (op `upsert`/`delete`) → `pushSqliteToPrisma` drains to Prisma
+   at the 6h probe tick. `delete` op routes to `deleteMany` in the sinks
+   (corporate_action natural-key delete → `deleteMany`; announcements/alerts/
+   transactions keyed on String(mirror row id)).
+2. **Co-writers stay Prisma** (not mirrored): alert lifecycle evaluator
+   (`evaluateAnomalyAlerts`), announcement broadcast dedupe, corporate PATCH
+   `backfillDividends`. The mirror is a read/CRUD surface for the four routes,
+   not a sync source for those flows.
+3. Route flip pattern: `const sqlite = getSqliteFallback();` → `if (sqlite) {
+   mirror } else { original Prisma }` — sqlite-null (init failure/WASM missing)
+   falls back to Prisma, so the admin UI never breaks.
+4. Helper set (`lib/sqlite.ts`): `upsertAnnouncement(...): number` (returns
+   auto/assigned id; second call with same id = REPLACE), `deleteAnnouncement`,
+   `upsertAlert` (id = row.id ?? randomUUID()), `deleteAlert`,
+   `upsertTransaction` (ticker uppercased), `deleteTransaction`,
+   `deleteCorporateAction(id): boolean` (SELECT natural key → DELETE → outbox
+   natural-key delete row → true; absent id → false, no outbox row).
+5. **Enrichment is NOT daily-limit/breaker-gated** (Phase 4 push engine keeps the
+   breaker/leader gate; admin CRUD is low-frequency user/admin traffic that must
+   keep working even mid-hold — the mirror is the point of the offline path).
+   Every helper try/catches and degrades gracefully (mirror writes fail → no
+   throw, route keeps serving Prisma-capable reads).
+6. **Mock sql.js needed a faithful single-value DELETE** (L43-81): real sql.js
+   `DELETE ... WHERE <col> = ?` removes only the matched row, but the mock
+   executor only honored prune/`IN (...)` and fell through to a whole-table wipe.
+   Added an equality branch (`WHERE <col> = ?` → filter rows where
+   `String(r[col]) !== String(param)`). Both `deleteTransaction` and
+   `deleteCorporateAction` tests now assert real semantics (1 row remains).
+7. **corporate_action AUTOINCREMENT simulation (test-only)**: `setCorporateActions`
+   intentionally omits `id` from the INSERT (real sql.js AUTOINCREMENT assigns
+   1, 2, ...). The mock derives table columns from INSERTs → no `id` column →
+   `WHERE id = ?` ignored. The delete test patches `sqlModule.__getStore()
+   ["corporate_action"]` columns/rows with synthetic ids before deleting (a
+   faithful simulation of the real id assignment, not a behaviour change).
+8. Verification: sqlite.test.ts **57/57** (4 new Phase 7 tests); full suite
+   **1093 pass / 4 skip / 2 fail** (2 = pre-existing `intelligence.test.ts`
+   async cache-flake, unrelated); tsc **46 = exact baseline (0 new)**; no schema
+   change → no migration. Commit `feat(sqlite): admin long-lived datasets
+   SQLite-first (Plan 09 Phase 7)`.

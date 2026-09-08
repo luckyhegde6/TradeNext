@@ -17,6 +17,7 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
+import { randomUUID } from "crypto";
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
@@ -207,8 +208,10 @@ export interface SqliteFallback {
     close: number;
     volume: number;
   }): void;
-  /** Get corporate actions (recent). */
-  getCorporateActions(limit?: number): Array<Record<string, unknown>>;
+  /** Get corporate actions (recent; number = legacy limit or opts with search). */
+  getCorporateActions(
+    optsOrLimit?: number | { search?: string; limit?: number },
+  ): Array<Record<string, unknown>>;
   /** Get recent server logs. */
   getServerLogs(limit?: number): Array<Record<string, unknown>>;
   /** Get write-behind queue records by source (e.g. `ai`) — zero Prisma reads. */
@@ -371,6 +374,39 @@ export interface SqliteFallback {
   deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void;
   /** Mirror delete: one tracker + its status-history rows + outbox. */
   deleteRecommendationTracker(trackerId: string): void;
+  // --- Plan 09 Phase 7 — admin long-lived datasets (SQLite-first readers) ---
+  /** Mirror read: admin announcements (optionally active-only / limited). */
+  getAnnouncements(opts?: {
+    activeOnly?: boolean;
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE admin-announcement row (mirror id = MAX(id)+1) + outbox.
+   *  Returns the mirror id (0 when the mirror is unavailable). */
+  upsertAnnouncement(row: Record<string, unknown>): number;
+  /** Mirror delete: one admin announcement + outbox. */
+  deleteAnnouncement(id: number): void;
+  /** Mirror read: alerts (recent, optional limit window). */
+  getAlerts(opts?: { limit?: number }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE alert row (client-side id passthrough) + outbox. */
+  upsertAlert(row: Record<string, unknown>): void;
+  /** Mirror delete: one alert + outbox. */
+  deleteAlert(id: string): void;
+  /** Mirror read: transactions — by portfolioId OR userId (denormalized name),
+   *  newest first. */
+  getTransactions(opts?: {
+    portfolioId?: string;
+    userId?: number;
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE transaction row (client-side id passthrough) + outbox. */
+  upsertTransaction(row: Record<string, unknown>): void;
+  /** Mirror delete: one transaction + outbox. */
+  deleteTransaction(id: string): void;
+  /** Mirror delete: one corporate-action row by LOCAL mirror id + natural-key
+   *  outbox delete. Returns true when the row existed in the mirror. */
+  deleteCorporateAction(id: number): boolean;
+  /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
+  getSqliteDerived(): Record<string, unknown>;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -1070,6 +1106,77 @@ const SCHEMA_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_swing_signal_symbol ON swing_signal (symbol);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_swing_signal_job_symbol ON swing_signal (job_id, symbol);
+
+  -- Plan 09 Phase 7 (admin long-lived datasets, SQLite-first readers): mirrors
+  -- for admin announcements / alerts / holdings (raw Postgres tables are
+  -- "Alert" and "Transaction" -- no @@map -- so sinks use quoted sql).
+  -- user_id + portfolio_name on transaction are DISPLAY-ONLY denormalized
+  -- columns hydrated from the portfolio join (never pushed by the sink).
+  -- ai_config / user_session are MASKED mirrors (value/token never stored).
+  -- Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS admin_announcement (
+    id         INTEGER PRIMARY KEY,
+    title      TEXT,
+    message    TEXT,
+    type       TEXT,
+    target     TEXT,
+    is_active  INTEGER,
+    starts_at  TEXT,
+    ends_at    TEXT,
+    link       TEXT,
+    created_by INTEGER,
+    created_at TEXT,
+    updated_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_announcement_active ON admin_announcement (is_active, starts_at, ends_at);
+  CREATE INDEX IF NOT EXISTS idx_admin_announcement_target ON admin_announcement (target);
+  CREATE TABLE IF NOT EXISTS alert (
+    id           TEXT PRIMARY KEY,
+    user_id      INTEGER,
+    type         TEXT,
+    symbol       TEXT,
+    condition    TEXT,
+    triggered    INTEGER,
+    triggered_at TEXT,
+    seen         INTEGER,
+    created_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_alert_created ON alert (created_at);
+  CREATE INDEX IF NOT EXISTS idx_alert_triggered ON alert (triggered);
+  CREATE TABLE IF NOT EXISTS transaction (
+    id             TEXT PRIMARY KEY,
+    portfolio_id   TEXT,
+    user_id        INTEGER,
+    portfolio_name TEXT,
+    trade_date     TEXT,
+    ticker         TEXT,
+    side           TEXT,
+    quantity       REAL,
+    price          REAL,
+    fees           REAL,
+    notes          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON transaction (portfolio_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_user ON transaction (user_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON transaction (trade_date);
+  CREATE TABLE IF NOT EXISTS ai_config (
+    id         TEXT PRIMARY KEY,
+    key        TEXT,
+    is_set     INTEGER,
+    category   TEXT,
+    updated_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS user_session (
+    id             TEXT PRIMARY KEY,
+    user_id        INTEGER,
+    is_active      INTEGER,
+    expires_at     TEXT,
+    last_active_at TEXT,
+    created_at     TEXT,
+    user_agent     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_session_user ON user_session (user_id);
+  CREATE INDEX IF NOT EXISTS idx_user_session_last_active ON user_session (last_active_at);
 
   -- Plan 09 Phase 1 (durable sync ledger): db-health "recent syncs" read
   -- survives restarts because real sync activity is recorded here, not just
@@ -2729,8 +2836,8 @@ export async function syncFromPrisma(opts?: {
         take: 2000,
       });
       return {
-        columns: "id, symbol, company_name, series, subject, action_type, ex_date, record_date, face_value, ratio, dividend_per_share, dividend_yield, source",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, symbol, company_name, series, subject, action_type, ex_date, record_date, face_value, ratio, dividend_per_share, dividend_yield, source, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: actions.map((a) => [
           a.id,
           a.symbol,
@@ -2745,6 +2852,8 @@ export async function syncFromPrisma(opts?: {
           a.dividendPerShare != null ? Number(a.dividendPerShare) : null,
           a.dividendYield != null ? Number(a.dividendYield) : null,
           a.source,
+          a.createdAt?.toISOString() ?? null,
+          a.updatedAt?.toISOString() ?? null,
         ]),
       };
     });
@@ -2918,6 +3027,132 @@ export async function syncFromPrisma(opts?: {
           t.cronJobId ?? null,
           t.payload != null ? JSON.stringify(t.payload) : null,
         ]),
+      };
+    });
+
+    // --- Sync admin announcements (recent 250, newest first) ---
+    totalRows += await syncTable(db, "admin_announcement", async () => {
+      const rows = await prisma.adminAnnouncement.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 250,
+      });
+      return {
+        columns: "id, title, message, type, target, is_active, starts_at, ends_at, link, created_by, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((a) => [
+          a.id,
+          a.title,
+          a.message,
+          a.type,
+          a.target,
+          a.isActive ? 1 : 0,
+          a.startsAt?.toISOString() ?? null,
+          a.endsAt?.toISOString() ?? null,
+          a.link,
+          a.createdBy,
+          a.createdAt?.toISOString() ?? null,
+          a.updatedAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync alerts (recent 100, newest first) ---
+    totalRows += await syncTable(db, "alert", async () => {
+      const rows = await prisma.alert.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+      return {
+        columns: "id, user_id, type, symbol, condition, triggered, triggered_at, seen, created_at",
+        placeholders: "?,?,?,?,?,?,?,?,?",
+        rows: rows.map((a) => [
+          a.id,
+          a.userId,
+          a.type,
+          a.symbol,
+          a.condition != null ? JSON.stringify(a.condition) : null,
+          a.triggered ? 1 : 0,
+          a.triggeredAt?.toISOString() ?? null,
+          a.seen ? 1 : 0,
+          a.createdAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync transactions (recent 2000, newest first; portfolio denormalized:
+    //     user_id + portfolio_name are display-only — never pushed to Prisma) ---
+    totalRows += await syncTable(db, "transaction", async () => {
+      const rows = await prisma.transaction.findMany({
+        orderBy: { tradeDate: "desc" },
+        take: 2000,
+        include: { portfolio: { select: { id: true, name: true, userId: true } } },
+      });
+      return {
+        columns: "id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side, quantity, price, fees, notes",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((t) => [
+          t.id,
+          t.portfolioId,
+          t.portfolio.userId,
+          t.portfolio.name,
+          t.tradeDate?.toISOString() ?? null,
+          t.ticker,
+          t.side,
+          t.quantity != null ? Number(t.quantity) : null,
+          t.price != null ? Number(t.price) : null,
+          t.fees != null ? Number(t.fees) : null,
+          t.notes ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync user sessions (recent 100; sessionToken is NEVER mirrored) ---
+    totalRows += await syncTable(db, "user_session", async () => {
+      const rows = await prisma.userSession.findMany({
+        orderBy: { lastActiveAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          userId: true,
+          isActive: true,
+          expiresAt: true,
+          lastActiveAt: true,
+          createdAt: true,
+          userAgent: true,
+        },
+      });
+      return {
+        columns: "id, user_id, is_active, expires_at, last_active_at, created_at, user_agent",
+        placeholders: "?,?,?,?,?,?,?",
+        rows: rows.map((s) => [
+          s.id,
+          s.userId,
+          s.isActive ? 1 : 0,
+          s.expiresAt?.toISOString() ?? null,
+          s.lastActiveAt?.toISOString() ?? null,
+          s.createdAt?.toISOString() ?? null,
+          s.userAgent ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync ai_config (masked Secret row: value/metadata/hint NEVER stored;
+    //     is_set mirrors Secret.isActive) ---
+    totalRows += await syncTable(db, "ai_config", async () => {
+      const row = await prisma.secret.findFirst({ where: { name: "ai_config" } });
+      if (!row) return null;
+      return {
+        columns: "id, key, is_set, category, updated_at",
+        placeholders: "?,?,?,?,?",
+        rows: [
+          [
+            row.id,
+            row.name,
+            row.isActive ? 1 : 0,
+            row.type,
+            row.updatedAt?.toISOString() ?? null,
+          ],
+        ],
       };
     });
 
@@ -3260,6 +3495,12 @@ const OUTBOX_TABLES = [
   "recommendation_archive",
   "swing_analysis_job",
   "swing_signal",
+  // Plan 09 Phase 7 — admin long-lived datasets (announcements/alerts/holdings)
+  // write SQLite-first too; promoted by the id-keyed sinks with quoted raw
+  // Postgres table names ("Alert" / "Transaction" have no @@map).
+  "admin_announcement",
+  "alert",
+  "transaction",
 ] as const;
 
 type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
@@ -3793,6 +4034,35 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    deleteCorporateAction(id: number): boolean {
+      if (!db || !id) return false;
+      try {
+        const res = db.exec(
+          "SELECT symbol, action_type, ex_date FROM corporate_action WHERE id = ?",
+          [Number(id)],
+        );
+        if (!res.length || !res[0].values.length) return false;
+        const row = res[0].values[0];
+        const symbol = String(row[0] ?? "");
+        const actionType = String(row[1] ?? "OTHER");
+        const exDate = row[2] ?? null;
+        db.run("DELETE FROM corporate_action WHERE id = ?", [Number(id)]);
+        recordSyncOutbox(
+          db,
+          "corporate_action",
+          JSON.stringify([symbol, actionType, exDate]),
+          "delete",
+        );
+        return true;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteCorporateAction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    },
+
     // Captured Chartink result rows (mirrors ChartinkScreenerResult)
     replaceChartinkResults(templateId, rows): void {
       const T = (templateId || "").toString();
@@ -3865,9 +4135,15 @@ function createFallback(db: Database): SqliteFallback {
     },
 
     // --- Corporate actions ---
-    getCorporateActions(limit = 500): Array<Record<string, unknown>> {
+    getCorporateActions(
+      optsOrLimit: number | { search?: string; limit?: number } = 500,
+    ): Array<Record<string, unknown>> {
       const _start = performance.now();
       try {
+        const opts =
+          typeof optsOrLimit === "number" ? { limit: optsOrLimit } : optsOrLimit ?? {};
+        const limit = opts.limit ?? 500;
+        const search = opts.search?.trim().toUpperCase();
         const rows = db.exec(
           "SELECT * FROM corporate_action ORDER BY ex_date DESC LIMIT ?",
           [limit],
@@ -3877,11 +4153,18 @@ function createFallback(db: Database): SqliteFallback {
           return [];
         }
         const cols = rows[0].columns;
-        const out = rows[0].values.map((row) => {
+        let out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           return obj;
         });
+        if (search) {
+          out = out.filter(
+            (r) =>
+              String(r.symbol ?? "").toUpperCase().includes(search) ||
+              String(r.company_name ?? "").toUpperCase().includes(search),
+          );
+        }
         recordSqliteRead("getCorporateActions", _start, out.length, true);
         return out;
       } catch {
@@ -4742,6 +5025,499 @@ function createFallback(db: Database): SqliteFallback {
           msg: "SQLite: deleteRecommendationTracker failed",
           error: err instanceof Error ? err.message : String(err),
         });
+      }
+    },
+
+    // --- Plan 09 Phase 7 — admin long-lived datasets (SQLite-first readers) ---
+
+    getAnnouncements(opts?: {
+      activeOnly?: boolean;
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const limit = Math.min(opts?.limit ?? 250, 1000);
+        const now = new Date().toISOString();
+        let sql = "SELECT * FROM admin_announcement";
+        const params: Array<string | number> = [];
+        if (opts?.activeOnly) {
+          sql +=
+            " WHERE is_active = 1 AND (starts_at IS NULL OR starts_at <= ?)" +
+            " AND (ends_at IS NULL OR ends_at >= ?)";
+          params.push(now, now);
+        }
+        sql += " ORDER BY created_at DESC LIMIT ?";
+        params.push(limit);
+        const rows = db.exec(sql, params);
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["starts_at", "ends_at", "created_at", "updated_at"],
+            jsonKeys: [],
+            alias: {
+              is_active: "isActive",
+              starts_at: "startsAt",
+              ends_at: "endsAt",
+              created_by: "createdBy",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getAnnouncements failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    upsertAnnouncement(row: Record<string, unknown>): number {
+      if (!db) return 0;
+      try {
+        let id = Number(row.id ?? 0);
+        if (!id) {
+          const res = db.exec(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM admin_announcement",
+          );
+          id = res.length && res[0].values.length ? Number(res[0].values[0][0] ?? 1) : 1;
+        }
+        const now = new Date().toISOString();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        const isActive = (row.isActive ?? row.is_active) ? 1 : 0;
+        db.run(
+          `INSERT INTO admin_announcement (
+             id, title, message, type, target, is_active, starts_at, ends_at,
+             link, created_by, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             title=excluded.title,
+             message=excluded.message,
+             type=excluded.type,
+             target=excluded.target,
+             is_active=excluded.is_active,
+             starts_at=excluded.starts_at,
+             ends_at=excluded.ends_at,
+             link=excluded.link,
+             created_by=excluded.created_by,
+             updated_at=excluded.updated_at`,
+          [
+            id,
+            String(row.title ?? ""),
+            String(row.message ?? ""),
+            String(row.type ?? "info"),
+            String(row.target ?? "all"),
+            isActive,
+            toIso(row.startsAt ?? row.starts_at),
+            toIso(row.endsAt ?? row.ends_at),
+            row.link != null ? String(row.link) : null,
+            Number(row.createdBy ?? row.created_by ?? 0) || null,
+            toIso(row.createdAt ?? row.created_at) ?? now,
+            toIso(row.updatedAt ?? row.updated_at) ?? now,
+          ],
+        );
+        recordSyncOutbox(db, "admin_announcement", String(id), "upsert");
+        return id;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertAnnouncement failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return 0;
+      }
+    },
+
+    deleteAnnouncement(id: number): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM admin_announcement WHERE id = ?", [id]);
+        recordSyncOutbox(db, "admin_announcement", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteAnnouncement failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertAlert(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const id = row.id != null ? String(row.id) : randomUUID();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        db.run(
+          `INSERT INTO alert (
+             id, user_id, type, symbol, condition, triggered, triggered_at,
+             seen, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             user_id=excluded.user_id,
+             type=excluded.type,
+             symbol=excluded.symbol,
+             condition=excluded.condition,
+             triggered=excluded.triggered,
+             triggered_at=excluded.triggered_at,
+             seen=excluded.seen,
+             created_at=excluded.created_at`,
+          [
+            id,
+            row.userId != null ? Number(row.userId) : null,
+            String(row.type ?? ""),
+            row.symbol != null ? String(row.symbol) : null,
+            row.condition != null ? JSON.stringify(row.condition) : null,
+            row.triggered ? 1 : 0,
+            toIso(row.triggeredAt ?? row.triggered_at),
+            row.seen ? 1 : 0,
+            toIso(row.createdAt ?? row.created_at) ?? new Date().toISOString(),
+          ],
+        );
+        recordSyncOutbox(db, "alert", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertAlert failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteAlert(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM alert WHERE id = ?", [String(id)]);
+        recordSyncOutbox(db, "alert", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteAlert failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    getAlerts(opts?: { limit?: number }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const rows = db.exec(
+          "SELECT * FROM alert ORDER BY created_at DESC LIMIT ?",
+          [Math.min(opts?.limit ?? 100, 1000)],
+        );
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["triggered_at", "created_at"],
+            jsonKeys: ["condition"],
+            alias: {
+              user_id: "userId",
+              triggered_at: "triggeredAt",
+              created_at: "createdAt",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getAlerts failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    getTransactions(opts?: {
+      portfolioId?: string;
+      userId?: number;
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const conds: string[] = [];
+        const params: Array<string | number> = [];
+        if (opts?.portfolioId) {
+          conds.push("portfolio_id = ?");
+          params.push(opts.portfolioId);
+        }
+        if (opts?.userId) {
+          conds.push("user_id = ?");
+          params.push(Number(opts.userId));
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const rows = db.exec(
+          `SELECT * FROM transaction${where} ORDER BY trade_date DESC LIMIT ?`,
+          [...params, Math.min(opts?.limit ?? 2000, 5000)],
+        );
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["trade_date"],
+            jsonKeys: [],
+            alias: {
+              portfolio_id: "portfolioId",
+              user_id: "userId",
+              portfolio_name: "portfolioName",
+              trade_date: "tradeDate",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getTransactions failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+upsertTransaction(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const id = row.id != null ? String(row.id) : randomUUID();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        const num = (v: unknown): number | null =>
+          v == null || v === "" ? null : Number(v);
+        db.run(
+          `INSERT INTO transaction (
+             id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side,
+             quantity, price, fees, notes
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             portfolio_id=excluded.portfolio_id,
+             user_id=excluded.user_id,
+             portfolio_name=excluded.portfolio_name,
+             trade_date=excluded.trade_date,
+             ticker=excluded.ticker,
+             side=excluded.side,
+             quantity=excluded.quantity,
+             price=excluded.price,
+             fees=excluded.fees,
+             notes=excluded.notes`,
+          [
+            id,
+            row.portfolioId != null ? String(row.portfolioId) : "",
+            row.userId != null ? Number(row.userId) : null,
+            row.portfolioName != null ? String(row.portfolioName) : null,
+            toIso(row.tradeDate ?? row.trade_date),
+            String(row.ticker ?? "").toUpperCase(),
+            String(row.side ?? ""),
+            num(row.quantity),
+            num(row.price),
+            num(row.fees),
+            row.notes != null ? String(row.notes) : null,
+          ],
+        );
+        recordSyncOutbox(db, "transaction", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertTransaction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteTransaction(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM transaction WHERE id = ?", [String(id)]);
+        recordSyncOutbox(db, "transaction", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteTransaction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
+    getSqliteDerived(): Record<string, unknown> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getSqliteDerived", _start, 0, false);
+        return {};
+      }
+      const safe = <T>(fn: () => T, fallback: T): T => {
+        try {
+          return fn();
+        } catch {
+          return fallback;
+        }
+      };
+      try {
+        const swingJobs = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM swing_analysis_job ORDER BY created_at DESC LIMIT 5",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["created_at", "started_at", "completed_at", "updated_at"],
+              jsonKeys: [],
+              alias: {
+                run_id: "runId",
+                created_at: "createdAt",
+                started_at: "startedAt",
+                completed_at: "completedAt",
+                updated_at: "updatedAt",
+              },
+            }),
+          );
+        }, []);
+
+        const swingSignals = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM swing_signal ORDER BY posted_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["posted_at", "created_at", "updated_at", "last_checked_at"],
+              jsonKeys: [],
+              alias: {
+                job_id: "jobId",
+                ai_recommendation: "aiRecommendation",
+                entry_price: "entryPrice",
+                target_price: "targetPrice",
+                stop_loss: "stopLoss",
+                current_price: "currentPrice",
+                return_percent: "returnPercent",
+                posted_at: "postedAt",
+                created_at: "createdAt",
+                updated_at: "updatedAt",
+                last_checked_at: "lastCheckedAt",
+              },
+            }),
+          );
+        }, []);
+
+        const trackers = safe(
+          () => this.getRecommendationTrackers({ limit: 200 }),
+          [] as Array<Record<string, unknown>>,
+        );
+
+        const statusHistory = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM recommendation_status_history ORDER BY created_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["created_at"],
+              jsonKeys: [],
+              alias: { tracker_id: "trackerId", created_at: "createdAt" },
+            }),
+          );
+        }, []);
+
+        const archives = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM recommendation_archive ORDER BY created_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["archived_at", "created_at"],
+              jsonKeys: [],
+              alias: {
+                tracker_id: "trackerId",
+                entry_price: "entryPrice",
+                target_price: "targetPrice",
+                stop_loss: "stopLoss",
+                archived_at: "archivedAt",
+                created_at: "createdAt",
+              },
+            }),
+          );
+        }, []);
+
+        const aiConfigSet = safe(() => {
+          const rows = db.exec("SELECT * FROM ai_config");
+          if (!rows.length || !rows[0].values.length) return null;
+          const cols = rows[0].columns;
+          const row = rows[0].values[0];
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return {
+            id: obj.id,
+            key: obj.key,
+            isSet: !!obj.is_set,
+            category: obj.category,
+            updatedAt: obj.updated_at ? new Date(String(obj.updated_at)) : null,
+          };
+        }, null);
+
+        const sessionsMeta = safe(() => {
+          const rows = db.exec(
+            "SELECT COUNT(*) AS total, SUM(is_active) AS active, MAX(last_active_at) AS last_active_at FROM user_session",
+          );
+          if (!rows.length || !rows[0].values.length) return null;
+          const v = rows[0].values[0];
+          return {
+            total: Number(v[0] ?? 0),
+            active: Number(v[1] ?? 0),
+            lastActiveAt: v[2] ? new Date(String(v[2])) : null,
+          };
+        }, null);
+
+        const adminAnnouncements = safe(
+          () => this.getAnnouncements({ limit: 10 }),
+          [] as Array<Record<string, unknown>>,
+        );
+        const alerts = safe(() => this.getAlerts({ limit: 50 }), [] as Array<Record<string, unknown>>);
+        const transactions = safe(
+          () =>
+            (this.getTransactions({ limit: 50 }) as Array<Record<string, unknown>>).map(
+              (t) => ({
+                id: t.id,
+                ticker: t.ticker,
+                side: t.side,
+                quantity: t.quantity,
+                price: t.price,
+                tradeDate: t.tradeDate,
+                userId: t.userId,
+                portfolioId: t.portfolioId,
+                portfolioName: t.portfolioName,
+              }),
+            ),
+          [] as Array<Record<string, unknown>>,
+        );
+
+        const totalRows =
+          swingJobs.length +
+          swingSignals.length +
+          trackers.length +
+          statusHistory.length +
+          archives.length +
+          (aiConfigSet ? 1 : 0) +
+          adminAnnouncements.length +
+          alerts.length +
+          transactions.length;
+        recordSqliteRead("getSqliteDerived", _start, totalRows, true);
+        return {
+          swingJobs,
+          swingSignals,
+          trackers,
+          statusHistory,
+          archives,
+          aiConfigSet,
+          sessionsMeta,
+          adminAnnouncements,
+          alerts,
+          transactions,
+        };
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSqliteDerived failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSqliteDerived", _start, 0, false);
+        return {};
       }
     },
 
