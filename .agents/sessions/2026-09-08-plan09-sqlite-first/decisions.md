@@ -148,3 +148,48 @@ Step 4-5 (THIS commit — swaps + re-pointed suites):
    async cache-flake, unrelated); tsc **46 = exact baseline (0 new)**; no schema
    change → no migration. Commit `feat(sqlite): admin long-lived datasets
    SQLite-first (Plan 09 Phase 7)`.
+
+## Phase 8 — db-health page wiring + push engine opts + derived counts + hot-route headers
+
+1. **Push opts design** (#4.9 recommended): `pushSqliteToPrisma(opts?: { reason?:
+   SyncTrigger; leaderGate?: boolean })` — `trigger = opts?.reason ?? "probe"`,
+   `leaderGate = opts?.leaderGate ?? true`. Both `recordSyncHistory` sites use
+   `trigger`/`leaderGated` so the ledger reflects who asked (probe vs admin) and
+   whether the leader gate applied. Default callers (probe tick) unchanged.
+2. **Route POST branch**: `pushSqliteToPrisma({ reason: "admin", leaderGate:
+   false })` + audit tag `ADMIN_DB_SYNC` with resource `sqlite-push` (matches
+   the phase-7 admin-CRUD boundary — admin feedback path is NOT leader-gated,
+   only the 6h probe is). Push engine internals still require
+   `state.leaderLock === true` and use `prisma.$transaction`.
+3. **Mock exec trap (test-only)**: the test mock's `SELECT COUNT(*)` returns
+   `[[n]]` and a MISSING table returns `[[0]]` (does NOT throw) — so
+   `hasSyncHistoryTable`'s try/catch fallback (`return false`) is untestable
+   via the mock. Tests assert the `!state.db || !state.ready` guard paths
+   instead (false before init, true after init).
+4. **Jest CLI flag**: on this repo it is `--testPathPatterns="..."` —
+   `--testPathPattern` throws "Unknown option" (jest 30 renamed it).
+5. **`sqlitePushInFlight` dedup**: `pushSqliteToPrisma` returns the SAME
+   in-flight promise for concurrent callers — tests MUST `await` each push
+   call sequentially before asserting (stacked awaits share the result).
+6. **Derived counts** (`getSqliteDerivedCounts` + `DERIVED_COUNT_TABLES`,
+   lib/sqlite.ts :3405/:3468): `SELECT COUNT(*)` per mirror table that has no
+   outbox representation (`swing_analysis_job`, `swing_signal`,
+   `recommendation_tracker`, `recommendation_status_history`,
+   `recommendation_archive`, `ai_config`, `user_session`,
+   `admin_announcement`, `alert`, `transaction`) — complements
+   `getOutboxPending` (outbox-backed tables show pending drains). All reads
+   instrumented via `recordSqliteRead`.
+7. **db-health page additions** (page.tsx): Outbox card (per-table pending +
+   lastAt) + Derived-counts card + "Push SQLite → Prisma now" button
+   (`triggerPush` handler, `pushing` state, 403-guarded when not admin) +
+   Direction/Trigger columns on Run History + footer notes explaining DB-first
+   reads and that push drains at the 6h probe. nse-sync page gains a
+   short amber DB-first info `<p>`.
+8. **Hot-route header comments** (5 routes: recommendations, swing, screener/
+   chartink, corporate-actions/combined, nse/indexes): document each route's
+   SQLite-first read chain + provider fallback so the read architecture is
+   discoverable at the route level.
+9. Verification: sqlite.test.ts **68/68** (11 new Phase 8 tests); tsc
+   **46 = exact baseline (0 new)**; no schema change → no migration. Commit
+   `feat(sqlite): db-health page wiring + push engine opts + derived counts +
+   hot-route headers (Plan 09 Phase 8)`.

@@ -52,7 +52,15 @@ interface DbHealthData {
       rowsSynced: number;
       durationMs: number;
       error?: string;
+      direction?: "prisma_to_sqlite" | "sqlite_to_prisma";
+      trigger?: "boot" | "probe" | "admin";
+      leaderGated?: boolean;
     }>;
+    // Plan 09 Phase 8: durable sync-ledger presence + SQLite -> Prisma push
+    // visibility (standing outbox counts + derived-tracker mirror counts).
+    syncHistoryTable: boolean;
+    outboxPending: Record<string, { pending: number; lastAt?: string }>;
+    derivedCounts: Record<string, number>;
   };
   dailyPriceCache: {
     cachedSymbols: number;
@@ -211,6 +219,7 @@ export default function DbHealthPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [flushingPrices, setFlushingPrices] = useState(false);
   const [flushingLogs, setFlushingLogs] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [preppingDeploy, setPreppingDeploy] = useState(false);
   const [deployMsg, setDeployMsg] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -260,6 +269,29 @@ export default function DbHealthPage() {
       setSyncMsg(`Sync error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const triggerPush = async () => {
+    setPushing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "push_to_prisma" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setSyncMsg(body.pushed ? body.message : `Push skipped: ${body.message}`);
+        await fetchHealth();
+      } else {
+        setSyncMsg(`Push failed: ${body.error}`);
+      }
+    } catch (e) {
+      setSyncMsg(`Push error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPushing(false);
     }
   };
 
@@ -688,6 +720,11 @@ export default function DbHealthPage() {
             Last error: {dailyPriceCache.lastError}
           </p>
         )}
+        <p className="mt-3 text-xs text-gray-400 dark:text-slate-500 italic">
+          OHLCV bars accumulate in-memory during market hours and bulk-flush to Prisma once after 4 PM IST
+          (a single write). The SQLite mirror load happens on sync; Prisma promotion for mirror rows runs on
+          the 6-hour push cycle or the manual "Push to Prisma" action below.
+        </p>
       </div>
 
       {/* Write-Behind Queue + Leader Election + Liveness (v3.22.0) */}
@@ -1233,6 +1270,79 @@ export default function DbHealthPage() {
         </div>
       </div>
 
+      {/* Plan 09 Phase 8: SQLite -> Prisma push queue + derived mirror counts */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+              SQLite → Prisma Push Queue
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+              Mirror writes queue here (outbox) and are promoted to Prisma on the 6-hour push cycle or
+              manually below. Rows stay queued until the sink for their table succeeds.
+            </p>
+          </div>
+          <button
+            onClick={triggerPush}
+            disabled={pushing || !sqlite.ready}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+          >
+            <ArrowPathIcon className={`w-4 h-4 ${pushing ? "animate-spin" : ""}`} />
+            {pushing ? "Pushing..." : "Push to Prisma"}
+          </button>
+        </div>
+        {Object.keys(sqlite.outboxPending ?? {}).length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            No rows queued — mirror is in sync with Prisma.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(sqlite.outboxPending ?? {}).map(([table, info]) => (
+              <span
+                key={table}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm"
+              >
+                <span className="font-medium text-gray-900 dark:text-white">{table}</span>
+                <span className="text-amber-700 dark:text-amber-300 font-semibold">
+                  {info.pending.toLocaleString()}
+                </span>
+                {info.lastAt && (
+                  <span className="text-xs text-gray-500 dark:text-slate-400">
+                    {formatTimeAgo(info.lastAt)}
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {!sqlite.syncHistoryTable && (
+          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400/90">
+            The durable sync-history ledger table (`sync_history`) is unavailable — recent-sync rows below
+            come from the in-memory ring only and do not survive restarts.
+          </p>
+        )}
+        {Object.keys(sqlite.derivedCounts ?? {}).length > 0 && (
+          <div className="mt-4 border-t border-gray-100 dark:border-slate-800 pt-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-2">
+              Derived-tracker rows mirrored (counts)
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(sqlite.derivedCounts ?? {}).map(([table, n]) => (
+                <span
+                  key={table}
+                  className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-50 dark:bg-slate-800/50 rounded-md text-xs"
+                >
+                  <span className="text-gray-600 dark:text-slate-300">{table}</span>
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    {Number(n).toLocaleString()}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Recent sync history */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-4">
@@ -1246,6 +1356,8 @@ export default function DbHealthPage() {
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Time</th>
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Direction</th>
+                  <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Trigger</th>
                   <th className="text-right py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Rows</th>
                   <th className="text-right py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Duration</th>
                   <th className="text-left py-2 px-3 text-gray-500 dark:text-slate-400 font-medium">Status</th>
@@ -1259,6 +1371,34 @@ export default function DbHealthPage() {
                   >
                     <td className="py-2 px-3 text-gray-900 dark:text-white">
                       {formatTimeAgo(sync.at)}
+                    </td>
+                    <td className="py-2 px-3">
+                      {sync.direction === "sqlite_to_prisma" ? (
+                        <span className="text-xs font-medium text-indigo-600 dark:text-indigo-300">
+                          ↑ to Prisma
+                        </span>
+                      ) : sync.direction === "prisma_to_sqlite" ? (
+                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-300">
+                          ↓ to SQLite
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-slate-500">--</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3">
+                      {sync.trigger ? (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            sync.trigger === "admin"
+                              ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                              : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"
+                          }`}
+                        >
+                          {sync.trigger}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-slate-500">--</span>
+                      )}
                     </td>
                     <td className="py-2 px-3 text-right text-gray-600 dark:text-slate-400">
                       {sync.rowsSynced.toLocaleString()}
@@ -1279,6 +1419,11 @@ export default function DbHealthPage() {
             </table>
           </div>
         )}
+        <p className="mt-3 text-xs text-gray-400 dark:text-slate-500 italic">
+          {sqlite.syncHistoryTable
+            ? "Rows persist in the SQLite `sync_history` ledger (last 100 kept) and survive restarts."
+            : "Ledger table unavailable — showing the in-memory ring only (does not survive restarts)."}
+        </p>
       </div>
 
       {/* SQLite backup / restore */}

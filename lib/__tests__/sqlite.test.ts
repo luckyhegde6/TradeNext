@@ -296,7 +296,14 @@ const mockDbUtils = require("@/lib/db-utils") as {
 };
 
 // ── Imports (after mocks so they use the mocked modules) ──────────────────
-import { getSqliteFallback, syncFromPrisma } from "../sqlite";
+import {
+  getSqliteFallback,
+  syncFromPrisma,
+  pushSqliteToPrisma,
+  hasSyncHistoryTable,
+  getOutboxPending,
+  getSqliteDerivedCounts,
+} from "../sqlite";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 function resetState() {
@@ -1768,6 +1775,208 @@ describe("SQLite backup fallback", () => {
         [naturalKey, "upsert"],
         [naturalKey, "delete"],
       ]);
+    });
+  });
+
+  // ── Plan 09 Phase 8: push opts, read helpers, derived counts ────────────
+  describe("Plan 09 Phase 8 — push opts + read helpers", () => {
+    const sqlModule = require("sql.js") as any;
+
+    const resetAndInit = async () => {
+      sqlModule.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      jest.clearAllMocks();
+      mockPrisma.workerStatus.upsert = jest.fn().mockResolvedValue({ count: 1 });
+      await ensureSqliteBackup();
+    };
+
+    const outboxRows = (): any[][] => sqlModule.__getStore()["_sync_outbox"]?.rows ?? [];
+
+    // ── hasSyncHistoryTable ─────────────────────────────────────────────
+    it("hasSyncHistoryTable returns false before init and true after init", async () => {
+      // Before init: state.db is null → false.
+      const { resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests();
+      expect(hasSyncHistoryTable()).toBe(false);
+
+      // After init: sync_history is created by SCHEMA_SQL → true.
+      await resetAndInit();
+      expect(hasSyncHistoryTable()).toBe(true);
+    });
+
+    // ── getOutboxPending ────────────────────────────────────────────────
+    it("getOutboxPending returns {} before init", async () => {
+      const { resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests();
+      expect(getOutboxPending()).toEqual({});
+    });
+
+    it("getOutboxPending returns empty when outbox is empty after init", async () => {
+      await resetAndInit();
+      expect(getOutboxPending()).toEqual({});
+    });
+
+    it("getOutboxPending returns per-table pending counts and lastAt after seeding", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Industries", series: "EQ", isActive: true });
+      fb.upsertSymbol({ symbol: "TCS", companyName: "TCS", series: "EQ", isActive: true });
+      fb.setCorporateActions([
+        { symbol: "INFY", companyName: "Infosys", actionType: "DIVIDEND", exDate: new Date("2026-09-01") },
+      ]);
+
+      const pending = getOutboxPending();
+      expect(pending.symbols).toBeDefined();
+      expect(pending.symbols.pending).toBe(2);
+      expect(typeof pending.symbols.lastAt).toBe("string");
+      expect(pending.corporate_action).toBeDefined();
+      expect(pending.corporate_action.pending).toBe(1);
+    });
+
+    it("getOutboxPending returns empty after a successful push drains the outbox", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance", series: "EQ", isActive: true });
+      fb.setCorporateActions([
+        { symbol: "TCS", companyName: "TCS", actionType: "DIVIDEND", exDate: new Date("2026-09-01") },
+      ]);
+      expect(Object.keys(getOutboxPending()).length).toBeGreaterThan(0);
+
+      await pushSqliteToPrisma();
+      expect(getOutboxPending()).toEqual({});
+    });
+
+    // ── getSqliteDerivedCounts ──────────────────────────────────────────
+    it("getSqliteDerivedCounts returns {} before init", async () => {
+      const { resetSqliteStateForTests } = await import("../sqlite");
+      resetSqliteStateForTests();
+      expect(getSqliteDerivedCounts()).toEqual({});
+    });
+
+    it("getSqliteDerivedCounts returns all-zero counts on an empty mirror", async () => {
+      await resetAndInit();
+      const counts = getSqliteDerivedCounts();
+      expect(counts.swing_analysis_job).toBe(0);
+      expect(counts.swing_signal).toBe(0);
+      expect(counts.recommendation_tracker).toBe(0);
+      expect(counts.recommendation_status_history).toBe(0);
+      expect(counts.recommendation_archive).toBe(0);
+      expect(counts.ai_config).toBe(0);
+      expect(counts.user_session).toBe(0);
+      expect(counts.admin_announcement).toBe(0);
+      expect(counts.alert).toBe(0);
+      expect(counts.transaction).toBe(0);
+    });
+
+    it("getSqliteDerivedCounts returns correct counts after seeding derived tables", async () => {
+      await resetAndInit();
+      const store = sqlModule.__getStore();
+
+      // Seed a few rows in the admin_announcement table (already has columns from Phase 7 tests).
+      store["admin_announcement"] = {
+        columns: ["id", "title", "message", "type", "target", "createdAt"],
+        rows: [
+          [1, "First", "Hello", "info", "all", "2026-09-01"],
+          [2, "Second", "World", "alert", "all", "2026-09-02"],
+        ],
+      };
+
+      // Seed the alert table.
+      store["alert"] = {
+        columns: ["id", "userId", "type", "symbol", "condition", "triggered", "seen", "createdAt"],
+        rows: [
+          ["al-1", 3, "price", "RELIANCE", '{"op":">","value":1500}', 1, 0, "2026-09-08"],
+        ],
+      };
+
+      const counts = getSqliteDerivedCounts();
+      expect(counts.admin_announcement).toBe(2);
+      expect(counts.alert).toBe(1);
+      expect(counts.swing_analysis_job).toBe(0);
+      expect(counts.transaction).toBe(0);
+    });
+
+    // ── pushSqliteToPrisma opts ─────────────────────────────────────────
+    it("pushSqliteToPrisma({ reason: 'admin', leaderGate: false }) succeeds as non-leader and records trigger + leaderGated", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "RELIANCE", companyName: "Reliance Industries", series: "EQ", isActive: true });
+
+      // Confirm outbox has data.
+      expect(outboxRows().length).toBe(1);
+
+      // Set isLeader to false — without leaderGate:false this would skip.
+      mockLeader.isLeader.mockResolvedValue(false);
+
+      const summary = await pushSqliteToPrisma({ reason: "admin", leaderGate: false });
+
+      expect(summary).not.toBeNull();
+      expect(summary!.ran).toBe(true);
+      expect(summary!.synced).toBe(1);
+      expect(summary!.failed).toBe(0);
+      expect(mockPrisma.symbol.upsert).toHaveBeenCalledTimes(1);
+      expect(outboxRows().length).toBe(0);
+
+      // The sync_history ledger records trigger:"admin" and leaderGated:false.
+      const row = getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.find(
+        (r: any) => r.direction === "sqlite_to_prisma",
+      );
+      expect(row).toBeDefined();
+      expect(row!.trigger).toBe("admin");
+      expect(row!.leaderGated).toBe(false);
+
+      // Restore default for later tests.
+      mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("pushSqliteToPrisma({ reason: 'admin', leaderGate: false }) returns empty-sync result when outbox is empty", async () => {
+      await resetAndInit();
+      mockLeader.isLeader.mockResolvedValue(false);
+
+      const summary = await pushSqliteToPrisma({ reason: "admin", leaderGate: false });
+
+      expect(summary).not.toBeNull();
+      expect(summary!.ran).toBe(true);
+      expect(summary!.synced).toBe(0);
+      expect(summary!.failed).toBe(0);
+      expect(summary!.errors).toEqual([]);
+
+      const row = getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.find(
+        (r: any) => r.direction === "sqlite_to_prisma",
+      );
+      expect(row).toBeDefined();
+      expect(row!.trigger).toBe("admin");
+      expect(row!.leaderGated).toBe(false);
+      expect(row!.rowsSynced).toBe(0);
+
+      mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("pushSqliteToPrisma default opts (no opts) uses trigger 'probe' and leaderGate true", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      fb.upsertSymbol({ symbol: "TCS", companyName: "TCS", series: "EQ", isActive: true });
+
+      // Default: leaderGate=true, isLeader=false → should be blocked.
+      mockLeader.isLeader.mockResolvedValue(false);
+      const skipped = await pushSqliteToPrisma();
+      expect(skipped).toBeNull();
+      expect(outboxRows().length).toBe(1); // outbox not drained
+
+      // Default: leaderGate=true, isLeader=true → should proceed with trigger "probe".
+      mockLeader.isLeader.mockResolvedValue(true);
+      const summary = await pushSqliteToPrisma();
+      expect(summary).not.toBeNull();
+      expect(summary!.ran).toBe(true);
+
+      const row = getSqliteFallback()!.getHealthStatus().sqlite.recentSyncs.find(
+        (r: any) => r.direction === "sqlite_to_prisma",
+      );
+      expect(row).toBeDefined();
+      expect(row!.trigger).toBe("probe");
+      expect(row!.leaderGated).toBe(true);
     });
   });
 });

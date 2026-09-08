@@ -1,3 +1,5 @@
+// HOT ROUTE (Plan 09 Phase 8): SQLite-first read gate when the plan-limit
+// breaker is open (`sqlite.getChartinkScreeners()`); direct Prisma otherwise.
 import { NextResponse } from "next/server";
 import logger from "@/lib/logger";
 import {

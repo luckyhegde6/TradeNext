@@ -121,3 +121,46 @@ L92-99) — read the plan's exact Phase 8 target list before starting.
   Phase 9 verification §101-110; files table §122-141).
 - Spec: `.agents/specs/09-sqlite-first-read-architecture.md`.
 - Deferred PCJEWELLER evidence files in decisions.md.
+
+## Phase 8 — db-health page wiring + push engine opts + derived counts + hot-route headers (THIS commit)
+
+- `lib/sqlite.ts`: `pushSqliteToPrisma(opts?: { reason?: SyncTrigger;
+  leaderGate?: boolean })` (:3665) — `trigger = opts?.reason ?? "probe"`,
+  `leaderGate = opts?.leaderGate ?? true`; both `recordSyncHistory` sites
+  (:3691, :3727) record trigger/leaderGated. NEW `DERIVED_COUNT_TABLES`
+  (:3405), `hasSyncHistoryTable()` (:3420), `getOutboxPending()` (:3432,
+  per-table `{pending, lastAt}`), `getSqliteDerivedCounts()` (:3468,
+  `SELECT COUNT(*)` per derived table); all reads instrumented via
+  `recordSqliteRead`.
+- `app/api/admin/db-health/route.ts`: GET spreads `sqlite` (outbox + derived
+  counts + sync history + health) into the response; POST gains
+  `push_to_prisma` branch → `pushSqliteToPrisma({ reason: "admin",
+  leaderGate: false })` + audit `ADMIN_DB_SYNC` resource `sqlite-push`
+  (403-guarded).
+- `app/admin/utils/db-health/page.tsx`: Outbox card (per-table pending +
+  lastAt), Derived-counts card, "Push SQLite → Prisma now" button
+  (`triggerPush`, `pushing` state), Direction/Trigger columns on Run History,
+  footer notes (DB-first reads; push at the 6h probe tick).
+- `app/admin/utils/nse-sync/page.tsx`: amber DB-first info paragraph.
+- Hot-route header comments (5): `app/api/recommendations/route.ts`,
+  `app/api/recommendations/swing/route.ts`, `app/api/screener/chartink/
+  route.ts`, `app/api/corporate-actions/combined/route.ts`,
+  `app/api/nse/indexes/route.ts` — each documents its SQLite-first read chain
+  + provider fallback.
+- `lib/__tests__/sqlite.test.ts`: Phase 8 describe (:1796-1970) — 11 tests
+  (hasSyncHistoryTable pre/post-init; getOutboxPending {} before init / empty
+  when empty / per-table counts+lastAt after seeding / {} after drain; derived
+  counts {} before init / all-zero on empty mirror / correct counts after
+  seeding; admin push as non-leader succeeds + records trigger+leaderGated;
+  empty-outbox admin push; leader-gated default push returns empty when outbox
+  empty).
+
+Verification: **sqlite.test.ts 68/68** (11 new Phase 8 tests); `npx tsc
+--noEmit` **46 = exact baseline, 0 new** (db-health pages/routes + lib/sqlite.ts
+clean); no schema change → no migration.
+
+## Next (Phase 9 — docs)
+
+Per plan 09 §Phase 9: AGENTS.md version-table row + CHANGELOG bullet,
+TODO quick-reference row, Primer/agent-memory/Lessons entries, plan+spec
+status → Complete. Session memory + checkpoint handled first (this commit).

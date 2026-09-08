@@ -3395,6 +3395,93 @@ function getDurableSyncHistory(db: Database | null | undefined): SyncResult[] {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 09 Phase 8: db-health read helpers — durable sync-ledger presence,
+// push-queue (outbox) standing counts, and per-table mirror row counts for
+// the derived-tracker tables. All local reads, zero Prisma, best-effort.
+// Used by GET /api/admin/db-health so the dashboard can show what is queued
+// for the 6-hourly push and exactly which tracker tables are mirrored.
+// ---------------------------------------------------------------------------
+
+const DERIVED_COUNT_TABLES = [
+  "swing_analysis_job",
+  "swing_signal",
+  "recommendation_tracker",
+  "recommendation_status_history",
+  "recommendation_archive",
+  "ai_config",
+  "user_session",
+  "admin_announcement",
+  "alert",
+  "transaction",
+] as const;
+
+/** True when the durable `sync_history` ledger table exists in the mirror.
+ *  Best-effort — false when the DB is not ready or the table is missing. */
+export function hasSyncHistoryTable(): boolean {
+  if (!state.db || !state.ready) return false;
+  try {
+    state.db.exec("SELECT COUNT(*) FROM sync_history");
+    return true; // query succeeded => the table exists (count may be 0)
+  } catch {
+    return false;
+  }
+}
+
+/** Per-table standing counts (+ newest at) of rows waiting in `_sync_outbox`
+ *  for the SQLite -> Prisma push. Best-effort: `{}` when unavailable. */
+export function getOutboxPending(): Record<string, { pending: number; lastAt?: string }> {
+  if (!state.db || !state.ready) return {};
+  const _start = performance.now();
+  try {
+    const rows = state.db.exec("SELECT table_name, at FROM _sync_outbox");
+    if (!rows.length) {
+      recordSqliteRead("getOutboxPending", _start, 0, false);
+      return {};
+    }
+    const cols = rows[0].columns;
+    const nameIdx = cols.indexOf("table_name");
+    const atIdx = cols.indexOf("at");
+    if (nameIdx < 0) {
+      recordSqliteRead("getOutboxPending", _start, 0, false);
+      return {};
+    }
+    const out: Record<string, { pending: number; lastAt?: string }> = {};
+    for (const row of rows[0].values) {
+      const name = String(row[nameIdx] ?? "");
+      if (!name) continue;
+      if (!out[name]) out[name] = { pending: 0 };
+      out[name].pending += 1;
+      const at = atIdx >= 0 && row[atIdx] != null ? String(row[atIdx]) : undefined;
+      if (at && (!out[name].lastAt || at > out[name].lastAt)) out[name].lastAt = at;
+    }
+    recordSqliteRead("getOutboxPending", _start, Object.keys(out).length, true);
+    return out;
+  } catch {
+    recordSqliteRead("getOutboxPending", _start, 0, false);
+    return {};
+  }
+}
+
+/** Per-table row counts for the derived-tracker mirror tables (counts, not
+ *  rows — distinct from the LIMIT-capped getSqliteDerived feed rows).
+ *  Best-effort: a table that is missing or fails resolves to 0. */
+export function getSqliteDerivedCounts(): Record<string, number> {
+  if (!state.db || !state.ready) return {};
+  const _start = performance.now();
+  const out: Record<string, number> = {};
+  for (const t of DERIVED_COUNT_TABLES) {
+    try {
+      const res = state.db.exec(`SELECT COUNT(*) FROM ${t}`);
+      out[t] = Number(res.length && res[0].values.length ? res[0].values[0][0] : 0);
+    } catch {
+      out[t] = 0;
+    }
+  }
+  recordSqliteRead("getSqliteDerivedCounts", _start, DERIVED_COUNT_TABLES.length, true);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Plan 09 Phase 4: SQLite -> Prisma one-way push (sync outbox)
 // ---------------------------------------------------------------------------
 
@@ -3567,29 +3654,44 @@ export type PushSqliteToPrismaResult = {
  * plan-limit breaker guard. Called from every periodic probe tick (6h). Sinks
  * are idempotent, so a failed table keeps its outbox rows and is retried next
  * cycle; successful tables are removed immediately.
+ *
+ * Plan 09 Phase 8: optional `opts` — `reason` is recorded verbatim in the
+ * durable sync_history ledger (default "probe"), and `leaderGate: false`
+ * bypasses the `sqlite-sync` leader lock so an admin "Push to Prisma" button
+ * works on whatever instance it is hit (mirrors the `syncFromPrisma({force:
+ * true})` admin-pull override). Readiness + plan-limit breaker guards ALWAYS
+ * stay — only the leader lock is overridable.
  */
-export async function pushSqliteToPrisma(): Promise<PushSqliteToPrismaResult | null> {
+export async function pushSqliteToPrisma(opts?: {
+  reason?: SyncTrigger;
+  leaderGate?: boolean;
+}): Promise<PushSqliteToPrismaResult | null> {
   if (sqlitePushInFlight) return sqlitePushInFlight;
-  sqlitePushInFlight = doPushSqliteToPrisma().finally(() => {
+  sqlitePushInFlight = doPushSqliteToPrisma(opts).finally(() => {
     sqlitePushInFlight = null;
   });
   return sqlitePushInFlight;
 }
 
-async function doPushSqliteToPrisma(): Promise<PushSqliteToPrismaResult | null> {
+async function doPushSqliteToPrisma(opts?: {
+  reason?: SyncTrigger;
+  leaderGate?: boolean;
+}): Promise<PushSqliteToPrismaResult | null> {
+  const trigger = opts?.reason ?? "probe";
+  const leaderGate = opts?.leaderGate ?? true;
   const started = Date.now();
   if (!state.db || !state.ready || state.syncing) return null;
   if (isPlanLimitBreakerOpen()) return null;
   const { isLeader } = await import("@/lib/services/leader");
-  if (!(await isLeader("sqlite-sync"))) return null;
+  if (leaderGate && !(await isLeader("sqlite-sync"))) return null;
   const db = state.db;
 
   const pending = drainSyncOutbox(db);
   if (!pending.length) {
     recordSyncHistory(db, {
       direction: "sqlite_to_prisma",
-      trigger: "probe",
-      leaderGated: true,
+      trigger,
+      leaderGated: leaderGate,
       rowsSynced: 0,
       durationMs: Date.now() - started,
     });
@@ -3624,8 +3726,8 @@ async function doPushSqliteToPrisma(): Promise<PushSqliteToPrismaResult | null> 
 
   recordSyncHistory(db, {
     direction: "sqlite_to_prisma",
-    trigger: "probe",
-    leaderGated: true,
+    trigger,
+    leaderGated: leaderGate,
     rowsSynced: synced,
     durationMs: Date.now() - started,
     error: errors.length ? errors.join("; ") : undefined,
