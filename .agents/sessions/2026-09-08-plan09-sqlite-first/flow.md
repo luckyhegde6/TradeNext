@@ -1,0 +1,86 @@
+# Session Flow — 2026-09-08 — Plan 09 SQLite-first (Phases 4–5)
+
+Branch `fix/v3.29.1-header-watchlist`; prior commits: 9303bd7 (P1), d9bda6b (P2),
+56ee538 (P3). Today's: **a681a48 (P4)**, **f7e56b5 (P5)**.
+
+## Phase 4 — `_sync_outbox` + 6h push engine (a681a48)
+
+- `lib/sqlite.ts`: SCHEMA_SQL `_sync_outbox` table + `idx_sync_outbox_table`
+  index; `recordSyncOutbox` (~:2930), `drainSyncOutbox` (~:2962),
+  `pushSqliteToPrisma` singleflight (~:3023), `doPushSqliteToPrisma` (~:3031)
+  with **leader gate now awaited** (:3035-3036), `rowsSynced` (:3081); probe
+  tick after `syncFromPrisma()` (:1181) → `pushSqliteToPrisma({reason:"probe"})`.
+- `lib/sqlitePushSinks.ts` (NEW): `readMirrorMap` — explicit
+  `case "symbols": key = String(obj.symbol ?? "").toUpperCase()` (fixes
+  "undefined:RELIANCE"); sinks for symbols/daily_price/corporate_action/
+  chartink_screener_result (+`createMany`/raw upsert SQL shapes).
+- `lib/__tests__/sqlite.test.ts`: Phase 4 describe (~:1324) — 10 tests incl.
+  guard-order test (not-ready / breaker OPEN / not-leader → null), outbox
+  insert/grouped-latest-op-wins/delete-survival, daily_price marker dedupe,
+  drain-clear, failure-retain, probe-tick-push. 53/53 pass.
+
+## Phase 5 — NSE captures → SQLite + outbox, auto-promote off (f7e56b5)
+
+- `instrumentation.ts`: removed `startNsePromoteFlush` from `@/lib/sqlite`
+  destructure (:21) + call block (:106-108).
+- `lib/services/worker/worker-service.ts`: removed 2× `flushNseToPrisma()` calls
+  (::209 stock sync, :343 corp-actions sync) — cacheSymbol/cacheCorporateActions
+  kept.
+- `lib/services/historicalPriceSyncService.ts`: removed end-of-task promote
+  try/catch (:257-266) — cacheDailyPriceBars kept.
+- `lib/sqlite.ts`: `startNsePromoteFlush` env-gated (`NSE_PROMOTE_ENABLED==="1"`
+  to start; default no-op handle) — functions stay exported.
+- `lib/__tests__/instrumentation.test.ts`: added `sqlite` requireMock ref +
+  `expect(sqlite.startNsePromoteFlush).not.toHaveBeenCalled()` in first test.
+- Outbox appends in capture helpers: NO-OP — already satisfied by Phase 4
+  (capture helpers delegate to the outbox-wired writers).
+
+## Verification
+
+- `npx jest` (instrumentation + historicalPriceSyncService + sqlite +
+  worker-engine): **88 passed, 88 total**.
+- `npx tsc --noEmit`: **46 errors = exact baseline, 0 new**.
+- Grep confirms zero `flushNseToPrisma()` / `startNsePromoteFlush()` call sites
+  outside the lib/sqlite.ts exports.
+
+## Phase 6 — Jobs write SQLite-first (recs / swing / perf)
+
+Steps 1-3 committed: `ae44431` (schema parity + SCHEMA_SQL additions),
+`63736f5` (write-through helpers + push sinks — Step 3).
+
+Step 4-5 (THIS commit):
+
+- `lib/sqlite.ts` +385: read-path re-base helpers behind `getSqliteFallback()`
+  (recs/swing/perf read chains now mirror-first, Prisma fallback).
+- `lib/services/dailyRecommendationService.ts`: mirror-first job writes
+  (run/stock/tracker upserts, delete-on-failure, AI-patch via full-row upsert).
+- `lib/services/swingRecommendationService.ts`: job/signal claim/update/retry/
+  supersede via mirrored status/attemptCount.
+- `lib/services/recommendationPerformanceService.ts`: archive write-through
+  (`insertRecommendationArchive` + `deleteRecommendationTracker`) after Prisma
+  create; perf status writes → `upsertRecommendationTracker` + status history.
+- `lib/__tests__/dailyRecommendationService.test.ts`: re-pointed run/stock/
+  tracker/delete/failure/perf assertions to mirror helpers (edits 4-15);
+  creation-state trap fixed (intermediate `status` not assertable — ref
+  mutated in place; see decisions.md §Phase 6 #5).
+- `lib/__tests__/swingRecommendationService.test.ts`: mirror-factory retrofit
+  (52/52).
+
+Verification: **daily 34/34**; targeted batch (swing 52/52, perf, sqlite,
+daemon-sqlite-first, nseRateGuard, instrumentation) **145/145**;
+`npx tsc --noEmit` **46 = exact baseline, 0 new**.
+
+## Next (Phase 7 — admin long-lived datasets SQLite-first: announcements / corp-actions / alerts / holdings)
+
+Per plan 09 §Phase 7: SCHEMA_SQL additions (`admin_announcement`, `alert`,
+`transaction`, corporate_action mirror exists); boot pulls in `syncFromPrisma`;
+SqliteFallback CRUD helpers (`listAlerts/upsertAlert/deleteAlert` etc.);
+flip admin CRUD routes (`app/api/admin/{announcements,corporate-actions,alerts,
+holdings}/route.ts`); re-point admin route tests.
+
+## Relevant refs
+
+- Plan: `.agents/plans/09-sqlite-first-read-architecture.md` (Phase 6 §68-77;
+  Phase 9 verification §101-110; files table §122-141).
+- Spec: `.agents/specs/09-sqlite-first-read-architecture.md`.
+- Deferred PCJEWELLER evidence files in decisions.md.

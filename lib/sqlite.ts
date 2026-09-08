@@ -350,6 +350,27 @@ export interface SqliteFallback {
   upsertSwingAnalysisJob(row: Record<string, unknown>): void;
   /** Write-through: upsert one swing signal row. */
   upsertSwingSignal(row: Record<string, unknown>): void;
+  /** Mirror read: stock rows for a run (camelCase, dates rehydrated). */
+  getRecommendationStocks(runId: string): Array<Record<string, unknown>>;
+  /** Mirror read: tracker rows, optionally filtered by symbols / statuses. */
+  getRecommendationTrackers(opts?: {
+    symbolIn?: string[];
+    status?: string[];
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror read: one swing analysis job by id, or null. */
+  getSwingAnalysisJob(id: string): Record<string, unknown> | null;
+  /** Mirror read: swing analysis jobs — one status or a status-list (default "running"). */
+  getSwingAnalysisJobs(opts?: {
+    status?: string | string[];
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror read: swing signal rows for one job (camelCase rehydrated). */
+  getSwingSignals(jobId: string): Array<Record<string, unknown>>;
+  /** Mirror delete: stock rows for a run (optional symbol whitelist) + outbox. */
+  deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void;
+  /** Mirror delete: one tracker + its status-history rows + outbox. */
+  deleteRecommendationTracker(trackerId: string): void;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -3183,6 +3204,46 @@ function toJsonVal(v: unknown): string | null {
   return JSON.stringify(v);
 }
 
+/** Rehydrate a mirror row (snake_case DDL columns) into the Prisma-shaped
+ *  camelCase contract the write-through helpers AND the swap-site services
+ *  expect: date columns become `Date` instances, JSON columns become parsed
+ *  objects, and `alias` maps DDL columns whose names differ from the Prisma
+ *  fields (e.g. `change_val` -> `change`). Inverse of the write helpers, so a
+ *  full row read here can be merged and re-upserted losslessly. */
+function rehydrateRow(
+  cols: string[],
+  vals: unknown[],
+  opts: {
+    dateKeys: string[];
+    jsonKeys: string[];
+    alias?: Record<string, string>;
+  },
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  cols.forEach((c, i) => {
+    const key = opts.alias?.[c] ?? c;
+    const v = vals[i];
+    if (v == null) {
+      out[key] = v;
+      return;
+    }
+    if (opts.dateKeys.includes(c)) {
+      out[key] = new Date(String(v));
+      return;
+    }
+    if (opts.jsonKeys.includes(c)) {
+      try {
+        out[key] = typeof v === "string" ? JSON.parse(v) : v;
+      } catch {
+        out[key] = v;
+      }
+      return;
+    }
+    out[key] = v;
+  });
+  return out;
+}
+
 const OUTBOX_DRAIN_LIMIT = 50_000;
 const OUTBOX_DELETE_CHUNK = 200;
 const OUTBOX_TABLES = [
@@ -4355,6 +4416,330 @@ function createFallback(db: Database): SqliteFallback {
       } catch (err) {
         logger.debug({
           msg: "SQLite: upsertSwingSignal failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    // ---- Plan 09 Phase 6: rec/swing mirror reads + deletes ----
+    // Reads return full Prisma-shaped camelCase rows (rehydrateRow — the
+    // inverse of the write helpers) so swap-site services can merge & re-upsert
+    // losslessly; deletes remove mirror rows AND enqueue "delete" outbox ops so
+    // the 6h push prunes the Prisma side too.
+
+    getRecommendationStocks(runId: string): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db || !runId) {
+        recordSqliteRead("getRecommendationStocks", _start, 0, false);
+        return [];
+      }
+      try {
+        const rows = db.exec(
+          "SELECT * FROM daily_recommendation_stock WHERE run_id = ? ORDER BY symbol ASC",
+          [runId],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getRecommendationStocks", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["created_at"],
+            jsonKeys: ["risk_factors", "screener_attribution"],
+            alias: {
+              run_id: "runId",
+              tracker_id: "trackerId",
+              change: "change",
+              change_percent: "changePercent",
+              ai_recommendation: "aiRecommendation",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              time_horizon: "timeHorizon",
+              risk_factors: "riskFactors",
+              screener_attribution: "screenerAttribution",
+              screener_count: "screenerCount",
+              ai_tokens_used: "aiTokensUsed",
+              ai_execution_ms: "aiExecutionMs",
+              ai_success: "aiSuccess",
+              ai_error: "aiError",
+              created_at: "createdAt",
+            },
+          }),
+        );
+        recordSqliteRead("getRecommendationStocks", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getRecommendationStocks failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getRecommendationStocks", _start, 0, false);
+        return [];
+      }
+    },
+
+    getRecommendationTrackers(opts?: {
+      symbolIn?: string[];
+      status?: string[];
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+        return [];
+      }
+      try {
+        const conds: string[] = [];
+        const params: (string | number)[] = [];
+        if (opts?.symbolIn?.length) {
+          conds.push(`symbol IN (${opts.symbolIn.map(() => "?").join(", ")})`);
+          params.push(...opts.symbolIn);
+        }
+        if (opts?.status?.length) {
+          conds.push(`status IN (${opts.status.map(() => "?").join(", ")})`);
+          params.push(...opts.status);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const rows = db.exec(
+          `SELECT * FROM recommendation_tracker${where} ORDER BY symbol ASC LIMIT ?`,
+          [...params, opts?.limit ?? 500],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["last_checked_at", "created_at", "updated_at"],
+            jsonKeys: ["risk_factors", "screener_attribution"],
+            alias: {
+              entry_price: "entryPrice",
+              current_price: "currentPrice",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              time_horizon: "timeHorizon",
+              ai_recommendation: "aiRecommendation",
+              risk_factors: "riskFactors",
+              screener_attribution: "screenerAttribution",
+              last_checked_at: "lastCheckedAt",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getRecommendationTrackers", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getRecommendationTrackers failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+        return [];
+      }
+    },
+
+    getSwingAnalysisJob(id: string): Record<string, unknown> | null {
+      const _start = performance.now();
+      if (!db || !id) {
+        recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+        return null;
+      }
+      try {
+        const rows = db.exec("SELECT * FROM swing_analysis_job WHERE id = ? LIMIT 1", [id]);
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+          return null;
+        }
+        const cols = rows[0].columns;
+        const out = rehydrateRow(cols, rows[0].values[0], {
+          dateKeys: ["generated_at", "started_at", "completed_at", "created_at", "updated_at"],
+          jsonKeys: ["payload"],
+          alias: {
+            generated_at: "generatedAt",
+            started_at: "startedAt",
+            completed_at: "completedAt",
+            stock_count: "stockCount",
+            analyzed_count: "analyzedCount",
+            attempt_count: "attemptCount",
+            template_count: "templateCount",
+            total_raw: "totalRaw",
+            created_at: "createdAt",
+            updated_at: "updatedAt",
+          },
+        });
+        recordSqliteRead("getSwingAnalysisJob", _start, 1, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingAnalysisJob failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+        return null;
+      }
+    },
+
+    getSwingAnalysisJobs(opts?: {
+      status?: string | string[];
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+        return [];
+      }
+      try {
+        const statusList = Array.isArray(opts?.status)
+          ? opts!.status
+          : [opts?.status ?? "running"];
+        const limit = opts?.limit ?? 100;
+        const statusWhere =
+          statusList.length === 1
+            ? "status = ?"
+            : `status IN (${statusList.map(() => "?").join(", ")})`;
+        const rows = db.exec(
+          `SELECT * FROM swing_analysis_job WHERE ${statusWhere} ORDER BY created_at ASC LIMIT ?`,
+          [...statusList, limit],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["generated_at", "started_at", "completed_at", "created_at", "updated_at"],
+            jsonKeys: ["payload"],
+            alias: {
+              generated_at: "generatedAt",
+              started_at: "startedAt",
+              completed_at: "completedAt",
+              stock_count: "stockCount",
+              analyzed_count: "analyzedCount",
+              attempt_count: "attemptCount",
+              template_count: "templateCount",
+              total_raw: "totalRaw",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getSwingAnalysisJobs", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingAnalysisJobs failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+        return [];
+      }
+    },
+
+    getSwingSignals(jobId: string): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db || !jobId) {
+        recordSqliteRead("getSwingSignals", _start, 0, false);
+        return [];
+      }
+      try {
+        const rows = db.exec(
+          "SELECT * FROM swing_signal WHERE job_id = ? ORDER BY symbol ASC",
+          [jobId],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingSignals", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["last_checked_at", "posted_at", "created_at", "updated_at"],
+            jsonKeys: ["screener_names", "families", "template_ids", "indicators", "analysis"],
+            alias: {
+              job_id: "jobId",
+              change_percent: "changePercent",
+              market_cap: "marketCap",
+              screener_names: "screenerNames",
+              screener_count: "screenerCount",
+              template_ids: "templateIds",
+              momentum_score: "momentumScore",
+              ai_recommendation: "aiRecommendation",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              current_price: "currentPrice",
+              return_percent: "returnPercent",
+              last_checked_at: "lastCheckedAt",
+              posted_at: "postedAt",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getSwingSignals", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingSignals failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingSignals", _start, 0, false);
+        return [];
+      }
+    },
+
+    deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void {
+      if (!db || !runId) return;
+      try {
+        const rows = db.exec(
+          "SELECT id, symbol FROM daily_recommendation_stock WHERE run_id = ?",
+          [runId],
+        );
+        if (!rows.length || !rows[0].values.length) return;
+        const cols = rows[0].columns;
+        const iId = cols.indexOf("id");
+        const iSym = cols.indexOf("symbol");
+        for (const row of rows[0].values) {
+          const symbol = String(row[iSym] ?? "");
+          if (keepSymbols && keepSymbols.length && !keepSymbols.includes(symbol)) continue;
+          const id = String(row[iId] ?? "");
+          if (!id) continue;
+          db.run("DELETE FROM daily_recommendation_stock WHERE id = ?", [id]);
+          recordSyncOutbox(db, "daily_recommendation_stock", id, "delete");
+        }
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteRecommendationStocksByRun failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteRecommendationTracker(trackerId: string): void {
+      if (!db || !trackerId) return;
+      try {
+        db.run("DELETE FROM recommendation_tracker WHERE id = ?", [trackerId]);
+        recordSyncOutbox(db, "recommendation_tracker", trackerId, "delete");
+        const rows = db.exec(
+          "SELECT id FROM recommendation_status_history WHERE tracker_id = ?",
+          [trackerId],
+        );
+        if (rows.length && rows[0].values.length) {
+          const cols = rows[0].columns;
+          const iId = cols.indexOf("id");
+          for (const row of rows[0].values) {
+            const id = String(row[iId] ?? "");
+            if (!id) continue;
+            db.run("DELETE FROM recommendation_status_history WHERE id = ?", [id]);
+            recordSyncOutbox(db, "recommendation_status_history", id, "delete");
+          }
+        }
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteRecommendationTracker failed",
           error: err instanceof Error ? err.message : String(err),
         });
       }

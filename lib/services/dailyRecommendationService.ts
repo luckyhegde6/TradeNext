@@ -29,11 +29,13 @@ import {
 } from "./unifiedEventService";
 import { recordMetric } from "./systemHealthService";
 import { archiveRecommendations } from "./recommendationPerformanceService";
+import { randomUUID } from "crypto";
 import { createAuditLog } from "@/lib/audit";
 import { recommendationsCache } from "@/lib/cache";
 import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -150,14 +152,27 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
 
   logger.info({ msg: "Daily recommendation run starting", triggeredBy });
 
-  // 1. Create run record
-  const run = await prisma.dailyRecommendationRun.create({
-    data: {
-      status: "running",
-      runDate: new Date(),
+  // 1. Create run record — SQLite mirror write-through (Plan 09 Phase 6).
+  //    Prisma recommendation tables are now written ONLY by the 6h push
+  //    sinks (lib/sqlitePushSinks); every job write lands in the mirror first.
+  const sqlite = getSqliteFallback();
+  if (!sqlite) {
+    logger.warn({
+      msg: "SQLite mirror unavailable — this run will not persist rows (Prisma writes are 6h-push-only)",
       triggeredBy,
-    },
-  });
+    });
+  }
+  const runId = randomUUID();
+  const runRow: Record<string, unknown> = {
+    id: runId,
+    status: "running",
+    runDate: new Date(),
+    triggeredBy,
+    createdAt: new Date(),
+  };
+  sqlite?.upsertDailyRecommendationRun(runRow);
+  // Minimal run object — downstream (events/audit/metrics/cache) needs .id only
+  const run = { id: runId, status: "running" as const };
 
   try {
     // 2. Record start event
@@ -195,11 +210,9 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     // 5. Select top stocks by market cap for AI analysis
     const rankedResults = selectTopByMarketCap(screenerResults, MAX_AI_STOCKS);
 
-    // 6 & 7. Batch upsert trackers and create stock entries
-    // Instead of N individual upserts+creates, we batch:
-    // 1 findMany for existing trackers, then batch create/update
+    // 6 & 7. Persist trackers + stock entries (SQLite mirror write-through,
+    // Plan 09 Phase 6 — Prisma only via the 6h push sinks).
     const stockEntries: StockAnalysisInput[] = [];
-    const BATCH_SIZE = 100;
 
     // v3.12.0 stage log: the prod 8715fd51 hang sat SILENT between the cap log
     // and the AI pre-flight — DB writes (findMany/createMany/update) through a
@@ -211,18 +224,35 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       runId: run.id,
     });
 
-    // Pre-fetch existing trackers in one query
+    // Pre-fetch existing trackers — mirror-first full rows (Plan 09 Phase 6).
+    // The mirror may be cold for these symbols on the first run after this
+    // write model deploys (Prisma rows predate the mirror): backfill missing
+    // symbols from Prisma and seed the mirror so writes stay in one place.
+    // NSE symbols are uppercase; keys are compared case-insensitively.
     const symbols = rankedResults.map(r => r.symbol);
-    const existingTrackers = await prisma.recommendationTracker.findMany({
-      where: { symbol: { in: symbols } },
-      select: { id: true, symbol: true, status: true },
-    });
-    const trackerMap = new Map(existingTrackers.map(t => [t.symbol, t]));
+    let existingTrackers: Array<Record<string, unknown>> =
+      sqlite?.getRecommendationTrackers({ symbolIn: symbols }) ?? [];
+    const mirrorSymbols = new Set(existingTrackers.map(t => String(t.symbol).toUpperCase()));
+    const missingSymbols = symbols.filter(s => !mirrorSymbols.has(s.toUpperCase()));
+    if (missingSymbols.length > 0) {
+      const prismaTrackers = await prisma.recommendationTracker.findMany({
+        where: { symbol: { in: missingSymbols } },
+      });
+      for (const t of prismaTrackers) {
+        sqlite?.upsertRecommendationTracker({ ...t });
+        existingTrackers.push(t as unknown as Record<string, unknown>);
+      }
+    }
+    const trackerMap = new Map(
+      existingTrackers.map(t => [String(t.symbol).toUpperCase(), t]),
+    );
 
-    // Batch create new trackers
+    // Batch create NEW trackers — client-side ids + full rows into the mirror
+    // (no Prisma createMany, no re-fetch: trackerMap already holds them).
     const newTrackerData = rankedResults
-      .filter(r => !trackerMap.has(r.symbol))
+      .filter(r => !trackerMap.has(r.symbol.toUpperCase()))
       .map(r => ({
+        id: randomUUID(),
         symbol: r.symbol,
         entryPrice: r.price,
         currentPrice: r.price,
@@ -233,63 +263,53 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         stopLoss: r.price * 0.95, // Default 5% stop loss
         confidence: 0,
         aiRecommendation: "HOLD" as const,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       }));
 
-    if (newTrackerData.length > 0) {
-      for (let i = 0; i < newTrackerData.length; i += BATCH_SIZE) {
-        const batch = newTrackerData.slice(i, i + BATCH_SIZE);
-        await prisma.recommendationTracker.createMany({ data: batch, skipDuplicates: true });
-      }
-      // Re-fetch to get IDs for new trackers
-      const refreshed = await prisma.recommendationTracker.findMany({
-        where: { symbol: { in: symbols } },
-        select: { id: true, symbol: true, status: true },
+    for (const t of newTrackerData) {
+      sqlite?.upsertRecommendationTracker(t);
+      trackerMap.set(t.symbol.toUpperCase(), t);
+    }
+
+    // Update existing trackers — mirror write-through (full-row upsert, no
+    // Prisma updateMany, no runInChunks). Runs over ALL ranked results; new
+    // drafts (above) are already in trackerMap, so this is idempotent.
+    let updatedTrackers = 0;
+    for (const r of rankedResults) {
+      const trackerRow = trackerMap.get(r.symbol.toUpperCase());
+      if (!trackerRow) continue;
+      sqlite?.upsertRecommendationTracker({
+        ...trackerRow,
+        currentPrice: r.price,
+        screenerAttribution: r.screenerNames,
+        lastCheckedAt: new Date(),
       });
-      refreshed.forEach(t => trackerMap.set(t.symbol, t));
+      updatedTrackers++;
     }
 
-    // Update existing trackers in batch.
-    // NOTE: We intentionally do NOT wrap these in an interactive $transaction.
-    // On production (Prisma Accelerate) the 5s default interactive transaction
-    // timeout was exceeded because each updateMany round-trips to the remote DB.
-    // Each updateMany is atomic on its own, so we run them in small concurrent
-    // chunks instead (bounded concurrency, no transaction timeout risk).
-    const existingToUpdate = rankedResults
-      .filter(r => trackerMap.has(r.symbol))
-      .map(r =>
-        prisma.recommendationTracker.updateMany({
-          where: { symbol: r.symbol, status: "active" },
-          data: {
-            currentPrice: r.price,
-            screenerAttribution: r.screenerNames,
-            lastCheckedAt: new Date(),
-          },
-        })
-      );
-    if (existingToUpdate.length > 0) {
-      await runInChunks(existingToUpdate, 10, (updates) => Promise.all(updates));
-    }
-
-    // Batch create stock entries
+    // Create stock entries — client-side ids + full rows into the mirror.
+    // volume is BigInt in Prisma; the mirror stores it as a number.
     const stockCreateData = rankedResults.map(r => {
-      const tracker = trackerMap.get(r.symbol);
+      const tracker = trackerMap.get(r.symbol.toUpperCase());
       if (!tracker) return null;
       return {
+        id: randomUUID(),
         runId: run.id,
-        trackerId: tracker.id,
+        trackerId: tracker.id as string,
         symbol: r.symbol,
         price: r.price,
         change: r.change,
         changePercent: r.changePercent,
-        volume: BigInt(Math.round(r.volume)),
+        volume: Number(Math.round(r.volume)),
         screenerAttribution: r.screenerNames,
         screenerCount: r.screenerCount,
+        createdAt: new Date(),
       };
     }).filter((d): d is NonNullable<typeof d> => d !== null);
 
-    for (let i = 0; i < stockCreateData.length; i += BATCH_SIZE) {
-      const batch = stockCreateData.slice(i, i + BATCH_SIZE);
-      await prisma.dailyRecommendationStock.createMany({ data: batch });
+    for (const d of stockCreateData) {
+      sqlite?.upsertDailyRecommendationStock(d);
     }
 
     // Build stockEntries for AI analysis
@@ -304,23 +324,21 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       });
     }
 
-    // Update run with screener stats
-    await prisma.dailyRecommendationRun.update({
-      where: { id: run.id },
-      data: {
-        totalScreeners: TOTAL_SCREENER_COUNT,
-        successfulScreeners: successfulScreenerNames.size,
-        totalStocks: totalRawHits,
-        uniqueStocks: rankedResults.length,
-      },
+    // Update run with screener stats (mirror write-through)
+    Object.assign(runRow, {
+      totalScreeners: TOTAL_SCREENER_COUNT,
+      successfulScreeners: successfulScreenerNames.size,
+      totalStocks: totalRawHits,
+      uniqueStocks: rankedResults.length,
     });
+    sqlite?.upsertDailyRecommendationRun(runRow);
 
     // v3.12.0 stage log — persistence block completed (trackers + stocks + run).
     logger.info({
       msg: "Screener results persisted",
       runId: run.id,
       newTrackers: newTrackerData.length,
-      updatedTrackers: existingToUpdate.length,
+      updatedTrackers,
       stockEntries: stockCreateData.length,
     });
 
@@ -523,24 +541,24 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         aiResults[0]?.error ??
         "AI analysis failed on all stocks — run kept without picks";
 
-      await prisma.dailyRecommendationStock.deleteMany({ where: { runId: run.id } });
-      await prisma.dailyRecommendationRun.update({
-        where: { id: run.id },
-        data: {
-          status: "failed",
-          errorMessage: aiError,
-          aiProcessed: 0,
-          aiFailed: aiResults.length,
-          uniqueStocks: 0,
-          executionTimeMs,
-          completedAt: new Date(),
-          metadata: {
-            screenerNames: Array.from(successfulScreenerNames),
-            totalRawHits,
-            aiUnavailable: true,
-          },
+      // Discard this run's mirror rows (client-created above) — the previous
+      // good run stays the latest shown (mirror writes only).
+      sqlite?.deleteRecommendationStocksByRun(run.id);
+      Object.assign(runRow, {
+        status: "failed",
+        errorMessage: aiError,
+        aiProcessed: 0,
+        aiFailed: aiResults.length,
+        uniqueStocks: 0,
+        executionTimeMs,
+        completedAt: new Date(),
+        metadata: {
+          screenerNames: Array.from(successfulScreenerNames),
+          totalRawHits,
+          aiUnavailable: true,
         },
       });
+      sqlite?.upsertDailyRecommendationRun(runRow);
 
       await recordScreenerEvent(
         "run_failed",
@@ -605,60 +623,52 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
 
     let aiProcessed = 0;
 
-    // Pre-fetch all stock entries for this run in one query (instead of N findFirst)
-    const allStockEntries = await prisma.dailyRecommendationStock.findMany({
-      where: { runId: run.id },
-      select: { id: true, symbol: true },
-    });
-    const stockEntryMap = new Map(allStockEntries.map(e => [e.symbol, e.id]));
+    // Pre-fetch all stock entries for this run from the mirror (written above)
+    const allStockEntries = sqlite?.getRecommendationStocks(run.id) ?? [];
+    const stockEntryMap = new Map(
+      allStockEntries.map(e => [String(e.symbol).toUpperCase(), e]),
+    );
 
-    // Batch update stock entries and trackers concurrently
-    const stockUpdates: Promise<any>[] = [];
-    const trackerUpdates: Promise<any>[] = [];
+    // Batch update stock entries and trackers via mirror write-through
     const predictionUpdates: Promise<unknown>[] = [];
 
     for (const aiResult of successfulResults) {
-      const stockEntryId = stockEntryMap.get(aiResult.symbol);
-      if (!stockEntryId) {
+      const stockRow = stockEntryMap.get(aiResult.symbol.toUpperCase());
+      if (!stockRow) {
         continue;
       }
 
-      // 8. Update DailyRecommendationStock with AI results
-      stockUpdates.push(
-        prisma.dailyRecommendationStock.update({
-          where: { id: stockEntryId },
-          data: {
-            aiRecommendation: aiResult.aiRecommendation.recommendation,
-            confidence: aiResult.aiRecommendation.confidence,
-            targetPrice: aiResult.aiRecommendation.targetPrice,
-            stopLoss: aiResult.aiRecommendation.stopLoss,
-            timeHorizon: aiResult.aiRecommendation.timeHorizon,
-            reasoning: aiResult.aiRecommendation.reasoning,
-            riskFactors: aiResult.aiRecommendation.riskFactors,
-            aiTokensUsed: aiResult.tokensUsed,
-            aiExecutionMs: aiResult.executionMs,
-            aiSuccess: aiResult.success,
-            aiError: aiResult.error ?? null,
-          },
-        })
-      );
+      // 8. Update DailyRecommendationStock with AI results (mirror write-through)
+      sqlite?.upsertDailyRecommendationStock({
+        ...stockRow,
+        aiRecommendation: aiResult.aiRecommendation.recommendation,
+        confidence: aiResult.aiRecommendation.confidence,
+        targetPrice: aiResult.aiRecommendation.targetPrice,
+        stopLoss: aiResult.aiRecommendation.stopLoss,
+        timeHorizon: aiResult.aiRecommendation.timeHorizon,
+        reasoning: aiResult.aiRecommendation.reasoning,
+        riskFactors: aiResult.aiRecommendation.riskFactors,
+        aiTokensUsed: aiResult.tokensUsed,
+        aiExecutionMs: aiResult.executionMs,
+        aiSuccess: aiResult.success,
+        aiError: aiResult.error ?? null,
+      });
 
-      // 9. Update RecommendationTracker with latest AI analysis
-      trackerUpdates.push(
-        prisma.recommendationTracker.updateMany({
-          where: { symbol: aiResult.symbol, status: "active" },
-          data: {
-            aiRecommendation: aiResult.aiRecommendation.recommendation,
-            confidence: aiResult.aiRecommendation.confidence,
-            targetPrice: aiResult.aiRecommendation.targetPrice,
-            stopLoss: aiResult.aiRecommendation.stopLoss,
-            timeHorizon: aiResult.aiRecommendation.timeHorizon,
-            reasoning: aiResult.aiRecommendation.reasoning,
-            riskFactors: aiResult.aiRecommendation.riskFactors,
-            currentPrice: aiResult.price,
-          },
-        })
-      );
+      // 9. Update RecommendationTracker with latest AI analysis (mirror write-through)
+      const trackerRow = trackerMap.get(aiResult.symbol.toUpperCase());
+      if (trackerRow) {
+        sqlite?.upsertRecommendationTracker({
+          ...trackerRow,
+          aiRecommendation: aiResult.aiRecommendation.recommendation,
+          confidence: aiResult.aiRecommendation.confidence,
+          targetPrice: aiResult.aiRecommendation.targetPrice,
+          stopLoss: aiResult.aiRecommendation.stopLoss,
+          timeHorizon: aiResult.aiRecommendation.timeHorizon,
+          reasoning: aiResult.aiRecommendation.reasoning,
+          riskFactors: aiResult.aiRecommendation.riskFactors,
+          currentPrice: aiResult.price,
+        });
+      }
 
       // 10. Record prediction for outcome tracking
       predictionUpdates.push(
@@ -684,43 +694,35 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
       aiProcessed++;
     }
 
-    // Execute batched updates concurrently (chunked to bound concurrency)
-    await runInChunks(
-      [...stockUpdates, ...trackerUpdates, ...predictionUpdates],
-      10,
-      (chunk) => Promise.all(chunk),
-    );
+    // Execute prediction writes concurrently (chunked to bound concurrency)
+    await runInChunks(predictionUpdates, 10, (chunk) => Promise.all(chunk));
 
     // Remove entries that never received a real AI verdict (failed-analyzed
     // + capped beyond MAX_AI_STOCKS) so Today's Picks shows ONLY analyzed
     // stocks — no synthetic HOLD rows (v3.11.1).
     if (successfulResults.length < stockEntries.length) {
-      await prisma.dailyRecommendationStock.deleteMany({
-        where: {
-          runId: run.id,
-          symbol: { notIn: successfulResults.map((r) => r.symbol) },
-        },
-      });
+      sqlite?.deleteRecommendationStocksByRun(
+        run.id,
+        successfulResults.map((r) => r.symbol),
+      );
     }
 
     // 11. Complete run
     const executionTimeMs = Date.now() - startTime;
 
-    await prisma.dailyRecommendationRun.update({
-      where: { id: run.id },
-      data: {
-        status: "completed",
-        aiProcessed,
-        aiFailed,
-        uniqueStocks: successfulResults.length,
-        executionTimeMs,
-        completedAt: new Date(),
-        metadata: {
-          screenerNames: Array.from(successfulScreenerNames),
-          totalRawHits,
-        },
+    Object.assign(runRow, {
+      status: "completed",
+      aiProcessed,
+      aiFailed,
+      uniqueStocks: successfulResults.length,
+      executionTimeMs,
+      completedAt: new Date(),
+      metadata: {
+        screenerNames: Array.from(successfulScreenerNames),
+        totalRawHits,
       },
     });
+    sqlite?.upsertDailyRecommendationRun(runRow);
 
     // Record completion event
     await recordScreenerEvent(
@@ -814,15 +816,13 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const errorMessage =
       error instanceof Error ? error.message : String(error);
 
-    await prisma.dailyRecommendationRun.update({
-      where: { id: run.id },
-      data: {
-        status: "failed",
-        errorMessage,
-        executionTimeMs,
-        completedAt: new Date(),
-      },
+    Object.assign(runRow, {
+      status: "failed",
+      errorMessage,
+      executionTimeMs,
+      completedAt: new Date(),
     });
+    sqlite?.upsertDailyRecommendationRun(runRow);
 
     await recordScreenerEvent(
       "run_failed",
@@ -881,6 +881,10 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
  */
 export async function checkRecommendationPerformance(): Promise<PerformanceCheckResult> {
   const startTime = Date.now();
+
+  // SQLite mirror handle for write-through (Plan 09 Phase 6) — hoisted so the
+  // per-tracker loop below never re-resolves it
+  const sqlite = getSqliteFallback();
 
   logger.info({ msg: "Performance check starting" });
 
@@ -990,9 +994,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   let targetAchieved = 0;
   let stopLossHit = 0;
 
-  // Batch status updates and history creation
-  const statusUpdates: Promise<any>[] = [];
-  const historyCreates: Promise<any>[] = [];
+  // Mirror write-through (Plan 09 Phase 6) — tracker/status-history rows go to
+  // the SQLite mirror; only AI event logs are still batched below
   const eventLogs: Promise<unknown>[] = [];
 
   for (const tracker of activeTrackers) {
@@ -1030,40 +1033,38 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     // Update currentPrice + lastCheckedAt for EVERY tracker — the Performance
     // tab computes return % from currentPrice, so even unchanged trackers must
     // get the freshest close. (There is no stored changePercent column.)
-    statusUpdates.push(
-      prisma.recommendationTracker.update({
-        where: { id: tracker.id },
-        data: {
-          ...(newStatus ? { status: newStatus } : {}),
-          currentPrice,
-          lastCheckedAt: new Date(),
-        },
-      })
-    );
+    // Mirror write-through full-row upsert: preserve all columns, overlay the
+    // per-run status flip (if any) + freshest close. Prisma is updated only by
+    // the 6h push sinks.
+    sqlite?.upsertRecommendationTracker({
+      ...tracker,
+      ...(newStatus ? { status: newStatus } : {}),
+      currentPrice,
+      lastCheckedAt: new Date(),
+    });
 
     if (newStatus) {
       const previousStatus = tracker.status;
 
-      // Batch create status history (triggerSource: system)
-      historyCreates.push(
-        prisma.recommendationStatusHistory.create({
-          data: {
-            trackerId: tracker.id,
-            previousStatus,
-            newStatus,
-            triggerSource: "system",
-            metadata: {
-              currentPrice,
-              entryPrice: tracker.entryPrice,
-              targetPrice: tracker.targetPrice,
-              stopLoss: tracker.stopLoss,
-              daysSinceCreation: Math.floor(
-                (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
-              ),
-            },
-          },
-        })
-      );
+      // Mirror write-through status history (triggerSource: system) — client
+      // id + full row; pushed to Prisma by the 6h sink.
+      sqlite?.appendRecommendationStatusHistory({
+        id: randomUUID(),
+        trackerId: tracker.id,
+        previousStatus,
+        newStatus,
+        triggerSource: "system",
+        metadata: {
+          currentPrice,
+          entryPrice: tracker.entryPrice,
+          targetPrice: tracker.targetPrice,
+          stopLoss: tracker.stopLoss,
+          daysSinceCreation: Math.floor(
+            (Date.now() - tracker.createdAt.getTime()) / (1000 * 60 * 60 * 24),
+          ),
+        },
+        createdAt: new Date(),
+      });
 
       // Record event
       const emoji = newStatus === "target_achieved" ? "TARGET" : "STOP_LOSS";
@@ -1084,12 +1085,9 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     }
   }
 
-  // Execute batched updates concurrently (chunked to bound concurrency)
-  await runInChunks(
-    [...statusUpdates, ...historyCreates, ...eventLogs],
-    10,
-    (chunk) => Promise.all(chunk),
-  );
+  // Execute batched writes concurrently (chunked to bound concurrency) — only
+  // AI event logs remain here (tracker/history rows already in the mirror).
+  await runInChunks(eventLogs, 10, (chunk) => Promise.all(chunk));
 
   // Run the 360-day archival sweep (any status) — snapshots + hard-deletes
   // aged trackers. Idempotent; safe to run every day.

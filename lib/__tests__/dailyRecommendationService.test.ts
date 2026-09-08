@@ -73,6 +73,87 @@ jest.mock("@/lib/prisma", () => {
   };
 });
 
+// SQLite mirror mock — in-memory store with upsert semantics (Plan 09 Phase 6).
+// The rewritten service writes EVERY job row to the mirror first (Prisma writes
+// are 6h-push-only); assertions below target these mirror helpers instead of
+// prisma dailyRecommendationRun/Stock/Tracker create/update/deleteMany calls.
+jest.mock("@/lib/sqlite", () => {
+  const runs: Array<Record<string, any>> = [];
+  const trackers: Array<Record<string, any>> = [];
+  const stocks: Array<Record<string, any>> = [];
+  const statusHistory: Array<Record<string, any>> = [];
+
+  const upsertBy = (
+    arr: Array<Record<string, any>>,
+    row: Record<string, any>,
+    match: (r: Record<string, any>) => boolean,
+  ) => {
+    const idx = arr.findIndex(match);
+    if (idx >= 0) {
+      Object.assign(arr[idx], row);
+      return arr[idx];
+    }
+    arr.push(row);
+    return row;
+  };
+
+  const fallback = {
+    upsertDailyRecommendationRun: jest.fn((row: Record<string, any>) =>
+      upsertBy(runs, row, (r) => r.id === row.id),
+    ),
+    getRecommendationTrackers: jest.fn(
+      ({ symbolIn }: { symbolIn?: string[] } = {}) =>
+        trackers.filter(
+          (t) =>
+            symbolIn === undefined ||
+            symbolIn.some(
+              (s) => String(s).toUpperCase() === String(t.symbol).toUpperCase(),
+            ),
+        ),
+    ),
+    upsertRecommendationTracker: jest.fn((row: Record<string, any>) =>
+      upsertBy(trackers, row, (t) => t.id === row.id),
+    ),
+    upsertDailyRecommendationStock: jest.fn((row: Record<string, any>) =>
+      upsertBy(stocks, row, (s) => s.id === row.id),
+    ),
+    getRecommendationStocks: jest.fn((runId: string) =>
+      stocks.filter((s) => s.runId === runId),
+    ),
+    deleteRecommendationStocksByRun: jest.fn(
+      (runId: string, symbols?: string[]) => {
+        for (let i = stocks.length - 1; i >= 0; i--) {
+          const row = stocks[i];
+          if (
+            row.runId === runId &&
+            (symbols === undefined ||
+              !symbols.some(
+                (sym) =>
+                  String(sym).toUpperCase() === String(row.symbol).toUpperCase(),
+              ))
+          ) {
+            stocks.splice(i, 1);
+          }
+        }
+      },
+    ),
+    appendRecommendationStatusHistory: jest.fn((row: Record<string, any>) => {
+      statusHistory.push(row);
+      return row;
+    }),
+  };
+
+  return {
+    __esModule: true,
+    getSqliteFallback: jest.fn(() => fallback),
+    fallback,
+    runs,
+    trackers,
+    stocks,
+    statusHistory,
+  };
+});
+
 jest.mock("@/lib/logger", () => {
   const mock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
   return { __esModule: true, default: mock, info: mock.info, warn: mock.warn, error: mock.error, debug: mock.debug };
@@ -183,6 +264,10 @@ import {
 const mockPrisma = require("@/lib/prisma").default as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cache = require("@/lib/cache").recommendationsCache;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const mockSqlite = require("@/lib/sqlite").fallback as any;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const sqliteStore = require("@/lib/sqlite") as Record<string, any[]>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -229,6 +314,12 @@ function makeAIResult(overrides: Record<string, unknown> = {}) {
 describe("dailyRecommendationService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Reset the in-memory SQLite mirror store between tests (clearAllMocks only
+    // clears jest.fn call data, not the arrays the mock's accessors read/write).
+    for (const key of ["runs", "trackers", "stocks", "statusHistory"]) {
+      sqliteStore[key].length = 0;
+    }
 
     // Cache mock default: always a miss (cold path) unless a test overrides.
     // clearAllMocks() does NOT reset implementations, so this must be set here
@@ -292,21 +383,28 @@ describe("dailyRecommendationService", () => {
 
       const result = await runDailyRecommendations();
 
-      expect(result.runId).toBe("run-123");
+      expect(result.runId).toMatch(/^[0-9a-f-]{36}$/);
       expect(result.uniqueStocks).toBe(1);
       expect(result.aiProcessed).toBe(1);
 
-      // Run created with status "running" and default triggeredBy "system"
-      expect(mockPrisma.dailyRecommendationRun.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: "running", triggeredBy: "system" }) }),
-      );
+      // Plan 09 Phase 6: the run row is written SQLite-first via the mirror's
+      // upsert helper — the SAME object is mutated in place on each service
+      // update (running → stats → final), so only never-mutated creation
+      // fields (id, triggeredBy) are inspectable on the first call.
+      const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+      expect(runUpserts.length).toBeGreaterThanOrEqual(2);
+      expect(runUpserts[0][0].id).toBe(result.runId);
+      expect(runUpserts[0][0].triggeredBy).toBe("system");
 
-      // Run updated to "completed"
-      const updateCalls = mockPrisma.dailyRecommendationRun.update.mock.calls;
-      const completeUpdate = updateCalls.find(
-        (call: any) => call[0]?.data?.status === "completed",
-      );
-      expect(completeUpdate).toBeDefined();
+      // Final upsert marks the run completed with the computed stats
+      const finalRun = runUpserts[runUpserts.length - 1][0];
+      expect(finalRun.status).toBe("completed");
+      expect(finalRun.uniqueStocks).toBe(1);
+      expect(finalRun.aiProcessed).toBe(1);
+
+      // No direct Prisma writes for the run row anymore
+      expect(mockPrisma.dailyRecommendationRun.create).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyRecommendationRun.update).not.toHaveBeenCalled();
     });
 
     test("persists triggeredBy when options provided", async () => {
@@ -315,9 +413,10 @@ describe("dailyRecommendationService", () => {
 
       await runDailyRecommendations({ triggeredBy: "admin" });
 
-      expect(mockPrisma.dailyRecommendationRun.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ triggeredBy: "admin" }) }),
-      );
+      // Mirror-first: the run row carries the provided triggeredBy on first upsert
+      const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+      expect(runUpserts[0][0].triggeredBy).toBe("admin");
+      expect(mockPrisma.dailyRecommendationRun.create).not.toHaveBeenCalled();
     });
 
     // ── AI pre-flight gate (v3.8.0) ────────────────────────────────────
@@ -396,19 +495,20 @@ describe("dailyRecommendationService", () => {
         expect(result.aiFailed).toBe(1);
         expect(result.uniqueStocks).toBe(0);
         expect(result.stocks).toEqual([]);
-        // v3.11.1: NO synthetic HOLD rows — entries are DELETED, never updated
+        // v3.11.1: NO synthetic HOLD rows — mirror entries are DELETED (single
+        // run-id arg = discard the whole run), never updated
         expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
-        expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith(
-          { where: { runId: "run-123" } },
-        );
+        expect(mockSqlite.deleteRecommendationStocksByRun).toHaveBeenCalledTimes(1);
+        expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0][0]).toBe(result.runId);
+        expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0]).toHaveLength(1);
         // Run marked failed with uniqueStocks 0 so getLatestRecommendations
         // (uniqueStocks > 0) falls back to the last good run
-        const failedUpdate = mockPrisma.dailyRecommendationRun.update.mock.calls.find(
-          (call: any) => call[0]?.data?.status === "failed",
-        );
-        expect(failedUpdate).toBeDefined();
-        expect(failedUpdate![0].data.uniqueStocks).toBe(0);
-        expect(failedUpdate![0].data.aiFailed).toBe(1);
+        const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+        const failedRun = runUpserts[runUpserts.length - 1][0];
+        expect(failedRun.status).toBe("failed");
+        expect(failedRun.uniqueStocks).toBe(0);
+        expect(failedRun.aiFailed).toBe(1);
+        expect(mockPrisma.dailyRecommendationRun.update).not.toHaveBeenCalled();
       } finally {
         delete process.env.OPENROUTERKEY;
       }
@@ -419,12 +519,12 @@ describe("dailyRecommendationService", () => {
 
       await expect(runDailyRecommendations()).rejects.toThrow("Screener crash");
 
-      const updateCalls = mockPrisma.dailyRecommendationRun.update.mock.calls;
-      const failedUpdate = updateCalls.find(
-        (call: any) => call[0]?.data?.status === "failed",
-      );
-      expect(failedUpdate).toBeDefined();
-      expect(failedUpdate![0].data.errorMessage).toContain("Screener crash");
+      // Mirror-first: the catch path upserts the run row as failed (last call)
+      const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+      const failedRun = runUpserts[runUpserts.length - 1][0];
+      expect(failedRun.status).toBe("failed");
+      expect(String(failedRun.errorMessage)).toContain("Screener crash");
+      expect(mockPrisma.dailyRecommendationRun.update).not.toHaveBeenCalled();
     });
 
     test("creates stock entries for each screener result", async () => {
@@ -438,25 +538,21 @@ describe("dailyRecommendationService", () => {
         makeAIResult({ symbol: "TCS", price: 3800 }),
       ]);
 
-      // First findMany (pre-fetch) returns empty, then createMany creates,
-      // then second findMany (re-fetch) returns the new trackers
-      mockPrisma.recommendationTracker.findMany
-        .mockResolvedValueOnce([]) // pre-fetch: no existing trackers
-        .mockResolvedValueOnce([ // re-fetch after createMany: return created trackers
-          { id: "tracker-1", symbol: "RELIANCE", status: "active" },
-          { id: "tracker-2", symbol: "TCS", status: "active" },
-        ]);
-
-      // Mock stock entries findMany for AI update step
-      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([
-        { id: "stock-1", symbol: "RELIANCE", runId: "run-123" },
-        { id: "stock-2", symbol: "TCS", runId: "run-123" },
-      ]);
+      // Mirror-first: the missing-symbol backfill queries Prisma (cold mirror
+      // → no existing trackers), then every stock entry + tracker is written
+      // via the mirror upsert helpers.
+      mockPrisma.recommendationTracker.findMany.mockResolvedValue([]);
 
       await runDailyRecommendations();
 
-      // Batched: createMany called instead of N individual creates
-      expect(mockPrisma.dailyRecommendationStock.createMany).toHaveBeenCalled();
+      // Mirror write-through: one full-row upsert per stock entry (client-side
+      // ids, runId = the created run) — no Prisma createMany anymore.
+      const stockUpserts = mockSqlite.upsertDailyRecommendationStock.mock.calls as any[][];
+      expect(stockUpserts.length).toBeGreaterThanOrEqual(2);
+      expect(stockUpserts[0][0].symbol).toBe("RELIANCE");
+      expect(stockUpserts[1][0].symbol).toBe("TCS");
+      expect(stockUpserts[0][0].runId).toBeDefined();
+      expect(mockPrisma.dailyRecommendationStock.createMany).not.toHaveBeenCalled();
     });
 
     test("upserts recommendation tracker for each stock", async () => {
@@ -465,9 +561,17 @@ describe("dailyRecommendationService", () => {
 
       await runDailyRecommendations();
 
-      // Batched: findMany (check existing) → createMany (no existing)
+      // Mirror-first: findMany backfills missing symbols from Prisma (cold
+      // mirror → []) then every tracker is written via the mirror upsert —
+      // the old createMany batch path no longer runs.
       expect(mockPrisma.recommendationTracker.findMany).toHaveBeenCalled();
-      expect(mockPrisma.recommendationTracker.createMany).toHaveBeenCalled();
+      expect(mockSqlite.upsertRecommendationTracker).toHaveBeenCalled();
+      const trackerUpserts = mockSqlite.upsertRecommendationTracker.mock.calls as any[][];
+      const created = trackerUpserts.find((c) => c[0]?.symbol === "RELIANCE");
+      expect(created).toBeDefined();
+      expect(created![0].entryPrice).toBe(2500);
+      expect(created![0].status).toBe("active");
+      expect(mockPrisma.recommendationTracker.createMany).not.toHaveBeenCalled();
     });
 
     test("updates stock entry with AI results", async () => {
@@ -476,15 +580,16 @@ describe("dailyRecommendationService", () => {
 
       await runDailyRecommendations();
 
-      expect(mockPrisma.dailyRecommendationStock.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            aiRecommendation: "BUY",
-            confidence: 75,
-            targetPrice: 2750,
-          }),
-        }),
+      // Mirror write-through: the AI verdict lands on the stock row via a
+      // full-row upsert (no Prisma update).
+      const stockUpserts = mockSqlite.upsertDailyRecommendationStock.mock.calls as any[][];
+      const aiUpdate = stockUpserts.find(
+        (c) => c[0]?.symbol === "RELIANCE" && c[0]?.aiRecommendation === "BUY",
       );
+      expect(aiUpdate).toBeDefined();
+      expect(aiUpdate![0].confidence).toBe(75);
+      expect(aiUpdate![0].targetPrice).toBe(2750);
+      expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
     });
 
     test("records prediction for each AI result", async () => {
@@ -571,11 +676,17 @@ describe("dailyRecommendationService", () => {
       expect(result.aiFailed).toBe(1);
       expect(result.aiProcessed).toBe(0);
       expect(result.uniqueStocks).toBe(0);
-      // v3.11.1: no HOLD-default persistence — entries deleted instead
+      // v3.11.1: no HOLD-default persistence — mirror entries discarded via the
+      // single-arg delete (whole run), never updated; run marked failed
       expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
-      expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith(
-        { where: { runId: "run-123" } },
-      );
+      expect(mockSqlite.deleteRecommendationStocksByRun).toHaveBeenCalledTimes(1);
+      expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0][0]).toBe(result.runId);
+      expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0]).toHaveLength(1);
+      const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+      const failedRun = runUpserts[runUpserts.length - 1][0];
+      expect(failedRun.status).toBe("failed");
+      expect(failedRun.uniqueStocks).toBe(0);
+      expect(mockPrisma.dailyRecommendationRun.update).not.toHaveBeenCalled();
     });
 
     test("partial AI failure — persists only successful verdicts, deletes failed entries", async () => {
@@ -603,25 +714,23 @@ describe("dailyRecommendationService", () => {
           executionMs: 0,
         }),
       ]);
-      // Two entries pre-fetched for the AI-update step
-      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue([
-        { id: "stock-1", symbol: "RELIANCE", runId: "run-123" },
-        { id: "stock-2", symbol: "TCS", runId: "run-123" },
-      ]);
-
       const result = await runDailyRecommendations();
 
       expect(result.aiProcessed).toBe(1);
       expect(result.aiFailed).toBe(1);
       expect(result.uniqueStocks).toBe(1);
-      // TCS (failed) entry deleted — RELIANCE (success) entry updated
-      expect(mockPrisma.dailyRecommendationStock.deleteMany).toHaveBeenCalledWith({
-        where: { runId: "run-123", symbol: { notIn: ["RELIANCE"] } },
-      });
-      const tcsUpdate = mockPrisma.dailyRecommendationStock.update.mock.calls.find(
-        (call: any) => call[0]?.where?.id === "stock-2",
+      // The mirror delete keeps ONLY the successful symbols for this run —
+      // TCS (failed) entry is discarded, RELIANCE (success) kept + updated
+      expect(mockSqlite.deleteRecommendationStocksByRun).toHaveBeenCalledTimes(1);
+      const deleteCall = mockSqlite.deleteRecommendationStocksByRun.mock.calls[0];
+      expect(deleteCall[0]).toBe(result.runId);
+      expect(deleteCall[1]).toEqual(["RELIANCE"]);
+      const stockUpserts = mockSqlite.upsertDailyRecommendationStock.mock.calls as any[][];
+      const tcsAiUpdate = stockUpserts.find(
+        (c) => c[0]?.symbol === "TCS" && c[0]?.aiRecommendation !== undefined,
       );
-      expect(tcsUpdate).toBeUndefined();
+      expect(tcsAiUpdate).toBeUndefined();
+      expect(mockPrisma.dailyRecommendationStock.deleteMany).not.toHaveBeenCalled();
     });
 
     test("caps AI analysis at MAX_AI_STOCKS (100) by market cap", async () => {
@@ -640,15 +749,8 @@ describe("dailyRecommendationService", () => {
       );
       mockAnalyzeStocks.mockResolvedValue(aiResults);
 
-      // Mock findMany to return entries for all 100 capped stocks
-      mockPrisma.dailyRecommendationStock.findMany.mockResolvedValue(
-        Array.from({ length: 100 }, (_, i) => ({
-          id: `stock-${i + 1}`,
-          symbol: `STOCK${i + 1}`,
-          runId: "run-123",
-        })),
-      );
-
+      // Mock findMany removed — the mirror holds all stock entries, so the AI
+      // verdicts are written straight back via upsert.
       const result = await runDailyRecommendations();
       expect(result.uniqueStocks).toBe(100);
       expect(result.aiProcessed).toBe(100);
@@ -958,7 +1060,10 @@ describe("dailyRecommendationService", () => {
 
       expect(result.checked).toBe(2);
       expect(mockGetStockQuote).not.toHaveBeenCalled();
-      expect(mockPrisma.recommendationTracker.update).toHaveBeenCalledTimes(2);
+      // Every priced tracker is pushed to the SQLite mirror (write-through);
+      // the Prisma update path no longer runs.
+      expect(mockSqlite.upsertRecommendationTracker).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.recommendationTracker.update).not.toHaveBeenCalled();
     });
 
     test("bridges trackers missing daily_prices rows with a live quote", async () => {
@@ -973,10 +1078,16 @@ describe("dailyRecommendationService", () => {
 
       expect(mockGetStockQuote).toHaveBeenCalledWith("FRESH", false);
       expect(result.checked).toBe(2);
-      // FRESH updated with the bridged price, RELIANCE with its DB close.
-      const updateCalls = mockPrisma.recommendationTracker.update.mock.calls as any[];
-      expect(updateCalls.some((c) => c[0]?.where?.id === "t2" && c[0]?.data?.currentPrice === 555)).toBe(true);
-      expect(updateCalls.some((c) => c[0]?.where?.id === "t1" && c[0]?.data?.currentPrice === 2500)).toBe(true);
+      // FRESH updated with the bridged price, RELIANCE with its DB close —
+      // both via the mirror write-through upsert.
+      const trackerUpserts = mockSqlite.upsertRecommendationTracker.mock.calls as any[][];
+      expect(
+        trackerUpserts.some((c) => c[0]?.id === "t2" && c[0]?.currentPrice === 555),
+      ).toBe(true);
+      expect(
+        trackerUpserts.some((c) => c[0]?.id === "t1" && c[0]?.currentPrice === 2500),
+      ).toBe(true);
+      expect(mockPrisma.recommendationTracker.update).not.toHaveBeenCalled();
     });
 
     test("survives live-quote failures — symbol skipped, no throw", async () => {
