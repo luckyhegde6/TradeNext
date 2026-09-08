@@ -25,7 +25,8 @@
 // The whole result is cached 30 min; forceRefresh bypasses the cache and
 // re-scans/re-analyzes.
 
-import { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
+import { getSqliteFallback } from "@/lib/sqlite";
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
@@ -290,69 +291,72 @@ export function swingTrackerDraft(stock: SwingStock): SwingTrackerDraft | null {
   };
 }
 
-/** Minimal DB surface persistSwingTrackers needs (override for tests). */
-export interface SwingTrackerDb {
-  recommendationTracker: {
-    findMany: (args: {
-      where: { symbol: { in: string[] }; timeHorizon: string; status: string };
-      select?: { symbol?: boolean };
-    }) => Promise<Array<{ symbol: string }>>;
-    createMany: (args: { data: SwingTrackerDraft[]; skipDuplicates?: boolean }) => Promise<{ count: number }>;
-    updateMany: (args: {
-      where: { symbol: string; timeHorizon: string; status: string };
-      data: { currentPrice: number; lastCheckedAt: Date };
-    }) => Promise<{ count: number }>;
-  };
-}
-
 /**
  * Persist AI-analyzed swing picks as active RecommendationTracker rows
- * (timeHorizon "swing"). New symbols are created; existing active swing
- * trackers get currentPrice/lastCheckedAt refreshed (targets stay as-of
- * creation — matching the daily pipeline's tracker convention). Non-fatal —
- * callers must catch. `db` override keeps this unit-testable.
+ * (timeHorizon "swing") in the local SQLite mirror. New symbols are created;
+ * existing active swing trackers get currentPrice/lastCheckedAt refreshed
+ * (targets stay as-of creation — matching the daily pipeline's tracker
+ * convention). The mirror's 6h push sink promotes rows to Prisma; the upserts
+ * are recorded in `_sync_outbox` for cross-instance reconcile. Non-fatal —
+ * callers must catch; a null mirror degrades to a no-op.
  */
 export async function persistSwingTrackers(
   stocks: SwingStock[],
-  db?: SwingTrackerDb,
 ): Promise<{ created: number; updated: number }> {
   const analyzed = stocks.filter((s) => s.analysis);
   if (analyzed.length === 0) return { created: 0, updated: 0 };
 
-  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingTrackerDb);
-  const symbols = analyzed.map((s) => s.symbol);
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return { created: 0, updated: 0 };
 
-  const existing = await prisma.recommendationTracker.findMany({
-    where: { symbol: { in: symbols }, timeHorizon: SWING_TIME_HORIZON, status: "active" },
-    select: { symbol: true },
+  const symbols = analyzed.map((s) => s.symbol);
+  const existing = sqlite.getRecommendationTrackers({
+    symbolIn: symbols.map((s) => s.toUpperCase()),
+    status: ["active"],
+    limit: 500,
   });
-  const existingSymbols = new Set(existing.map((r) => r.symbol));
+  // The mirror query has no timeHorizon filter — swing rows are filtered in
+  // memory (rehydrated rows are camelCase, e.g. `timeHorizon`).
+  const existingSwing = existing.filter(
+    (r) => String(r.timeHorizon ?? "") === SWING_TIME_HORIZON,
+  );
+  const existingSymbols = new Set(existingSwing.map((r) => String(r.symbol).toUpperCase()));
 
   let created = 0;
-  const toCreate = analyzed
-    .filter((s) => !existingSymbols.has(s.symbol))
-    .map((s) => swingTrackerDraft(s))
-    .filter((d): d is SwingTrackerDraft => d !== null);
-  if (toCreate.length > 0) {
-    const res = await prisma.recommendationTracker.createMany({
-      data: toCreate,
-      skipDuplicates: true,
+  const now = new Date();
+  for (const s of analyzed) {
+    if (existingSymbols.has(s.symbol.toUpperCase())) continue;
+    const draft = swingTrackerDraft(s);
+    if (!draft) continue;
+    sqlite.upsertRecommendationTracker({
+      id: randomUUID(),
+      symbol: s.symbol.toUpperCase(),
+      status: "active",
+      entryPrice: draft.entryPrice,
+      currentPrice: draft.currentPrice,
+      targetPrice: draft.targetPrice,
+      stopLoss: draft.stopLoss,
+      timeHorizon: draft.timeHorizon,
+      confidence: draft.confidence,
+      aiRecommendation: draft.aiRecommendation,
+      reasoning: draft.reasoning,
+      riskFactors: draft.riskFactors,
+      screenerAttribution: draft.screenerAttribution,
+      createdAt: now,
+      updatedAt: now,
     });
-    created = res.count;
+    created++;
+    existingSymbols.add(s.symbol.toUpperCase());
   }
 
-  const priceBySymbol = new Map(analyzed.map((s) => [s.symbol, s.price]));
-  const refreshSymbols = symbols.filter((sym) => existingSymbols.has(sym));
-  const updated = (
-    await Promise.all(
-      refreshSymbols.map((sym) =>
-        prisma.recommendationTracker.updateMany({
-          where: { symbol: sym, timeHorizon: SWING_TIME_HORIZON, status: "active" },
-          data: { currentPrice: priceBySymbol.get(sym) ?? 0, lastCheckedAt: new Date() },
-        }),
-      ),
-    )
-  ).reduce((sum, r) => sum + r.count, 0);
+  const priceBySymbol = new Map(analyzed.map((s) => [s.symbol.toUpperCase(), s.price]));
+  let updated = 0;
+  for (const row of existingSwing) {
+    const price = priceBySymbol.get(String(row.symbol).toUpperCase());
+    if (price == null) continue;
+    sqlite.upsertRecommendationTracker({ ...row, currentPrice: Number(price), updatedAt: now });
+    updated++;
+  }
 
   return { created, updated };
 }
@@ -376,9 +380,9 @@ export interface SwingSignalDraft {
   families: SignalFamily[];
   templateIds: string[];
   source: string;
-  indicators: Prisma.InputJsonValue | null;
+  indicators: unknown | null;
   momentumScore: number;
-  analysis: Prisma.InputJsonValue | null;
+  analysis: unknown | null;
   aiRecommendation: "BUY" | "SELL" | "HOLD" | null;
   confidence: number | null;
   targetPrice: number | null;
@@ -406,7 +410,7 @@ export function swingSignalDraft(stock: SwingStock, jobId: string): SwingSignalD
     families: stock.families ?? [],
     templateIds: stock.templateIds ?? [],
     source: stock.source ?? "chartink",
-    indicators: (stock.indicators ?? null) as unknown as Prisma.InputJsonValue | null,
+    indicators: stock.indicators ?? null,
     momentumScore: stock.momentumScore ?? 0,
     analysis: null,
     aiRecommendation: null,
@@ -418,7 +422,7 @@ export function swingSignalDraft(stock: SwingStock, jobId: string): SwingSignalD
 
 /** Analysis patch fields for one completed swing stock. */
 export interface SwingSignalAnalysisPatch {
-  analysis: Prisma.InputJsonValue;
+  analysis: unknown;
   aiRecommendation: "BUY" | "SELL" | "HOLD";
   confidence: number;
   targetPrice: number;
@@ -430,7 +434,7 @@ export function swingSignalAnalysisPatch(stock: SwingStock): SwingSignalAnalysis
   const a = stock.analysis;
   if (!a) return null;
   return {
-    analysis: a as unknown as Prisma.InputJsonValue,
+    analysis: a,
     aiRecommendation: swingActionToRecommendation(a.action),
     confidence: a.confidence,
     targetPrice: a.targetPrice,
@@ -438,38 +442,62 @@ export function swingSignalAnalysisPatch(stock: SwingStock): SwingSignalAnalysis
   };
 }
 
-/** Minimal DB surface swing signal persistence needs (override for tests). */
-export interface SwingSignalDb {
-  swingSignal: {
-    createMany: (args: {
-      data: SwingSignalDraft[];
-      skipDuplicates?: boolean;
-    }) => Promise<{ count: number }>;
-    updateMany: (args: {
-      where: { jobId: string; symbol: string };
-      data: Partial<SwingSignalAnalysisPatch> & { updatedAt?: Date };
-    }) => Promise<{ count: number }>;
-  };
-}
-
 /**
  * Persist the posted feed into SwingSignal at JOB CREATION — the durable
- * "date of posting" snapshot the swing performance check tracks. Idempotent
- * via the @@unique([jobId, symbol]) constraint + skipDuplicates. Non-fatal —
+ * "date of posting" snapshot the swing performance check tracks, landed in the
+ * local SQLite mirror (6h push sink promotes to Prisma). Idempotent — signals
+ * already posted for this job (deduped by symbol) are skipped. Non-fatal —
  * callers catch; the pipeline must never fail because persistence hiccuped.
  */
 export async function persistSwingSignals(
   jobId: string,
   stocks: SwingStock[],
-  db?: SwingSignalDb,
 ): Promise<{ created: number }> {
   if (stocks.length === 0) return { created: 0 };
-  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingSignalDb);
-  const res = await prisma.swingSignal.createMany({
-    data: stocks.map((s) => swingSignalDraft(s, jobId)),
-    skipDuplicates: true,
-  });
-  return { created: res.count };
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return { created: 0 };
+
+  const existing = new Set(
+    sqlite.getSwingSignals(jobId).map((r) => String(r.symbol).toUpperCase()),
+  );
+  const now = new Date();
+  let created = 0;
+  for (const s of stocks) {
+    if (existing.has(s.symbol.toUpperCase())) continue;
+    const draft = swingSignalDraft(s, jobId);
+    sqlite.upsertSwingSignal({
+      id: randomUUID(),
+      jobId: draft.jobId,
+      symbol: draft.symbol.toUpperCase(),
+      name: draft.name,
+      price: draft.price,
+      change: draft.change,
+      changePercent: draft.changePercent,
+      volume: draft.volume,
+      marketCap: draft.marketCap,
+      screenerNames: draft.screenerNames,
+      screenerCount: draft.screenerCount,
+      families: draft.families,
+      templateIds: draft.templateIds,
+      source: draft.source,
+      indicators: draft.indicators,
+      momentumScore: draft.momentumScore,
+      analysis: null,
+      aiRecommendation: null,
+      confidence: null,
+      targetPrice: null,
+      stopLoss: null,
+      currentPrice: s.price,
+      returnPercent: null,
+      status: "tracking",
+      postedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    created++;
+    existing.add(draft.symbol.toUpperCase());
+  }
+  return { created };
 }
 
 /**
@@ -482,18 +510,29 @@ export async function persistSwingSignals(
 export async function patchSwingSignalAnalysis(
   jobId: string,
   stocks: SwingStock[],
-  db?: SwingSignalDb,
 ): Promise<{ patched: number }> {
-  const prisma = db ?? ((await import("@/lib/prisma")).default as unknown as SwingSignalDb);
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return { patched: 0 };
+
+  const rows = sqlite.getSwingSignals(jobId);
   let patched = 0;
   for (const stock of stocks) {
     const patch = swingSignalAnalysisPatch(stock);
     if (!patch) continue;
-    const res = await prisma.swingSignal.updateMany({
-      where: { jobId, symbol: stock.symbol },
-      data: { ...patch, updatedAt: new Date() },
+    const row = rows.find(
+      (r) => String(r.symbol).toUpperCase() === stock.symbol.toUpperCase(),
+    );
+    if (!row) continue;
+    sqlite.upsertSwingSignal({
+      ...row,
+      analysis: patch.analysis,
+      aiRecommendation: patch.aiRecommendation,
+      confidence: patch.confidence,
+      targetPrice: patch.targetPrice,
+      stopLoss: patch.stopLoss,
+      updatedAt: new Date(),
     });
-    patched += res.count;
+    patched++;
   }
   return { patched };
 }
@@ -611,33 +650,31 @@ export const SWING_JOB_STALE_MS = 45 * 60 * 1000;
 export const SWING_JOB_MAX_ATTEMPTS = 2;
 
 /** Normalize a job row into the public SwingResponse the tab renders. */
-export function jobToResponse(job: {
-  status: string;
-  payload: unknown;
-  error?: string | null;
-  templateCount: number;
-  totalRaw: number;
-}): SwingResponse {
+export function jobToResponse(job: Record<string, unknown>): SwingResponse {
   const payload = (job.payload ?? {}) as Partial<SwingResponse>;
+  const status = String(job.status ?? "");
+  const templateCount = Number(job.templateCount ?? 0);
+  const totalRaw = Number(job.totalRaw ?? 0);
+  const errorFromJob = job.error != null ? String(job.error) : null;
   const base: SwingResponse = {
     success: true,
     generatedAt: payload.generatedAt ?? new Date().toISOString(),
-    templateCount: job.templateCount,
-    totalRaw: job.totalRaw,
+    templateCount,
+    totalRaw,
     topN: payload.stocks?.length ?? 0,
     segregation: payload.segregation ?? countSegregation([]),
     analysisStatus: "pending",
     analysisError: null,
     stocks: payload.stocks ?? [],
   };
-  if (job.status === "done") {
+  if (status === "done") {
     return { ...base, analysisStatus: "done", analysisError: payload.analysisError ?? null };
   }
-  if (job.status === "failed") {
+  if (status === "failed") {
     return {
       ...base,
       analysisStatus: "failed",
-      analysisError: job.error ?? payload.analysisError ?? "AI analysis failed",
+      analysisError: errorFromJob ?? payload.analysisError ?? "AI analysis failed",
     };
   }
   // pending | running → the frozen screener feed; the tab polls until done.
@@ -645,34 +682,37 @@ export function jobToResponse(job: {
 }
 
 /**
- * Claim + process one analysis job. The atomic updateMany (pending→running,
- * attemptCount++) is the multi-instance lock — count 0 means another instance
- * already claimed it (or it was superseded). Never throws to the caller.
+ * Claim + process one analysis job. Under the SQLite-primary model the claim
+ * is a per-instance mirror read-then-upsert (the v3.13.0 cross-instance
+ * atomic updateMany is intentionally abandoned — each instance owns its own
+ * mirror): re-read the job and bail unless it's still pending, then re-upsert
+ * as running with attemptCount++. The supersede-abort guard below still
+ * protects against a force refresh landing mid-analysis. Never throws.
  */
-export async function processSwingAnalysisJob(job: {
-  id: string;
-  payload: unknown;
-  templateCount: number;
-  totalRaw: number;
-}): Promise<void> {
-  const prisma = (await import("@/lib/prisma")).default;
+export async function processSwingAnalysisJob(job: Record<string, unknown>): Promise<void> {
+  const jobId = String(job.id ?? "");
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return; // no mirror — cannot persist job state
 
-  const claimed = await prisma.swingAnalysisJob.updateMany({
-    where: { id: job.id, status: "pending" },
-    data: { status: "running", startedAt: new Date(), attemptCount: { increment: 1 } },
+  const claimed = sqlite.getSwingAnalysisJob(jobId);
+  if (!claimed || String(claimed.status) !== "pending") return; // not claimable
+  sqlite.upsertSwingAnalysisJob({
+    ...claimed,
+    status: "running",
+    startedAt: new Date(),
+    attemptCount: Number(claimed.attemptCount ?? 0) + 1,
   });
-  if (claimed.count === 0) return; // another instance won the claim
 
   const stocks = ((job.payload ?? {}) as Partial<SwingResponse>).stocks ?? [];
-  const templateCount = job.templateCount;
-  const totalRaw = job.totalRaw;
+  const templateCount = Number(job.templateCount ?? 0);
+  const totalRaw = Number(job.totalRaw ?? 0);
 
   createAuditLog({
     action: "SWING_ANALYSIS_START",
     resource: "swing_analysis",
-    resourceId: job.id,
+    resourceId: jobId,
     path: "/api/recommendations/swing",
-    metadata: { stocks: stocks.length, jobId: job.id },
+    metadata: { stocks: stocks.length, jobId: jobId },
   }).catch(() => undefined);
 
   let analysisStatus: "done" | "failed" = "failed";
@@ -699,18 +739,18 @@ export async function processSwingAnalysisJob(job: {
       createAuditLog({
         action: "SWING_ANALYSIS_FAILED",
         resource: "swing_analysis",
-        resourceId: job.id,
+        resourceId: jobId,
         path: "/api/recommendations/swing",
         errorMessage: analysisError,
-        metadata: { stocks: stocks.length, succeeded, failed: stocks.length - succeeded, jobId: job.id },
+        metadata: { stocks: stocks.length, succeeded, failed: stocks.length - succeeded, jobId: jobId },
       }).catch(() => undefined);
     } else {
       createAuditLog({
         action: "SWING_ANALYSIS_COMPLETE",
         resource: "swing_analysis",
-        resourceId: job.id,
+        resourceId: jobId,
         path: "/api/recommendations/swing",
-        metadata: { stocks: stocks.length, succeeded, jobId: job.id },
+        metadata: { stocks: stocks.length, succeeded, jobId: jobId },
       }).catch(() => undefined);
     }
   } catch (e) {
@@ -718,16 +758,16 @@ export async function processSwingAnalysisJob(job: {
     logger.error({
       msg: "Swing AI analysis failed — marking job failed",
       error: analysisError,
-      jobId: job.id,
+      jobId: jobId,
     });
     analysisStatus = "failed";
     createAuditLog({
       action: "SWING_ANALYSIS_FAILED",
       resource: "swing_analysis",
-      resourceId: job.id,
+      resourceId: jobId,
       path: "/api/recommendations/swing",
       errorMessage: analysisError,
-      metadata: { stocks: stocks.length, jobId: job.id },
+      metadata: { stocks: stocks.length, jobId: jobId },
     }).catch(() => undefined);
   }
 
@@ -750,8 +790,8 @@ export async function processSwingAnalysisJob(job: {
     // level-less signal can only expire (its date-of-posting price baseline
     // is already stored).
     try {
-      const { patched } = await patchSwingSignalAnalysis(job.id, stocks);
-      logger.info({ msg: "Swing signal analysis patched", patched, jobId: job.id });
+      const { patched } = await patchSwingSignalAnalysis(jobId, stocks);
+      logger.info({ msg: "Swing signal analysis patched", patched, jobId: jobId });
     } catch (e) {
       logger.warn({
         msg: "Swing signal analysis patch failed — signals stay level-less",
@@ -761,13 +801,14 @@ export async function processSwingAnalysisJob(job: {
   }
 
   // A force refresh may have superseded us mid-analysis — never overwrite the
-  // newer job's payload. Re-read and bail when we're no longer running.
-  const fresh = await prisma.swingAnalysisJob.findUnique({ where: { id: job.id } });
-  if (!fresh || fresh.status !== "running") {
+  // newer job's payload. Re-read the mirror and bail when we're no longer
+  // running.
+  const fresh = sqlite.getSwingAnalysisJob(jobId);
+  if (!fresh || String(fresh.status) !== "running") {
     logger.warn({
       msg: "Swing job superseded mid-analysis — discarding result",
-      jobId: job.id,
-      status: fresh?.status,
+      jobId: jobId,
+      status: fresh ? String(fresh.status) : undefined,
     });
     return;
   }
@@ -784,21 +825,20 @@ export async function processSwingAnalysisJob(job: {
     stocks,
   };
 
-  await prisma.swingAnalysisJob.update({
-    where: { id: job.id },
-    data: {
-      status: analysisStatus,
-      payload: response as unknown as Prisma.InputJsonValue,
-      completedAt: new Date(),
-      analyzedCount: stocks.filter((s) => s.analysis).length,
-      error: analysisError,
-    },
+  sqlite.upsertSwingAnalysisJob({
+    ...fresh,
+    status: analysisStatus,
+    payload: response,
+    completedAt: new Date(),
+    analyzedCount: stocks.filter((s) => s.analysis).length,
+    error: analysisError,
+    updatedAt: new Date(),
   });
 
   createAuditLog({
     action: "SWING_RUN_COMPLETE",
     resource: "swing",
-    resourceId: job.id,
+    resourceId: jobId,
     path: "/api/recommendations/swing",
     metadata: {
       templates: templateCount,
@@ -807,7 +847,7 @@ export async function processSwingAnalysisJob(job: {
       topN: stocks.length,
       analysisStatus,
       error: analysisError ?? undefined,
-      jobId: job.id,
+      jobId: jobId,
     },
   }).catch(() => undefined);
 
@@ -828,7 +868,7 @@ export async function processSwingAnalysisJob(job: {
         analysis: s.analysis,
       })));
       const sent = await broadcastToSubscribers("🌊 Swing Signals", tgMessage);
-      logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId: job.id });
+      logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId: jobId });
     } catch (tgErr) {
       logger.warn({ msg: "Swing Telegram broadcast failed (non-critical)", error: tgErr });
     }
@@ -839,8 +879,8 @@ export async function processSwingAnalysisJob(job: {
  * Drain the swing analysis queue. Recovery + claim:
  *   1. Stale running jobs (instance died mid-batch) → back to pending for a
  *      retry; exhausted attempts → failed with a readable error.
- *   2. Claim the OLDEST pending job and process it (multi-instance safe via
- *      the atomic updateMany claim).
+ *   2. Claim the OLDEST pending job (mirror read, ordered by created_at) and
+ *      process it. Per-instance mirror: no cross-instance atomicity.
  * Never throws — the daemon tick and the request path fire-and-forget.
  */
 export async function maybeProcessSwingAnalysis(): Promise<void> {
@@ -848,41 +888,45 @@ export async function maybeProcessSwingAnalysis(): Promise<void> {
 
   const run = (async () => {
     try {
-      const prisma = (await import("@/lib/prisma")).default;
+      const sqlite = getSqliteFallback();
+      if (!sqlite) return;
       const staleBefore = new Date(Date.now() - SWING_JOB_STALE_MS);
 
-      const retried = await prisma.swingAnalysisJob.updateMany({
-        where: {
-          status: "running",
-          startedAt: { lt: staleBefore },
-          attemptCount: { lt: SWING_JOB_MAX_ATTEMPTS },
-        },
-        data: { status: "pending", startedAt: null },
-      });
-      const exhausted = await prisma.swingAnalysisJob.updateMany({
-        where: {
-          status: "running",
-          startedAt: { lt: staleBefore },
-          attemptCount: { gte: SWING_JOB_MAX_ATTEMPTS },
-        },
-        data: {
-          status: "failed",
-          error: `Swing AI analysis timed out after ${SWING_JOB_MAX_ATTEMPTS} attempt(s)`,
-          completedAt: new Date(),
-        },
-      });
-      if (retried.count > 0 || exhausted.count > 0) {
+      let retried = 0;
+      let exhausted = 0;
+      for (const row of sqlite.getSwingAnalysisJobs({ status: "running", limit: 100 })) {
+        const startedAt =
+          row.startedAt instanceof Date ? row.startedAt : new Date(String(row.startedAt ?? ""));
+        if (startedAt.getTime() >= staleBefore.getTime()) continue;
+        const attemptCount = Number(row.attemptCount ?? 0);
+        if (attemptCount < SWING_JOB_MAX_ATTEMPTS) {
+          sqlite.upsertSwingAnalysisJob({
+            ...row,
+            status: "pending",
+            startedAt: null,
+            updatedAt: new Date(),
+          });
+          retried++;
+        } else {
+          sqlite.upsertSwingAnalysisJob({
+            ...row,
+            status: "failed",
+            error: `Swing AI analysis timed out after ${SWING_JOB_MAX_ATTEMPTS} attempt(s)`,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          });
+          exhausted++;
+        }
+      }
+      if (retried > 0 || exhausted > 0) {
         logger.warn({
           msg: "Swing analysis jobs recovered from stale running",
-          retried: retried.count,
-          exhausted: exhausted.count,
+          retried,
+          exhausted,
         });
       }
 
-      const pending = await prisma.swingAnalysisJob.findFirst({
-        where: { status: "pending" },
-        orderBy: { createdAt: "asc" },
-      });
+      const pending = sqlite.getSwingAnalysisJobs({ status: "pending", limit: 1 })[0];
       if (!pending) return;
       await processSwingAnalysisJob(pending);
     } catch (e) {
@@ -929,16 +973,20 @@ export async function getSwingRecommendations(
   // only touched again on the 6h recovery sync or a manual force.
   const breakerOpen = isPlanLimitBreakerOpen();
   const templateIds = getSwingTemplateIds();
-  const prisma = (await import("@/lib/prisma")).default;
+  const sqlite = getSqliteFallback();
 
   // Analyze=true fast path: a completed/pending DB job serves the response
   // WITHOUT re-running the screener — the job row is the durable source of
   // truth (survives cache LRU eviction + instance recycle), the cache is only
   // a 30-min accelerator for steady-state polls.
   if (analyze && !breakerOpen) {
-    const latestJob = await prisma.swingAnalysisJob.findFirst({
-      orderBy: { createdAt: "desc" },
-    });
+    const jobs =
+      sqlite?.getSwingAnalysisJobs({
+        status: ["pending", "running", "done", "failed"],
+        limit: 500,
+      }) ?? [];
+    // Mirror orders created_at ASC — the LAST row is the newest job.
+    const latestJob = jobs.length > 0 ? jobs[jobs.length - 1] : null;
     if (latestJob && !forceRefresh) {
       const served = jobToResponse(latestJob);
       if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
@@ -951,8 +999,8 @@ export async function getSwingRecommendations(
       }
       logger.info({
         msg: "Swing served from DB job",
-        status: latestJob.status,
-        jobId: latestJob.id,
+        status: String(latestJob.status ?? ""),
+        jobId: String(latestJob.id ?? ""),
         analyze,
         forceRefresh,
       });
@@ -964,16 +1012,20 @@ export async function getSwingRecommendations(
     // the new job takes over. The superseded processor aborts on its final
     // re-read (status !== running) and discards its result.
     if (forceRefresh) {
-      const superseded = await prisma.swingAnalysisJob.updateMany({
-        where: { status: { in: ["pending", "running"] } },
-        data: {
+      let superseded = 0;
+      for (const row of
+        sqlite?.getSwingAnalysisJobs({ status: ["pending", "running"], limit: 500 }) ?? []) {
+        sqlite?.upsertSwingAnalysisJob({
+          ...row,
           status: "failed",
           error: "Superseded by a newer force refresh",
           completedAt: new Date(),
-        },
-      });
-      if (superseded.count > 0) {
-        logger.warn({ msg: "Swing jobs superseded by force refresh", count: superseded.count });
+          updatedAt: new Date(),
+        });
+        superseded++;
+      }
+      if (superseded > 0) {
+        logger.warn({ msg: "Swing jobs superseded by force refresh", count: superseded });
       }
       // v3.14.0: drop any cached done/failed payload — the old run's targets
       // must never show once a newer run has started (a stale "ready" feed
@@ -1051,19 +1103,27 @@ export async function getSwingRecommendations(
   // background. The DB row survives Netlify instance recycle and staticCache
   // LRU eviction — the tab can never hang on "generating".
   if (analyze && !breakerOpen) {
-    const created = await prisma.swingAnalysisJob.create({
-      data: {
-        status: "pending",
-        payload: {
-          generatedAt: new Date().toISOString(),
-          stocks: enriched,
-          segregation: countSegregation(enriched),
-        } as unknown as Prisma.InputJsonValue,
-        stockCount: enriched.length,
-        templateCount: templateIds.length,
-        totalRaw: deduped.length,
+    // SQLite-primary: the job row lives in the local mirror + sync outbox
+    // (the 6h push sink promotes it to Prisma). Same-server reads of the
+    // just-written row must come from the mirror, never Prisma.
+    const jobId = randomUUID();
+    sqlite?.upsertSwingAnalysisJob({
+      id: jobId,
+      status: "pending",
+      payload: {
+        generatedAt: new Date().toISOString(),
+        stocks: enriched,
+        segregation: countSegregation(enriched),
       },
+      stockCount: enriched.length,
+      templateCount: templateIds.length,
+      totalRaw: deduped.length,
+      attemptCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
+    // Read back the just-written row (mirror-first guarantee).
+    const created = sqlite?.getSwingAnalysisJob(jobId);
 
     // v3.14.0: drop any cached done/failed payload from the previous run —
     // the tab must show THIS run's frozen pending feed, not the last run's
@@ -1074,24 +1134,27 @@ export async function getSwingRecommendations(
     // date-of-posting snapshot the swing performance check tracks; AI levels
     // are patched in when the background analysis completes). Non-fatal — a
     // persistence hiccup must not fail the feed.
-    try {
-      const { created: signalCount } = await persistSwingSignals(created.id, enriched);
-      logger.info({ msg: "Swing signals persisted", created: signalCount, jobId: created.id });
-    } catch (e) {
-      logger.warn({
-        msg: "Swing signal persistence failed — feed continues",
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
+    if (created) {
+      try {
+        const { created: signalCount } = await persistSwingSignals(jobId, enriched);
+        logger.info({ msg: "Swing signals persisted", created: signalCount, jobId });
+      } catch (e) {
+        logger.warn({
+          msg: "Swing signal persistence failed — feed continues",
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
 
-    maybeProcessSwingAnalysis().catch(() => undefined);
+      // Kick the processor so the very first poll settles the pending feed.
+      maybeProcessSwingAnalysis().catch(() => undefined);
+    }
 
     const pending: SwingResponse = {
       success: true,
-      generatedAt: created.generatedAt.toISOString(),
-      templateCount: created.templateCount,
-      totalRaw: created.totalRaw,
-      topN: created.stockCount,
+      generatedAt: new Date().toISOString(),
+      templateCount: templateIds.length,
+      totalRaw: deduped.length,
+      topN: enriched.length,
       segregation: countSegregation(enriched),
       analysisStatus: "pending",
       analysisError: null,

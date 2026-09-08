@@ -63,6 +63,12 @@ const leader = jest.requireMock("@/lib/services/leader") as {
   acquireLeaderLock: jest.Mock;
   startLeaderHeartbeat: jest.Mock;
 };
+const sqlite = jest.requireMock("@/lib/sqlite") as {
+  initSqliteBackup: jest.Mock;
+  startOpsCounterPersistence: jest.Mock;
+  startWriteBehindFlush: jest.Mock;
+  startNsePromoteFlush: jest.Mock;
+};
 
 describe("instrumentation lost-leader stop (v3.28.2)", () => {
   const originalRuntime = process.env.NEXT_RUNTIME;
@@ -91,6 +97,9 @@ describe("instrumentation lost-leader stop (v3.28.2)", () => {
     expect(leader.acquireLeaderLock).toHaveBeenCalledWith("worker");
     expect(leader.acquireLeaderLock).toHaveBeenCalledWith("cron-daemon");
     expect(leader.acquireLeaderLock).toHaveBeenCalledWith("sqlite-sync");
+    // Plan 09 Phase 5: NSE→Prisma promotion moved to the 6h push engine — the
+    // ~60s promote timer must NOT be auto-started by register().
+    expect(sqlite.startNsePromoteFlush).not.toHaveBeenCalled();
   });
 
   it("fires stopWorkerEngine when the worker onLost callback is invoked", async () => {

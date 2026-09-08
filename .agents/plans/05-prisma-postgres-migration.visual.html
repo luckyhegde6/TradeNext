@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Prisma Postgres Migration (Standalone Accelerate Retirement) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Prisma Postgres Migration</h1>
+  <p>Standalone Prisma Accelerate (<code class="inline">prisma+postgres://accelerate.prisma-data.net</code>) <b>retires Dec 1, 2026</b>. Long-term fix = <b>Prisma Postgres</b> (edge caching built-in; Phase 0 = manual Console provisioning, no code). Phases 1-2 ship the intermediate win: <code class="inline">withAccelerate()</code> on the runtime client + explicit <code class="inline">cacheStrategy</code> at 5 high-frequency direct-Prisma read sites.</p>
+  <div class="badges">
+    <span class="badge green">v3.27.0</span>
+    <span class="badge">branch v3.26.0-prod-failure-triage</span>
+    <span class="badge red">deadline Dec 1, 2026</span>
+    <span class="badge">withAccelerate()</span>
+    <span class="badge amber">5 cacheStrategy sites</span>
+    <span class="badge">no migration</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: WHY ======================= -->
+<section>
+  <h2>1 · Why — Accelerate Retirement</h2>
+  <table>
+    <tr><th style="width:50%">Standalone Prisma Accelerate (today)</th><th>Prisma Postgres (target)</th></tr>
+    <tr>
+      <td class="mono">prisma+postgres://accelerate.prisma-data.net</td>
+      <td class="mono">prisma+postgres://YOUR-PROJECT.prisma-data.net + postgres://… DIRECT_URL</td>
+    </tr>
+    <tr><td>Query proxy only; caching opt-in per query</td><td>Edge caching built-in; <code class="inline">cacheStrategy</code> supported</td></tr>
+    <tr><td>Retires <b>Dec 1, 2026</b> (~3 months from plan)</td><td>Provisioned in Prisma Console (Phase 0, manual)</td></tr>
+    <tr><td>+ <code class="inline">withAccelerate()</code> extension required</td><td>Post-move the wrapper may be dropped (caching default; <code class="inline">PRISMA_ACCELERATE_CACHE_TTL</code> stays as the knob)</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: PHASE 0 (MANUAL) ======================= -->
+<section>
+  <h2>2 · Phase 0 — Provisioning (user actions, no code)</h2>
+  <p class="sub">These steps require user action in Prisma Console — the agent cannot provision infrastructure without credentials, and must NOT run <code class="inline">pg_dump</code>/<code class="inline">pg_restore</code> on prod credentials.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    P1["Console: provision Prisma Postgres instance"] --> P2["locally: DIRECT_URL set → npx prisma migrate deploy<br/>(all 36+ migrations, status = up to date)"]
+    P2 --> P3["migrate data: pg_dump old → pg_restore new<br/>(or Console data tool) → db pull row counts match"]
+    P3 --> P4["Netlify: update DATABASE_URL + DIRECT_URL → redeploy"]
+    P4 --> P5["DB Health dashboard shows Prisma Online"]
+    style P1 fill:#78350f,color:#fef3c7
+    style P2 fill:#1e3a8a,color:#dbeafe
+    style P3 fill:#1e3a8a,color:#dbeafe
+    style P4 fill:#78350f,color:#fef3c7
+    style P5 fill:#065f46,color:#d1fae5
+    </pre>
+  </div>
+  <div class="callout"><b>⚠</b> Do NOT proceed to Phase 1 until the user confirms the new instance is live and data is migrated.</div>
+</section>
+
+<!-- ======================= SECTION 3: CLIENT WIRING ======================= -->
+<section>
+  <h2>3 · Phase 1 — Client wiring (<code class="inline">lib/prisma.ts</code>)</h2>
+  <p class="sub">Extension order is documented and deliberate: <code class="inline">otelSetup()</code> FIRST (module top — PrismaInstrumentation wraps the query engine at client construction), then <code class="inline">withAccelerate()</code> as the base extension, then the <code class="inline">$allOperations</code> circuit-breaker/op-count/timeout extension wraps the cached reads. <code class="inline">type AccelerateClient = PrismaClient</code> is kept as the top type because base model read-args hard-code <code class="inline">cacheStrategy: never</code> and intersections don’t override it.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    O["otelSetup()<br/>(PRISMA_OTEL_ENABLED=1 opt-in)"] --> C["new PrismaClient({ accelerateUrl })<br/>.$extends(withAccelerate())"]
+    C --> A["$extends({ query: { $allOperations } })<br/>circuit breaker · op counter · 120s timeout"]
+    A --> H["withAccelerateCache(strategy)(args)<br/>boundary helper — injects cacheStrategy<br/>while preserving Prisma contextual typing"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>NEW <code class="inline">withAccelerateCache(strategy)</code></b> — pure transform via <code class="inline">Parameters&lt;T&gt;[0]</code> so literals like <code class="inline">orderBy: 'asc'|'desc'</code> still resolve; runtime client supports <code class="inline">cacheStrategy</code>, the base type doesn’t.</li>
+    <li><b><code class="inline">ACCELERATE_CACHE_TTL</code></b> — <code class="inline">Number(process.env.PRISMA_ACCELERATE_CACHE_TTL) || 300</code> (5-min default), exported for query sites.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 4: 5 QUERY SITES ======================= -->
+<section>
+  <h2>4 · Phase 2 — cacheStrategy at 5 direct-Prisma read sites</h2>
+  <table>
+    <tr><th style="width:44%">Site</th><th>Operation</th><th>cacheStrategy</th></tr>
+    <tr><td class="mono">app/api/corporate-actions/combined</td><td class="mono">corporateAction.findMany</td><td class="mono">{ ttl: 300, swr: 60 }</td></tr>
+    <tr><td class="mono">chartinkScreenerService</td><td class="mono">chartinkScreenerResult.findMany</td><td class="mono">{ ttl: 900, swr: 300 }</td></tr>
+    <tr><td class="mono">recommendationPerformanceService</td><td class="mono">recommendationTracker.findMany ×2</td><td class="mono">{ ttl: 600, swr: 60 }</td></tr>
+    <tr><td class="mono">lib/stock-service.ts</td><td class="mono">dailyPrice.findFirst ×2</td><td class="mono">{ ttl: 60, swr: 30 }</td></tr>
+    <tr><td class="mono">lib/services/market-cache.ts</td><td class="mono">marketCache.findUnique</td><td class="mono">{ ttl: 300, swr: 60 }</td></tr>
+  </table>
+  <div class="callout"><b>Test-coupling fix:</b> <code class="inline">recommendationPerformanceService.test</code> + <code class="inline">chartinkScreenerService.test</code> mock <code class="inline">@/lib/prisma</code> with factory objects returning only <code class="inline">{ __esModule, default }</code>, so the new named export was <code class="inline">undefined</code> → added the pure <code class="inline">withAccelerateCache</code> stub <code class="inline">(s) =&gt; (a) =&gt; ({ ...a, cacheStrategy: s })</code> to both factories.</div>
+</section>
+
+<!-- ======================= SECTION 5: VERIFICATION ======================= -->
+<section>
+  <h2>5 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> tsc <b>46 = exact baseline (0 new production errors)</b>; <code class="inline">prisma validate</code> valid + <code class="inline">prisma generate</code> ok; full suite <b>995 pass / 4 skip / 2 fail</b> (the 2 fails = documented pre-existing <code class="inline">intelligence.test.ts</code> async cache-flake, fails identically in isolation — excluding it: 71 suites / 995 / 4 / 0 from these changes); no schema change → no migration; diff scoped to exactly 8 files. Spec <code class="inline">.agents/specs/05-prisma-postgres-migration.md</code> + plan <code class="inline">.agents/plans/05-prisma-postgres-migration.md</code> committed <code class="inline">db5a5cc</code>.</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Prisma Postgres Migration · Spec <code class="inline">.agents/specs/05-prisma-postgres-migration.md</code> · Plan <code class="inline">.agents/plans/05-prisma-postgres-migration.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

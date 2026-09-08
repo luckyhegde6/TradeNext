@@ -49,7 +49,7 @@ let lastHeartbeatTaskId: string | undefined;
 // "failed" cleanly instead of the reaper having to discover it.
 export const STALE_MS = 45 * 60_000;
 export const TASK_TIMEOUT_MS = 40 * 60_000; // hard ceiling on any single task execution
-const REAP_INTERVAL_MS = 60_000; // reaper throttled to once per minute
+const REAP_INTERVAL_MS = 300_000; // reaper throttled to once per 5 min (v3.30.x: was 1/min; each reap = up to 4 Prisma reads)
 const WORKER_ALIVE_WINDOW_MS = 10 * 60_000; // 10 min — 2x heartbeat cadence (5 min)
 // ─── SQLite-primary control plane (v3.25.x) ────────────────────────────────
 // The 30s worker poll + 1-min reaper check-reads serve from the LOCAL SQLite
@@ -237,6 +237,12 @@ function safeJson(value: unknown): Record<string, unknown> {
  * Prisma findFirst and seeds the mirror so subsequent polls hit SQLite. The
  * authoritative atomic claim (updateMany) still runs on Prisma, so a stale
  * mirror can never double-execute a task.
+ *
+ * v3.30.x: when the Prisma fallback CONFIRMS the shared queue is empty but the
+ * local mirror is non-empty, re-mark it fresh (`touchControlMirror`) so the
+ * following CONTROL_TTL_MS of polls trust the confirmed-empty mirror instead
+ * of re-reading Prisma every poll. The marker still expires, so this is a
+ * per-TTL Prisma re-check, not a permanent blind spot.
  */
 export async function discoverPendingTask(): Promise<any | null> {
     const sqlite = await getSqliteControl();
@@ -280,6 +286,14 @@ export async function discoverPendingTask(): Promise<any | null> {
     if (task && sqlite?.upsertWorkerTask) {
         // Seed the local mirror so subsequent polls discover it via SQLite.
         sqlite.upsertWorkerTask(task);
+    } else if (!task && sqlite?.touchControlMirror) {
+        // v3.30.x: Prisma CONFIRMED the shared queue is empty. Re-mark the
+        // local mirror fresh (non-empty gate enforced inside) so the next
+        // CONTROL_TTL_MS of polls trust the confirmed-empty mirror instead of
+        // re-reading Prisma every 30s (~120/hr → ~12/hr). The marker expires
+        // again after CONTROL_TTL_MS, so cross-instance tasks surface on the
+        // next periodic Prisma re-check; the atomic claim guards double-exec.
+        sqlite.touchControlMirror("worker_task");
     }
     return task;
 }
@@ -288,7 +302,7 @@ export async function discoverPendingTask(): Promise<any | null> {
  * Poll for pending tasks and execute them one by one
  */
 async function pollAndExecute() {
-    // 1. Reap stale in-flight tasks (throttled to 1/min) so a wedged
+    // 1. Reap stale in-flight tasks (throttled to 1/5min) so a wedged
     // "running" task never blocks new work.
     await maybeReap();
 
@@ -529,7 +543,7 @@ export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<
     return { reapedTasks, reapedRuns };
 }
 
-/** Throttled wrapper — the poll loop calls this every 5s but DB work runs ≤1/min. */
+/** Throttled wrapper — the poll loop calls this every 5s but DB work runs ≤1/5min. */
 async function maybeReap(): Promise<void> {
     if (Date.now() - lastReapAt < REAP_INTERVAL_MS) return;
     lastReapAt = Date.now();

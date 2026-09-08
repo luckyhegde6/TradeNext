@@ -5,6 +5,12 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-09 (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync; Plan 09 on `fix/v3.29.1-header-watchlist` on top of committed v3.30.0; see Current Project Status below)
+
+2026-09-07 (v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.2 `1e907f1`; see Current Project Status below)
+
+2026-09-07 (v3.29.2 — Admin AI model management: true built-ins permanently locked — `openrouter/free` + `openrouter/auto` can NEVER be removed (API 400 + UI), catalog (8) + custom models stay removable; "Model Library" UI + 3-optgroup active-model select; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.1 `6e8db23`; see Current Project Status below)
+
 2026-09-06 (v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix; browser/DevTools visual-verification batch on `main`, on top of merged v3.29.0 `d7e54cf`; see Current Project Status below)
 
 2026-09-05 (v3.29.0 — UI/UX audit fixes: backtest symbol-gate softening + AI-failure error surfacing + mobile-nav Alerts + `[object Object]` throw-site fix, on top of v3.28.5 `6700076` on branch `fix/v3.28.1-sqlite-self-heal`; see Current Project Status below)
@@ -16,6 +22,38 @@
 ---
 
 ## Current Project Status
+
+### v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync (Sep 09 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `9303bd7`→`653b617` (9 commits) + DOC COMMIT PENDING
+**User directive**: plan limit is now **monthly 200K ops/mo (resetting 2nd)** + **Prisma calls ALLOWED ONLY at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between**.
+**(1) sync_history ledger** (`9303bd7`): durable `sync_history` table (`direction` `prisma_to_sqlite`|`sqlite_to_prisma`, `trigger`, `leaderGated`, `rowsSynced`, `durationMs`, `error?`) + `recordSyncHistory()` (prune-100) + `recentSyncs` in health; also fixed the SCHEMA_SQL stray-`;`-in-`--`-comment sql.js parse error (root cause of v3.30.0 boot noise).
+**(2) Boot hydration on every instance** (`d9bda6b`): `syncFromPrisma(opts)` `reason`=`boot|probe|admin` / `skipReconcile` / `leaderBypass` / `force`; `initSqliteBackup()` → `{reason:"boot", skipReconcile:true, leaderBypass:true}` — every instance pulls, reconcile only on probe/admin/force.
+**(3) NSE rate guard** (`56ee538`): NEW `lib/services/nseRateGuard.ts` (single-flight, throttle, burst cooldown) + 6 tests; wired `nse-client.ts` + `market-cache.ts`.
+**(4) `_sync_outbox` + 6h PUSH engine** (`a681a48`+`63736f5`): `_sync_outbox` table + `pushSqliteToPrisma` (grouped latest-op-wins, chunk-200 sinks, `reconcileControlToPrisma`); NEW `lib/sqlitePushSinks.ts`; 6h probe pivots PULL→PUSH. **Prod bug fixed**: `if (!isLeader("sqlite-sync"))` never fired (isLeader returns Promise) → awaited.
+**(5) NSE captures SQLite+outbox only** (`f7e56b5`): auto-promote off, env-gated `NSE_PROMOTE_ENABLED=1`.
+**(6) Jobs write SQLite-first (recs/swing/perf)** (`ae44431`+`0013dae`): 5 mirror tables + 7 write-through helpers; pipelines mirror-first with Prisma fallback.
+**(7) Admin long-lived datasets SQLite-first** (`a2bffd9`): +7 `SqliteFallback` helpers + 4 admin CRUD routes flipped.
+**(8) db-health wiring** (`653b617`): GET spreads `outboxPending`/`derivedCounts`/sync-history; POST `push_to_prisma`; db-health UI Outbox + Derived-counts cards + Push button + Direction/Trigger columns; 5 hot-route header comments document the read chain.
+**Tests**: sqlite.test.ts **68/68** (11 new P8); instrumentation +1; NEW nseRateGuard 6; full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no schema change → no migration. **Deferred (plan rev-v3 c/d)**: `query_cache` + db-health monthly-ops window NOT implemented.
+
+### v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging (Sep 07 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `8af65cc` + DOC COMMIT
+**User directive**: "i don't want to see this every time — defaults in `.env` on Netlify" — the recurring db-health noise traced to root causes fixed here (schema-init failure was making SQLite never-ready → every SQLite-first read silently fell back to Prisma). Also "Commit fix + doc the whole v3.30.0".
+**(1) Cadence** (`lib/services/leader.ts`, `cron-daemon.ts`, `worker-engine.ts`): `LEADER_STALENESS_MS` 5min→**15min** + `LEADER_HEARTBEAT_MS` 60s→**300s**; NEW `SWING_DRAIN_INTERVAL_MS = 900s` (swing drain off the 60s resync tick); `REAP_INTERVAL_MS` 60s→**300s**.
+**(2) Mirror freshness**: NEW `SqliteFallback.touchControlMirror(table)` re-marks `control_write_at:<table>` = NOW (non-empty gate, best-effort); `discoverPendingTask()` touches on the ready-DB path so an idle system's mirror freshness tracks poll cadence.
+**(3) Schema-init root cause**: SCHEMA_SQL stray `;` inside `--` comments → sql.js `near "Prisma": syntax error` every boot → SQLite never ready.
+**(4) Netlify WASM staging**: NEW `scripts/copy-sql-wasm-netlify.mjs` copies `public/sql-wasm.wasm` → `.next/sql-wasm.wasm` post-build (publish dir = .next; quickbuild/build wired; non-fatal).
+**(5) `upsertCronJob` Date-binding fix** (`lib/sqlite.ts`): Prisma `CronJob` rows carry real `Date` instances — raw bind → locale string breaks the ISO read-back (`new Date(String(col))` in `reconcileControlToPrisma`, 12h reconcile could write corrupt `nextRun`); NEW `toIso(v)` on lastRun/nextRun/createdAt binds.
+**Tests**: NEW Date-binding describe (2: ISO not locale — fails pre-fix; re-upsert same id replaces) + mock INSERT regex/OR REPLACE semantics; daemon-sqlite-first +2 (touch); leader constants; targeted **96/96**.
+**Verification**: tsc **46 = exact baseline (0 new)**; no schema change → no migration.
+**Commits**: `8af65cc` (Phases 1–4) + doc commit (Phase 5 + docs). PR #114 (v3.29.2 pre-merge) stays held. **No push/merge/deploy without explicit approval.**
+
+### v3.29.2 — Admin AI model management: true built-ins permanently locked (Sep 07 2026) — ✅ CODE + TESTS + LIVE-VERIFIED, COMMITTED `1e907f1`
+**User directive**: "a built-in model cannot be removed" — built-ins are the `AI_FALLBACK_MODELS` foundation (`lib/services/ai/modelChain.ts`) re-selected whenever the active model is removed/becomes unviable.
+**API** (`app/api/admin/ai/config/route.ts` DELETE): zod-validates `modelId` (NOT `id` — `{id}` → 400 "modelId is required"); **builtin → 400 "Cannot remove built-in models"** (nothing persisted); unknown → 404; catalog → hidden from GET; custom → removed outright; removing the ACTIVE model resets `ai_config.model` → `DEFAULT_MODEL` + `resetLLM()`. `app/api/admin/ai/custom-models/route.ts`: add/remove, and adding a hidden catalog id **restores via the catalog path** (CATALOG badge, not pushed into the custom collection).
+**Constants** (`lib/services/ai/config.ts`): NEW `BUILTIN_MODELS` + `BUILTIN_MODEL_IDS` (the two true built-ins `openrouter/free` + `openrouter/auto`); `AVAILABLE_MODELS` (8) contains no built-ins; sync-guard test ties `AI_FALLBACK_MODELS` ⊆ `BUILTIN_MODEL_IDS`. **UI** (`app/admin/ai/page.tsx`): Custom-model section → **"Model Library"** + locked-note subtitle ("OpenRouter Free / Auto are built-ins and cannot be removed"); active-model select → **3 optgroups (Built-in / Available / Custom)**; per-model Remove list = catalog ∪ custom **minus builtins**.
+**Tests**: NEW `aiModelCatalog.test.ts` **4** + `adminAiConfigModelManagement.test.ts` **10** (builtin 400 regression, hide/remove/404/active-reset/restore, POST valid/invalid) = **14 new**; guard-run `modelChain.test.ts` (5 pre-existing) → **19/19**.
+**Verification**: tsc **46 = exact baseline (0 new)**; no schema change → no migration.
+**Live verified** (Playwright :3000 admin): builtin DELETE → 400; UI remove/re-add gpt-oss toasts + CATALOG badge persists across reload; combobox = **all 11 options** across 3 optgroups (an earlier "7 options" read was an a11y-snapshot truncation — re-snapshot the combobox element with a target ref); 0 console errors; pre/post DB state identical (no pollution).
+**Docs**: AGENTS.md v3.29.2 row, CHANGELOG index + `.agents/changelog/versions-v3.29.md` v3.29.2 section, TODO.md row, Primer (this), agent-memory, Lessons #108, session-todos, `.agents/sessions/2026-09-07-admin-ai-model-management/` (decisions + flow). ⚠️ Working tree ALSO carries unrelated pending v3.28.x-era changes (sqlite/leader/worker files, `package.json`) — do NOT mix into the v3.29.2 commit. **Commit pending user (no push/merge without explicit approval).**
 
 ### v3.29.1 — Header overflow fix + Watchlist logged-out infinite-skeleton fix (Sep 06 2026) — ✅ CODE + TESTS + LIVE-BROWSER VERIFIED, COMMIT PENDING USER
 **Fixes** (on `main`, on top of merged v3.29.0 `d7e54cf`): **(1) Header overflow** (`app/Header.tsx`, CSS-only) — logged-in nav no longer overflows at 1440–1600px (Playwright audit: 372 DOM overflow checks + 9-width quick-check loop, 0 overflow @1440 + @375 on watchlist/alerts/screener/advanced-screener; e2e **87 passed / 2 flaky / 0 failed**). **(2) Watchlist logged-out infinite-skeleton FIX (found during user-requested browser + Chrome DevTools visual observation)** — `app/watchlist/page.tsx` :303 guard `if (status === "loading" || loading)` dead-coded the `unauthenticated` "Please sign in to view your watchlist." card: the local `loading` (`useState(true)`) only clears inside `fetchWatchlists()` (authenticated-only) → logged-out visitors saw an eternal skeleton (e2e missed it — the watchlist spec logs in first). Fix: `status === "loading" || (status === "authenticated" && loading)`.

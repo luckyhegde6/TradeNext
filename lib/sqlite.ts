@@ -17,6 +17,7 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
+import { randomUUID } from "crypto";
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
@@ -67,7 +68,15 @@ if (!g.__sqliteBackup) {
     prismaAvailable: true as boolean,
     lastSyncAt: null as string | null,
     lastProbeAt: null as string | null,
-    syncHistory: [] as Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>,
+    syncHistory: [] as Array<{
+      at: string;
+      rowsSynced: number;
+      durationMs: number;
+      error?: string;
+      direction?: SyncDirection;
+      trigger?: SyncTrigger;
+      leaderGated?: boolean;
+    }>,
     probeTimer: null as ReturnType<typeof setInterval> | null,
     opsPersistTimer: null as ReturnType<typeof setInterval> | null,
     sqliteBytes: 0 as number,
@@ -87,7 +96,15 @@ const state: {
   prismaAvailable: boolean;
   lastSyncAt: string | null;
   lastProbeAt: string | null;
-  syncHistory: Array<{ at: string; rowsSynced: number; durationMs: number; error?: string }>;
+  syncHistory: Array<{
+    at: string;
+    rowsSynced: number;
+    durationMs: number;
+    error?: string;
+    direction?: SyncDirection;
+    trigger?: SyncTrigger;
+    leaderGated?: boolean;
+  }>;
   probeTimer: ReturnType<typeof setInterval> | null;
   opsPersistTimer: ReturnType<typeof setInterval> | null;
   sqliteBytes: number;
@@ -104,10 +121,32 @@ const state: {
 // Types
 // ---------------------------------------------------------------------------
 
+/** Plan 09: which store initiated the sync. */
+export type SyncDirection = "prisma_to_sqlite" | "sqlite_to_prisma";
+
+/** What triggered a sync attempt (Phase 2 wires probe/admin call sites). */
+export type SyncTrigger = "boot" | "probe" | "admin";
+
 export interface SyncResult {
   at: string;
   rowsSynced: number;
   durationMs: number;
+  error?: string;
+  /** Plan 09: direction of the sync (set only when read from the durable `sync_history` ledger). */
+  direction?: SyncDirection;
+  /** Plan 09: what triggered the sync (set only when read from the durable ledger). */
+  trigger?: SyncTrigger;
+  /** Plan 09: whether the sync was leader-gated (set only when read from the durable ledger). */
+  leaderGated?: boolean;
+}
+
+/** Plan 09 Phase 1: durable ledger row payload for `recordSyncHistory`. */
+export interface SyncHistoryInput {
+  direction: SyncDirection;
+  trigger: SyncTrigger;
+  leaderGated?: boolean;
+  rowsSynced?: number;
+  durationMs?: number;
   error?: string;
 }
 
@@ -169,8 +208,10 @@ export interface SqliteFallback {
     close: number;
     volume: number;
   }): void;
-  /** Get corporate actions (recent). */
-  getCorporateActions(limit?: number): Array<Record<string, unknown>>;
+  /** Get corporate actions (recent; number = legacy limit or opts with search). */
+  getCorporateActions(
+    optsOrLimit?: number | { search?: string; limit?: number },
+  ): Array<Record<string, unknown>>;
   /** Get recent server logs. */
   getServerLogs(limit?: number): Array<Record<string, unknown>>;
   /** Get write-behind queue records by source (e.g. `ai`) — zero Prisma reads. */
@@ -190,8 +231,10 @@ export interface SqliteFallback {
   getWorkerTasks(limit?: number): Array<Record<string, unknown>>;
   /** Get full health status for admin dashboard. */
   getHealthStatus(): HealthStatus;
-  /** Trigger a sync from Prisma -> SQLite (leader-gated unless `force`). */
-  syncFromPrisma(opts?: { force?: boolean }): Promise<void>;
+  /** Trigger a sync from Prisma -> SQLite. Single-leader gated unless `force` or
+   *  `leaderBypass` (boot hydration — EVERY instance pulls its own mirror);
+   *  `skipReconcile` skips the SQLite->Prisma control-plane push (boot never pushes). */
+  syncFromPrisma(opts?: { force?: boolean; reason?: SyncTrigger; skipReconcile?: boolean; leaderBypass?: boolean }): Promise<void>;
   /** Persist the Prisma ops counter snapshot into SQLite (`_backup_meta`). */
   persistOpsCounter(): void;
   /** Restore the Prisma ops counter from SQLite when it matches today (IST). */
@@ -247,6 +290,15 @@ export interface SqliteFallback {
     table: "worker_task" | "worker_status" | "cron_job",
     maxAgeMs: number,
   ): boolean;
+  /**
+   * v3.30.0: Re-mark a control-plane table's "last control write" timestamp as
+   * NOW (best-effort, never throws). Used by `discoverPendingTask` when a Prisma
+   * fallback CONFIRMED the shared queue is empty but the local mirror still has
+   * rows — so the daemon trusts the (non-empty, confirmed-empty) mirror for
+   * `maxAgeMs` instead of re-reading Prisma every poll. No-op when the table is
+   * empty (mirrors `isControlMirrorFresh`'s non-empty gate).
+   */
+  touchControlMirror(table: "worker_task" | "worker_status" | "cron_job"): void;
 
   // ── v3.28.0 NSE-backed data store (SQLite-first) ──────────────────────────
   /** Upsert a stock (Symbol) row into SQLite. */
@@ -285,6 +337,76 @@ export interface SqliteFallback {
   ): void;
   /** Get captured Chartink result rows for a screener (fresh, non-expired). */
   getChartinkResults(templateId: string): Array<Record<string, unknown>>;
+  // Plan 09 Phase 6 — jobs write SQLite-first: recommendation / swing / perf
+  // job rows land in the mirror via write-through, the 6h push promotes them.
+  /** Write-through: upsert one daily-recommendation run row. */
+  upsertDailyRecommendationRun(row: Record<string, unknown>): void;
+  /** Write-through: upsert one daily-recommendation stock row. */
+  upsertDailyRecommendationStock(row: Record<string, unknown>): void;
+  /** Write-through: upsert one recommendation tracker row. */
+  upsertRecommendationTracker(row: Record<string, unknown>): void;
+  /** Write-through: append one recommendation status-history row. */
+  appendRecommendationStatusHistory(row: Record<string, unknown>): void;
+  /** Write-through: insert one recommendation archive row. */
+  insertRecommendationArchive(row: Record<string, unknown>): void;
+  /** Write-through: upsert one swing analysis job row. */
+  upsertSwingAnalysisJob(row: Record<string, unknown>): void;
+  /** Write-through: upsert one swing signal row. */
+  upsertSwingSignal(row: Record<string, unknown>): void;
+  /** Mirror read: stock rows for a run (camelCase, dates rehydrated). */
+  getRecommendationStocks(runId: string): Array<Record<string, unknown>>;
+  /** Mirror read: tracker rows, optionally filtered by symbols / statuses. */
+  getRecommendationTrackers(opts?: {
+    symbolIn?: string[];
+    status?: string[];
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror read: one swing analysis job by id, or null. */
+  getSwingAnalysisJob(id: string): Record<string, unknown> | null;
+  /** Mirror read: swing analysis jobs — one status or a status-list (default "running"). */
+  getSwingAnalysisJobs(opts?: {
+    status?: string | string[];
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror read: swing signal rows for one job (camelCase rehydrated). */
+  getSwingSignals(jobId: string): Array<Record<string, unknown>>;
+  /** Mirror delete: stock rows for a run (optional symbol whitelist) + outbox. */
+  deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void;
+  /** Mirror delete: one tracker + its status-history rows + outbox. */
+  deleteRecommendationTracker(trackerId: string): void;
+  // --- Plan 09 Phase 7 — admin long-lived datasets (SQLite-first readers) ---
+  /** Mirror read: admin announcements (optionally active-only / limited). */
+  getAnnouncements(opts?: {
+    activeOnly?: boolean;
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE admin-announcement row (mirror id = MAX(id)+1) + outbox.
+   *  Returns the mirror id (0 when the mirror is unavailable). */
+  upsertAnnouncement(row: Record<string, unknown>): number;
+  /** Mirror delete: one admin announcement + outbox. */
+  deleteAnnouncement(id: number): void;
+  /** Mirror read: alerts (recent, optional limit window). */
+  getAlerts(opts?: { limit?: number }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE alert row (client-side id passthrough) + outbox. */
+  upsertAlert(row: Record<string, unknown>): void;
+  /** Mirror delete: one alert + outbox. */
+  deleteAlert(id: string): void;
+  /** Mirror read: transactions — by portfolioId OR userId (denormalized name),
+   *  newest first. */
+  getTransactions(opts?: {
+    portfolioId?: string;
+    userId?: number;
+    limit?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror upsert: ONE transaction row (client-side id passthrough) + outbox. */
+  upsertTransaction(row: Record<string, unknown>): void;
+  /** Mirror delete: one transaction + outbox. */
+  deleteTransaction(id: string): void;
+  /** Mirror delete: one corporate-action row by LOCAL mirror id + natural-key
+   *  outbox delete. Returns true when the row existed in the mirror. */
+  deleteCorporateAction(id: number): boolean;
+  /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
+  getSqliteDerived(): Record<string, unknown>;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -579,16 +701,23 @@ const SCHEMA_SQL = `
     run_date       TEXT,
     status         TEXT,
     total_screeners INTEGER,
+    successful_screeners INTEGER,
+    total_stocks    INTEGER,
     unique_stocks   INTEGER,
     ai_processed    INTEGER,
+    ai_failed       INTEGER,
     execution_time_ms INTEGER,
+    error_message   TEXT,
     triggered_by    TEXT,
-    metadata        TEXT
+    metadata        TEXT,
+    created_at      TEXT,
+    completed_at    TEXT
   );
 
   CREATE TABLE IF NOT EXISTS daily_recommendation_stock (
     id                TEXT PRIMARY KEY,
     run_id            TEXT,
+    tracker_id        TEXT,
     symbol            TEXT,
     price             REAL,
     change_val        REAL,
@@ -603,6 +732,10 @@ const SCHEMA_SQL = `
     risk_factors      TEXT,
     screener_attribution TEXT,
     screener_count    INTEGER,
+    ai_tokens_used    INTEGER,
+    ai_execution_ms   INTEGER,
+    ai_success        INTEGER DEFAULT 0,
+    ai_error          TEXT,
     created_at        TEXT
   );
 
@@ -807,10 +940,10 @@ const SCHEMA_SQL = `
     queued_at       TEXT
   );
 
-  -- ── NSE-backed data store (v3.28.0 SQLite-first): mirrors the Prisma models
+  -- NSE-backed data store (v3.28.0 SQLite-first): mirrors the Prisma models
   -- used by the NSE syncs. SQLite is the PRIMARY write/read store for NSE
-  -- market data; Prisma is kept in sync via the instant promote. Schema
-  -- mirrors Prisma camelCase → snake_case columns with hot-path indexes. ──
+  -- market data, and Prisma is kept in sync via the instant promote. Schema
+  -- mirrors Prisma camelCase -> snake_case columns with hot-path indexes.
   CREATE TABLE IF NOT EXISTS symbols (
     symbol       TEXT PRIMARY KEY,
     company_name TEXT,
@@ -840,7 +973,7 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_daily_price_ticker ON daily_price (ticker);
 
   -- Captured Chartink scan rows (mirrors ChartinkScreenerResult). Populated
-  -- from live captures during a full run; served SQLite-first on reads.
+  -- from live captures during a full run, served SQLite-first on reads.
   CREATE TABLE IF NOT EXISTS chartink_screener_result (
     id             TEXT PRIMARY KEY,
     run_id         TEXT,
@@ -860,6 +993,219 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_chartink_result_symbol ON chartink_screener_result (symbol);
   CREATE INDEX IF NOT EXISTS idx_chartink_result_expires ON chartink_screener_result (expires_at);
   CREATE INDEX IF NOT EXISTS idx_chartink_result_captured ON chartink_screener_result (captured_at);
+
+  -- Plan 09 Phase 6 (jobs write SQLite-first): recommendation / swing / perf
+  -- job tables mirrored so the write-through helpers round-trip full rows and
+  -- the 6h push can promote them to Prisma. Columns mirror the Prisma models
+  -- (camelCase to snake_case). Json/arrays stored as TEXT (serialized).
+  -- Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS recommendation_tracker (
+    id                  TEXT PRIMARY KEY,
+    symbol              TEXT,
+    status              TEXT,
+    entry_price         REAL,
+    current_price       REAL,
+    target_price        REAL,
+    stop_loss           REAL,
+    time_horizon        TEXT,
+    confidence          REAL,
+    ai_recommendation   TEXT,
+    reasoning           TEXT,
+    risk_factors        TEXT,
+    screener_attribution TEXT,
+    last_checked_at     TEXT,
+    created_at          TEXT,
+    updated_at          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_tracker_symbol ON recommendation_tracker (symbol);
+
+  CREATE TABLE IF NOT EXISTS recommendation_status_history (
+    id              TEXT PRIMARY KEY,
+    tracker_id      TEXT,
+    previous_status TEXT,
+    new_status      TEXT,
+    trigger_source  TEXT,
+    metadata        TEXT,
+    created_at      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_status_tracker ON recommendation_status_history (tracker_id);
+
+  CREATE TABLE IF NOT EXISTS recommendation_archive (
+    id                   TEXT PRIMARY KEY,
+    symbol               TEXT,
+    tracker_id           TEXT,
+    last_run_id          TEXT,
+    run_date             TEXT,
+    entry_price          REAL,
+    current_price        REAL,
+    target_price         REAL,
+    stop_loss            REAL,
+    category             TEXT,
+    ai_recommendation    TEXT,
+    confidence           REAL,
+    reasoning            TEXT,
+    risk_factors         TEXT,
+    screener_attribution TEXT,
+    final_status         TEXT,
+    return_percent       REAL,
+    days_tracked         INTEGER,
+    status_history       TEXT,
+    archived_reason      TEXT,
+    archived_at          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_archive_symbol ON recommendation_archive (symbol);
+  CREATE INDEX IF NOT EXISTS idx_rec_archive_final ON recommendation_archive (final_status);
+
+  CREATE TABLE IF NOT EXISTS swing_analysis_job (
+    id             TEXT PRIMARY KEY,
+    status         TEXT,
+    payload        TEXT,
+    generated_at   TEXT,
+    started_at     TEXT,
+    completed_at   TEXT,
+    error          TEXT,
+    stock_count    INTEGER,
+    analyzed_count INTEGER,
+    attempt_count  INTEGER,
+    template_count INTEGER,
+    total_raw      INTEGER,
+    created_at     TEXT,
+    updated_at     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_job_status ON swing_analysis_job (status, created_at);
+
+  CREATE TABLE IF NOT EXISTS swing_signal (
+    id                TEXT PRIMARY KEY,
+    job_id            TEXT,
+    symbol            TEXT,
+    name              TEXT,
+    price             REAL,
+    change            REAL,
+    change_percent    REAL,
+    volume            REAL,
+    market_cap        REAL,
+    screener_names    TEXT,
+    screener_count    INTEGER,
+    families          TEXT,
+    template_ids      TEXT,
+    source            TEXT,
+    indicators        TEXT,
+    momentum_score    INTEGER,
+    analysis          TEXT,
+    ai_recommendation TEXT,
+    confidence        REAL,
+    target_price      REAL,
+    stop_loss         REAL,
+    current_price     REAL,
+    return_percent    REAL,
+    status            TEXT,
+    last_checked_at   TEXT,
+    posted_at         TEXT,
+    created_at        TEXT,
+    updated_at        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_signal_symbol ON swing_signal (symbol);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_swing_signal_job_symbol ON swing_signal (job_id, symbol);
+
+  -- Plan 09 Phase 7 (admin long-lived datasets, SQLite-first readers): mirrors
+  -- for admin announcements / alerts / holdings (raw Postgres tables are
+  -- "Alert" and "Transaction" -- no @@map -- so sinks use quoted sql).
+  -- user_id + portfolio_name on transaction are DISPLAY-ONLY denormalized
+  -- columns hydrated from the portfolio join (never pushed by the sink).
+  -- ai_config / user_session are MASKED mirrors (value/token never stored).
+  -- Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS admin_announcement (
+    id         INTEGER PRIMARY KEY,
+    title      TEXT,
+    message    TEXT,
+    type       TEXT,
+    target     TEXT,
+    is_active  INTEGER,
+    starts_at  TEXT,
+    ends_at    TEXT,
+    link       TEXT,
+    created_by INTEGER,
+    created_at TEXT,
+    updated_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_announcement_active ON admin_announcement (is_active, starts_at, ends_at);
+  CREATE INDEX IF NOT EXISTS idx_admin_announcement_target ON admin_announcement (target);
+  CREATE TABLE IF NOT EXISTS alert (
+    id           TEXT PRIMARY KEY,
+    user_id      INTEGER,
+    type         TEXT,
+    symbol       TEXT,
+    condition    TEXT,
+    triggered    INTEGER,
+    triggered_at TEXT,
+    seen         INTEGER,
+    created_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_alert_created ON alert (created_at);
+  CREATE INDEX IF NOT EXISTS idx_alert_triggered ON alert (triggered);
+  CREATE TABLE IF NOT EXISTS transaction (
+    id             TEXT PRIMARY KEY,
+    portfolio_id   TEXT,
+    user_id        INTEGER,
+    portfolio_name TEXT,
+    trade_date     TEXT,
+    ticker         TEXT,
+    side           TEXT,
+    quantity       REAL,
+    price          REAL,
+    fees           REAL,
+    notes          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON transaction (portfolio_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_user ON transaction (user_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON transaction (trade_date);
+  CREATE TABLE IF NOT EXISTS ai_config (
+    id         TEXT PRIMARY KEY,
+    key        TEXT,
+    is_set     INTEGER,
+    category   TEXT,
+    updated_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS user_session (
+    id             TEXT PRIMARY KEY,
+    user_id        INTEGER,
+    is_active      INTEGER,
+    expires_at     TEXT,
+    last_active_at TEXT,
+    created_at     TEXT,
+    user_agent     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_session_user ON user_session (user_id);
+  CREATE INDEX IF NOT EXISTS idx_user_session_last_active ON user_session (last_active_at);
+
+  -- Plan 09 Phase 1 (durable sync ledger): db-health "recent syncs" read
+  -- survives restarts because real sync activity is recorded here, not just
+  -- in the in-memory ring. Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS sync_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           TEXT NOT NULL,
+    direction    TEXT NOT NULL,
+    trigger      TEXT,
+    leader_gated INTEGER DEFAULT 1,
+    rows_synced  INTEGER DEFAULT 0,
+    duration_ms  INTEGER DEFAULT 0,
+    error        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_history_at ON sync_history (at);
+
+  -- Plan 09 Phase 4 (one-way push outbox): SQLite mirror write methods that
+  -- must reach Prisma (symbols, daily_price, corporate_action, chartink)
+  -- record rows here. The 6h probe push drains them to Prisma via
+  -- lib/sqlitePushSinks.ts. row_id is a per-table natural key, op is
+  -- 'upsert' | 'delete'. Comments must stay semicolon-free (schema split).
+  CREATE TABLE IF NOT EXISTS _sync_outbox (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name   TEXT NOT NULL,
+    row_id       TEXT NOT NULL,
+    op           TEXT NOT NULL DEFAULT 'upsert',
+    at           TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_outbox_table ON _sync_outbox (table_name);
 `;
 
 // ---------------------------------------------------------------------------
@@ -964,6 +1310,62 @@ function ensureNseColumns(db: any): void {
 }
 
 /**
+ * Plan 09 Phase 6: extend the recommendation-mirror columns so the jobs
+ * write-through helpers + 6h push can round-trip FULL rows (the v3.19-era
+ * mirror schema predates fields like successfulScreeners / aiTokensUsed).
+ * Idempotent + `PRAGMA table_info`-guarded like ensureControlColumns.
+ * SQLite-only — NO Prisma schema change / NO migration.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureRecommendationColumns(db: any): void {
+  const ADD: Record<string, string[]> = {
+    daily_recommendation_run: [
+      "successful_screeners INTEGER",
+      "total_stocks INTEGER",
+      "ai_failed INTEGER",
+      "error_message TEXT",
+      "created_at TEXT",
+      "completed_at TEXT",
+    ],
+    daily_recommendation_stock: [
+      "tracker_id TEXT",
+      "ai_tokens_used INTEGER",
+      "ai_execution_ms INTEGER",
+      "ai_success INTEGER",
+      "ai_error TEXT",
+    ],
+  };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addIfMissing = (table: string, col: string, ddl: string): void => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = db.exec(`PRAGMA table_info(${table})`);
+      if (!res || !res.length) return;
+      const existing = new Set<string>();
+      const vals: unknown[][] = res[0].values;
+      const nameIdx = res[0].columns.indexOf("name");
+      vals.forEach((row) => {
+        if (nameIdx >= 0) existing.add(String((row as string[])[nameIdx]));
+      });
+      if (!existing.has(col)) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    };
+    for (const [table, cols] of Object.entries(ADD)) {
+      for (const c of cols) {
+        const colName = c.split(" ")[0];
+        addIfMissing(table, colName, c);
+      }
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: ensureRecommendationColumns failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize the SQLite backup database. Called once from instrumentation.ts
  * or on first request. Non-blocking -- sync happens in background.
  */
@@ -986,6 +1388,9 @@ export async function initSqliteBackup(): Promise<void> {
     // v3.28.0: add the NSE-store columns older mirror DBs are missing
     // (idempotent, SQLite-only).
     ensureNseColumns(db);
+    // Plan 09 Phase 6: add the recommendation/job columns older mirror DBs
+    // are missing (idempotent, SQLite-only).
+    ensureRecommendationColumns(db);
 
     state.ready = true;
     _instance = createFallback(db);
@@ -1001,7 +1406,12 @@ export async function initSqliteBackup(): Promise<void> {
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
     // after the sync completes so the dashboard reflects the latest state.
-    await syncFromPrisma().catch((err) => {
+    // Plan 09 Phase 2: boot hydration runs on EVERY instance (leaderBypass) —
+    // pulling Prisma → SQLite is read-only on Prisma. The plan-limit breaker
+    // still applies (graceful skip during a hold; retried at the 6h probe).
+    // skipReconcile: boot NEVER pushes SQLite → Prisma (that is the 6h probe /
+    // admin force job).
+    await syncFromPrisma({ reason: "boot", skipReconcile: true, leaderBypass: true }).catch((err) => {
       logger.error({ msg: "SQLite initial sync failed", error: err instanceof Error ? err.message : String(err) });
     });
     try {
@@ -1092,6 +1502,10 @@ function startRecoveryProbe(): void {
         logger.info({ msg: "SQLite: Prisma recovered, triggering re-sync" });
       }
       await syncFromPrisma();
+
+      // Plan 09 Phase 4: drain _sync_outbox one-way to Prisma on the same
+      // probe cadence (leader + breaker gated inside pushSqliteToPrisma).
+      await pushSqliteToPrisma();
     } catch (err) {
       if (isDbUnavailableError(err)) {
         state.prismaAvailable = false;
@@ -2188,9 +2602,16 @@ export async function flushNseToPrisma(): Promise<Record<string, number>> {
 /**
  * Start the periodic ~60s NSE-store promote timer (leader + breaker gated).
  * Returns a stop handle for graceful shutdown / tests.
+ *
+ * v3.30.0 Plan 09 Phase 5: the NSE→Prisma promote is now driven by the 6h
+ * push engine (pushSqliteToPrisma) draining the outbox, so this timer is
+ * OFF by default — only starts when NSE_PROMOTE_ENABLED === "1".
  */
 export function startNsePromoteFlush(): () => void {
   let timer: ReturnType<typeof setInterval> | null = null;
+  if (process.env.NSE_PROMOTE_ENABLED !== "1") {
+    return () => stopNsePromoteFlush();
+  }
   if (state.nsePromoteTimer) {
     clearInterval(state.nsePromoteTimer);
     state.nsePromoteTimer = null;
@@ -2231,22 +2652,40 @@ export function stopNsePromoteFlush(): void {
  * Leader gate (v3.22.0): when called with `opts.force`, always sync (used by
  * the admin "Sync Now" button / manual trigger). Otherwise, only the instance
  * that holds the `sqlite-sync` leader lock performs the sync, so a
- * multi-instance deploy doesn't run N concurrent full synchs at boot. If the
- * DB is unavailable the gate degrades (leader.ts returns true) and sync
- * proceeds only as far as individual tables allow.
+ * multi-instance deploy doesn't run N concurrent full synchs at boot — EXCEPT
+ * Plan 09 Phase 2 boot hydration (`leaderBypass`), the ONLY Prisma->SQLite
+ * flow (spec v2): it runs on EVERY instance (pulling is read-only on Prisma,
+ * so cold-start bursts each hydrate their own mirror instead of waiting on the
+ * single leader). `skipReconcile` makes boot never perform the SQLite->Prisma
+ * control-plane push. If the DB is unavailable the gate degrades (leader.ts
+ * returns true) and sync proceeds only as far as individual tables allow.
  */
-export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> {
+export async function syncFromPrisma(opts?: {
+  force?: boolean;
+  reason?: SyncTrigger;
+  // Plan 09 Phase 2: `leaderBypass` = boot hydration — the ONLY Prisma->SQLite
+  // flow per spec v2 — runs on EVERY instance (pulling is read-only on Prisma,
+  // so cold-start bursts each hydrate their own mirror instead of waiting on
+  // the single sqlite-sync leader). `skipReconcile` = boot never runs the
+  // SQLite->Prisma control-plane push (that is the 6h probe / admin force job).
+  skipReconcile?: boolean;
+  leaderBypass?: boolean;
+}): Promise<void> {
   if (!state.db || state.syncing) return;
   if (!opts?.force) {
     // lazy require to keep the module graph light at init (avoids a hard cycle)
     const leader = await import("@/lib/services/leader");
-    const isSyncLeader = await leader.isLeader("sqlite-sync");
-    if (!isSyncLeader) {
-      logger.info({
-        msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
-        self: leader.LEADER_SELF,
-      });
-      return;
+    // Plan 09 Phase 2: the single-leader gate applies ONLY to probe/periodic
+    // syncs — boot hydration (leaderBypass) pulls on every instance.
+    if (!opts?.leaderBypass) {
+      const isSyncLeader = await leader.isLeader("sqlite-sync");
+      if (!isSyncLeader) {
+        logger.info({
+          msg: "SQLite sync skipped — this instance is not the sqlite-sync leader",
+          self: leader.LEADER_SELF,
+        });
+        return;
+      }
     }
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
     // (account on hold / DB down), do NOT touch Prisma at all — the SQLite
@@ -2279,7 +2718,12 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     // Prisma — this is the ONLY Prisma write to these tables, per the user
     // directive ("only write to prisma during the 6h sync job"). Then the
     // pulls below re-sync Prisma→SQLite with the reconciled values (idempotent).
-    await reconcileControlToPrisma(db);
+    // Plan 09 Phase 2: this SQLite→Prisma push runs only when NOT
+    // `skipReconcile` (probe/admin/force). Boot hydration never pushes — every
+    // instance pulls; the mirror is filled from Prisma (read-only on Prisma).
+    if (!opts?.skipReconcile) {
+      await reconcileControlToPrisma(db, opts?.reason ?? "boot", !opts?.leaderBypass && !opts?.force);
+    }
 
     // --- Sync daily price snapshots (latest row per ticker) ---
     totalRows += await syncTable(db, "daily_price_snapshot", async () => {
@@ -2319,18 +2763,24 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
         take: 30,
       });
       return {
-        columns: "id, run_date, status, total_screeners, unique_stocks, ai_processed, execution_time_ms, triggered_by, metadata",
-        placeholders: "?,?,?,?,?,?,?,?,?",
+        columns: "id, run_date, status, total_screeners, successful_screeners, total_stocks, unique_stocks, ai_processed, ai_failed, execution_time_ms, error_message, triggered_by, metadata, created_at, completed_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: runs.map((r) => [
           r.id,
           r.runDate?.toISOString() ?? null,
           r.status,
           r.totalScreeners,
+          r.successfulScreeners,
+          r.totalStocks,
           r.uniqueStocks,
           r.aiProcessed,
+          r.aiFailed,
           r.executionTimeMs,
+          r.errorMessage ?? null,
           r.triggeredBy ?? null,
           r.metadata ? JSON.stringify(r.metadata) : null,
+          r.createdAt?.toISOString() ?? null,
+          r.completedAt?.toISOString() ?? null,
         ]),
       };
     });
@@ -2347,11 +2797,12 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
         orderBy: { symbol: "asc" },
       });
       return {
-        columns: "id, run_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning, risk_factors, screener_attribution, screener_count, created_at",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, run_id, tracker_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning, risk_factors, screener_attribution, screener_count, ai_tokens_used, ai_execution_ms, ai_success, ai_error, created_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: stocks.map((s) => [
           s.id,
           s.runId,
+          s.trackerId ?? null,
           s.symbol,
           s.price,
           s.change,
@@ -2366,6 +2817,10 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
           s.riskFactors != null ? JSON.stringify(s.riskFactors) : null,
           s.screenerAttribution != null ? JSON.stringify(s.screenerAttribution) : null,
           s.screenerCount,
+          s.aiTokensUsed,
+          s.aiExecutionMs,
+          s.aiSuccess ? 1 : 0,
+          s.aiError ?? null,
           s.createdAt?.toISOString() ?? null,
         ]),
       };
@@ -2381,8 +2836,8 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
         take: 2000,
       });
       return {
-        columns: "id, symbol, company_name, series, subject, action_type, ex_date, record_date, face_value, ratio, dividend_per_share, dividend_yield, source",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, symbol, company_name, series, subject, action_type, ex_date, record_date, face_value, ratio, dividend_per_share, dividend_yield, source, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: actions.map((a) => [
           a.id,
           a.symbol,
@@ -2397,6 +2852,8 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
           a.dividendPerShare != null ? Number(a.dividendPerShare) : null,
           a.dividendYield != null ? Number(a.dividendYield) : null,
           a.source,
+          a.createdAt?.toISOString() ?? null,
+          a.updatedAt?.toISOString() ?? null,
         ]),
       };
     });
@@ -2573,6 +3030,132 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
       };
     });
 
+    // --- Sync admin announcements (recent 250, newest first) ---
+    totalRows += await syncTable(db, "admin_announcement", async () => {
+      const rows = await prisma.adminAnnouncement.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 250,
+      });
+      return {
+        columns: "id, title, message, type, target, is_active, starts_at, ends_at, link, created_by, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((a) => [
+          a.id,
+          a.title,
+          a.message,
+          a.type,
+          a.target,
+          a.isActive ? 1 : 0,
+          a.startsAt?.toISOString() ?? null,
+          a.endsAt?.toISOString() ?? null,
+          a.link,
+          a.createdBy,
+          a.createdAt?.toISOString() ?? null,
+          a.updatedAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync alerts (recent 100, newest first) ---
+    totalRows += await syncTable(db, "alert", async () => {
+      const rows = await prisma.alert.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+      return {
+        columns: "id, user_id, type, symbol, condition, triggered, triggered_at, seen, created_at",
+        placeholders: "?,?,?,?,?,?,?,?,?",
+        rows: rows.map((a) => [
+          a.id,
+          a.userId,
+          a.type,
+          a.symbol,
+          a.condition != null ? JSON.stringify(a.condition) : null,
+          a.triggered ? 1 : 0,
+          a.triggeredAt?.toISOString() ?? null,
+          a.seen ? 1 : 0,
+          a.createdAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync transactions (recent 2000, newest first; portfolio denormalized:
+    //     user_id + portfolio_name are display-only — never pushed to Prisma) ---
+    totalRows += await syncTable(db, "transaction", async () => {
+      const rows = await prisma.transaction.findMany({
+        orderBy: { tradeDate: "desc" },
+        take: 2000,
+        include: { portfolio: { select: { id: true, name: true, userId: true } } },
+      });
+      return {
+        columns: "id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side, quantity, price, fees, notes",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((t) => [
+          t.id,
+          t.portfolioId,
+          t.portfolio.userId,
+          t.portfolio.name,
+          t.tradeDate?.toISOString() ?? null,
+          t.ticker,
+          t.side,
+          t.quantity != null ? Number(t.quantity) : null,
+          t.price != null ? Number(t.price) : null,
+          t.fees != null ? Number(t.fees) : null,
+          t.notes ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync user sessions (recent 100; sessionToken is NEVER mirrored) ---
+    totalRows += await syncTable(db, "user_session", async () => {
+      const rows = await prisma.userSession.findMany({
+        orderBy: { lastActiveAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          userId: true,
+          isActive: true,
+          expiresAt: true,
+          lastActiveAt: true,
+          createdAt: true,
+          userAgent: true,
+        },
+      });
+      return {
+        columns: "id, user_id, is_active, expires_at, last_active_at, created_at, user_agent",
+        placeholders: "?,?,?,?,?,?,?",
+        rows: rows.map((s) => [
+          s.id,
+          s.userId,
+          s.isActive ? 1 : 0,
+          s.expiresAt?.toISOString() ?? null,
+          s.lastActiveAt?.toISOString() ?? null,
+          s.createdAt?.toISOString() ?? null,
+          s.userAgent ?? null,
+        ]),
+      };
+    });
+
+    // --- Sync ai_config (masked Secret row: value/metadata/hint NEVER stored;
+    //     is_set mirrors Secret.isActive) ---
+    totalRows += await syncTable(db, "ai_config", async () => {
+      const row = await prisma.secret.findFirst({ where: { name: "ai_config" } });
+      if (!row) return null;
+      return {
+        columns: "id, key, is_set, category, updated_at",
+        placeholders: "?,?,?,?,?",
+        rows: [
+          [
+            row.id,
+            row.name,
+            row.isActive ? 1 : 0,
+            row.type,
+            row.updatedAt?.toISOString() ?? null,
+          ],
+        ],
+      };
+    });
+
     // Update sync metadata
     const now = new Date().toISOString();
     db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES ('last_synced_at', ?)", [now]);
@@ -2582,6 +3165,15 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     state.lastSyncAt = now;
     state.syncHistory.push({ at: now, rowsSynced: totalRows, durationMs });
     if (state.syncHistory.length > 20) state.syncHistory.shift();
+
+    // Plan 09 Phase 1: durable row (direction/trigger/leader-gated metadata).
+    recordSyncHistory(db, {
+      direction: "prisma_to_sqlite",
+      trigger: opts?.reason ?? "boot",
+      leaderGated: !opts?.leaderBypass && !opts?.force,
+      rowsSynced: totalRows,
+      durationMs,
+    });
 
     // Refresh the in-memory size probe once per hydration (cheap: only runs on
     // deploy/recovery, never on the read path).
@@ -2601,6 +3193,16 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
     const errorMsg = err instanceof Error ? err.message : String(err);
     state.syncHistory.push({ at: new Date().toISOString(), rowsSynced: totalRows, durationMs, error: errorMsg });
     if (state.syncHistory.length > 20) state.syncHistory.shift();
+
+    // Plan 09 Phase 1: durable error row (state.db — `db` is scoped to the try).
+    recordSyncHistory(state.db, {
+      direction: "prisma_to_sqlite",
+      trigger: opts?.reason ?? "boot",
+      leaderGated: !opts?.leaderBypass && !opts?.force,
+      rowsSynced: totalRows,
+      durationMs,
+      error: errorMsg,
+    });
     logger.error({ msg: "SQLite: sync failed", error: errorMsg });
   } finally {
     state.syncing = false;
@@ -2613,8 +3215,14 @@ export async function syncFromPrisma(opts?: { force?: boolean }): Promise<void> 
 // Pushes the SQLite-only daemon writes into Prisma. Called ONLY from the 6h
 // `syncFromPrisma` job (leader-gated), per the user's "write to prisma only
 // during the 6h sync" directive. Non-fatal — a failure never fails the sync.
-async function reconcileControlToPrisma(db: Database): Promise<void> {
+async function reconcileControlToPrisma(
+  db: Database,
+  trigger: SyncTrigger = "boot",
+  leaderGated = true,
+): Promise<void> {
   if (!db) return;
+  const reconcileStart = Date.now();
+  let rowsSynced = 0;
   try {
     // --- Worker status heartbeats (few rows per instance) ---
     const wsRes = db.exec("SELECT * FROM worker_status");
@@ -2651,6 +3259,7 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
             memoryUsage: obj.memory_usage != null ? Number(obj.memory_usage) : undefined,
           },
         });
+        rowsSynced++;
       }
     }
 
@@ -2673,6 +3282,7 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
         if (obj.failure_count != null) data.failureCount = Number(obj.failure_count);
         if (Object.keys(data).length) {
           await prisma.cronJob.updateMany({ where: { id }, data });
+          rowsSynced++;
         }
       }
     }
@@ -2696,14 +3306,433 @@ async function reconcileControlToPrisma(db: Database): Promise<void> {
         if (obj.error != null) patch.error = String(obj.error);
         if (obj.assigned_to) patch.assignedTo = String(obj.assigned_to);
         await prisma.workerTask.updateMany({ where: { id }, data: patch });
+        rowsSynced++;
       }
     }
+
+    // Plan 09 Phase 1: durable success row for this SQLite->Prisma push.
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger,
+      leaderGated,
+      rowsSynced,
+      durationMs: Date.now() - reconcileStart,
+    });
   } catch (err) {
     logger.warn({
       msg: "SQLite: reconcileControlToPrisma failed",
       error: err instanceof Error ? err.message : String(err),
     });
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger,
+      leaderGated,
+      rowsSynced,
+      durationMs: Date.now() - reconcileStart,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sync-history ledger (Plan 09 Phase 1)
+// ---------------------------------------------------------------------------
+
+/** Append one durable row to `sync_history` and prune to the last 100 rows.
+ *  Never throws — the ledger is best-effort and must not break a sync. */
+export function recordSyncHistory(db: Database | null | undefined, rec: SyncHistoryInput): void {
+  if (!db) return;
+  try {
+    db.run(
+      "INSERT INTO sync_history (at, direction, trigger, leader_gated, rows_synced, duration_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        new Date().toISOString(),
+        rec.direction,
+        rec.trigger,
+        rec.leaderGated === false ? 0 : 1,
+        rec.rowsSynced ?? 0,
+        rec.durationMs ?? 0,
+        rec.error ?? null,
+      ],
+    );
+    db.run(
+      "DELETE FROM sync_history WHERE id NOT IN (SELECT id FROM sync_history ORDER BY id DESC LIMIT 100)",
+    );
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: recordSyncHistory failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Read the durable ledger newest-first (LIMIT 10), falling back to the
+ *  in-memory ring when the table is unavailable or empty. */
+function getDurableSyncHistory(db: Database | null | undefined): SyncResult[] {
+  try {
+    if (!db) return [...state.syncHistory].reverse().slice(0, 10);
+    const res = db.exec(
+      "SELECT at, direction, trigger, leader_gated, rows_synced, duration_ms, error FROM sync_history ORDER BY id DESC LIMIT 10",
+    );
+    if (!res.length || !res[0].values.length) return [...state.syncHistory].reverse().slice(0, 10);
+    const cols = res[0].columns;
+    return res[0].values.map((row) => {
+      const o: Record<string, unknown> = {};
+      cols.forEach((c, i) => (o[c] = row[i]));
+      return {
+        at: String(o.at ?? ""),
+        rowsSynced: Number(o.rows_synced ?? 0),
+        durationMs: Number(o.duration_ms ?? 0),
+        error: o.error != null && o.error !== "" ? String(o.error) : undefined,
+        direction: o.direction != null ? (String(o.direction) as SyncDirection) : undefined,
+        trigger: o.trigger != null ? (String(o.trigger) as SyncTrigger) : undefined,
+        leaderGated: o.leader_gated != null ? Number(o.leader_gated) === 1 : undefined,
+      };
+    });
+  } catch {
+    return [...state.syncHistory].reverse().slice(0, 10);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Plan 09 Phase 8: db-health read helpers — durable sync-ledger presence,
+// push-queue (outbox) standing counts, and per-table mirror row counts for
+// the derived-tracker tables. All local reads, zero Prisma, best-effort.
+// Used by GET /api/admin/db-health so the dashboard can show what is queued
+// for the 6-hourly push and exactly which tracker tables are mirrored.
+// ---------------------------------------------------------------------------
+
+const DERIVED_COUNT_TABLES = [
+  "swing_analysis_job",
+  "swing_signal",
+  "recommendation_tracker",
+  "recommendation_status_history",
+  "recommendation_archive",
+  "ai_config",
+  "user_session",
+  "admin_announcement",
+  "alert",
+  "transaction",
+] as const;
+
+/** True when the durable `sync_history` ledger table exists in the mirror.
+ *  Best-effort — false when the DB is not ready or the table is missing. */
+export function hasSyncHistoryTable(): boolean {
+  if (!state.db || !state.ready) return false;
+  try {
+    state.db.exec("SELECT COUNT(*) FROM sync_history");
+    return true; // query succeeded => the table exists (count may be 0)
+  } catch {
+    return false;
+  }
+}
+
+/** Per-table standing counts (+ newest at) of rows waiting in `_sync_outbox`
+ *  for the SQLite -> Prisma push. Best-effort: `{}` when unavailable. */
+export function getOutboxPending(): Record<string, { pending: number; lastAt?: string }> {
+  if (!state.db || !state.ready) return {};
+  const _start = performance.now();
+  try {
+    const rows = state.db.exec("SELECT table_name, at FROM _sync_outbox");
+    if (!rows.length) {
+      recordSqliteRead("getOutboxPending", _start, 0, false);
+      return {};
+    }
+    const cols = rows[0].columns;
+    const nameIdx = cols.indexOf("table_name");
+    const atIdx = cols.indexOf("at");
+    if (nameIdx < 0) {
+      recordSqliteRead("getOutboxPending", _start, 0, false);
+      return {};
+    }
+    const out: Record<string, { pending: number; lastAt?: string }> = {};
+    for (const row of rows[0].values) {
+      const name = String(row[nameIdx] ?? "");
+      if (!name) continue;
+      if (!out[name]) out[name] = { pending: 0 };
+      out[name].pending += 1;
+      const at = atIdx >= 0 && row[atIdx] != null ? String(row[atIdx]) : undefined;
+      if (at && (!out[name].lastAt || at > out[name].lastAt)) out[name].lastAt = at;
+    }
+    recordSqliteRead("getOutboxPending", _start, Object.keys(out).length, true);
+    return out;
+  } catch {
+    recordSqliteRead("getOutboxPending", _start, 0, false);
+    return {};
+  }
+}
+
+/** Per-table row counts for the derived-tracker mirror tables (counts, not
+ *  rows — distinct from the LIMIT-capped getSqliteDerived feed rows).
+ *  Best-effort: a table that is missing or fails resolves to 0. */
+export function getSqliteDerivedCounts(): Record<string, number> {
+  if (!state.db || !state.ready) return {};
+  const _start = performance.now();
+  const out: Record<string, number> = {};
+  for (const t of DERIVED_COUNT_TABLES) {
+    try {
+      const res = state.db.exec(`SELECT COUNT(*) FROM ${t}`);
+      out[t] = Number(res.length && res[0].values.length ? res[0].values[0][0] : 0);
+    } catch {
+      out[t] = 0;
+    }
+  }
+  recordSqliteRead("getSqliteDerivedCounts", _start, DERIVED_COUNT_TABLES.length, true);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Plan 09 Phase 4: SQLite -> Prisma one-way push (sync outbox)
+// ---------------------------------------------------------------------------
+
+/** Append one outbox row for a changed mirror row. Best-effort, never throws:
+ *  the mirror write itself must not fail because bookkeeping failed. */
+function recordSyncOutbox(
+  db: Database | null | undefined,
+  tableName: string,
+  rowId: string,
+  op: "upsert" | "delete" = "upsert",
+): void {
+  if (!db || !state.ready) return;
+  try {
+    db.run("INSERT INTO _sync_outbox (table_name, row_id, op, at) VALUES (?, ?, ?, ?)", [
+      tableName,
+      rowId,
+      op,
+      new Date().toISOString(),
+    ]);
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: recordSyncOutbox failed",
+      tableName,
+      rowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// Plan 09 Phase 6: value normalisers shared by the write-through helpers.
+// Dates must never be bound raw (`String(Date)` yields locale text — same
+// class of bug as the v3.30.0 upsertCronJob fix); JSON-ish values are stored
+// as TEXT (or NULL).
+function toIsoVal(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  return String(v);
+}
+function toJsonVal(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  return JSON.stringify(v);
+}
+
+/** Rehydrate a mirror row (snake_case DDL columns) into the Prisma-shaped
+ *  camelCase contract the write-through helpers AND the swap-site services
+ *  expect: date columns become `Date` instances, JSON columns become parsed
+ *  objects, and `alias` maps DDL columns whose names differ from the Prisma
+ *  fields (e.g. `change_val` -> `change`). Inverse of the write helpers, so a
+ *  full row read here can be merged and re-upserted losslessly. */
+function rehydrateRow(
+  cols: string[],
+  vals: unknown[],
+  opts: {
+    dateKeys: string[];
+    jsonKeys: string[];
+    alias?: Record<string, string>;
+  },
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  cols.forEach((c, i) => {
+    const key = opts.alias?.[c] ?? c;
+    const v = vals[i];
+    if (v == null) {
+      out[key] = v;
+      return;
+    }
+    if (opts.dateKeys.includes(c)) {
+      out[key] = new Date(String(v));
+      return;
+    }
+    if (opts.jsonKeys.includes(c)) {
+      try {
+        out[key] = typeof v === "string" ? JSON.parse(v) : v;
+      } catch {
+        out[key] = v;
+      }
+      return;
+    }
+    out[key] = v;
+  });
+  return out;
+}
+
+const OUTBOX_DRAIN_LIMIT = 50_000;
+const OUTBOX_DELETE_CHUNK = 200;
+const OUTBOX_TABLES = [
+  "symbols",
+  "daily_price",
+  "corporate_action",
+  "chartink_screener_result",
+  // Plan 09 Phase 6 — jobs write SQLite-first; promoted by the id-keyed sinks
+  // in lib/sqlitePushSinks.ts (pushByIdUpsert).
+  "daily_recommendation_run",
+  "daily_recommendation_stock",
+  "recommendation_tracker",
+  "recommendation_status_history",
+  "recommendation_archive",
+  "swing_analysis_job",
+  "swing_signal",
+  // Plan 09 Phase 7 — admin long-lived datasets (announcements/alerts/holdings)
+  // write SQLite-first too; promoted by the id-keyed sinks with quoted raw
+  // Postgres table names ("Alert" / "Transaction" have no @@map).
+  "admin_announcement",
+  "alert",
+  "transaction",
+] as const;
+
+type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
+
+/** Read pending outbox rows oldest-first, latest-op-wins per (table, row_id).
+ *  Only the push-eligible mirror tables are returned. */
+function drainSyncOutbox(db: Database): OutboxItem[] {
+  try {
+    const res = db.exec(
+      "SELECT table_name, row_id, op FROM _sync_outbox ORDER BY id ASC LIMIT ?",
+      [OUTBOX_DRAIN_LIMIT],
+    );
+    if (!res.length || !res[0].values.length) return [];
+    const cols = res[0].columns;
+    const iTable = cols.indexOf("table_name");
+    const iRow = cols.indexOf("row_id");
+    const iOp = cols.indexOf("op");
+    const latest = new Map<string, OutboxItem>();
+    for (const row of res[0].values) {
+      const tableName = String(row[iTable] ?? "");
+      if (!(OUTBOX_TABLES as readonly string[]).includes(tableName)) continue;
+      const rowId = String(row[iRow] ?? "");
+      const op: OutboxItem["op"] = String(row[iOp] ?? "upsert") === "delete" ? "delete" : "upsert";
+      latest.set(`${tableName}\u0000${rowId}`, { tableName, rowId, op });
+    }
+    return [...latest.values()];
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: drainSyncOutbox failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+/** Delete the drained outbox rows for one table (chunked so bound params stay
+ *  well under sql.js parameter limits for large drains). */
+function deleteSyncOutboxRows(db: Database, tableName: string, rowIds: string[]): void {
+  if (!rowIds.length) return;
+  for (let i = 0; i < rowIds.length; i += OUTBOX_DELETE_CHUNK) {
+    const chunk = rowIds.slice(i, i + OUTBOX_DELETE_CHUNK);
+    const placeholders = chunk.map(() => "?").join(", ");
+    db.run(`DELETE FROM _sync_outbox WHERE row_id IN (${placeholders}) AND table_name = ?`, [
+      ...chunk,
+      tableName,
+    ]);
+  }
+}
+
+/** In-flight push promise. Module-scope so every concurrent caller (and every
+ *  module graph copy in Next.js dev) shares one drain at a time. */
+let sqlitePushInFlight: Promise<PushSqliteToPrismaResult | null> | null = null;
+
+export type PushSqliteToPrismaResult = {
+  ran: boolean;
+  synced: number;
+  failed: number;
+  errors: string[];
+};
+
+/**
+ * Plan 09 Phase 4: one-way SQLite -> Prisma push engine. Drains `_sync_outbox`
+ * through lib/sqlitePushSinks.ts under the `sqlite-sync` leader lock and the
+ * plan-limit breaker guard. Called from every periodic probe tick (6h). Sinks
+ * are idempotent, so a failed table keeps its outbox rows and is retried next
+ * cycle; successful tables are removed immediately.
+ *
+ * Plan 09 Phase 8: optional `opts` — `reason` is recorded verbatim in the
+ * durable sync_history ledger (default "probe"), and `leaderGate: false`
+ * bypasses the `sqlite-sync` leader lock so an admin "Push to Prisma" button
+ * works on whatever instance it is hit (mirrors the `syncFromPrisma({force:
+ * true})` admin-pull override). Readiness + plan-limit breaker guards ALWAYS
+ * stay — only the leader lock is overridable.
+ */
+export async function pushSqliteToPrisma(opts?: {
+  reason?: SyncTrigger;
+  leaderGate?: boolean;
+}): Promise<PushSqliteToPrismaResult | null> {
+  if (sqlitePushInFlight) return sqlitePushInFlight;
+  sqlitePushInFlight = doPushSqliteToPrisma(opts).finally(() => {
+    sqlitePushInFlight = null;
+  });
+  return sqlitePushInFlight;
+}
+
+async function doPushSqliteToPrisma(opts?: {
+  reason?: SyncTrigger;
+  leaderGate?: boolean;
+}): Promise<PushSqliteToPrismaResult | null> {
+  const trigger = opts?.reason ?? "probe";
+  const leaderGate = opts?.leaderGate ?? true;
+  const started = Date.now();
+  if (!state.db || !state.ready || state.syncing) return null;
+  if (isPlanLimitBreakerOpen()) return null;
+  const { isLeader } = await import("@/lib/services/leader");
+  if (leaderGate && !(await isLeader("sqlite-sync"))) return null;
+  const db = state.db;
+
+  const pending = drainSyncOutbox(db);
+  if (!pending.length) {
+    recordSyncHistory(db, {
+      direction: "sqlite_to_prisma",
+      trigger,
+      leaderGated: leaderGate,
+      rowsSynced: 0,
+      durationMs: Date.now() - started,
+    });
+    return { ran: true, synced: 0, failed: 0, errors: [] };
+  }
+
+  const sinks = await import("@/lib/sqlitePushSinks");
+  const byTable = new Map<string, OutboxItem[]>();
+  for (const p of pending) {
+    const list = byTable.get(p.tableName) ?? [];
+    list.push(p);
+    byTable.set(p.tableName, list);
+  }
+
+  const errors: string[] = [];
+  let synced = 0;
+  for (const [tableName, rows] of byTable) {
+    try {
+      const applied = await sinks.pushTable(db, tableName, rows);
+      deleteSyncOutboxRows(
+        db,
+        tableName,
+        rows.map((r) => r.rowId),
+      );
+      synced += applied;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${tableName}: ${msg}`);
+      logger.error({ msg: "SQLite: pushTable failed — outbox retained for retry", tableName, error: msg });
+    }
+  }
+
+  recordSyncHistory(db, {
+    direction: "sqlite_to_prisma",
+    trigger,
+    leaderGated: leaderGate,
+    rowsSynced: synced,
+    durationMs: Date.now() - started,
+    error: errors.length ? errors.join("; ") : undefined,
+  });
+  return { ran: true, synced, failed: errors.length, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -2959,6 +3988,7 @@ function createFallback(db: Database): SqliteFallback {
           now,
         ]);
         stmt.free();
+        recordSyncOutbox(db, "symbols", (row.symbol || "").toUpperCase());
       } catch (err) {
         logger.error({ msg: "SQLite: upsertSymbol failed", symbol: row.symbol, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3008,6 +4038,9 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const b of bars) {
+          recordSyncOutbox(db, "daily_price", JSON.stringify([T, String(b.tradeDate ?? "")]));
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: setDailyPriceBars failed", ticker, n: bars.length, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3087,8 +4120,48 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const r of rows) {
+          recordSyncOutbox(
+            db,
+            "corporate_action",
+            JSON.stringify([
+              sv(r.symbol) ?? "",
+              sv(r.action_type ?? r.actionType) ?? "OTHER",
+              sv(r.ex_date ?? r.exDate),
+            ]),
+          );
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: setCorporateActions failed", n: rows.length, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    deleteCorporateAction(id: number): boolean {
+      if (!db || !id) return false;
+      try {
+        const res = db.exec(
+          "SELECT symbol, action_type, ex_date FROM corporate_action WHERE id = ?",
+          [Number(id)],
+        );
+        if (!res.length || !res[0].values.length) return false;
+        const row = res[0].values[0];
+        const symbol = String(row[0] ?? "");
+        const actionType = String(row[1] ?? "OTHER");
+        const exDate = row[2] ?? null;
+        db.run("DELETE FROM corporate_action WHERE id = ?", [Number(id)]);
+        recordSyncOutbox(
+          db,
+          "corporate_action",
+          JSON.stringify([symbol, actionType, exDate]),
+          "delete",
+        );
+        return true;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteCorporateAction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
       }
     },
 
@@ -3131,6 +4204,13 @@ function createFallback(db: Database): SqliteFallback {
           ]);
         }
         stmt.free();
+        for (const r of rows) {
+          recordSyncOutbox(
+            db,
+            "chartink_screener_result",
+            String(sv(r.id ?? r._id) ?? `${T}:${String(r.symbol ?? r.SYMBOL ?? "").toUpperCase()}`),
+          );
+        }
       } catch (err) {
         logger.error({ msg: "SQLite: replaceChartinkResults failed", templateId, error: err instanceof Error ? err.message : String(err) });
       }
@@ -3157,9 +4237,15 @@ function createFallback(db: Database): SqliteFallback {
     },
 
     // --- Corporate actions ---
-    getCorporateActions(limit = 500): Array<Record<string, unknown>> {
+    getCorporateActions(
+      optsOrLimit: number | { search?: string; limit?: number } = 500,
+    ): Array<Record<string, unknown>> {
       const _start = performance.now();
       try {
+        const opts =
+          typeof optsOrLimit === "number" ? { limit: optsOrLimit } : optsOrLimit ?? {};
+        const limit = opts.limit ?? 500;
+        const search = opts.search?.trim().toUpperCase();
         const rows = db.exec(
           "SELECT * FROM corporate_action ORDER BY ex_date DESC LIMIT ?",
           [limit],
@@ -3169,11 +4255,18 @@ function createFallback(db: Database): SqliteFallback {
           return [];
         }
         const cols = rows[0].columns;
-        const out = rows[0].values.map((row) => {
+        let out = rows[0].values.map((row) => {
           const obj: Record<string, unknown> = {};
           cols.forEach((c, i) => (obj[c] = row[i]));
           return obj;
         });
+        if (search) {
+          out = out.filter(
+            (r) =>
+              String(r.symbol ?? "").toUpperCase().includes(search) ||
+              String(r.company_name ?? "").toUpperCase().includes(search),
+          );
+        }
         recordSqliteRead("getCorporateActions", _start, out.length, true);
         return out;
       } catch {
@@ -3429,10 +4522,1120 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    // ---- Plan 09 Phase 6: write-through helpers (jobs write SQLite-first) -----
+    // Every row is upserted into the mirror and enqueued to `_sync_outbox` so the
+    // 6h push (pushTable → lib/sqlitePushSinks.ts) promotes it to Prisma.
+    // Column names mirror the Prisma models (camelCase input; snake_case DDL).
+
+    upsertDailyRecommendationRun(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO daily_recommendation_run (
+             id, run_date, status, total_screeners, successful_screeners, total_stocks,
+             unique_stocks, ai_processed, ai_failed, execution_time_ms, error_message,
+             triggered_by, metadata, created_at, completed_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            toIsoVal(row.runDate ?? row.run_date ?? now),
+            String(row.status ?? "completed"),
+            Number(row.totalScreeners ?? 0),
+            Number(row.successfulScreeners ?? 0),
+            Number(row.totalStocks ?? 0),
+            Number(row.uniqueStocks ?? 0),
+            Number(row.aiProcessed ?? 0),
+            Number(row.aiFailed ?? 0),
+            row.executionTimeMs != null ? Number(row.executionTimeMs) : null,
+            row.errorMessage != null ? String(row.errorMessage) : null,
+            String(row.triggeredBy ?? "system"),
+            toJsonVal(row.metadata),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.completedAt ?? row.completed_at),
+          ],
+        );
+        recordSyncOutbox(db, "daily_recommendation_run", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertDailyRecommendationRun failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertDailyRecommendationStock(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO daily_recommendation_stock (
+             id, run_id, tracker_id, symbol, price, change_val, change_percent, volume,
+             ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning,
+             risk_factors, screener_attribution, screener_count, ai_tokens_used,
+             ai_execution_ms, ai_success, ai_error, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.runId ?? row.run_id ?? ""),
+            row.trackerId != null ? String(row.trackerId) : null,
+            String(row.symbol ?? "").toUpperCase(),
+            row.price != null ? Number(row.price) : null,
+            row.change != null ? Number(row.change) : null,
+            row.changePercent != null ? Number(row.changePercent) : null,
+            row.volume != null ? Number(row.volume) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.timeHorizon != null ? String(row.timeHorizon) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            Number(row.screenerCount ?? 0),
+            Number(row.aiTokensUsed ?? 0),
+            Number(row.aiExecutionMs ?? 0),
+            row.aiSuccess ? 1 : 0,
+            row.aiError != null ? String(row.aiError) : null,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "daily_recommendation_stock", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertDailyRecommendationStock failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertRecommendationTracker(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_tracker (
+             id, symbol, status, entry_price, current_price, target_price, stop_loss,
+             time_horizon, confidence, ai_recommendation, reasoning, risk_factors,
+             screener_attribution, last_checked_at, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            String(row.status ?? "tracking"),
+            row.entryPrice != null ? Number(row.entryPrice) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.timeHorizon != null ? String(row.timeHorizon) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            toIsoVal(row.lastCheckedAt ?? row.last_checked_at),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_tracker", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertRecommendationTracker failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    appendRecommendationStatusHistory(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        const id = String(row.id ?? "");
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_status_history (
+             id, tracker_id, previous_status, new_status, trigger_source, metadata, created_at
+           ) VALUES (?,?,?,?,?,?,?)`,
+          [
+            id,
+            String(row.trackerId ?? row.tracker_id ?? ""),
+            row.previousStatus != null ? String(row.previousStatus) : null,
+            String(row.newStatus ?? row.new_status ?? ""),
+            String(row.triggerSource ?? row.trigger_source ?? "cron_check"),
+            toJsonVal(row.metadata),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_status_history", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: appendRecommendationStatusHistory failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    insertRecommendationArchive(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_archive (
+             id, symbol, tracker_id, last_run_id, run_date, entry_price, current_price,
+             target_price, stop_loss, category, ai_recommendation, confidence, reasoning,
+             risk_factors, screener_attribution, final_status, return_percent, days_tracked,
+             status_history, archived_reason, archived_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            String(row.trackerId ?? row.tracker_id ?? ""),
+            row.lastRunId != null ? String(row.lastRunId) : null,
+            toIsoVal(row.runDate ?? row.run_date ?? now),
+            row.entryPrice != null ? Number(row.entryPrice) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.category != null ? String(row.category) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            String(row.finalStatus ?? row.final_status ?? "archived"),
+            row.returnPercent != null ? Number(row.returnPercent) : null,
+            Number(row.daysTracked ?? 0),
+            toJsonVal(row.statusHistory),
+            String(row.archivedReason ?? row.archived_reason ?? "age_360d"),
+            toIsoVal(row.archivedAt ?? row.archived_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_archive", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: insertRecommendationArchive failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertSwingAnalysisJob(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO swing_analysis_job (
+             id, status, payload, generated_at, started_at, completed_at, error,
+             stock_count, analyzed_count, attempt_count, template_count, total_raw,
+             created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.status ?? "pending"),
+            toJsonVal(row.payload),
+            toIsoVal(row.generatedAt ?? row.generated_at),
+            toIsoVal(row.startedAt ?? row.started_at),
+            toIsoVal(row.completedAt ?? row.completed_at),
+            row.error != null ? String(row.error) : null,
+            row.stockCount != null ? Number(row.stockCount) : null,
+            row.analyzedCount != null ? Number(row.analyzedCount) : null,
+            row.attemptCount != null ? Number(row.attemptCount) : null,
+            row.templateCount != null ? Number(row.templateCount) : null,
+            row.totalRaw != null ? Number(row.totalRaw) : null,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "swing_analysis_job", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertSwingAnalysisJob failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertSwingSignal(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO swing_signal (
+             id, job_id, symbol, name, price, change, change_percent, volume, market_cap,
+             screener_names, screener_count, families, template_ids, source, indicators,
+             momentum_score, analysis, ai_recommendation, confidence, target_price, stop_loss,
+             current_price, return_percent, status, last_checked_at, posted_at, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.jobId ?? row.job_id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            row.name != null ? String(row.name) : null,
+            row.price != null ? Number(row.price) : null,
+            row.change != null ? Number(row.change) : null,
+            row.changePercent != null ? Number(row.changePercent) : null,
+            row.volume != null ? Number(row.volume) : null,
+            row.marketCap != null ? Number(row.marketCap) : null,
+            toJsonVal(row.screenerNames),
+            row.screenerCount != null ? Number(row.screenerCount) : null,
+            toJsonVal(row.families),
+            toJsonVal(row.templateIds),
+            String(row.source ?? "chartink"),
+            toJsonVal(row.indicators),
+            row.momentumScore != null ? Number(row.momentumScore) : null,
+            toJsonVal(row.analysis),
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.returnPercent != null ? Number(row.returnPercent) : null,
+            String(row.status ?? "tracking"),
+            toIsoVal(row.lastCheckedAt ?? row.last_checked_at),
+            toIsoVal(row.postedAt ?? row.posted_at),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "swing_signal", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertSwingSignal failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    // ---- Plan 09 Phase 6: rec/swing mirror reads + deletes ----
+    // Reads return full Prisma-shaped camelCase rows (rehydrateRow — the
+    // inverse of the write helpers) so swap-site services can merge & re-upsert
+    // losslessly; deletes remove mirror rows AND enqueue "delete" outbox ops so
+    // the 6h push prunes the Prisma side too.
+
+    getRecommendationStocks(runId: string): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db || !runId) {
+        recordSqliteRead("getRecommendationStocks", _start, 0, false);
+        return [];
+      }
+      try {
+        const rows = db.exec(
+          "SELECT * FROM daily_recommendation_stock WHERE run_id = ? ORDER BY symbol ASC",
+          [runId],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getRecommendationStocks", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["created_at"],
+            jsonKeys: ["risk_factors", "screener_attribution"],
+            alias: {
+              run_id: "runId",
+              tracker_id: "trackerId",
+              change: "change",
+              change_percent: "changePercent",
+              ai_recommendation: "aiRecommendation",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              time_horizon: "timeHorizon",
+              risk_factors: "riskFactors",
+              screener_attribution: "screenerAttribution",
+              screener_count: "screenerCount",
+              ai_tokens_used: "aiTokensUsed",
+              ai_execution_ms: "aiExecutionMs",
+              ai_success: "aiSuccess",
+              ai_error: "aiError",
+              created_at: "createdAt",
+            },
+          }),
+        );
+        recordSqliteRead("getRecommendationStocks", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getRecommendationStocks failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getRecommendationStocks", _start, 0, false);
+        return [];
+      }
+    },
+
+    getRecommendationTrackers(opts?: {
+      symbolIn?: string[];
+      status?: string[];
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+        return [];
+      }
+      try {
+        const conds: string[] = [];
+        const params: (string | number)[] = [];
+        if (opts?.symbolIn?.length) {
+          conds.push(`symbol IN (${opts.symbolIn.map(() => "?").join(", ")})`);
+          params.push(...opts.symbolIn);
+        }
+        if (opts?.status?.length) {
+          conds.push(`status IN (${opts.status.map(() => "?").join(", ")})`);
+          params.push(...opts.status);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const rows = db.exec(
+          `SELECT * FROM recommendation_tracker${where} ORDER BY symbol ASC LIMIT ?`,
+          [...params, opts?.limit ?? 500],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["last_checked_at", "created_at", "updated_at"],
+            jsonKeys: ["risk_factors", "screener_attribution"],
+            alias: {
+              entry_price: "entryPrice",
+              current_price: "currentPrice",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              time_horizon: "timeHorizon",
+              ai_recommendation: "aiRecommendation",
+              risk_factors: "riskFactors",
+              screener_attribution: "screenerAttribution",
+              last_checked_at: "lastCheckedAt",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getRecommendationTrackers", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getRecommendationTrackers failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+        return [];
+      }
+    },
+
+    getSwingAnalysisJob(id: string): Record<string, unknown> | null {
+      const _start = performance.now();
+      if (!db || !id) {
+        recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+        return null;
+      }
+      try {
+        const rows = db.exec("SELECT * FROM swing_analysis_job WHERE id = ? LIMIT 1", [id]);
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+          return null;
+        }
+        const cols = rows[0].columns;
+        const out = rehydrateRow(cols, rows[0].values[0], {
+          dateKeys: ["generated_at", "started_at", "completed_at", "created_at", "updated_at"],
+          jsonKeys: ["payload"],
+          alias: {
+            generated_at: "generatedAt",
+            started_at: "startedAt",
+            completed_at: "completedAt",
+            stock_count: "stockCount",
+            analyzed_count: "analyzedCount",
+            attempt_count: "attemptCount",
+            template_count: "templateCount",
+            total_raw: "totalRaw",
+            created_at: "createdAt",
+            updated_at: "updatedAt",
+          },
+        });
+        recordSqliteRead("getSwingAnalysisJob", _start, 1, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingAnalysisJob failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingAnalysisJob", _start, 0, false);
+        return null;
+      }
+    },
+
+    getSwingAnalysisJobs(opts?: {
+      status?: string | string[];
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+        return [];
+      }
+      try {
+        const statusList = Array.isArray(opts?.status)
+          ? opts!.status
+          : [opts?.status ?? "running"];
+        const limit = opts?.limit ?? 100;
+        const statusWhere =
+          statusList.length === 1
+            ? "status = ?"
+            : `status IN (${statusList.map(() => "?").join(", ")})`;
+        const rows = db.exec(
+          `SELECT * FROM swing_analysis_job WHERE ${statusWhere} ORDER BY created_at ASC LIMIT ?`,
+          [...statusList, limit],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["generated_at", "started_at", "completed_at", "created_at", "updated_at"],
+            jsonKeys: ["payload"],
+            alias: {
+              generated_at: "generatedAt",
+              started_at: "startedAt",
+              completed_at: "completedAt",
+              stock_count: "stockCount",
+              analyzed_count: "analyzedCount",
+              attempt_count: "attemptCount",
+              template_count: "templateCount",
+              total_raw: "totalRaw",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getSwingAnalysisJobs", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingAnalysisJobs failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingAnalysisJobs", _start, 0, false);
+        return [];
+      }
+    },
+
+    getSwingSignals(jobId: string): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db || !jobId) {
+        recordSqliteRead("getSwingSignals", _start, 0, false);
+        return [];
+      }
+      try {
+        const rows = db.exec(
+          "SELECT * FROM swing_signal WHERE job_id = ? ORDER BY symbol ASC",
+          [jobId],
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getSwingSignals", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["last_checked_at", "posted_at", "created_at", "updated_at"],
+            jsonKeys: ["screener_names", "families", "template_ids", "indicators", "analysis"],
+            alias: {
+              job_id: "jobId",
+              change_percent: "changePercent",
+              market_cap: "marketCap",
+              screener_names: "screenerNames",
+              screener_count: "screenerCount",
+              template_ids: "templateIds",
+              momentum_score: "momentumScore",
+              ai_recommendation: "aiRecommendation",
+              target_price: "targetPrice",
+              stop_loss: "stopLoss",
+              current_price: "currentPrice",
+              return_percent: "returnPercent",
+              last_checked_at: "lastCheckedAt",
+              posted_at: "postedAt",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getSwingSignals", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingSignals failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingSignals", _start, 0, false);
+        return [];
+      }
+    },
+
+    deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void {
+      if (!db || !runId) return;
+      try {
+        const rows = db.exec(
+          "SELECT id, symbol FROM daily_recommendation_stock WHERE run_id = ?",
+          [runId],
+        );
+        if (!rows.length || !rows[0].values.length) return;
+        const cols = rows[0].columns;
+        const iId = cols.indexOf("id");
+        const iSym = cols.indexOf("symbol");
+        for (const row of rows[0].values) {
+          const symbol = String(row[iSym] ?? "");
+          if (keepSymbols && keepSymbols.length && !keepSymbols.includes(symbol)) continue;
+          const id = String(row[iId] ?? "");
+          if (!id) continue;
+          db.run("DELETE FROM daily_recommendation_stock WHERE id = ?", [id]);
+          recordSyncOutbox(db, "daily_recommendation_stock", id, "delete");
+        }
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteRecommendationStocksByRun failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteRecommendationTracker(trackerId: string): void {
+      if (!db || !trackerId) return;
+      try {
+        db.run("DELETE FROM recommendation_tracker WHERE id = ?", [trackerId]);
+        recordSyncOutbox(db, "recommendation_tracker", trackerId, "delete");
+        const rows = db.exec(
+          "SELECT id FROM recommendation_status_history WHERE tracker_id = ?",
+          [trackerId],
+        );
+        if (rows.length && rows[0].values.length) {
+          const cols = rows[0].columns;
+          const iId = cols.indexOf("id");
+          for (const row of rows[0].values) {
+            const id = String(row[iId] ?? "");
+            if (!id) continue;
+            db.run("DELETE FROM recommendation_status_history WHERE id = ?", [id]);
+            recordSyncOutbox(db, "recommendation_status_history", id, "delete");
+          }
+        }
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteRecommendationTracker failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    // --- Plan 09 Phase 7 — admin long-lived datasets (SQLite-first readers) ---
+
+    getAnnouncements(opts?: {
+      activeOnly?: boolean;
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const limit = Math.min(opts?.limit ?? 250, 1000);
+        const now = new Date().toISOString();
+        let sql = "SELECT * FROM admin_announcement";
+        const params: Array<string | number> = [];
+        if (opts?.activeOnly) {
+          sql +=
+            " WHERE is_active = 1 AND (starts_at IS NULL OR starts_at <= ?)" +
+            " AND (ends_at IS NULL OR ends_at >= ?)";
+          params.push(now, now);
+        }
+        sql += " ORDER BY created_at DESC LIMIT ?";
+        params.push(limit);
+        const rows = db.exec(sql, params);
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["starts_at", "ends_at", "created_at", "updated_at"],
+            jsonKeys: [],
+            alias: {
+              is_active: "isActive",
+              starts_at: "startsAt",
+              ends_at: "endsAt",
+              created_by: "createdBy",
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getAnnouncements failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    upsertAnnouncement(row: Record<string, unknown>): number {
+      if (!db) return 0;
+      try {
+        let id = Number(row.id ?? 0);
+        if (!id) {
+          const res = db.exec(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM admin_announcement",
+          );
+          id = res.length && res[0].values.length ? Number(res[0].values[0][0] ?? 1) : 1;
+        }
+        const now = new Date().toISOString();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        const isActive = (row.isActive ?? row.is_active) ? 1 : 0;
+        db.run(
+          `INSERT INTO admin_announcement (
+             id, title, message, type, target, is_active, starts_at, ends_at,
+             link, created_by, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             title=excluded.title,
+             message=excluded.message,
+             type=excluded.type,
+             target=excluded.target,
+             is_active=excluded.is_active,
+             starts_at=excluded.starts_at,
+             ends_at=excluded.ends_at,
+             link=excluded.link,
+             created_by=excluded.created_by,
+             updated_at=excluded.updated_at`,
+          [
+            id,
+            String(row.title ?? ""),
+            String(row.message ?? ""),
+            String(row.type ?? "info"),
+            String(row.target ?? "all"),
+            isActive,
+            toIso(row.startsAt ?? row.starts_at),
+            toIso(row.endsAt ?? row.ends_at),
+            row.link != null ? String(row.link) : null,
+            Number(row.createdBy ?? row.created_by ?? 0) || null,
+            toIso(row.createdAt ?? row.created_at) ?? now,
+            toIso(row.updatedAt ?? row.updated_at) ?? now,
+          ],
+        );
+        recordSyncOutbox(db, "admin_announcement", String(id), "upsert");
+        return id;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertAnnouncement failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return 0;
+      }
+    },
+
+    deleteAnnouncement(id: number): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM admin_announcement WHERE id = ?", [id]);
+        recordSyncOutbox(db, "admin_announcement", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteAnnouncement failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertAlert(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const id = row.id != null ? String(row.id) : randomUUID();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        db.run(
+          `INSERT INTO alert (
+             id, user_id, type, symbol, condition, triggered, triggered_at,
+             seen, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             user_id=excluded.user_id,
+             type=excluded.type,
+             symbol=excluded.symbol,
+             condition=excluded.condition,
+             triggered=excluded.triggered,
+             triggered_at=excluded.triggered_at,
+             seen=excluded.seen,
+             created_at=excluded.created_at`,
+          [
+            id,
+            row.userId != null ? Number(row.userId) : null,
+            String(row.type ?? ""),
+            row.symbol != null ? String(row.symbol) : null,
+            row.condition != null ? JSON.stringify(row.condition) : null,
+            row.triggered ? 1 : 0,
+            toIso(row.triggeredAt ?? row.triggered_at),
+            row.seen ? 1 : 0,
+            toIso(row.createdAt ?? row.created_at) ?? new Date().toISOString(),
+          ],
+        );
+        recordSyncOutbox(db, "alert", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertAlert failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteAlert(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM alert WHERE id = ?", [String(id)]);
+        recordSyncOutbox(db, "alert", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteAlert failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    getAlerts(opts?: { limit?: number }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const rows = db.exec(
+          "SELECT * FROM alert ORDER BY created_at DESC LIMIT ?",
+          [Math.min(opts?.limit ?? 100, 1000)],
+        );
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["triggered_at", "created_at"],
+            jsonKeys: ["condition"],
+            alias: {
+              user_id: "userId",
+              triggered_at: "triggeredAt",
+              created_at: "createdAt",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getAlerts failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    getTransactions(opts?: {
+      portfolioId?: string;
+      userId?: number;
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const conds: string[] = [];
+        const params: Array<string | number> = [];
+        if (opts?.portfolioId) {
+          conds.push("portfolio_id = ?");
+          params.push(opts.portfolioId);
+        }
+        if (opts?.userId) {
+          conds.push("user_id = ?");
+          params.push(Number(opts.userId));
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const rows = db.exec(
+          `SELECT * FROM transaction${where} ORDER BY trade_date DESC LIMIT ?`,
+          [...params, Math.min(opts?.limit ?? 2000, 5000)],
+        );
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["trade_date"],
+            jsonKeys: [],
+            alias: {
+              portfolio_id: "portfolioId",
+              user_id: "userId",
+              portfolio_name: "portfolioName",
+              trade_date: "tradeDate",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getTransactions failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+upsertTransaction(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const id = row.id != null ? String(row.id) : randomUUID();
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        const num = (v: unknown): number | null =>
+          v == null || v === "" ? null : Number(v);
+        db.run(
+          `INSERT INTO transaction (
+             id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side,
+             quantity, price, fees, notes
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             portfolio_id=excluded.portfolio_id,
+             user_id=excluded.user_id,
+             portfolio_name=excluded.portfolio_name,
+             trade_date=excluded.trade_date,
+             ticker=excluded.ticker,
+             side=excluded.side,
+             quantity=excluded.quantity,
+             price=excluded.price,
+             fees=excluded.fees,
+             notes=excluded.notes`,
+          [
+            id,
+            row.portfolioId != null ? String(row.portfolioId) : "",
+            row.userId != null ? Number(row.userId) : null,
+            row.portfolioName != null ? String(row.portfolioName) : null,
+            toIso(row.tradeDate ?? row.trade_date),
+            String(row.ticker ?? "").toUpperCase(),
+            String(row.side ?? ""),
+            num(row.quantity),
+            num(row.price),
+            num(row.fees),
+            row.notes != null ? String(row.notes) : null,
+          ],
+        );
+        recordSyncOutbox(db, "transaction", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertTransaction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    deleteTransaction(id: string): void {
+      if (!db || !id) return;
+      try {
+        db.run("DELETE FROM transaction WHERE id = ?", [String(id)]);
+        recordSyncOutbox(db, "transaction", String(id), "delete");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: deleteTransaction failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
+    getSqliteDerived(): Record<string, unknown> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getSqliteDerived", _start, 0, false);
+        return {};
+      }
+      const safe = <T>(fn: () => T, fallback: T): T => {
+        try {
+          return fn();
+        } catch {
+          return fallback;
+        }
+      };
+      try {
+        const swingJobs = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM swing_analysis_job ORDER BY created_at DESC LIMIT 5",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["created_at", "started_at", "completed_at", "updated_at"],
+              jsonKeys: [],
+              alias: {
+                run_id: "runId",
+                created_at: "createdAt",
+                started_at: "startedAt",
+                completed_at: "completedAt",
+                updated_at: "updatedAt",
+              },
+            }),
+          );
+        }, []);
+
+        const swingSignals = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM swing_signal ORDER BY posted_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["posted_at", "created_at", "updated_at", "last_checked_at"],
+              jsonKeys: [],
+              alias: {
+                job_id: "jobId",
+                ai_recommendation: "aiRecommendation",
+                entry_price: "entryPrice",
+                target_price: "targetPrice",
+                stop_loss: "stopLoss",
+                current_price: "currentPrice",
+                return_percent: "returnPercent",
+                posted_at: "postedAt",
+                created_at: "createdAt",
+                updated_at: "updatedAt",
+                last_checked_at: "lastCheckedAt",
+              },
+            }),
+          );
+        }, []);
+
+        const trackers = safe(
+          () => this.getRecommendationTrackers({ limit: 200 }),
+          [] as Array<Record<string, unknown>>,
+        );
+
+        const statusHistory = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM recommendation_status_history ORDER BY created_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["created_at"],
+              jsonKeys: [],
+              alias: { tracker_id: "trackerId", created_at: "createdAt" },
+            }),
+          );
+        }, []);
+
+        const archives = safe(() => {
+          const rows = db.exec(
+            "SELECT * FROM recommendation_archive ORDER BY created_at DESC LIMIT 100",
+          );
+          if (!rows.length || !rows[0].values.length) return [];
+          const cols = rows[0].columns;
+          return rows[0].values.map((row) =>
+            rehydrateRow(cols, row, {
+              dateKeys: ["archived_at", "created_at"],
+              jsonKeys: [],
+              alias: {
+                tracker_id: "trackerId",
+                entry_price: "entryPrice",
+                target_price: "targetPrice",
+                stop_loss: "stopLoss",
+                archived_at: "archivedAt",
+                created_at: "createdAt",
+              },
+            }),
+          );
+        }, []);
+
+        const aiConfigSet = safe(() => {
+          const rows = db.exec("SELECT * FROM ai_config");
+          if (!rows.length || !rows[0].values.length) return null;
+          const cols = rows[0].columns;
+          const row = rows[0].values[0];
+          const obj: Record<string, unknown> = {};
+          cols.forEach((c, i) => (obj[c] = row[i]));
+          return {
+            id: obj.id,
+            key: obj.key,
+            isSet: !!obj.is_set,
+            category: obj.category,
+            updatedAt: obj.updated_at ? new Date(String(obj.updated_at)) : null,
+          };
+        }, null);
+
+        const sessionsMeta = safe(() => {
+          const rows = db.exec(
+            "SELECT COUNT(*) AS total, SUM(is_active) AS active, MAX(last_active_at) AS last_active_at FROM user_session",
+          );
+          if (!rows.length || !rows[0].values.length) return null;
+          const v = rows[0].values[0];
+          return {
+            total: Number(v[0] ?? 0),
+            active: Number(v[1] ?? 0),
+            lastActiveAt: v[2] ? new Date(String(v[2])) : null,
+          };
+        }, null);
+
+        const adminAnnouncements = safe(
+          () => this.getAnnouncements({ limit: 10 }),
+          [] as Array<Record<string, unknown>>,
+        );
+        const alerts = safe(() => this.getAlerts({ limit: 50 }), [] as Array<Record<string, unknown>>);
+        const transactions = safe(
+          () =>
+            (this.getTransactions({ limit: 50 }) as Array<Record<string, unknown>>).map(
+              (t) => ({
+                id: t.id,
+                ticker: t.ticker,
+                side: t.side,
+                quantity: t.quantity,
+                price: t.price,
+                tradeDate: t.tradeDate,
+                userId: t.userId,
+                portfolioId: t.portfolioId,
+                portfolioName: t.portfolioName,
+              }),
+            ),
+          [] as Array<Record<string, unknown>>,
+        );
+
+        const totalRows =
+          swingJobs.length +
+          swingSignals.length +
+          trackers.length +
+          statusHistory.length +
+          archives.length +
+          (aiConfigSet ? 1 : 0) +
+          adminAnnouncements.length +
+          alerts.length +
+          transactions.length;
+        recordSqliteRead("getSqliteDerived", _start, totalRows, true);
+        return {
+          swingJobs,
+          swingSignals,
+          trackers,
+          statusHistory,
+          archives,
+          aiConfigSet,
+          sessionsMeta,
+          adminAnnouncements,
+          alerts,
+          transactions,
+        };
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSqliteDerived failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSqliteDerived", _start, 0, false);
+        return {};
+      }
+    },
+
     upsertCronJob(row: Record<string, unknown>): void {
       if (!db) return;
       try {
         const now = new Date().toISOString();
+        // v3.30.0: Prisma CronJob rows carry real `Date` instances for
+        // lastRun / nextRun / createdAt (caller: cron-daemon.ts re-seed loop).
+        // NEVER bind them raw — `String(Date)` yields a locale-formatted value
+        // like "Sat Sep 06 2026 10:30:00 GMT+0530 (India Standard Time)" that
+        // breaks the ISO read-back (`reconcileControlToPrisma` does
+        // `new Date(String(col))`). syncFromPrisma already ISO-normalises
+        // (:2524-2525); this path must too.
+        const toIso = (v: unknown): string | null =>
+          v == null ? null : v instanceof Date ? v.toISOString() : String(v);
         db.run(
           `INSERT INTO cron_job (
              id, name, description, task_type, cron_expression, is_active,
@@ -3462,12 +5665,12 @@ function createFallback(db: Database): SqliteFallback {
               const v = row.isActive ?? row.is_active;
               return v == null ? 1 : v ? 1 : 0;
             })(),
-            (row.lastRun ?? row.last_run) as string | null,
-            (row.nextRun ?? row.next_run ?? now) as string,
+            (toIso(row.lastRun ?? row.last_run) ?? null) as string | null,
+            (toIso(row.nextRun ?? row.next_run) ?? now) as string,
             Number(row.runCount ?? row.run_count ?? 0),
             Number(row.successCount ?? row.success_count ?? 0),
             Number(row.failCount ?? row.failure_count ?? row.fail_count ?? 0),
-            (row.createdAt ?? row.created_at ?? now) as string,
+            (toIso(row.createdAt ?? row.created_at) ?? now) as string,
             row.config != null ? JSON.stringify(row.config) : null,
           ],
         );
@@ -3523,6 +5726,23 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    touchControlMirror(table: "worker_task" | "worker_status" | "cron_job"): void {
+      if (!db) return;
+      try {
+        // Same non-empty gate as isControlMirrorFresh: an EMPTY mirror must stay
+        // stale so daemons keep falling back to Prisma until something seeds it.
+        const countRes = db.exec(`SELECT COUNT(*) AS cnt FROM ${table}`);
+        const cnt = countRes.length ? Number(countRes[0].values[0][0]) : 0;
+        if (cnt <= 0) return;
+        db.run(`INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)`, [
+          `control_write_at:${table}`,
+          new Date().toISOString(),
+        ]);
+      } catch {
+        // best-effort — leaving the mirror stale only costs a Prisma reread
+      }
+    },
+
     // --- Health status ---
     getHealthStatus(): HealthStatus {
       const budget = Number(process.env.DB_WRITE_BUDGET) || 8_000;
@@ -3534,6 +5754,11 @@ function createFallback(db: Database): SqliteFallback {
       const tableNames = [
         "daily_recommendation_run",
         "daily_recommendation_stock",
+        "recommendation_tracker",
+        "recommendation_status_history",
+        "recommendation_archive",
+        "swing_analysis_job",
+        "swing_signal",
         "corporate_action",
         "chartink_screener",
         "worker_status",
@@ -3570,7 +5795,7 @@ function createFallback(db: Database): SqliteFallback {
           syncing: state.syncing,
           lastSyncAt: state.lastSyncAt,
           tables,
-          recentSyncs: [...state.syncHistory].reverse().slice(0, 10),
+          recentSyncs: getDurableSyncHistory(db),
           // In-memory footprint of the sql.js mirror (refreshed at sync time via
           // db.export().byteLength — cheap because it only runs on hydration).
           memoryBytes: state.sqliteBytes,

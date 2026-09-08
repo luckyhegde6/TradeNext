@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush, startNsePromoteFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
@@ -103,9 +103,9 @@ export async function register() {
     // manual admin flush — but stays op-cheap (≤1 createMany per kind/window).
     startWriteBehindFlush();
 
-    // v3.28.0: periodically promote the SQLite NSE market mirror (corp actions,
-    // OHLCV bars, Chartink captures, symbols) to Prisma (leader-gated, ~60s).
-    startNsePromoteFlush();
+    // v3.30.0 Plan 09 Phase 5: NSE mirror promotion is now driven by the 6h
+    // push engine (pushSqliteToPrisma). The ~60s promote timer is env-gated
+    // off (NSE_PROMOTE_ENABLED=1) and no longer auto-started here.
 
     logger.info({ msg: "Cron daemon + worker + intelligence cache + SQLite + price cache started via instrumentation", self: leader.LEADER_SELF });
   } catch (error) {

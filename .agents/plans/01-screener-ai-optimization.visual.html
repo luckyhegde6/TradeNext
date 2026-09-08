@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Screener & AI Optimization (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Screener & AI Optimization</h1>
+  <p>Free-tier OpenRouter was exhausted (50 req/day), the connection-test cron burned 28–42 req/day, and Chartink throttle-bursts starved the screener. Fixes: <b>429 early-exit</b> (no retry on exhausted quota), a <b>2-hour connection-test skip window</b>, <b>parallelized</b> screener DB reads, and a <b>8192 maxTokens</b> default.</p>
+  <div class="badges">
+    <span class="badge green">v3.8.0 · branch fix/screener-ai-optimization</span>
+    <span class="badge red">OpenRouter 50/day exhausted</span>
+    <span class="badge">429 early-exit (stopAllBatches)</span>
+    <span class="badge amber">shouldSkipConnectionTest (2h)</span>
+    <span class="badge">234 serial reads → parallel</span>
+    <span class="badge">AI pre-flight gate</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problem</h2>
+  <table>
+    <tr><th style="width:36%">Issue</th><th>Impact</th></tr>
+    <tr><td class="mono">HTTP 429 rate-limited batches</td><td><span class="x">✕</span> Each batch retried ×2 before failing — wasted the remaining budget and tripled latency.</td></tr>
+    <tr><td class="mono">Connection-test cron 28–42 req/day</td><td><span class="warn">⚠</span> Every 30-min tick hit OpenRouter even when the last test already passed.</td></tr>
+    <tr><td class="mono">234 serial screener DB reads</td><td><span class="x">✕</span> One query per symbol throttles the run and Prisma plan.</td></tr>
+    <tr><td class="mono">maxTokens 2048 default</td><td><span class="warn">⚠</span> 5-stock batch + JSON reasoning truncated → unparseable → HOLD defaults.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: 429 EARLY-EXIT ======================= -->
+<section>
+  <h2>2 · 429 Early-Exit (no retry)</h2>
+  <p class="sub">In <code class="inline">recommendation-agent.ts</code> <code class="inline">analyzeBatch()</code> and <code class="inline">swing-agent.ts</code>: when a batch returns HTTP 429, set the <code class="inline">stopAllBatches</code> flag, log, and fail the remaining batches immediately — no retry, no fallback, no wasted budget.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant A as analyzeBatch (5 stocks)
+    participant P as directPrompt
+    participant OR as OpenRouter
+    participant B as next batches
+
+    A->>P: call 1 …
+    P->>OR: POST /chat (primary model)
+    alt HTTP 200
+        OR-->>P: parsed verdicts
+        P-->>A: success
+    else HTTP 429 (quota exhausted)
+        OR-->>P: 429
+        P->>A: stopAllBatches = true (log + audit)
+        A->>B: SKIP all remaining batches<br/>(no retry, no fallback)
+        A->>A: fail-fast — return rolled-up result
+    else other non-429 error
+        P->>A: retry ×2 with backoff (unchanged)
+    end
+    </pre>
+  </div>
+  <div class="callout"><b>Rule:</b> 429 means “today's budget is gone” — retrying only makes it worse. Non-429 transient errors keep the existing ×2 retry.</div>
+</section>
+
+<!-- ======================= SECTION 3: CONNECTION TEST SKIP ======================= -->
+<section>
+  <h2>3 · Connection-Test Skip Window (2h)</h2>
+  <p class="sub">NEW <code class="inline">shouldSkipConnectionTest()</code> in <code class="inline">connectionTestService.ts</code> — reads the last <code class="inline">ServerLog</code> (source="ai", action="connection_test", status="ok") from Prisma; if within 2h, skip the test entirely. DB error → return false (run the test) — never throws. Wired into the cron daemon's <code class="inline">spawnDueCronJob()</code>.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    T["AI Connection Test cron<br/>every 30 min 08:30–15:30 IST"] --> Q{"shouldSkipConnectionTest()"}
+    Q -->|"last ok within 2h"| SKIP["SKIP — 0 OpenRouter calls<br/>(budget preserved)"]
+    Q -->|"stale / never ok"| RUN["runAiConnectionTest()<br/>primary → fallback chain"]
+    Q -->|"DB error"| RUN
+    RUN -->|"ok"| LOG["ServerLog status ok<br/>(next 2h window opens)"]
+    RUN -->|"all fail"| NOTIFY["notifyAdmins + audit FAILED"]
+    </pre>
+  </div>
+  <table>
+    <tr><th>Metric</th><th>Before</th><th>After</th></tr>
+    <tr><td>Connection-test req/day</td><td class="mono">28–42</td><td class="mono">~25–35 (skips when healthy)</td></tr>
+    <tr><td>Budget burned on dead models</td><td class="mono">28–42 × (primary+frees)</td><td class="mono">0 when last test passed</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 4: PRE-FLIGHT + OTHER ======================= -->
+<section>
+  <h2>4 · AI Pre-Flight Gate & Misc Fixes</h2>
+  <ul>
+    <li><b>Pre-flight gate</b> — before the daily run, <code class="inline">runAiConnectionTest(120s)</code>: <code class="inline">ok</code> → configured model · <code class="inline">fallback</code> → run on recommended model · <code class="inline">failed</code> → <code class="inline">skipAi = true</code> (all-HOLD with <code class="inline">aiSuccess:false</code>) — fail fast instead of burning the 14-min cap.</li>
+    <li><b>maxTokens default → 8192</b> — <code class="inline">getPromptTimeoutMs()</code> clamp per batch remaining budget; 30s cap → 120s (<code class="inline">AI_PROMPT_TIMEOUT_MS</code>).</li>
+    <li><b>Parallel screener reads</b> — 234 serial DB reads batched into parallel queries.</li>
+    <li><b>Chartink HTTP 419 throttle</b> — burst-aware scanning with TradingView fallback (v3.5.6 runner).</li>
+    <li><span class="warn">⚠</span> Caveat: DB <code class="inline">ai_config</code> metadata overrides env default until re-saved (config load order).</li>
+  </ul>
+  <div class="callout ok"><b>Verification:</b> suite 597 pass (was 582, +15 — 429 early-exit, swing stop, non-429 retry, pre-flight ok/fallback/failed, cron dedupe); tsc clean on touched files; no schema change.</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Screener & AI Optimization · Spec <code class="inline">.agents/specs/01-screener-ai-optimization.md</code> · Plan <code class="inline">.agents/plans/01-screener-ai-optimization.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

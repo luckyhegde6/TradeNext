@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — SQLite-First NSE Read Architecture (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — SQLite-First NSE Read Architecture</h1>
+  <p>Architecture revamp: pages read from <b>NSE (rate-disciplined)</b> + <b>SQLite mirror</b> first; Prisma demoted to <b>backup · auth · boot-hydration</b>; the recurring sync is a <b>one-way SQLite → Prisma push every 6h</b> (boot is the ONLY Prisma → SQLite pull).</p>
+  <div class="badges">
+    <span class="badge green">NSE fetch → SQLite</span>
+    <span class="badge">SQLite-first reads</span>
+    <span class="badge amber">Prisma = backup + auth</span>
+    <span class="badge red">NSE anti-blacklist discipline</span>
+    <span class="badge">Boot hydration — ONLY pull (every instance)</span>
+    <span class="badge">6h leader PUSH (one-way)</span>
+    <span class="badge">_sync_outbox change tracking</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: BEFORE / AFTER ======================= -->
+<section>
+  <h2>1 · The Problem</h2>
+  <p class="sub">Today Prisma/Postgres is the primary tier for almost every read and write — so DB hiccups cascade into 500s / empty screens / breaker trips, and NSE data is mirrored into Prisma at high frequency for no benefit.</p>
+  <table>
+    <tr><th style="width:30%">Symptom (prod evidence)</th><th>Root cause</th></tr>
+    <tr><td class="mono">"SQLite Not Ready" on prod db-health</td><td><span class="x">✕</span> Netlify never ships <code class="inline">sql-wasm.wasm</code> — <code class="inline">copy-sql-wasm-netlify.mjs</code> is never run by the build (<code class="inline">publish=".next"</code>), so <code class="inline">initSqlJs</code> throws → <code class="inline">ready:false</code> forever.</td></tr>
+    <tr><td class="mono">DB op-count pressure / plan-limit breaker trips</td><td><span class="x">✕</span> Every NSE sync also mirrors to Prisma (<code class="inline">flushNseToPrisma</code> at 3 call sites + a 60s <code class="inline">startNsePromoteFlush</code> timer). High-frequency writes for data Prisma doesn't own.</td></tr>
+    <tr><td class="mono">"Recent Sync History" empty after restart</td><td><span class="x">✕</span> Sync history lives in-memory only (<code class="inline">state.syncHistory</code>) — lost on every deploy.</td></tr>
+    <tr><td class="mono">NSE 403s / 419s / blacklist risk</td><td><span class="warn">⚠</span> Burst NSE calls (market sync, historical backfill, screener scans) with no single-flight / min-interval guard.</td></tr>
+    <tr><td class="mono">Multi-instance cold-start bursts</td><td><span class="x">✕</span> Boot hydration is leader-gated — only ONE instance hydrates SQLite; the rest serve stale mirrors.</td></tr>
+  </table>
+  <div class="callout">
+    <b>User directive:</b> pages less reliant on the DB, more on NSE fetch + SQLite — but avoid frequent/high-frequency NSE calls to avoid blacklisting; Prisma as backup + auth + initial bootup hydration (recommendations, swing, performance, audit, worker status, AI configs, auth sessions); only low-frequency data syncs.
+  </div>
+</section>
+
+<!-- ======================= SECTION 2: TARGET ARCHITECTURE ======================= -->
+<section>
+  <h2>2 · Target Architecture</h2>
+  <p class="sub">Two read tiers: <b>market data</b> (NSE → SQLite cache, never Prisma) and <b>derived data</b> (SQLite mirror → Prisma fallback). Jobs + admin CRUD write SQLite + <code class="inline">_sync_outbox</code>; Prisma is authoritative for auth, and receives data only at the 6h push.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    subgraph UI["ROUTES / PAGES"]
+        M["market-data routes<br/>/api/nse/*, corp-actions, dividends,<br/>screener, backtest, /api/fo/*"]
+        D["derived-data routes<br/>/api/recommendations, /swing, performance,<br/>admin db-health, cron, workers, ai-monitoring"]
+    end
+
+    subgraph MEM["MEMORY (NodeCache / hotCache)"]
+        MC1["short TTL hot cache"]
+        MC2["recommendations / swing / status caches"]
+    end
+
+    subgraph SQLITE["SQLITE MIRROR (sql.js, in-memory)"]
+        S1["daily_price_snapshot · daily_price<br/>symbols · chartink_screener_result<br/>corporate_action"]
+        S2["daily_recommendation_run/stock · trackers<br/>swing_analysis_job · swing_signal<br/>status_history · archive<br/>ai_config(is_set) · user_session(meta)<br/>audit_log · worker_status · cron_job/run · worker_task<br/>admin_announcement · alert · transaction"]
+        S3["sync_history table<br/>(durable, persisted)"]
+        S4["_sync_outbox<br/>(table_name + row_id + op — change queue)"]
+    end
+
+    subgraph NSE["NSE API (rate-disciplined)"]
+        N["nseRateGuard:<br/>single-flight · min-interval throttle<br/>stale-while-revalidate · burst cooldown"]
+    end
+
+    PRISMA["PRISMA / POSTGRES<br/>(backup · auth authoritative)<br/>+ write-behind log store"]
+
+    M -->|"a) memory hit"| MC1
+    M -->|"b) memory miss → snapshot"| S1
+    S1 -->|"c) snapshot miss"| N
+    N -->|"fetch → write-through to SQLite"| S1
+    N -.->|"NEVER auto-writes to Prisma"| PRISMA
+
+    D -->|"a) memory hit"| MC2
+    D -->|"b) memory miss → mirror"| S2
+    S2 -->|"c) mirror miss (last resort)"| PRISMA
+    S2 -->|"every tracked write"| S4
+    S2 --> S3
+
+    PRISMA -->|"BOOT hydration — ONLY pull<br/>(every instance, leaderBypass, breaker respected)"| S2
+    S4 -->|"6h leader PUSH — ONE WAY<br/>(outbox drain → chunked sinks → reconcile)"| PRISMA
+    S2 -->|"write-behind drain (important logs only)"| PRISMA
+    </pre>
+  </div>
+  <table>
+    <tr><th>Data class</th><th>Source of truth</th><th>Read path</th><th>Write path</th></tr>
+    <tr><td>Live market (quote/chart/indices/corp actions/screener)</td><td>NSE</td><td class="mono">memory → SQLite → NSE</td><td class="mono">NSE fetch → SQLite cache (no Prisma auto-write)</td></tr>
+    <tr><td>Daily prices / snapshots</td><td>NSE → SQLite</td><td class="mono">memory → SQLite → (miss) Prisma</td><td class="mono">NSE → cacheDailyPrice* → SQLite + outbox (per-symbol marker) → <b>6h push</b> → Prisma</td></tr>
+    <tr><td>Recommendations / swing / performance</td><td><b>SQLite</b> (jobs write SQLite-first)</td><td class="mono">memory → SQLite mirror → Prisma fallback</td><td class="mono">jobs write SQLite + outbox → <b>6h push</b> → Prisma</td></tr>
+    <tr><td>Admin long-lived (announcements / corp-actions / alerts / holdings)</td><td><b>SQLite</b> (admin CRUD SQLite-first, boot hydrated)</td><td class="mono">SQLite mirror (boot hydrated)</td><td class="mono">admin CRUD writes SQLite + outbox → <b>6h push</b> → Prisma</td></tr>
+    <tr><td>Audit / worker / cron / tasks</td><td>SQLite (write-behind + control plane)</td><td class="mono">SQLite mirror → Prisma fallback</td><td class="mono">write-behind (important rows at drain) + reconcileControlToPrisma push at 6h</td></tr>
+    <tr><td>AI config</td><td>Prisma</td><td class="mono">SQLite mirror (<code>is_set</code> flag only)</td><td class="mono">Prisma → mirrored (value masked)</td></tr>
+    <tr><td>Auth / sessions</td><td><b>Prisma (authoritative)</b></td><td class="mono">Prisma always for validation; SQLite mirrors safe metadata</td><td class="mono">Prisma only</td></tr>
+    <tr><td>Write-behind logs (API/server/audit)</td><td>SQLite <code>wb_*</code></td><td class="mono">SQLite only (14d TTL)</td><td class="mono">write-behind; important rows promoted at drain</td></tr>
+  </table>
+  <p class="sub">* = NEW tables in this revamp.</p>
+</section>
+
+<!-- ======================= SECTION 3: BOOT HYDRATION ======================= -->
+<section>
+  <h2>3 · Boot Hydration — Every Instance</h2>
+  <p class="sub">At <code class="inline">register()</code>, SQLite is empty on a fresh deploy. Each instance hydrates the <b>low-frequency set + admin datasets</b> from Prisma — boot is the <b>ONLY</b> Prisma → SQLite flow (<code class="inline">opts.boot</code>: leaderBypass pull, skipReconcile, breaker respected). The 6h probe is a one-way SQLite → Prisma PUSH, single-writer via the leader gate.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant I as Instance (next server)
+    participant SQ as SQLite (sql.js)
+    participant P as Prisma/Postgres
+    participant H as sync_history table
+
+    I->>SQ: initSqliteBackup()<br/>(create tables + indexes)
+    I->>SQ: ensureControlColumns / ensureNseColumns
+    I->>P: syncFromPrisma({ reason:"boot", skipReconcile:true,<br/>leaderBypass:true })
+    Note over I,P: PULL hydration — the ONLY Prisma → SQLite flow<br/>(leaderBypass: every instance hydrates,<br/>skipReconcile: NO push at boot,<br/>breaker respected: held Prisma degrades gracefully)
+    P-->>I: daily_recommendation_run/stock + trackers + status_history
+    P-->>I: swing_analysis_job / swing_signal / archive
+    P-->>I: audit_log · worker_status · cron_job/run · worker_task
+    P-->>I: ai_config (is_set flag only) · user_session (safe cols)
+    P-->>I: admin_announcement · alert · transaction (cap)
+    P-->>I: corporate_action · daily_price_snapshot (recent)<br/>— NOT full daily_price
+    I->>SQ: upsert rows into mirror tables
+    I->>H: INSERT sync_history<br/>(direction=prisma_to_sqlite, trigger=boot, rows)
+    Note over I,P: SKIPPED at boot: reconcileControlToPrisma push<br/>(single-writer, only at 6h probe / admin force)
+    I->>I: serve requests from SQLite+NSE (0 Prisma reads on hot path)
+    </pre>
+  </div>
+  <div class="callout ok"><b>Key decision:</b> boot PULLS bypass the <b>leader gate</b> (<code class="inline">leaderBypass: true</code> — every instance hydrates) but keep the <b>breaker gate</b> — a held Prisma degrades gracefully (log + sync_history error row, retried at the next 6h probe). Boot never pushes (<code class="inline">skipReconcile: true</code>); the SQLite→Prisma <b>push</b> remains leader-gated so cold-start bursts never race writes.</div>
+</section>
+
+<!-- ======================= SECTION 4: READ PATHS ======================= -->
+<section>
+  <h2>4 · Read Paths — Market Data vs Derived Data</h2>
+  <p class="sub">Market-data routes touch NSE (throttled) and stop at SQLite — Prisma is never consulted. Derived-data routes serve from the SQLite mirror with Prisma as last-resort fallback.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant R as Route (/api/...)
+    participant MC as Memory cache
+    participant SQ as SQLite mirror
+    participant N as NSE API
+    participant P as Prisma
+
+    rect rgb(15,25,42)
+    Note over C,P: MARKET-DATA READ (quote / chart / corp actions / screener)
+    C->>R: GET /api/nse/quote?symbol=X
+    R->>MC: hit?
+    alt memory hit
+        MC-->>C: cached quote (fast)
+    else miss
+        R->>SQ: daily_price_snapshot fresh?
+        alt snapshot fresh
+            SQ-->>C: snapshot (zero NSE, zero Prisma)
+        else miss
+            R->>N: nseRateGuard{ single-flight, min-interval,<br/>cooldown check } → fetch
+            alt rate guard allows
+                N-->>R: live quote
+                R->>SQ: cacheDailyPriceSnapshot / cacheDailyPrice (write-through)
+                R-->>C: live quote
+            else cooldown active
+                N-->>R: (skipped — serve stale/empty, no blacklist risk)
+                R-->>C: stale/empty (graceful)
+            end
+        end
+    end
+    Note over R,P: Prisma is NEVER read for market data
+    </pre>
+  </div>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C2 as Client
+    participant R2 as Route (/api/recommendations, /swing,<br/>perf, admin db-health, cron, ai-monitoring)
+    participant MC2 as Memory cache
+    participant SQ2 as SQLite mirror (derived tables)
+    participant P2 as Prisma
+
+    rect rgb(15,25,42)
+    Note over C2,P2: DERIVED-DATA READ
+    C2->>R2: GET /api/recommendations
+    R2->>MC2: hit?
+    alt memory hit
+        MC2-->>C2: cached payload
+    else miss
+        R2->>SQ2: mirror row(s) (readTier counters: sqlite hit)
+        alt mirror hit
+            SQ2-->>C2: payload from mirror (zero Prisma)
+        else miss
+            R2->>P2: LAST-RESORT fallback (Prisma)
+            P2-->>R2: row(s)
+            R2->>SQ2: backfill mirror (best-effort)
+            R2-->>C2: payload
+        end
+    end
+    Note over R2,P2: Auth/session VALIDATION still hits Prisma (authoritative)
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 5: 6H SYNC ======================= -->
+<section>
+  <h2>5 · Low-Frequency Sync — 6h Leader PUSH (one-way)</h2>
+  <p class="sub">The <b>only</b> recurring Prisma↔SQLite sync is the 6h leader-gated probe, and it is <b>SQLite → Prisma ONLY</b> (per user directive): the <code class="inline">_sync_outbox</code> change queue drains tracked SQLite writes into Prisma chunked, the control plane is reconciled, and every run is recorded in <code class="inline">sync_history</code>. Boot hydration (section 3) is the ONLY Prisma → SQLite flow.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant T as Timer (6h, leader-gated) / admin button
+    participant O as _sync_outbox (SQLite)
+    participant SQ3 as SQLite mirror
+    participant P3 as Prisma
+    participant H3 as sync_history table
+
+    T->>T: isLeader("sqlite-sync")?
+    alt not leader
+        Note over T: standby instance — skip (no duplicate writes)
+    else leader (or admin push_to_prisma, leaderGate:false)
+        T->>O: drain: SELECT table_name, row_id, op,<br/>MAX(id) GROUP BY table_name, row_id<br/>(latest op wins — upsert / delete)
+        Note over O,P3: per-table sink (§6.3 of spec):<br/>symbols → ON CONFLICT(symbol)<br/>daily_price → per-symbol marker → re-read bars<br/>→ chunked ON CONFLICT(ticker,"tradeDate")<br/>corp-action → ON CONFLICT(symbol,actionType,exDate)<br/>recs / swing / trackers → upsert by id<br/>status_history / archive → createMany skipDuplicates<br/>admin tables → upsert by id / deleteMany
+        O->>P3: chunked upserts / createMany / raw ON CONFLICT (chunk 200)
+        alt table success
+            P3-->>O: DELETE drained rows for that table
+        else failure
+            P3-->>H3: INSERT sync_history (error row)<br/>rows RETRY next 6h (idempotent)
+        end
+        SQ3->>P3: reconcileControlToPrisma()<br/>(worker_status upsert · cron_job conditional update<br/>· completed/failed worker_task updateMany)
+        SQ3->>H3: INSERT sync_history<br/>(direction=sqlite_to_prisma, trigger=probe|admin,<br/>rows, durationMs)
+        T->>T: reschedule in 6h
+    end
+    </pre>
+  </div>
+  <div class="callout"><b>Why “only low-frequency”:</b> the 60s NSE→Prisma promote timer is removed, and the 3 <code class="inline">flushNseToPrisma()</code> write-mirror calls in sync services are deleted. NSE data stops at SQLite; the 6h push is what keeps Prisma <code class="inline">daily_prices</code> and every other consumer fresh — <b>new/changed bars only</b> (per-symbol outbox markers, not per-bar rows). Jobs and admin CRUD write SQLite + outbox at runtime; Prisma receives them at the push. Prisma op count drops dramatically — closer to the <1000/day target.</div>
+</section>
+
+<!-- ======================= SECTION 6: ER ======================= -->
+<section>
+  <h2>6 · ER — SQLite Mirror vs Prisma</h2>
+  <p class="sub">SQLite mirrors the <b>boot-hydrated set + job results + admin datasets</b> on the left; Prisma remains authoritative for auth. Arrows: <b>boot pull (Prisma → SQLite — the ONLY one)</b> + <b>6h push (SQLite → Prisma, outbox drain)</b>.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+erDiagram
+    "SQLITE_MIRROR (read tier)" ||..o{ "PRISMA (auth + jobs)" : "boot pull (only) + 6h PUSH"
+
+    daily_recommendation_run ||--o{ daily_recommendation_stock : "run rows"
+    daily_recommendation_run { int id PK }
+    daily_recommendation_stock { int id PK, string symbol, string verdict, float confidence }
+
+    swing_analysis_job ||--o{ swing_signal : "job → signals"
+    swing_analysis_job { int id PK, string status }
+    swing_signal { int id PK, string symbol, string direction, float entry_price, string status }
+
+    recommendation_tracker ||--o{ recommendation_status_history : "audit trail"
+    recommendation_tracker ||--o| recommendation_archive : "snapshot"
+    recommendation_tracker { int id PK, string symbol, string status, float entry_price, float current_price }
+
+    corporate_action { int id PK, string symbol, string purpose, date ex_date }
+    chartink_screener_result { int id PK, string symbol, json data }
+
+    admin_announcement { int id PK, string title, string category, boolean active }
+    alert { int id PK, string user_id, string symbol, string type }
+    transaction { int id PK, string user_id, string symbol, float quantity, float price }
+
+    ai_config { int id PK, string key, boolean is_set }
+    user_session { int id PK, string user_id, datetime expires_at, text user_agent }
+    audit_log { int id PK, string action, string user_email, json metadata }
+    worker_status { int id PK, string role, string state }
+    cron_job { int id PK, string name, string expression }
+    cron_run { int id PK, int cron_job_id, boolean success }
+    worker_task { int id PK, string type, string status }
+
+    sync_history { int id PK, datetime at, string direction, string trigger, int rows_synced, int duration_ms, string error }
+    _sync_outbox { int id PK, string table_name, string row_id, string op, datetime at }
+    _sync_outbox }o--|| "PRISMA" : "drains at 6h (chunked sinks)"
+
+    symbols { int id PK, string symbol, string name }
+    daily_price { int id PK, string ticker, date trade_date, float close }
+
+    ai_config ||--|| user_session : "value MASKED (never mirrored)"
+    daily_price ||--o{ daily_recommendation_stock : "price lookups"
+  </pre>
+  </div>
+  <table>
+    <tr><th>New SQLite table</th><th>Prisma source</th><th>Mirrored columns</th><th>Security note</th></tr>
+    <tr><td class="mono">swing_analysis_job</td><td><code class="inline">SwingAnalysisJob</code></td><td>id, symbol, status, startedAt, completedAt, attemptCount, error, supersededBy</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">swing_signal</td><td><code class="inline">SwingSignal</code></td><td>id, symbol, direction, entryPrice, target, stopLoss, status, createdAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">recommendation_tracker</td><td><code class="inline">RecommendationTracker</code></td><td>id, symbol, status, entry/target/stop/current price, returnPercent, createdAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">recommendation_status_history</td><td><code class="inline">RecommendationStatusHistory</code></td><td>id, trackerId, fromStatus, toStatus, createdAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">recommendation_archive</td><td><code class="inline">RecommendationArchive</code></td><td>id, trackerId, snapshot, archivedAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">admin_announcement</td><td><code class="inline">AdminAnnouncement</code></td><td>id, title, body, category, active, createdAt, updatedAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">alert</td><td><code class="inline">Alert</code></td><td>id, userId, symbol, condition, type, active, createdAt</td><td><span class="check">✓</span> no secrets</td></tr>
+    <tr><td class="mono">transaction</td><td><code class="inline">Transaction</code></td><td>id, userId, symbol, type, quantity, price, tradeDate, createdAt</td><td><span class="warn">⚠</span> holdings display scope only (cap — Risk R4)</td></tr>
+    <tr><td class="mono">_sync_outbox</td><td>— (SQLite-native)</td><td>id, tableName, rowId, op ('upsert'|'delete'), at</td><td><span class="check">✓</span> keys only — no payload data</td></tr>
+    <tr><td class="mono">ai_config</td><td><code class="inline">AiConfig</code> (Secret)</td><td>id, key, <b>is_set</b> (boolean only), category, updatedAt</td><td><span class="warn">⚠</span> API key value NEVER mirrored; mirrored at boot only</td></tr>
+    <tr><td class="mono">user_session</td><td><code class="inline">UserSession</code></td><td>id, userId, createdAt, expiresAt, lastActiveAt, userAgent</td><td><span class="warn">⚠</span> token/hash NEVER mirrored; Prisma authoritative</td></tr>
+    <tr><td class="mono">sync_history</td><td>— (SQLite-native)</td><td>id, at, direction, trigger, leaderGated, rowsSynced, durationMs, error</td><td><span class="check">✓</span> UI-facing, no secrets</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 7: NSE DISCIPLINE ======================= -->
+<section>
+  <h2>7 · NSE Anti-Blacklist Discipline</h2>
+  <p class="sub">NEW <code class="inline">lib/services/nseRateGuard.ts</code> — memory-only, zero DB. Wired into <code class="inline">nseFetch</code>, <code class="inline">lib/nse-api.ts</code> fetchers, and the market-cache chain.</p>
+  <table>
+    <tr><th>Guard</th><th>Mechanism</th><th>Default limits</th></tr>
+    <tr><td><b>Single-flight</b></td><td>Concurrent identical NSE requests share one in-flight promise (<code class="inline">nseInflight: Map&lt;key, Promise&gt;</code>)</td><td>per method+path</td></tr>
+    <tr><td><b>Min-interval throttle</b></td><td>Per-endpoint-key minimum spacing (<code class="inline">nseLastCall</code>); skip if too soon</td><td>quote 1s · chart 5s · historical 250ms · index 2s · corp actions 30s · marquee 30s</td></tr>
+    <tr><td><b>Stale-while-revalidate</b></td><td>Serve SQLite/memory snapshot immediately; refresh in background</td><td>existing <code class="inline">enhancedCache.getWithCache</code> pattern</td></tr>
+    <tr><td><b>Burst cooldown</b></td><td>≥5 × 403/419/429 within 60s → 60s backoff, serve SQLite/stale only</td><td><code class="inline">NSE_THROTTLE_MS</code> env override (dev)</td></tr>
+    <tr><td><b>Boot stagger</b></td><td>Historical sync keeps 200ms inter-symbol delay; market-sync keeps 6-min budget</td><td>unchanged</td></tr>
+  </table>
+  <div class="callout ok"><b>Net result:</b> route bursts collapse to one real NSE call; cooldown mode never blacklists us; users see live or slightly-stale data instead of 502s.</div>
+</section>
+
+<!-- ======================= SECTION 8: CHANGES ======================= -->
+<section>
+  <h2>8 · What Changes (file-level)</h2>
+  <table>
+    <tr><th>File</th><th>Change</th></tr>
+    <tr><td class="mono">package.json</td><td><code class="inline">quickbuild</code>/<code class="inline">build</code> append <code class="inline">node scripts/copy-sql-wasm-netlify.mjs</code> → prod ships <code class="inline">.next/sql-wasm.wasm</code> → SQLite becomes Ready on Netlify (prerequisite)</td></tr>
+    <tr><td class="mono">lib/sqlite.ts</td><td><code class="inline">sync_history</code> + <code class="inline">_sync_outbox</code> tables + record helpers (prune-100; grouped latest-op-wins outbox drain); boot opts (<code class="inline">reason:"boot"</code>, skipReconcile, leaderBypass pull); NEW mirror tables (tracker/status_history/archive/swing/session/ai_config/admin) + pulls; write-through helpers for jobs + admin CRUD (SQLite + outbox append); <code class="inline">getSqliteDerived()</code>; <code class="inline">recentSyncs</code> now from the table; <code class="inline">startNsePromoteFlush</code> env-gated (default off)</td></tr>
+    <tr><td class="mono">lib/sqlitePushSinks.ts</td><td>NEW — per-table sink mappers (snake→camel) + symbols / corporate_action raw upsert SQL + daily_price chunked <code class="inline">ON CONFLICT(ticker,"tradeDate") DO UPDATE</code> (chunk 200)</td></tr>
+    <tr><td class="mono">lib/services/nseRateGuard.ts</td><td>NEW — single-flight / throttle / cooldown / status</td></tr>
+    <tr><td class="mono">lib/nse-client.ts · lib/nse-api.ts · lib/market-cache.ts</td><td>wire the rate guard into every NSE egress</td></tr>
+    <tr><td class="mono">instrumentation.ts</td><td>remove <code class="inline">startNsePromoteFlush()</code> call (L108) + import (L21)</td></tr>
+    <tr><td class="mono">worker-service.ts · historicalPriceSyncService.ts</td><td>remove the 3 <code class="inline">flushNseToPrisma()</code> write-mirror calls (NSE captures now append outbox markers instead)</td></tr>
+    <tr><td class="mono">dailyRecommendationService · swingRecommendationService · recommendationPerformanceService</td><td>Prisma writes → SQLite write-through helpers + outbox; reads re-base on the local mirror (fingerprint/staleness checks too); Prisma fallbacks stay</td></tr>
+    <tr><td class="mono">admin announcements / corporate-actions / alerts / holdings APIs</td><td>unchanged contracts; reads ↔ SQLite <code class="inline">getSqliteDerived()</code> + mirrors; writes → SQLite helper + <code class="inline">recordSyncOutbox</code> (6h push → Prisma)</td></tr>
+    <tr><td class="mono">app/api/admin/db-health/route.ts</td><td>add <code class="inline">sqlite.syncHistoryTable</code> + <code class="inline">sqlite.outboxPending</code> + <code class="inline">sqlite.derivedCounts</code>; persisted <code class="inline">recentSyncs</code>; NEW POST action <code class="inline">push_to_prisma</code> (admin force); <code class="inline">sync_sqlite</code> = boot-style pull</td></tr>
+    <tr><td class="mono">app/admin/utils/db-health/page.tsx</td><td>Recent Sync History card gains trigger/direction/leaderGated/durationMs + “persisted” note; NEW Outbox pending summary (per-table counts) + “Push to Prisma” button</td></tr>
+    <tr><td class="mono">swing route · ai-monitoring · admin users</td><td>read from <code class="inline">getSqliteDerived()</code> mirrors (zero Prisma on hot path)</td></tr>
+    <tr><td class="mono">tests</td><td>sqlite +8 (outbox / push engine / history) · daemon-sqlite-first +2 · nseRateGuard 6 (NEW) · instrumentation mock update · pipeline suites re-pointed to write-through helpers · admin CRUD mirror tests</td></tr>
+  </table>
+  <div class="callout ok"><b>No Prisma schema change, no migration</b> — all new tables are SQLite-native via <code class="inline">CREATE TABLE IF NOT EXISTS</code>. tsc stays at the 46-error exact baseline. Full suite green.</div>
+</section>
+
+<!-- ======================= SECTION 9: IMPLEMENTATION ORDER ======================= -->
+<section>
+  <h2>9 · Implementation Order</h2>
+  <ol>
+    <li><b>Phase 0</b> — WASM build fix (prod SQLite Ready) — <span class="check">prerequisite</span></li>
+    <li><b>Phase 1</b> — <code class="inline">sync_history</code> table + recording + db-health history persistence</li>
+    <li><b>Phase 2</b> — boot hydration opts (<code class="inline">reason:"boot"</code>, skipReconcile, leaderBypass — every instance hydrates)</li>
+    <li><b>Phase 3</b> — NSE rate guard (single-flight / throttle / cooldown)</li>
+    <li><b>Phase 4</b> — <code class="inline">_sync_outbox</code> table + <code class="inline">pushSqliteToPrisma()</code> engine + 6h probe pivot (PUSH, not pull)</li>
+    <li><b>Phase 5</b> — NSE captures → SQLite + outbox markers; remove auto-promote (timer + 3 flush call sites)</li>
+    <li><b>Phase 6</b> — jobs write SQLite-first (recs / swing / perf: mirror parity validation + write-through helpers)</li>
+    <li><b>Phase 7</b> — admin datasets SQLite-first (announcements / corp-actions / alerts / holdings) + <code class="inline">getSqliteDerived()</code></li>
+    <li><b>Phase 8</b> — db-health Outbox section + “Push to Prisma” button + sync-history columns</li>
+    <li><b>Phase 9</b> — full verification gate (tsc 46 baseline · Jest suite · Playwright · docs)</li>
+  </ol>
+  <details>
+    <summary>Risks / open questions (for human approval)</summary>
+    <ul>
+      <li><b>R1 Multi-instance freshness (accepted tradeoff):</b> SQLite-first job/admin writes are locally fresh; other instances’ mirrors refresh at boot + memory cache until the 6h push. Phase-9 mitigation option: publish-on-write for job rows (not in scope).</li>
+      <li><b>R2 daily_price marker rewrite volume:</b> each 6h push rewrites the full bar history of marked symbols (idempotent, chunked) — fine at current sizes.</li>
+      <li><b>R3 Admin outbox vs co-writer overlap:</b> alert lifecycle / announcement broadcast tasks keep Prisma write-through; a same-row admin outbox push wins (rare).</li>
+      <li><b>R4 transaction boot-hydration volume:</b> cap mirrored rows to the admin-holdings display scope (confirm during implementation).</li>
+      <li><b>Q1 Boot vs breaker:</b> <code class="inline">leaderBypass + skipReconcile</code> (every instance pulls; breaker respected) rather than bare <code class="inline">force:true</code> — a held Prisma shouldn't cascade a boot failure.</li>
+      <li><b>Q2 ai_config mirror:</b> value-masked <code class="inline">is_set</code> flag only; the API key value never lands in SQLite; config edits stay Prisma, mirrored at boot only.</li>
+      <li><b>Q3 user_session mirror:</b> metadata-only; Prisma stays authoritative for validation.</li>
+      <li><b>Q4 .next pruning:</b> verify <code class="inline">sql-wasm.wasm</code> survives the Netlify build on the first deploy after Phase 0.</li>
+    </ul>
+  </details>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — SQLite-First NSE Read Architecture · Spec <code class="inline">.agents/specs/09-sqlite-first-read-architecture.md</code> · Plan <code class="inline">.agents/plans/09-sqlite-first-read-architecture.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

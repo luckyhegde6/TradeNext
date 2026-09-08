@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { getSqliteFallback } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 
 // Force dynamic to prevent pre-rendering during build
@@ -16,24 +17,34 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const activeOnly = searchParams.get("activeOnly") === "true";
 
-    const where: any = {};
-    if (activeOnly) {
-      const now = new Date();
-      where.isActive = true;
-      where.OR = [
-        { startsAt: null },
-        { startsAt: { lte: now } },
-      ];
-      where.AND = [
-        { endsAt: null },
-        { endsAt: { gte: now } },
-      ];
+    const sqlite = getSqliteFallback();
+    let announcements: any[];
+    if (sqlite) {
+      // SQLite-first mirror: zero-Prisma read (Plan 09 §4.8). Mirror stores
+      // is_active as 0/1 — coerce back to boolean for the UI contract.
+      announcements = (sqlite.getAnnouncements({
+        activeOnly: activeOnly || undefined,
+        limit: 1000,
+      }) as any[]).map((a) => ({ ...a, isActive: !!a.isActive }));
+    } else {
+      const where: any = {};
+      if (activeOnly) {
+        const now = new Date();
+        where.isActive = true;
+        where.OR = [
+          { startsAt: null },
+          { startsAt: { lte: now } },
+        ];
+        where.AND = [
+          { endsAt: null },
+          { endsAt: { gte: now } },
+        ];
+      }
+      announcements = await prisma.adminAnnouncement.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+      });
     }
-
-    const announcements = await prisma.adminAnnouncement.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-    });
 
     return NextResponse.json(announcements);
   } catch (error) {
@@ -57,19 +68,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Title and message are required" }, { status: 400 });
     }
 
-    const announcement = await prisma.adminAnnouncement.create({
-      data: {
-        title,
-        message,
-        type: type || "info",
-        target: target || "all",
-        isActive: isActive ?? true,
-        startsAt: startsAt ? new Date(startsAt) : null,
-        endsAt: endsAt ? new Date(endsAt) : null,
-        link: link || null,
-        createdBy: adminId,
-      },
-    });
+    const row = {
+      title,
+      message,
+      type: type || "info",
+      target: target || "all",
+      isActive: isActive ?? true,
+      startsAt: startsAt ? new Date(startsAt) : null,
+      endsAt: endsAt ? new Date(endsAt) : null,
+      link: link || null,
+      createdBy: adminId,
+    };
+    const sqlite = getSqliteFallback();
+    const announcement = sqlite
+      ? {
+          id: sqlite.upsertAnnouncement(row),
+          title,
+          message,
+          type: type || "info",
+          target: target || "all",
+          isActive: !!(isActive ?? true),
+          startsAt: row.startsAt,
+          endsAt: row.endsAt,
+          link: link || null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      : await prisma.adminAnnouncement.create({ data: row });
 
     await createAuditLog({
       userId: adminId,
@@ -101,12 +126,6 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
 
-    // Fetch existing to verify
-    const existing = await prisma.adminAnnouncement.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: "Announcement not found" }, { status: 404 });
-    }
-
     let updatePayload: any = {};
 
     if (action === "toggleActive" && typeof isActive === "boolean") {
@@ -125,10 +144,33 @@ export async function PUT(req: NextRequest) {
       };
     }
 
-    const announcement = await prisma.adminAnnouncement.update({
-      where: { id },
-      data: updatePayload,
-    });
+    const sqlite = getSqliteFallback();
+    let announcement: any;
+    if (sqlite) {
+      const rows = sqlite.getAnnouncements({ limit: 1000 }) as any[];
+      const existing = rows.find((r) => Number(r.id) === Number(id));
+      if (!existing) {
+        return NextResponse.json({ error: "Announcement not found" }, { status: 404 });
+      }
+
+      sqlite.upsertAnnouncement({ ...existing, ...updatePayload, id: Number(id) });
+      announcement = {
+        ...existing,
+        ...updatePayload,
+        isActive: !!((updatePayload.isActive ?? existing.isActive) ? 1 : 0),
+      };
+    } else {
+      // Fetch existing to verify
+      const existing = await prisma.adminAnnouncement.findUnique({ where: { id } });
+      if (!existing) {
+        return NextResponse.json({ error: "Announcement not found" }, { status: 404 });
+      }
+
+      announcement = await prisma.adminAnnouncement.update({
+        where: { id },
+        data: updatePayload,
+      });
+    }
 
     await createAuditLog({
       userId: adminId,
@@ -160,9 +202,14 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
 
-    await prisma.adminAnnouncement.delete({
-      where: { id: Number(id) },
-    });
+    const sqlite = getSqliteFallback();
+    if (sqlite) {
+      sqlite.deleteAnnouncement(Number(id));
+    } else {
+      await prisma.adminAnnouncement.delete({
+        where: { id: Number(id) },
+      });
+    }
 
     await createAuditLog({
       userId: adminId,

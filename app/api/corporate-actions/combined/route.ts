@@ -1,3 +1,5 @@
+// HOT ROUTE (Plan 09 Phase 8): memory cache -> SQLite mirror (breaker open)
+// -> Prisma with Accelerate cacheStrategy + fire-and-forget NSE refresh.
 import { NextResponse } from "next/server";
 import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";

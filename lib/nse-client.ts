@@ -3,6 +3,14 @@ import { CookieJar } from "tough-cookie";
 import fetchCookie from "fetch-cookie";
 import logger, { trackNseApiCall } from "@/lib/logger";
 import { logAPIRequest } from "@/lib/rate-limit";
+import {
+  isNseCooldownActive,
+  maybeThrottle,
+  getThrottleMs,
+  recordNseFailure,
+  withSingleFlight,
+  NseRateLimitedError,
+} from "@/lib/services/nseRateGuard";
 import crypto from "crypto";
 
 // Determine if we're in production (Netlify)
@@ -49,7 +57,7 @@ async function ensureSession() {
   }
 }
 
-async function nseFetch(path: string, qs = "", retryCount = 0) {
+async function rawNseFetch(path: string, qs = "", retryCount = 0) {
   await initFetch();
   await ensureSession();
   const fullUrl = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
@@ -105,6 +113,7 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
         errorMessage: `${resp.status} ${resp.statusText}`
       }).catch(err => logger.error({ msg: "Failed to update NSE API error log", error: err }));
 
+      recordNseFailure(resp.status);
       throw new Error(`NSE fetch failed ${resp.status} ${resp.statusText}`);
     }
 
@@ -140,7 +149,7 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
         // Wait before retrying (exponential backoff)
         const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
         await new Promise(resolve => setTimeout(resolve, delay));
-        return nseFetch(path, qs, retryCount + 1);
+        return rawNseFetch(path, qs, retryCount + 1);
       }
 
       logger.error({ msg: `[NSE Timeout] All retries exhausted for ${fullUrl}` });
@@ -162,6 +171,18 @@ async function nseFetch(path: string, qs = "", retryCount = 0) {
 
     throw error;
   }
+}
+
+// Public entry: rate-guarded (single-flight + min-interval throttle + burst
+// cooldown). Retries stay inside rawNseFetch so the guard applies once per
+// logical request, not per attempt.
+async function nseFetch(path: string, qs = "") {
+  const endpoint = path + qs;
+  return withSingleFlight(endpoint, async () => {
+    if (isNseCooldownActive()) throw new NseRateLimitedError("cooldown");
+    if (!maybeThrottle(endpoint, getThrottleMs(endpoint))) throw new NseRateLimitedError("throttle");
+    return rawNseFetch(path, qs, 0);
+  });
 }
 
 export { nseFetch };

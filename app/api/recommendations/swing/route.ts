@@ -1,3 +1,5 @@
+// HOT ROUTE (Plan 09 Phase 8): cached swing feed + async AI analysis.
+// Breaker-open: serves the screener-only feed and makes no Prisma writes.
 import { NextRequest, NextResponse } from "next/server";
 import { getSwingRecommendations } from "@/lib/services/swingRecommendationService";
 import logger from "@/lib/logger";

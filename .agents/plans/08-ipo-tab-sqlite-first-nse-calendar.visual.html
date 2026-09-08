@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — IPO Tab: SQLite-first NSE IPO Calendar (3-endpoint fetch) (v3.30.0) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — IPO Tab: SQLite-first NSE IPO Calendar</h1>
+  <p>The IPO tab's feed becomes a resilient <b>SQLite-first calendar</b> built from <b>three NSE endpoints</b> (special pre-open / forthcoming listings / recent listings). Read chain: <b>memory 15 min → SQLite mirror 6 h → NSE live</b> (<code class="inline">Promise.allSettled</code>, partial success). The calendar service is <b>zero-Prisma</b>; Prisma gains it as a single change-gated <code class="inline">market_cache</code> row via the promote engine.</p>
+  <div class="badges">
+    <span class="badge green">v3.30.0</span>
+    <span class="badge">branch fix/v3.28.1-sqlite-self-heal</span>
+    <span class="badge red">zero Prisma imports (calendar module)</span>
+    <span class="badge">memory 15m · SQLite 6h</span>
+    <span class="badge amber">≤1 promote op (change-gated)</span>
+    <span class="badge green">SQLite-only — no Prisma migration</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problem</h2>
+  <p class="sub">The IPO tab depended on a single legacy calendar source in <code class="inline">market_cache</code> plus per-symbol detail lookups; NSE rate-limiting / anti-bot behaviour made every refresh fragile, and the tab had no durable local mirror to serve during blips. The redesign mirrors the v3.28.0 SQLite-first pattern at IPO scale (3 endpoints, small data).</p>
+  <table>
+    <tr><th style="width:40%">Constraint</th><th>Design answer</th></tr>
+    <tr><td>NSE 3-endpoint rate limits / anti-bot</td><td>Memory 15-min front + SQLite 6-h mirror; <code class="inline">Promise.allSettled</code> partial success; existing <code class="inline">nseFetch</code> cookie flow</td></tr>
+    <tr><td>Calendar rows lack issuePrice/size/lot</td><td>Rendered via the existing per-symbol <code class="inline">/detail</code> chain for Active/Forthcoming (unchanged); per-symbol <code class="inline">/detail</code> SQLite tiering deferred</td></tr>
+    <tr><td>Legacy callers/tests of <code class="inline">getUpcomingIpoIssues</code></td><td>Compat wrapper maps the calendar source back to legacy <code class="inline">api|cache|db</code> values</td></tr>
+    <tr><td>AI IPO analysis unavailable this period</td><td>OpenRouter quota — untouched (deferred)</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: SQLITE MIRROR ======================= -->
+<section>
+  <h2>2 · SQLite Mirror Table</h2>
+  <p class="sub">NEW <code class="inline">nse_ipo_listing</code> in <code class="inline">SCHEMA_SQL</code> — SQLite-only, <b>no Prisma migration</b>. <code class="inline">setIpoListings(category, rows)</code> replaces per-category (transaction: <code class="inline">DELETE … WHERE category = ?</code> then INSERT batch — <code class="inline">replaceChartinkResults</code> style); <code class="inline">getIpoListings(category)</code> returns ordered by symbol. <code class="inline">restoreSqliteBackup()</code> validation gains the new table.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    subgraph SCHEMA["nse_ipo_listing (CREATE TABLE IF NOT EXISTS)"]
+        PK["PRIMARY KEY (symbol, category)"] --> IDXC["index on category"]
+        IDXC --> IDXF["index on fetched_at (mirror freshness)"]
+    end
+    N1["NSE special pre-open"] --> S1["setIpoListings('current', rows)"]
+    N2["NSE forthcoming"] --> S2["setIpoListings('upcoming', rows)"]
+    N3["NSE recent listings"] --> S3["setIpoListings('recent', rows)"]
+    S1 --> T1["txn: DELETE WHERE category + INSERT batch"]
+    S2 --> T1
+    S3 --> T1
+    T1 --> M["getIpoListings(category) — ordered by symbol"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 3: CALENDAR SERVICE ======================= -->
+<section>
+  <h2>3 · nseIpoCalendarService — 3 Pure Normalizers</h2>
+  <p class="sub">NEW server-only <code class="inline">lib/services/nseIpoCalendarService.ts</code> with types <code class="inline">IpoCalendarCategory</code> / <code class="inline">IpoCalendarSource</code> / <code class="inline">NseIpoListing</code>. All three normalizers <b>never throw</b> and coerce stringly numbers.</p>
+  <table>
+    <tr><th style="width:30%">Normalizer</th><th>Category</th><th>Status</th><th>Key fields</th></tr>
+    <tr><td class="mono">parseSpecialPreOpenListing(raw)</td><td><code class="inline">current</code></td><td><code class="inline">"Active"</code></td><td><code class="inline">listingDate</code> = today IST ISO; <code class="inline">finalPrice</code> from <code class="inline">preopenBook.finalPrice</code> (fallback <code class="inline">fPrice</code>/<code class="inline">iep</code>); OHLC from <code class="inline">preopenBook</code>; raw preserved</td></tr>
+    <tr><td class="mono">parseForthListing(raw)</td><td><code class="inline">upcoming</code></td><td><code class="inline">"Forthcoming"</code></td><td><code class="inline">effectiveDate</code>; <code class="inline">shdAttachment</code> prefixed <code class="inline">https://www.nseindia.com/</code> when relative; <code class="inline">specialPreOpen</code></td></tr>
+    <tr><td class="mono">parseRecentListing(raw)</td><td><code class="inline">recent</code></td><td><code class="inline">"Closed"</code></td><td><code class="inline">listingDate</code>; <code class="inline">instrument</code>; series</td></tr>
+  </table>
+  <div class="callout"><b>Zero-Prisma guarantee:</b> the module holds <b>no <code class="inline">@/lib/prisma</code> import</b> anywhere on the read path — verified by the "never-Prisma" test.</div>
+</section>
+
+<!-- ======================= SECTION 4: READ CHAIN ======================= -->
+<section>
+  <h2>4 · Read Chain: memory → SQLite → NSE live</h2>
+  <p class="sub"><code class="inline">getNseIpoCalendar(forceRefresh = false)</code> serves memory (<code class="inline">ipo:calendar</code>, <code class="inline">IPO_CALENDAR_MEM_TTL_SECONDS = 15 * 60</code>) → SQLite mirror (all three categories present AND fresh within <code class="inline">IPO_MIRROR_FRESH_MS = 6h</code> → merge, <code class="inline">source:"sqlite_mirror"</code>; stale-but-present still served for durability) → NSE live (<code class="inline">Promise.allSettled</code> over the 3 <code class="inline">nseFetch</code> calls), parse, per-category <code class="inline">setIpoListings</code>, memory set, <code class="inline">source:"nse_live"</code>.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    GET["getNseIpoCalendar(forceRefresh?)"] --> M{"memory ipo:calendar<br/>(15 min)"}
+    M -->|"hit"| MC["source: memory_cache"]
+    M -->|"miss"| S{"SQLite mirror<br/>3 categories present?"}
+    S -->|"fresh (<=6h)"| SM["merge + serve<br/>source: sqlite_mirror"]
+    S -->|"stale but present"| SS["serve for durability<br/>(not refreshed)"]
+    S -->|"missing / stale"| L["Promise.allSettled × 3 NSE fetches"]
+    L -->|"per-category success"| WT["parse → setIpoListings per category<br/>source: nse_live"]
+    L -->|"total failure"| E["{ list: [], changed: false } + logger.error"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>Partial success</b> — successful categories are kept and written; only the failed ones remain stale.</li>
+    <li><b>Total failure</b> — honest empty result, never a 500.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 5: PROMOTE + COMPAT ======================= -->
+<section>
+  <h2>5 · Promote to Prisma (change-gated) + Legacy Compat</h2>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant S as SQLite mirror (nse_ipo_listing)
+    participant P as promoteIpoCalendarToPrisma
+    participant C as stableStringify
+    participant M as market_cache
+
+    Note over S,P: inside promoteNseToPrisma() — leader + breaker + in-flight gated
+    S->>P: aggregate current + upcoming + recent
+    P->>C: stringify {current, upcoming, recent} payload
+    C->>P: compare vs existing nse_ipo_calendar row
+    alt identical
+        P->>M: 0 upserts (skip)
+    else changed
+        P->>M: 1 upsert (cacheKey "nse_ipo_calendar", dataType "ipo_calendar")
+    end
+    </pre>
+  </div>
+  <ul>
+    <li><b><code class="inline">stableStringify</code></b> — exported from <code class="inline">syncedDataService.ts</code> (no behavior change) for deterministic change detection.</li>
+    <li><b>Compat</b> — <code class="inline">mapCalendarToIpoIssues(list)</code> derives status; <code class="inline">issueStartDate = effectiveDate ?? listingDate</code>; <code class="inline">issueEndDate</code> = listingDate or effectiveDate for upcoming; issuePrice/issueSize/lotSize/priceBand stay null unless detail-filled (<code class="inline">/detail</code> chain unchanged).</li>
+    <li><b>Service re-pointing</b> — <code class="inline">nseIpoService.getUpcomingIpoIssues(forceRefresh)</code> → <code class="inline">getNseIpoCalendar</code> → <code class="inline">mapCalendarToIpoIssues</code>, preserving the <code class="inline">SyncedFetchResult&lt;IpoIssue[]&gt;</code> shape (source mapped to legacy <code class="inline">"api"|"cache"|"db"</code>); legacy <code class="inline">market_cache</code> calendar read/write paths removed. <code class="inline">getIpoIssueDetail</code> + <code class="inline">parseIpoDetail</code> unchanged.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 6: ROUTES + UI ======================= -->
+<section>
+  <h2>6 · Routes + UI</h2>
+  <table>
+    <tr><th style="width:38%">Surface</th><th>Change</th></tr>
+    <tr><td class="mono">GET /api/recommendations/ipos</td><td>→ <code class="inline">getNseIpoCalendar(refresh==="1")</code>; response <code class="inline">{ success, issues, sections:{current,upcoming,recent}, source, syncedAt, changed, timestamp, traceId }</code>; catch → <code class="inline">{ success:true, issues:[], warning:"Data temporarily unavailable", source:"fallback" }</code></td></tr>
+    <tr><td class="mono">GET /api/recommendations/ipos/closed?days=30</td><td>closed set = calendar <code class="inline">recent</code> filtered to <code class="inline">listingDate</code> within <code class="inline">days</code>; existing parse + <code class="inline">MAX_DAYS</code>/<code class="inline">MAX_QUOTES</code> + 1h cache + <code class="inline">getStockQuote</code> enrichment mechanics unchanged, new source</td></tr>
+    <tr><td class="mono">IposTab.tsx</td><td><code class="inline">sourceLabel()</code>: "Live from NSE" (nse_live) / "SQLite mirror" (sqlite_mirror) / "Cached" (memory_cache); legacy "db" branch dropped; Current → <b>"Listing Today"</b> + <b>Listing Price</b> column (<code class="inline">finalPrice</code>/<code class="inline">iep</code> via <code class="inline">formatPrice</code>); Forthcoming + "📄 Prospectus" link when <code class="inline">shdAttachment</code> present (target blank, NSE-hosted RHP); Recently Closed unchanged, fed from <code class="inline">recent</code></td></tr>
+  </table>
+  <ul>
+    <li><b>E2E (manual)</b> — IPO tab sections render from the calendar source; source label correct; closed section price enrichment intact. Playwright 375px + 1440px, 0 console errors.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 7: VERIFICATION ======================= -->
+<section>
+  <h2>7 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> NEW <code class="inline">nseIpoCalendarService.test.ts</code> (normalizers incl. IEP finalPrice fallback, RHP prefix, stringly numbers, anomaly tolerance; chain order memory → sqlite → NSE; sqlite freshness window; partial-success NSE; total-failure empty; never-Prisma; promote change-skip; <code class="inline">mapCalendarToIpoIssues</code> compat). <code class="inline">sqlite.test.ts</code> +3–4 (ipo roundtrip, replace-per-category, mirror freshness, promote summary/helper wiring). tsc <b>46 = exact baseline (0 new)</b>. <code class="inline">npx prisma validate</code> — schema unchanged (SQLite-only).</div>
+  <ul>
+    <li><b>Promote summary</b> — <code class="inline">promoteNseToPrisma()</code> gains <code class="inline">nse_ipo_listing: 0</code> and calls <code class="inline">promoteIpoCalendarToPrisma</code> in the loop (leader + breaker + in-flight gated, same as other tables).</li>
+    <li><b>Freshness window</b> — stale-but-present mirror still serves (durability over freshness); only missing/stale triggers the live 3-endpoint fetch.</li>
+    <li><b>No new packages</b> — SQLite-only schema change, zero deps.</li>
+  </ul>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — IPO Tab: SQLite-first NSE IPO Calendar · Spec <code class="inline">.agents/specs/08-ipo-tab-sqlite-first-nse-calendar.md</code> · Plan <code class="inline">.agents/plans/08-ipo-tab-sqlite-first-nse-calendar.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

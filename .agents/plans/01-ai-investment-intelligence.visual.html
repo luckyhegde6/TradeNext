@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — AI Investment Intelligence (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — AI Investment Intelligence</h1>
+  <p>Company-level AI research: <b>cache-first</b> orchestrator pulls 8 NSE data adapters in parallel, feeds a <b>structured JSON</b> prompt to the OpenRouter fallback chain, and renders an 11-section institutional-style panel — with honest <b>data-gap</b> surfacing (never fabricated).</p>
+  <div class="badges">
+    <span class="badge green">v3.18.0 · branch feature/ai-intelligence</span>
+    <span class="badge">cache-first + write-through dual-layer</span>
+    <span class="badge">8 NSE adapters (parallel)</span>
+    <span class="badge amber">directPrompt + modelFallbackChain</span>
+    <span class="badge">structured JSON verdict contract</span>
+    <span class="badge">MCP getInvestmentIntelligence (29 fns)</span>
+    <span class="badge red">quota-exhausted guard</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problem</h2>
+  <p class="sub">Symbol pages only showed quotes/technicals — no research depth. Ad-hoc solutions were either too slow (sync NSE calls per field) or fabricated answers (unstructured AI text with no evidence trail).</p>
+  <table>
+    <tr><th style="width:34%">Pain point</th><th>Design answer</th></tr>
+    <tr><td class="mono">Research takes many slow NSE round-trips</td><td><span class="check">✓</span> 8 independent adapters fetched via <code class="inline">Promise.allSettled</code> in parallel; each adapter try/catch → <code class="inline">null</code> on failure (graceful data gaps).</td></tr>
+    <tr><td class="mono">AI output unreliable / unbounded</td><td><span class="check">✓</span> Structured <b>JSON prompt contract</b> + markdown-fence-tolerant parser; numbers validated; missing fields → <code class="inline">null</code> + surfaced in <code class="inline">dataGaps</code>.</td></tr>
+    <tr><td class="mono">Re-running analysis is expensive</td><td><span class="check">✓</span> Write-through dual-layer cache (memory NodeCache ~1 ms + Prisma <code class="inline">IntelligenceCache</code> persistent, 7-day TTL) below the orchestrator.</td></tr>
+    <tr><td class="mono">Free-tier quota exhaustion</td><td><span class="warn">⚠</span> <code class="inline">isQuotaExhausted()</code> guard aborts generation early and serves the cache / stale result.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: ARCHITECTURE ======================= -->
+<section>
+  <h2>2 · Orchestrator Architecture</h2>
+  <p class="sub">Cache-first read → parallel adapters → AI prompt → fallback chain → parse → cache → audit. The UI (CompanyIntelligence) drives a 5-state button and an expandable 11-section panel.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    subgraph UI["COMPANY PAGE"]
+        B["IntelligenceButton<br/>(idle → loading → ready / error / disabled)"]
+        P["IntelligencePanel<br/>(expandable, height-animated)"]
+    end
+
+    subgraph API["/api/company/[ticker]/intelligence"]
+        R["GET read cache<br/>POST generate (Zod, auth)"]
+        O["Orchestrator<br/>intelligence.ts"]
+    end
+
+    subgraph CACHE["write-through dual-layer cache"]
+        M1["memory: NodeCache (~1 ms)"]
+        DB1["Prisma IntelligenceCache<br/>@@unique([symbol]) · 7d TTL"]
+    end
+
+    subgraph ADAPT["8 NSE adapters (parallel)"]
+        A1["quote · technicals · valuation"]
+        A2["fundamentals · shareholding(null) · corporate"]
+        A3["news(null) · peers(null)"]
+    end
+
+    subgraph TA["technical-analysis lib"]
+        T["computeATR(bars, 14)<br/>findSupportResistance(bars)"]
+    end
+
+    subgraph AI["AI layer"]
+        PR["buildIntelligencePrompt<br/>(structured JSON)"]
+        FC["directPrompt → modelFallbackChain<br/>(openrouter/free → openrouter/auto)"]
+        PA["parseIntelligenceResponse<br/>(fence-tolerant, never throws)"]
+    end
+
+    B --> R
+    R -->|"cache read first"| M1
+    M1 -->|"miss"| DB1
+    DB1 -->|"miss → generate"| O
+    O --> A1
+    O --> A2
+    O --> A3
+    A1 -.-> T
+    O --> PR --> FC --> PA
+    PA -->|"audit + persist"| M1
+    PA -->|"fire-and-forget"| DB1
+    M1 --> P
+    P -.->|"dataGaps shown, never fabricated"| UI
+    </pre>
+  </div>
+  <div class="callout ok"><b>Cache semantics:</b> GET serves memory → DB, restoring DB rows back into memory on hit (write-through both directions). Generation is POST + auth + Zod-validated; every run is audit-logged (<code class="inline">INTELLIGENCE_GENERATED / CACHE_HIT / FAILED / REQUESTED / UNAUTHORIZED</code>).</div>
+</section>
+
+<!-- ======================= SECTION 3: GENERATE FLOW ======================= -->
+<section>
+  <h2>3 · Generate Flow (cache miss)</h2>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as User (company page)
+    participant R as Route
+    participant O as Orchestrator
+    participant A as 8 adapters (parallel)
+    participant N as NSE API
+    participant AI as OpenRouter chain
+    participant C as Cache (mem + Prisma)
+
+    U->>R: POST /intelligence {symbol}
+    R->>R: auth + Zod + audit REQUESTED
+    R->>O: generate(symbol)
+    O->>O: isQuotaExhausted()?
+    alt quota exhausted
+        O-->>U: serve cache / stale (graceful)
+    else proceed
+        O->>A: Promise.allSettled(8 adapters)
+        A->>N: fetch quote/technicals/valuation/...
+        A-->>O: per-adapter data or null (never throws)
+        O->>AI: structured JSON prompt (data + gaps)
+        AI->>AI: fallback chain (primary → fallback models)
+        AI-->>O: raw text (markdown fences tolerated)
+        O->>O: parse (never throws) + normalize + clamp
+        O->>C: write-through (memory immediate + DB fire-and-forget)
+        O->>O: audit GENERATED
+        O-->>U: IntelligenceAnalysis payload
+    end
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 4: UI SECTIONS ======================= -->
+<section>
+  <h2>4 · 11-Section Panel</h2>
+  <table>
+    <tr><th>Section</th><th>Component</th><th>Content</th></tr>
+    <tr><td>Verdict</td><td class="mono">VerdictCard</td><td>BUY/HOLD/SELL + confidence + one-line thesis</td></tr>
+    <tr><td>Fair value</td><td class="mono">FairValueGauge</td><td>estimate vs current price, band visualization</td></tr>
+    <tr><td>Technicals</td><td class="mono">TechnicalSummary</td><td>ATR, support/resistance, trend/pattern summary</td></tr>
+    <tr><td>Fundamentals</td><td class="mono">FundamentalInsights</td><td>reported metrics + derived ratios</td></tr>
+    <tr><td>Valuation</td><td class="mono">ValuationView</td><td>P/E, P/B, EV/EBITDA, dividend yield</td></tr>
+    <tr><td>Catalysts</td><td class="mono">NewsCatalystList</td><td>NSE + TradingView news → catalysts</td></tr>
+    <tr><td>Shareholding</td><td class="mono">ShareholdingTrend</td><td>holder trend (null → gap shown)</td></tr>
+    <tr><td>Corporate</td><td class="mono">CorporateActionsSummary</td><td>dividends / splits / bonus history</td></tr>
+    <tr><td>Risk matrix</td><td class="mono">RiskCatalystMatrix</td><td>risk category × probability × impact</td></tr>
+    <tr><td>Scenarios</td><td class="mono">ScenarioAnalysis</td><td>bull / base / bear outcomes</td></tr>
+    <tr><td>Summary</td><td class="mono">ExecutiveSummary</td><td>condensed thesis + watch-outs</td></tr>
+  </table>
+  <h3>Data adapter map</h3>
+  <table>
+    <tr><th>Adapter</th><th>Source / notes</th></tr>
+    <tr><td class="mono">Quote</td><td>live NSE quote (market-cache chain)</td></tr>
+    <tr><td class="mono">Technicals</td><td>historical bars → <code class="inline">computeATR</code> + <code class="inline">findSupportResistance</code></td></tr>
+    <tr><td class="mono">Valuation</td><td>P/E · P/B · EV/EBITDA · dividend yield</td></tr>
+    <tr><td class="mono">Fundamentals</td><td>reported financials (cached corporate results)</td></tr>
+    <tr><td class="mono">Shareholding / News / Peers</td><td><span class="warn">⚠</span> adapter exists but returns <code class="inline">null</code> today — surfaced as honest gaps</td></tr>
+    <tr><td class="mono">Corporate</td><td>corporate actions + announcements</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 5: SCOPE ======================= -->
+<section>
+  <h2>5 · Scope & Rollout</h2>
+  <ol>
+    <li><b>Phase 1</b> — types (<code class="inline">intelligenceTypes.ts</code>: 14 interfaces) + TA helpers</li>
+    <li><b>Phase 2</b> — Prisma <code class="inline">IntelligenceCache</code> (<code class="inline">@@unique([symbol])</code>, <code class="inline">@@index([symbol, expiresAt])</code>) — applied via <code class="inline">migrate diff</code> + <code class="inline">db execute</code></li>
+    <li><b>Phase 3</b> — write-through dual-layer cache (<code class="inline">lib/services/intelligence/cache.ts</code>)</li>
+    <li><b>Phase 4</b> — 8 adapters (<code class="inline">lib/services/intelligence/adapters.ts</code>)</li>
+    <li><b>Phase 5</b> — prompt builder + parser (<code class="inline">ai/intelligence-prompt.ts</code>)</li>
+    <li><b>Phase 6</b> — orchestrator (<code class="inline">ai/intelligence.ts</code>) + quota guard</li>
+    <li><b>Phase 7</b> — API route + MCP <code class="inline">getInvestmentIntelligence</code></li>
+    <li><b>Phase 8</b> — UI: 14 files, 11 section components, state machine</li>
+  </ol>
+  <details>
+    <summary>Deliberately OUT of scope</summary>
+    <ul>
+      <li>Intraday ticks, L2/DMA, DCF Monte-Carlo, AI sentiment, PDF export, portfolio optimization, new charts.</li>
+      <li>Original <code class="inline">buildIntelligencePrompt</code>/<code class="inline">parseIntelligenceResponse</code> kept backward-compatible — legacy cached rows stay valid.</li>
+    </ul>
+  </details>
+  <div class="callout ok"><b>Verification gate:</b> tsc 46 = exact baseline (0 new production errors); suite +38 intelligence tests (TA 16 · cache 10 · prompt 18 · orchestrator 10); audience checks 852 pass / 4 skip total.</div>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — AI Investment Intelligence · Spec <code class="inline">.agents/specs/01-ai-investment-intelligence.md</code> · Plan <code class="inline">.agents/plans/01-ai-investment-intelligence.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

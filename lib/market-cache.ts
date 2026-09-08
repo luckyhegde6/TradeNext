@@ -3,6 +3,7 @@ import prisma, { withAccelerateCache } from "@/lib/prisma";
 import { isMarketOpen, getMillisecondsUntilNextMarketOpen, getRecommendedTTL } from "@/lib/market-hours";
 import logger from "@/lib/logger";
 import cache from "@/lib/cache";
+import { isNseCooldownActive, NseRateLimitedError } from "@/lib/services/nseRateGuard";
 
 export type DataType = 
   | "corporate_actions" 
@@ -165,6 +166,15 @@ export async function getOrFetchNseData<T>(
     });
 
     try {
+      // Rate-guard: fail-fast during cooldown — serve stale DB / memory
+      if (isNseCooldownActive()) {
+        logger.warn({ msg: "MarketCache: NSE cooldown active, serving from DB", cacheKey });
+        if (cached) {
+          cache.set(memKey, { data: cached.data as T, lastSyncedAt: cached.lastSyncedAt }, memTtl);
+          return { data: cached.data as T, source: "db" as const, needsRefresh: true, lastSyncedAt: cached.lastSyncedAt };
+        }
+        throw new NseRateLimitedError("cooldown");
+      }
       const nseData = await fetchFromNse();
 
       // Calculate next sync time
@@ -207,11 +217,15 @@ export async function getOrFetchNseData<T>(
         lastSyncedAt: updatedCache.lastSyncedAt
       };
     } catch (nseError) {
-      logger.error({
-        msg: "MarketCache: NSE fetch failed, serving from DB if available",
-        cacheKey,
-        error: nseError
-      });
+      if (nseError instanceof NseRateLimitedError) {
+        logger.warn({ msg: "MarketCache: NSE rate guard active, serving from DB", cacheKey, kind: nseError.kind });
+      } else {
+        logger.error({
+          msg: "MarketCache: NSE fetch failed, serving from DB if available",
+          cacheKey,
+          error: nseError
+        });
+      }
 
       // If NSE fails but we have cached data, return it
       if (cached) {

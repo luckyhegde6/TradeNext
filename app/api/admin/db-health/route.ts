@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
-import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, type WriteBehindKind } from "@/lib/sqlite";
+import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
 import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
@@ -151,12 +151,20 @@ export async function GET(req: Request) {
         dayKey: opsSnapshot.day,
       },
     },
-    sqlite: sqliteHealth?.sqlite ?? {
-      ready: false,
-      syncing: false,
-      lastSyncAt: null,
-      tables: {},
-      recentSyncs: [],
+    sqlite: {
+      ...(sqliteHealth?.sqlite ?? {
+        ready: false,
+        syncing: false,
+        lastSyncAt: null,
+        tables: {},
+        recentSyncs: [],
+      }),
+      // Plan 09 Phase 8: durable sync-ledger table presence + the SQLite ->
+      // Prisma push-queue (outbox) standing counts + mirror row counts for the
+      // derived-tracker tables. Zero Prisma footprint (all local reads).
+      syncHistoryTable: hasSyncHistoryTable(),
+      outboxPending: getOutboxPending(),
+      derivedCounts: getSqliteDerivedCounts(),
     },
     dailyPriceCache: priceCacheStatus,
     dbErrors,
@@ -191,7 +199,7 @@ export async function GET(req: Request) {
  * Trigger a manual SQLite sync from Prisma, flush daily prices, or perform an
  * admin backup / restore of the in-memory SQLite backup layer.
  *
- * Body: { action?: "sync_sqlite" | "flush_prices" | "flush_logs" | "deploy_prep" | "backup" | "restore" }
+ * Body: { action?: "sync_sqlite" | "flush_prices" | "flush_logs" | "push_to_prisma" | "deploy_prep" | "backup" | "restore" }
  *  - backup:      returns { data: base64 } of the exported .sqlite blob
  *  - restore:     { data: <base64 sqlite> } applies the uploaded backup
  *  - deploy_prep: run the "Prepare for Deploy" sequence — flush write-behind logs
@@ -327,6 +335,43 @@ export async function POST(req: Request) {
     }
   }
 
+  if (action === "push_to_prisma") {
+    // Plan 09 Phase 8: admin manual trigger for the SQLite -> Prisma one-way
+    // push (mirrors the 6-hourly probe-tick push). `leaderGate: false` so the
+    // button works on whichever instance the admin is hitting — the readiness
+    // + plan-limit breaker guards still apply. A skipped push returns 200 with
+    // `pushed: false` so the UI can show the reason instead of a 500.
+    try {
+      const result = await pushSqliteToPrisma({ reason: "admin", leaderGate: false });
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_SYNC",
+        resource: "sqlite-push",
+        responseStatus: 200,
+        metadata: result ?? { skipped: true },
+      });
+      if (!result) {
+        return NextResponse.json({
+          success: false,
+          pushed: false,
+          message: "Push skipped (SQLite not ready, syncing, or plan-limit breaker open)",
+        });
+      }
+      return NextResponse.json({
+        success: true,
+        pushed: true,
+        message: `Pushed ${result.synced} rows to Prisma (${result.failed} failed)`,
+        ...result,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Push to Prisma failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
   if (action === "probe_prisma") {
     // v3.23.x manual-trigger Prisma health check (the GET path is Prisma-free;
     // this is the only on-demand way to force a connectivity probe). Updates
@@ -366,7 +411,7 @@ export async function POST(req: Request) {
           { status: 503 },
         );
       }
-      await sqlite.syncFromPrisma({ force: true });
+      await sqlite.syncFromPrisma({ force: true, reason: "admin" });
       sqlite.persistOpsCounter();
       sqlite.persistDbErrorCounts();
       const health = sqlite.getHealthStatus();
@@ -405,7 +450,7 @@ export async function POST(req: Request) {
   try {
     // Manual admin action — force the sync regardless of leader election so it
     // works on whatever instance the admin is hitting (leader-gated otherwise).
-    await sqlite.syncFromPrisma({ force: true });
+    await sqlite.syncFromPrisma({ force: true, reason: "admin" });
     // Persist snapshots so the post-sync state survives restarts/deploys
     sqlite.persistOpsCounter();
     sqlite.persistDbErrorCounts();

@@ -12,21 +12,25 @@ status: "in_progress"             # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-09-06T00:00:00Z"
-feature: "v3.29.1-header-overflow-watchlist-skeleton"
+last_updated: "2026-09-09T00:00:00Z"
+feature: "v3.31.0-sqlite-first-read-architecture"
 ```
 
 ## Handoff Required?
 
-**On `main` (HEAD `d7e54cf` = merge of `fix/v3.28.1-sqlite-self-heal`; v3.29.0 `4563713` merged) — v3.29.1 Header overflow fix + Watchlist logged-out infinite-skeleton fix: code + regression test + live-browser verification + docs DONE; COMMIT PENDING USER (no push/merge/deploy).**
-- **Header overflow fix** (`app/Header.tsx`, CSS-only): logged-in nav no longer overflows at 1440–1600px — Playwright DOM audit of **372 overflow checks + 9-width quick-check loop** → 0 overflow @1440 + @375 on watchlist/alerts/screener/advanced-screener; full e2e **87 passed / 2 flaky / 0 failed**.
-- **Watchlist logged-out infinite-skeleton BUG (found during user-requested browser + Chrome DevTools visual observation)**: `app/watchlist/page.tsx` :303 guard `if (status === "loading" || loading)` dead-coded the `unauthenticated` "Please sign in to view your watchlist." card — the local `loading` (`useState(true)`) only clears inside `fetchWatchlists()` (authenticated-only) → logged-out visitors saw an eternal skeleton; e2e missed it (watchlist spec logs in first). **Fix (1 line)**: `status === "loading" || (status === "authenticated" && loading)` (authenticated UX unchanged).
-- **Tests**: NEW `app/watchlist/__tests__/page.test.tsx` **3/3** — unauthenticated → sign-in + no skeleton (fails pre-fix), loading → skeleton, authenticated-empty → CTA; mocks `useSession`/`fetch`/`AiActionButton`/`Autocomplete`/`useLivePrices`.
-- **Verification**: tsc **46 = exact baseline (0 new)**; full jest **1043 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake, not attributable); no schema change → no migration.
-- **Live verified (Chrome DevTools, :3000)**: logged-out isolated context → sign-in card, 0 skeletons; logged-in demo → "Demo AI Watchlist" (RELIANCE ● LIVE ₹1,310.90 / -23.90 (-1.79%), OHLC table, Analyze / + Add / Delete), 0 console errors (Web Vitals GOOD), no overflow @375×812 / @2696.
-- **Docs updated (all)**: AGENTS.md v3.29.1 row, `.agents/CHANGELOG.md` index + `.agents/changelog/versions-v3.29.md` v3.29.1 section, TODO.md row, Primer.md, agent-memory.md, Lessons.md #107, `.agents/session-todos.md`, `.agents/handoffs/active/latest.md` (rewritten as v3.29.1 handoff), this file, `.agents/sessions/2026-09-06-v3.29.1-header-watchlist/`.
-- **Next**: commit v3.29.1 when approved (`app/Header.tsx`, `app/watchlist/page.tsx`, `app/watchlist/__tests__/page.test.tsx` + doc set). Dev server PID 42644 left running (do not kill); temp probe files cleaned.
-- **Unrelated open**: PR #114 (v3.26.0 fixes + Accelerate docs) pending merge against `main`; v3.28.0/v3.27.0 diffs pending user commit; Phase 0 (Prisma Postgres provisioning) REQUIRED before Dec 1 2026 Accelerate retirement (BUGS.md #14); deferred daily recommendation job failures (Issue 3).
+**On `fix/v3.29.1-header-watchlist` (HEAD `653b617` = v3.31.0 code P8; v3.30.0 `8af65cc` + v3.29.2 `1e907f1` + v3.29.1 `6e8db23` committed) — v3.31.0 SQLite-first NSE read architecture + low-frequency Prisma sync (Plan 09): CODE + TESTS COMMITTED `9303bd7`→`653b617` (9 commits); DOC COMMIT PENDING USER (no push/merge/deploy).**
+- **(1) sync_history ledger** — durable `sync_history` table + `recordSyncHistory()` (prune-100) + `recentSyncs` in health; SCHEMA_SQL stray-`;`-in-comment sql.js parse error fixed (root cause of v3.30.0 boot noise; converted `--` comment `;` → `/* */`).
+- **(2) Boot hydration on every instance** — `syncFromPrisma(opts)` (`reason`/`skipReconcile`/`leaderBypass`/`force`); `initSqliteBackup()` → `{boot, skipReconcile, leaderBypass}`.
+- **(3) NSE rate guard** — NEW `lib/services/nseRateGuard.ts` + 6 tests (single-flight, throttle, burst cooldown); wired `nse-client.ts` + `market-cache.ts`.
+- **(4) `_sync_outbox` + 6h PUSH engine** — `_sync_outbox` table + `pushSqliteToPrisma` (grouped latest-op-wins, chunk-200 sinks, `reconcileControlToPrisma`); NEW `lib/sqlitePushSinks.ts`; 6h probe pivots PULL→PUSH. **Prod bug FIXED**: `if (!isLeader("sqlite-sync"))` never fired (isLeader returns `Promise` — always truthy) → awaited.
+- **(5) NSE captures SQLite+outbox only** — auto-promote off (`NSE_PROMOTE_ENABLED=1` env-gated).
+- **(6) Jobs write SQLite-first (recs/swing/perf)** — 5 mirror tables + 7 write-through helpers; pipelines mirror-first with Prisma fallback.
+- **(7) Admin long-lived datasets SQLite-first** — +7 helpers (`admin_announcement`/`alert`/`transaction`/`corporate_action`) + 4 admin CRUD routes flipped.
+- **(8) db-health wiring** — GET spreads outbox/derived-counts/sync-history; POST `push_to_prisma`; UI Outbox + Derived-counts + Push button; 5 hot-route headers document the read chain.
+- **Verification**: sqlite.test.ts **68/68** (11 new P8); instrumentation +1; NEW nseRateGuard 6; full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no schema change → no migration.
+- **Deferred (plan rev-v3 c/d)**: SQLite `query_cache` + db-health monthly-ops window NOT implemented (follow-up).
+- **Next**: doc commit — stage the doc files (changelog versions-v3.31.md + CHANGELOG index + AGENTS.md + TODO.md + Primer.md + agent-memory.md + Lessons.md + session-todos.md + plan + spec) → run `/pre-commit-check` → commit `docs(sqlite): v3.31.0 Plan 09 SQLite-first read architecture (AGENTS/CHANGELOG/TODO/Primer/memory/Lessons)` (no code — code already landed).
+- **Unrelated open**: PR #114 (v3.26.0 fixes + Accelerate docs) pending merge against `main`; v3.28.0/v3.27.0 diffs pending user commit; Phase 0 (Prisma Postgres provisioning) REQUIRED before Dec 1 2026 Accelerate retirement (BUGS.md #14); deferred daily recommendation job failures (Issue 3); held (req text not provided — no guess-implement): `dailyRecommendationService` AI-unavailable fallback + rate re-capture wiring.
 
 ---
 
@@ -93,3 +97,4 @@ No active handoff. See `.agents/session-todos.md` for the current session todo l
 | v1.8 | 2026-08-17 | Session v3.14.0 (swing signal persistence + advanced screener fix + spec-driven dev): state updated to `ready`; branch `docs-readme-refs-agentic-coding` committed + pushed |
 | v1.9 | 2026-08-25 | Session v3.19.2 (SQLite expanded + recovery sync + admin DB health dashboard): state updated to `ready`; branch `feature/ai-intelligence` committed + pushed |
 | v1.10 | 2026-08-27 | Session v3.20.1 + v3.20.2 (DB ops optimization + DB Health enhancements + Daily Price Cache batch writer): state `in_progress`; branch `feat/db-health-price-cache`; commit/push/PR in progress |
+| v1.11 | 2026-09-09 | Session v3.31.0 (SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09): state `in_progress`; branch `fix/v3.29.1-header-watchlist`; code + tests committed `9303bd7`→`653b617` (9 commits); doc commit pending user |

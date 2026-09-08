@@ -47,6 +47,7 @@ import {
   leaderWorkerId,
   LEADER_SELF,
   LEADER_STALENESS_MS,
+  LEADER_HEARTBEAT_MS,
 } from "@/lib/services/leader";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -64,7 +65,8 @@ describe("leaderWorkerId / constants", () => {
   it("exposes host-pid self identifier and staleness window", () => {
     expect(typeof LEADER_SELF).toBe("string");
     expect(LEADER_SELF).toContain("-");
-    expect(LEADER_STALENESS_MS).toBe(5 * 60_000);
+    expect(LEADER_STALENESS_MS).toBe(15 * 60_000);
+    expect(LEADER_HEARTBEAT_MS).toBe(300_000);
   });
 });
 

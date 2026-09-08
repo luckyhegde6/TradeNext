@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { getDefaultConfig, AVAILABLE_MODELS, hasValidConfig } from "@/lib/services/ai/config";
+import { getDefaultConfig, AVAILABLE_MODELS, BUILTIN_MODELS, BUILTIN_MODEL_IDS, hasValidConfig } from "@/lib/services/ai/config";
 import { resetLLM } from "@/lib/services/ai/llm-provider";
 import logger from "@/lib/logger";
 
@@ -29,17 +29,25 @@ export async function GET() {
       }
     } catch { /* DB not available */ }
 
-    // Fetch custom models from DB
+    // Fetch custom models + hidden catalog removals from DB
     let customModels: { id: string; name: string; description?: string; contextLength?: number }[] = [];
+    let hiddenModelIds: string[] = [];
     try {
       const customModelsRecord = await prisma.secret.findFirst({ where: { name: "ai_custom_models" } });
-      if (customModelsRecord?.metadata && Array.isArray((customModelsRecord.metadata as any).models)) {
-        customModels = (customModelsRecord.metadata as any).models;
-      }
+      const raw = (customModelsRecord?.metadata as any) || {};
+      if (Array.isArray(raw.models)) customModels = raw.models;
+      if (Array.isArray(raw.hidden)) hiddenModelIds = raw.hidden;
     } catch { /* DB not available */ }
 
-    // Merge built-in + custom models
-    const allModels = [...AVAILABLE_MODELS, ...customModels];
+    // Visible models = true builtins + catalog minus hidden, merged (deduped) with customs
+    const hiddenSet = new Set(hiddenModelIds);
+    const visibleCatalog = [...BUILTIN_MODELS, ...AVAILABLE_MODELS.filter((m) => !hiddenSet.has(m.id))];
+    const seen = new Set<string>();
+    const allModels = [...visibleCatalog, ...customModels].filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
 
     return NextResponse.json({
       configured: isConfigured,
@@ -49,6 +57,7 @@ export async function GET() {
       maxTokens: dbConfig?.maxTokens ?? envConfig.maxTokens,
       enabled: dbConfig?.enabled ?? envConfig.enabled,
       availableModels: allModels,
+      builtinModelIds: BUILTIN_MODEL_IDS,
       customModels,
       envModel: envConfig.model,
     });
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest) {
 
     if (body.model !== undefined) {
       // Validate model: must be in built-in list OR custom models OR valid OpenRouter format
-      const builtIn = AVAILABLE_MODELS.find((m) => m.id === body.model);
+      const builtIn = BUILTIN_MODELS.find((m) => m.id === body.model) || AVAILABLE_MODELS.find((m) => m.id === body.model);
       
       // Check custom models in DB
       let isCustom = false;
@@ -158,8 +167,13 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * DELETE /api/admin/ai/config — Remove a custom model
+ * DELETE /api/admin/ai/config — Remove a non-built-in model
  * Body: { modelId: string }
+ *
+ * Only the true built-ins (`openrouter/free`, `openrouter/auto`) are
+ * non-removable. Catalog models are persistently hidden (persisted in the
+ * `ai_custom_models` secret metadata `hidden` array) and admin-added custom
+ * models are deleted outright.
  */
 export async function DELETE(req: NextRequest) {
   try {
@@ -173,27 +187,51 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "modelId is required" }, { status: 400 });
     }
 
-    // Don't allow removing built-in models
-    const isBuiltIn = AVAILABLE_MODELS.some((m) => m.id === body.modelId);
-    if (isBuiltIn) {
+    const modelId: string = body.modelId;
+
+    // Only the true built-ins are blocked from removal
+    if (BUILTIN_MODEL_IDS.includes(modelId)) {
       return NextResponse.json({ error: "Cannot remove built-in models" }, { status: 400 });
     }
 
+    const isCatalog = AVAILABLE_MODELS.some((m) => m.id === modelId);
+
     const existing = await prisma.secret.findFirst({ where: { name: "ai_custom_models" } });
-    if (!existing?.metadata || !Array.isArray((existing.metadata as any).models)) {
-      return NextResponse.json({ error: "Custom model not found" }, { status: 404 });
+    const raw = (existing?.metadata as any) || {};
+    const models: any[] = Array.isArray(raw.models) ? raw.models : [];
+    const hidden: string[] = Array.isArray(raw.hidden) ? raw.hidden : [];
+
+    const inCustomModels = models.some((m: any) => m.id === modelId);
+    if (!isCatalog && !inCustomModels) {
+      return NextResponse.json({ error: "Model not found" }, { status: 404 });
     }
 
-    const models = (existing.metadata as any).models.filter((m: any) => m.id !== body.modelId);
-    
-    await prisma.secret.update({
-      where: { id: existing.id },
-      data: { metadata: { models }, updatedAt: new Date() },
-    });
+    // Catalog removals are hidden; custom removals are dropped; custom copies of
+    // a catalog model are dropped AND hidden.
+    const nextModels = models.filter((m: any) => m.id !== modelId);
+    const nextHidden = isCatalog && !hidden.includes(modelId) ? [...hidden, modelId] : hidden;
+    const metadata = { models: nextModels, hidden: nextHidden };
 
-    // If the active model was the one removed, fall back to default
+    if (existing) {
+      await prisma.secret.update({
+        where: { id: existing.id },
+        data: { metadata, updatedAt: new Date() },
+      });
+    } else if (isCatalog) {
+      await prisma.secret.create({
+        data: {
+          name: "ai_custom_models",
+          type: "api_key",
+          value: "custom_models_storage",
+          hint: "User-added OpenRouter models",
+          metadata,
+        },
+      });
+    }
+
+    // If the active model was the one removed/hidden, fall back to default
     const aiConfig = await prisma.secret.findFirst({ where: { name: "ai_config" } });
-    if (aiConfig?.metadata && (aiConfig.metadata as any).model === body.modelId) {
+    if (aiConfig?.metadata && (aiConfig.metadata as any).model === modelId) {
       await prisma.secret.update({
         where: { id: aiConfig.id },
         data: { metadata: { ...(aiConfig.metadata as any), model: "openrouter/free" }, updatedAt: new Date() },
@@ -201,9 +239,9 @@ export async function DELETE(req: NextRequest) {
       resetLLM();
     }
 
-    return NextResponse.json({ success: true, message: `Model "${body.modelId}" removed` });
+    return NextResponse.json({ success: true, message: `Model "${modelId}" removed` });
   } catch (err) {
-    logger.error({ msg: "Failed to delete custom model", error: err });
+    logger.error({ msg: "Failed to delete model", error: err });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

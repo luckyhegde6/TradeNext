@@ -1,3 +1,6 @@
+// HOT ROUTE (Plan 09 Phase 8): read-first chain — route memory cache (60s
+// ROUTE_CACHE_KEY) -> SQLite mirror while the plan-limit breaker is open ->
+// Prisma with Accelerate cacheStrategy on the heavy latest-run reads.
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestRecommendations } from "@/lib/services/dailyRecommendationService";
 import { recommendationsCache } from "@/lib/cache";

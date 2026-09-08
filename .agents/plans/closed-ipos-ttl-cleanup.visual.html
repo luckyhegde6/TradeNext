@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Closed IPOs with Current Prices + IPO Analysis TTL Cleanup (v3.15.0) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Closed IPOs with Current Prices + IPO Analysis TTL Cleanup</h1>
+  <p>Closed IPOs move out of the main IPO table into a <b>collapsible "Recently Closed IPOs" section</b> enriched with <b>current prices + gain/loss %</b> (new <code class="inline">GET /api/recommendations/ipos/closed</code>, 1h memory cache). In parallel, a <b>TTL cleanup</b> task (<code class="inline">cleanStaleIpoAnalysisRows</code>, 90-day) prunes stale <code class="inline">ipo_analysis</code> rows from <code class="inline">market_cache</code> on every market-sync run.</p>
+  <div class="badges">
+    <span class="badge green">v3.15.0</span>
+    <span class="badge">IPO tab enhancement</span>
+    <span class="badge red">closed rows leave main table</span>
+    <span class="badge">30-day window</span>
+    <span class="badge green">1h closed-IPOs cache</span>
+    <span class="badge amber">90-day TTL cleanup</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: PROBLEM ======================= -->
+<section>
+  <h2>1 · The Problems</h2>
+  <table>
+    <tr><th style="width:36%">Surface</th><th>Issue</th></tr>
+    <tr><td class="mono">IposTab main table</td><td><span class="x">✕</span> Closed IPOs shared the main table with Active/Forthcoming rows — no current-price context, cluttered the actionable view.</td></tr>
+    <tr><td class="mono">IPO analysis cache</td><td><span class="x">✕</span> <code class="inline">market_cache</code> rows with <code class="inline">dataType="ipo_analysis"</code> accumulated forever — no expiry, unbounded growth.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: CLOSED ENDPOINT ======================= -->
+<section>
+  <h2>2 · New GET /api/recommendations/ipos/closed</h2>
+  <p class="sub">Filters <code class="inline">getUpcomingIpoIssues()</code> for <code class="inline">status === "Closed"</code> + <code class="inline">issueEndDate</code> within the last N days (default 30), batch-fetches current prices via <code class="inline">getStockQuote()</code> (dynamic import, chunked 10, <code class="inline">Promise.allSettled</code>), computes <code class="inline">gainPercent</code> vs the issue price-band low, and memory-caches the result for 1 hour (<code class="inline">IPO_CLOSED_CACHE_TTL = 3600</code>).</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    REQ["GET /api/recommendations/ipos/closed?days=30"] --> C{"IPC_CLOSED_CACHE_TTL 1h<br/>memory cache"}
+    C -->|"hit"| H["serve cached result"]
+    C -->|"miss"| F["getUpcomingIpoIssues() filter<br/>status Closed + issueEndDate within 30 days"]
+    F --> Q["getStockQuote batch — chunked 10<br/>Promise.allSettled (graceful price fallback)"]
+    Q --> G["gainPercent = (current − bandLow) / bandLow<br/>parsePriceBandLow(issuePrice)"]
+    G --> SET["memory-cache 1h"]
+    SET --> R["200 { closed: [...] }"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>Price-parse chain</b> — band low via <code class="inline">parsePriceBandLow(issuePrice)</code>; current via <code class="inline">lastPrice</code> from <code class="inline">getStockQuote</code>; graceful fallback when a quote fails (row still returned, gain blank).</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 3: TTL CLEANUP ======================= -->
+<section>
+  <h2>3 · IPO Analysis TTL Cleanup</h2>
+  <p class="sub">NEW <code class="inline">cleanStaleIpoAnalysisRows()</code> in <code class="inline">ipoAnalysisService.ts</code> deletes <code class="inline">MarketCache</code> rows where <code class="inline">dataType = "ipo_analysis"</code> AND <code class="inline">lastSyncedAt &lt; 90 days ago</code>; returns the deleted count for logging. Wired in as a <b>non-fatal step 5</b> of <code class="inline">executeMarketDataSync()</code> and as a standalone <code class="inline">ipo_analysis_cleanup</code> task type; surfaced in the admin TASK_TYPES enums (cron + workers routes).</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    SYNC["executeMarketDataSync()"] --> S5["step 5 — cleanStaleIpoAnalysisRows() (non-fatal)"]
+    TASK["admin task ipo_analysis_cleanup"] --> S5
+    S5 --> DEL["deleteMany: dataType = ipo_analysis<br/>AND lastSyncedAt &lt; 90 days"]
+    DEL --> N["deleted count → logger"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 4: UI ======================= -->
+<section>
+  <h2>4 · IposTab — Collapsible Closed Section</h2>
+  <ul>
+    <li>Main table now renders <b>Active + Forthcoming only</b> — Closed rows are removed from it.</li>
+    <li>NEW collapsible <b>"Recently Closed IPOs"</b> section — header toggle (<code class="inline">showClosed</code>, default <code class="inline">false</code>), lazy-loaded via <code class="inline">fetchClosedPrices()</code> on first expand.</li>
+    <li>Columns: symbol, current price (₹, via <code class="inline">formatPrice</code>) and <b>Gain/Loss %</b> — green for gains, red for losses.</li>
+    <li>Section hidden entirely when the closed list is empty (0 rows → no section).</li>
+  </ul>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    TAB["IposTab"] --> MAIN["Main table: Active + Forthcoming"]
+    TAB --> CL["Recently Closed IPOs — collapsed"]
+    CL -->|"toggle showClosed"| FETCH["fetchClosedPrices() lazy"]
+    FETCH --> ROWS["Current ₹ · Gain/Loss %<br/>green / red"]
+    ROWS -->|"0 rows"| HIDE["section not rendered"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 5: VERIFICATION ======================= -->
+<section>
+  <h2>5 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> NEW <code class="inline">closedIpoPrices.test.ts</code> <b>18</b> (gain calculation, date filtering, price parsing, graceful price fallback); <code class="inline">ipoAnalysisService.test.ts</code> +3 cleanup tests; <code class="inline">ipoAnalysisPrewarm.test.ts</code> +5. Full suite <b>787 pass / 4 skip</b> (was 758/4, +29). tsc <b>46 = exact baseline (0 new)</b>. Live-verified: pipeline 30 Total / 16 Buy / 5 Hold / 9 Sell, HOLDs collapsed, IPO tab 4 Active + 1 Upcoming, <code class="inline">ipo_analysis: 2 (29%)</code> visible in AI monitoring.</div>
+  <ul>
+    <li><b>Monitoring visibility</b> — cache-hit paths (<code class="inline">action:"ipo_analysis_served", model:"cache"</code>) let cache hits show in AI monitoring alongside the cleanup deletes.</li>
+    <li><b>Commit note</b> — shipped together with the pipeline redesign + IPO monitoring + closed IPOs + TTL cleanup batch (v3.15.0, one user-approved commit).</li>
+  </ul>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Closed IPOs with Current Prices + IPO Analysis TTL Cleanup · Spec <code class="inline">.agents/specs/closed-ipos-ttl-cleanup.md</code> · Plan <code class="inline">.agents/plans/closed-ipos-ttl-cleanup.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

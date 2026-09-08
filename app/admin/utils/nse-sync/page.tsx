@@ -420,6 +420,10 @@ export default function NSESyncPage() {
                         <p className="text-lg text-gray-500 dark:text-slate-400 max-w-2xl leading-relaxed">
                             Manage real-time indexing, flush system-wide caches, and maintain cross-environment data consistency with NSE India.
                         </p>
+                        <p className="text-sm text-amber-600 dark:text-amber-400/90 max-w-2xl leading-relaxed">
+                            NSE writes land in the local SQLite mirror first; Prisma is promoted on the 6-hour
+                            push cycle (or manually via DB Health → "Push to Prisma").
+                        </p>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-4">
                         <button

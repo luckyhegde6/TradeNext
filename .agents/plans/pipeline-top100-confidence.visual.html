@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeNext — Daily Recommendation Pipeline Redesign: Top-100 + Top-Pick Confidence (v3.15.0) (Visual Explainer)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --sky: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  header.hero {
+    text-align: center;
+    padding: 32px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  header.hero p { color: var(--muted); margin: 0 auto; max-width: 760px; font-size: 1.05rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .badge {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--sky);
+  }
+  .badge.red { color: var(--red); } .badge.green { color: var(--green); } .badge.amber { color: var(--amber); }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.35rem; color: var(--sky);
+    border-left: 4px solid var(--accent); padding-left: 12px; margin-bottom: 8px;
+  }
+  h3 { font-size: 1.05rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 20px 16px; max-width: 860px; }
+  .diagram {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto; margin: 16px 0;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    font-size: 0.9rem;
+  }
+  th { background: var(--panel2); text-align: left; padding: 10px 12px; color: var(--sky); font-weight: 600; }
+  td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; }
+  .check { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--amber); border-left: 4px solid var(--amber);
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0; color: var(--text); font-size: 0.95rem;
+  }
+  .callout.ok { border-color: var(--green); border-left-color: var(--green); }
+  .callout b { color: var(--amber); } .callout.ok b { color: var(--green); }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; border-top: 1px solid var(--border); padding-top: 20px; margin-top: 40px; }
+  details { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; margin: 10px 0; }
+  summary { cursor: pointer; color: var(--sky); font-weight: 600; }
+  ul { margin: 8px 0 8px 20px; padding: 0; }
+  li { margin: 4px 0; }
+  code.inline { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>TradeNext — Daily Recommendation Pipeline Redesign: Top-100 + Top-Pick Confidence</h1>
+  <p>The daily recommendation pipeline is rebuilt around a <b>top-100 market-cap screener slice</b> (<code class="inline">MAX_AI_STOCKS</code> 50→100) whose AI-analyzed results are partitioned into <b>actionable vs HOLD</b>; the top 50 BUY/SELL by confidence get <code class="inline">isTopPick: true</code>. The AI fallback chain is hardened so a primary-model failure <b>tries fallbacks instead of skipping</b>, and the Today's Picks UI shows BUY/SELL in the main grid with HOLDs collapsed separately.</p>
+  <div class="badges">
+    <span class="badge green">v3.15.0</span>
+    <span class="badge">branch feat/recs-pipeline-v2</span>
+    <span class="badge">MAX_AI_STOCKS 50 → 100</span>
+    <span class="badge green">top 50 → isTopPick</span>
+    <span class="badge amber">AI fallback chain (not skip)</span>
+    <span class="badge">HOLDs separate section</span>
+  </div>
+</header>
+
+<!-- ======================= SECTION 1: WHY ======================= -->
+<section>
+  <h2>1 · Why Redesign the Pipeline</h2>
+  <p class="sub">With 98 TradingView templates + the 117-entry Chartink registry feeding the run, the pre-v3.15.0 pipeline could surface <b>hundreds of candidate stocks</b> — the UI was unusable and the AI budget unbounded.</p>
+  <table>
+    <tr><th style="width:36%">Problem</th><th>Consequence</th></tr>
+    <tr><td class="mono">643 recommendations surfaced</td><td><span class="x">✕</span> Too many to be useful — no cap, no prioritisation; users saw an endless mixed grid.</td></tr>
+    <tr><td class="mono">HOLDs mixed with BUY/SELL</td><td><span class="x">✕</span> Actionable picks were visually buried inside wall-of-cards of neutral HOLD verdicts (conf-50 noise).</td></tr>
+    <tr><td class="mono">AI model failure = skip</td><td><span class="x">✕</span> When the configured primary model failed, the batch layer could skip analysis entirely → synthetic all-HOLD fallback rows.</td></tr>
+  </table>
+</section>
+
+<!-- ======================= SECTION 2: PIPELINE ======================= -->
+<section>
+  <h2>2 · Pipeline Redesign — Top-100 by Market Cap → Top-50 Confidence</h2>
+  <p class="sub">In <code class="inline">lib/services/dailyRecommendationService.ts</code>: NEW pure <code class="inline">selectTopByMarketCap(results, limit)</code> sorts the full screener result set by <code class="inline">marketCap</code> descending and keeps the top N; <code class="inline">rankAndCapRecommendations</code> is replaced by <code class="inline">selectTopByMarketCap(screenerResults, 100)</code>; after AI analysis the successes partition into <b>actionable</b> (<code class="inline">recommendation !== "HOLD"</code>) vs <b>holdOnly</b>; actionable is ranked by confidence descending and the top 50 carry <code class="inline">isTopPick: true</code>. <b>ALL results (incl. HOLDs) are stored</b> for history/performance tracking — only the <i>presentation</i> is filtered.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    SCAN["All screener results (Chartink 117 + TradingView 98)"] --> TOP["selectTopByMarketCap(results, 100)<br/>marketCap desc · MAX_AI_STOCKS 100"]
+    TOP --> AI["AI analysis batches (top 100)"]
+    AI --> P{"Partition successes"}
+    P -->|"recommendation ≠ HOLD"| ACT["actionable"]
+    P -->|"recommendation = HOLD"| HOLD["holdOnly"]
+    ACT --> RANK["rank by confidence descending<br/>take top 50"]
+    RANK --> FLAG["isTopPick = true"]
+    ACT --> STORE["store ALL results<br/>(history + performance)"]
+    HOLD --> STORE
+    FLAG --> UI["Today's Picks — main grid (top picks)<br/>HOLDs (N) collapsible section"]
+    </pre>
+  </div>
+  <ul>
+    <li><b>Selection honesty</b> — market-cap cut is applied to the <i>screener universe</i> BEFORE AI spend; the confidence cut is applied to the <i>AI verdicts</i> after analysis.</li>
+    <li><b>No data loss</b> — the stored run keeps every analyzed stock, so History/Performance/Telegram see the full picture, not just the top 50.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 3: AI FALLBACK CHAIN ======================= -->
+<section>
+  <h2>3 · AI Fallback Chain Fix — Try Fallbacks, Don't Skip</h2>
+  <p class="sub">In <code class="inline">lib/services/ai/config.ts</code> the shared <code class="inline">modelChain</code> carries the fallback model list; <code class="inline">lib/services/ai/recommendation-agent.ts</code> iterates <code class="inline">modelFallbackChain</code> so a primary-model failure <b>attempts each fallback in order</b> instead of skipping analysis for the batch. Per-batch logging records which model actually served.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+    participant P as analyzeBatch
+    participant M1 as Primary model<br/>(configured)
+    participant M2 as Fallback 1<br/>(openrouter/free)
+    participant M3 as Fallback 2<br/>(openrouter/auto)
+    P->>M1: attempt batch (5 stocks)
+    M1-->>P: failure / unusable response
+    P->>M2: retry with fallback
+    M2-->>P: success
+    P->>P: log usedModel = "openrouter/free"
+    P->>P: persist verdicts (success: true)
+    </pre>
+  </div>
+  <ul>
+    <li><b>Honest persistence</b> — only real AI verdicts (<code class="inline">success: true</code>) are persisted; a fully-failed chain must NOT fall back to synthetic all-HOLD rows (v3.11.1 "no-fake-HOLD" discipline preserved).</li>
+    <li><b>Visibility</b> — <code class="inline">trackAiCall</code> records <code class="inline">usedModel</code> so AI monitoring shows fallback usage, not just the configured model.</li>
+  </ul>
+</section>
+
+<!-- ======================= SECTION 4: UI ======================= -->
+<section>
+  <h2>4 · DailyPicksTab — Top Picks Grid + Collapsible HOLDs</h2>
+  <p class="sub">In <code class="inline">app/components/recommendations/DailyPicksTab.tsx</code>: the stock data type gains <code class="inline">isTopPick</code>; the main grid filters to <code class="inline">isTopPick === true</code> only; a collapsible <b>"HOLDs (N)"</b> section renders below the grid; the summary cards show <b>"X Buy/Sell · Y Hold"</b> instead of the raw total.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    API["GET /api/recommendations<br/>(stocks with isTopPick)"] --> TAB["DailyPicksTab"]
+    TAB --> GRID["Main grid — isTopPick === true<br/>BUY/SELL cards only"]
+    TAB --> HOLDS["HOLDs (N) — collapsible<br/>showHolds toggle · default collapsed"]
+    TAB --> SUM["Summary cards<br/>X Buy/Sell · Y Hold"]
+    </pre>
+  </div>
+</section>
+
+<!-- ======================= SECTION 5: VERIFICATION ======================= -->
+<section>
+  <h2>5 · Verification</h2>
+  <div class="callout ok"><b>Shipped:</b> <code class="inline">dailyRecommendationService.test.ts</code> updated for the new pipeline (top-100 slice, confidence ranking, <code class="inline">selectTopByMarketCap</code> + HOLD/BUY/SELL partitioning tests). Full suite <b>787 pass / 4 skip</b> (was 758/4, +29). tsc <b>46 = exact baseline (0 new)</b>. Live-verified: pipeline produced <b>30 Total / 16 Buy / 5 Hold / 9 Sell</b> with the HOLDs section collapsed and summary cards correct — 0 console errors.</div>
+  <ul>
+    <li><b>Playwright check</b> — Today's Picks main grid renders BUY/SELL only; "HOLDs (N)" toggles open/closed; summary counts match the API payload.</li>
+    <li><b>Commit note</b> — shipped together with the IPO monitoring batch + closed IPOs + TTL cleanup (v3.15.0, one user-approved commit).</li>
+  </ul>
+</section>
+
+<footer>
+  TradeNext · Visual Explainer — Daily Recommendation Pipeline Redesign: Top-100 + Top-Pick Confidence · Spec <code class="inline">.agents/specs/pipeline-top100-confidence.md</code> · Plan <code class="inline">.agents/plans/pipeline-top100-confidence.md</code>
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+</body>
+</html>

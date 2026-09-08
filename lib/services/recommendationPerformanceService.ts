@@ -22,6 +22,7 @@ import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { recommendationsCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -352,7 +353,7 @@ export async function archiveRecommendations(): Promise<ArchiveResult> {
           ? ((tracker.currentPrice - tracker.entryPrice) / tracker.entryPrice) * 100
           : null;
 
-      await prisma.recommendationArchive.create({
+      const archivedRow = await prisma.recommendationArchive.create({
         data: {
           symbol: tracker.symbol,
           trackerId: tracker.id,
@@ -380,6 +381,16 @@ export async function archiveRecommendations(): Promise<ArchiveResult> {
           archivedReason: "age_360d",
         },
       });
+
+      // Write-through mirror (read-first, non-fatal): mirror the archive
+      // snapshot + the tracker delete so SQLite-first reads never serve
+      // archived trackers. Prisma stays the writer of truth — the 6h/12h
+      // syncFromPrisma re-backfills the mirror rows regardless.
+      const sqlite = getSqliteFallback();
+      if (sqlite) {
+        sqlite.insertRecommendationArchive({ ...archivedRow });
+        sqlite.deleteRecommendationTracker(tracker.id);
+      }
 
       // Hard-delete tracker (statusHistory cascade-deletes; dailyStocks SetNull)
       await prisma.recommendationTracker.delete({ where: { id: tracker.id } });

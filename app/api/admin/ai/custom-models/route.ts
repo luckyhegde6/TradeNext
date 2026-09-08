@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { AVAILABLE_MODELS, BUILTIN_MODEL_IDS } from "@/lib/services/ai/config";
 
 export const runtime = "nodejs";
 
@@ -34,9 +35,12 @@ export async function POST(req: NextRequest) {
     // Get or create the ai_custom_models Secret record
     let record = await prisma.secret.findFirst({ where: { name: "ai_custom_models" } });
     let models: CustomModel[] = [];
+    let hidden: string[] = [];
 
-    if (record?.metadata && Array.isArray((record.metadata as any).models)) {
-      models = (record.metadata as any).models;
+    if (record?.metadata) {
+      const raw = (record.metadata as any) || {};
+      if (Array.isArray(raw.models)) models = raw.models;
+      if (Array.isArray(raw.hidden)) hidden = raw.hidden;
     }
 
     if (action === "add") {
@@ -44,12 +48,39 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "model.id is required" }, { status: 400 });
       }
 
+      const modelId: string = model.id;
+
       // Validate OpenRouter format: org/model-name or org/model-name:variant
-      const isValidFormat = /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+(:[a-zA-Z0-9_-]+)?$/.test(model.id);
+      const isValidFormat = /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+(:[a-zA-Z0-9_-]+)?$/.test(modelId);
       if (!isValidFormat) {
         return NextResponse.json({
           error: `Invalid model format. Use "org/model-name" (e.g., "openrouter/auto-beta" or "nvidia/nemotron-3-embed-1b:free")`,
         }, { status: 400 });
+      }
+
+      // Built-ins and catalog models are already available — no custom copy
+      // needed; re-adding one restores a previously-hidden catalog model.
+      if (BUILTIN_MODEL_IDS.includes(modelId) || AVAILABLE_MODELS.some((m) => m.id === modelId)) {
+        const nextHidden = hidden.filter((id) => id !== modelId);
+        const metadata = { models, hidden: nextHidden };
+        if (record) {
+          await prisma.secret.update({
+            where: { id: record.id },
+            data: { metadata: metadata as any, updatedAt: new Date() },
+          });
+        } else if (nextHidden.length > 0) {
+          await prisma.secret.create({
+            data: {
+              name: "ai_custom_models",
+              type: "api_key",
+              value: "custom_models_storage",
+              hint: "User-added OpenRouter models",
+              metadata: metadata as any,
+            },
+          });
+        }
+        logger.info({ msg: "AI model restored", modelId });
+        return NextResponse.json({ success: true, models, model: { id: modelId, name: model.name || modelId } });
       }
 
       // Check for duplicates
@@ -66,10 +97,11 @@ export async function POST(req: NextRequest) {
 
       models.push(newModel);
 
+      const metadata = { models, hidden };
       if (record) {
         await prisma.secret.update({
           where: { id: record.id },
-          data: { metadata: { models } as any, updatedAt: new Date() },
+          data: { metadata: metadata as any, updatedAt: new Date() },
         });
       } else {
         await prisma.secret.create({
@@ -78,7 +110,7 @@ export async function POST(req: NextRequest) {
             type: "api_key",
             value: "custom_models_storage",
             hint: "User-added OpenRouter models",
-            metadata: { models } as any,
+            metadata: metadata as any,
           },
         });
       }
@@ -99,10 +131,16 @@ export async function POST(req: NextRequest) {
 
     models.splice(idx, 1);
 
+    // Removing a custom copy of a catalog model also hides the catalog entry
+    const removedId: string = model.id;
+    const nextHidden = AVAILABLE_MODELS.some((m) => m.id === removedId) && !hidden.includes(removedId)
+      ? [...hidden, removedId]
+      : hidden;
+
     if (record) {
       await prisma.secret.update({
         where: { id: record.id },
-        data: { metadata: { models } as any, updatedAt: new Date() },
+        data: { metadata: { models, hidden: nextHidden } as any, updatedAt: new Date() },
       });
     }
 

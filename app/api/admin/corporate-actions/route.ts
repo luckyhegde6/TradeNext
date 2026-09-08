@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { parse } from "csv-parse/sync";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No data provided" }, { status: 400 });
     }
 
+    const sqlite = getSqliteFallback();
+    if (sqlite) {
+      // SQLite-first mirror write (Plan 09 §4.8): check-then-insert against a
+      // per-request full-list cache so a re-upload of an existing natural key
+      // is a no-op; new rows merge into the mirror and reach Prisma via the
+      // sync-sink push.
+      const existing = sqlite.getCorporateActions(100000) as any[];
+      const rows = existing.slice();
+      const baseKeys = new Set(
+        existing.map((a) => `${a.symbol}|${a.actionType}|${exDateKey(a.exDate)}`),
+      );
+      let created = 0;
+      for (const rec of records) {
+        const a = buildCorporateActionRecord(rec);
+        if (!a) continue;
+        const key = `${a.symbol}|${a.actionType}|${exDateKey(a.exDate)}`;
+        if (baseKeys.has(key)) continue;
+        baseKeys.add(key);
+        rows.push(a);
+        created++;
+      }
+      sqlite.setCorporateActions(rows);
+      logger.info({ msg: "Corporate actions uploaded (SQLite mirror)", count: created, admin: session.user.email });
+      return NextResponse.json({ success: true, created });
+    }
+
     // Transform and validate each record
     const createdActions: any[] = [];
     for (const rec of records) {
@@ -57,6 +84,30 @@ export async function GET(req: Request) {
     const session = await auth();
     if (!session?.user?.role || session.user.role !== "admin") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    const sqlite = getSqliteFallback();
+    if (sqlite) {
+      // SQLite-first mirror read: zero-Prisma (Plan 09 §4.8).
+      const actions = sqlite.getCorporateActions(100000) as any[];
+      const formatted = actions.map(a => ({
+        id: Number(a.id),
+        symbol: a.symbol,
+        companyName: a.companyName,
+        series: a.series,
+        subject: a.subject,
+        actionType: a.actionType,
+        exDate: a.exDate,
+        recordDate: a.recordDate,
+        faceValue: a.faceValue,
+        ratio: a.ratio,
+        dividendPerShare: a.dividendPerShare != null ? Number(a.dividendPerShare) : null,
+        dividendYield: a.dividendYield != null ? Number(a.dividendYield) : null,
+        source: a.source,
+        createdAt: a.createdAt,
+      })).sort((a, b) =>
+        (b.exDate && a.exDate ? new Date(b.exDate).getTime() - new Date(a.exDate).getTime() : 0));
+      return NextResponse.json(formatted);
     }
 
     const actions = await prisma.corporateAction.findMany({
@@ -108,12 +159,26 @@ export async function DELETE(req: Request) {
     const idArr = ids.split(",").map(Number).filter(n => !isNaN(n));
     if (idArr.length === 0) return NextResponse.json({ error: "Invalid IDs" }, { status: 400 });
 
-    const result = await prisma.corporateAction.deleteMany({
-      where: { id: { in: idArr } }
-    });
+    const sqlite = getSqliteFallback();
+    let deleted = 0;
+    if (sqlite) {
+      const missing: number[] = [];
+      for (const id of idArr) {
+        if (sqlite.deleteCorporateAction(id)) deleted++;
+        else missing.push(id);
+      }
+      // Ids absent from the mirror fall back to Prisma so admin delete works
+      // even if the mirror skipped a row (cold start, outbox gap).
+      if (missing.length > 0) {
+        const fallback = await prisma.corporateAction.deleteMany({ where: { id: { in: missing } } });
+        deleted += fallback.count;
+      }
+    } else {
+      deleted = (await prisma.corporateAction.deleteMany({ where: { id: { in: idArr } } })).count;
+    }
 
-    logger.info({ msg: "Corporate actions deleted", count: result.count, admin: session.user.email });
-    return NextResponse.json({ success: true, deleted: result.count });
+    logger.info({ msg: "Corporate actions deleted", count: deleted, admin: session.user.email });
+    return NextResponse.json({ success: true, deleted });
   } catch (e) {
     logger.error({ msg: "Failed to delete corporate actions", error: e });
     const errorMessage = e instanceof Error ? e.message : String(e);
@@ -132,7 +197,7 @@ export async function PATCH(req: Request) {
     const body = await req.json();
     const { action } = body;
 
-    if (action === 'backfillDividends') {
+if (action === 'backfillDividends') {
       // Get all DIVIDEND actions that don't have dividendPerShare or dividendYield
       const actions = await prisma.corporateAction.findMany({
         where: {
@@ -185,8 +250,8 @@ export async function PATCH(req: Request) {
   }
 }
 
-// Helper to create a single corporate action with type detection
-async function createCorporateAction(rec: any): Promise<any> {
+// Pure normalization shared by the SQLite mirror path and Prisma upsert.
+function buildCorporateActionRecord(rec: any): any {
   // CSV columns from NSE: SYMBOL, COMPANY NAME, SERIES, PURPOSE, FACE VALUE, EX-DATE, RECORD DATE, BOOK CLOSURE START DATE, BOOK CLOSURE END DATE
   const symbol = rec.SYMBOL || rec.symbol;
   const companyName = rec['COMPANY NAME'] || rec.companyName;
@@ -206,6 +271,42 @@ async function createCorporateAction(rec: any): Promise<any> {
     return null;
   }
 
+  return {
+    symbol,
+    companyName,
+    series,
+    subject: purpose,
+    actionType,
+    exDate,
+    recordDate,
+    effectiveDate: exDate,
+    faceValue,
+    oldFV: null,
+    newFV: null,
+    ratio,
+    dividendPerShare: dividendAmount || null,
+    dividendYield: dividendYield || null,
+    isin: rec.ISIN || rec.isin || null,
+    bookClosureStartDate: bookClosureStart,
+    bookClosureEndDate: bookClosureEnd,
+    announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
+    source: 'admin',
+  };
+}
+
+// Natural-key date component shared by mirror dedupe checks.
+function exDateKey(d: unknown): string {
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  return d == null ? '' : String(d).slice(0, 10);
+}
+
+// Helper to create a single corporate action with type detection
+async function createCorporateAction(rec: any): Promise<any> {
+  const record = buildCorporateActionRecord(rec);
+  if (!record) return null;
+
+  const { symbol, actionType, exDate, ...rest } = record;
+
   // Use upsert with symbol + actionType + exDate to match unique constraint
   return await prisma.corporateAction.upsert({
     where: {
@@ -215,42 +316,12 @@ async function createCorporateAction(rec: any): Promise<any> {
         exDate
       }
     },
-    update: {
-      companyName,
-      series,
-      subject: purpose,
-      recordDate,
-      effectiveDate: exDate,
-      faceValue,
-      ratio,
-      dividendPerShare: dividendAmount || null,
-      dividendYield: dividendYield || null,
-      isin: rec.ISIN || rec.isin || null,
-      bookClosureStartDate: bookClosureStart,
-      bookClosureEndDate: bookClosureEnd,
-      announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
-      source: 'admin',
-    },
+    update: rest,
     create: {
       symbol,
-      companyName,
-      series,
-      subject: purpose,
       actionType,
       exDate,
-      recordDate,
-      effectiveDate: exDate,
-      faceValue,
-      oldFV: null,
-      newFV: null,
-      ratio,
-      dividendPerShare: dividendAmount || null,
-      dividendYield: dividendYield || null,
-      isin: rec.ISIN || rec.isin || null,
-      bookClosureStartDate: bookClosureStart,
-      bookClosureEndDate: bookClosureEnd,
-      announcementDate: parseDate(rec['ANNOUNCEMENT DATE'] || rec.announcementDate),
-      source: 'admin',
+      ...rest,
     }
   });
 }

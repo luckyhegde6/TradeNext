@@ -31,9 +31,9 @@ export function leaderWorkerId(role: LeaderRole): string {
 }
 
 /** Staleness window — a heartbeat older than this means the leader is dead. */
-export const LEADER_STALENESS_MS = 5 * 60_000;
+export const LEADER_STALENESS_MS = 15 * 60_000;
 /** How often we refresh our leadership heartbeat. */
-export const LEADER_HEARTBEAT_MS = 60_000;
+export const LEADER_HEARTBEAT_MS = 300_000;
 
 /** This instance's unique name (host-pid) so we can tell it's us. */
 export const LEADER_SELF = `${os.hostname()}-${process.pid}`;
@@ -174,8 +174,8 @@ export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
 /**
  * Periodically refresh OUR leadership heartbeat for `role` so the row never
  * goes stale inside LEADER_STALENESS_MS (which would let a standby instance
- * claim the lock and split leadership). Uses LEADER_HEARTBEAT_MS (60s) which
- * is well under the 5-min staleness window. Self-healing: if renewal stops
+ * claim the lock and split leadership). Uses LEADER_HEARTBEAT_MS (5 min) which
+ * is well under the 15-min staleness window (3x). Self-healing: if renewal stops
  * returning true (we lost the lock), stop renewing and notify via a callback.
  * Returns a stop() function.
  */

@@ -1,3 +1,5 @@
+// HOT ROUTE (Plan 09 Phase 8): memory-cached NSE index snapshot
+// (5-min TTL, HTTP s-maxage 300). Phase 8 candidate for SQLite-first reads.
 // app/api/nse/indexes/route.ts
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";

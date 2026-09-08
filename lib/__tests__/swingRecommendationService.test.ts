@@ -26,137 +26,105 @@ jest.mock("@/lib/services/ai/config", () => ({
 }));
 
 /**
- * Stateful in-memory SwingAnalysisJob store mirroring the service's queries:
- * findFirst (orderBy), findUnique, create, update, updateMany with
- * status-in / lt / gte / increment conditions (claim, stale recovery,
- * supersede, force-refresh). Exposed on the mock as `__swingJobs` for tests.
+ * SQLite-first swing service tests: a stateful in-memory mirror of the
+ * lib/sqlite fallback (swingJobs / swingSignals / trackers) replaces the
+ * former in-memory Prisma mocks — the service reads/writes these tables
+ * through getSqliteFallback(). Mirror upserts mutate rows IN PLACE
+ * (Object.assign) so references captured before a claim/update stay live,
+ * matching the old mock's applyData semantics. The arrays are exposed on the
+ * @/lib/sqlite mock as `swingJobs`, `swingSignals`, `trackers` and are
+ * re-imported at module scope below.
+ *
+ * The service's only remaining Prisma call is fetchRecentCloses
+ * (prisma.$queryRaw) — mocked to resolve [] in the orchestration describe.
  */
-jest.mock("@/lib/prisma", () => {
-  const jobs: Array<Record<string, any>> = [];
+jest.mock("@/lib/prisma", () => ({
+  __esModule: true,
+  default: { $queryRaw: jest.fn() },
+}));
 
-  const compare = (cond: unknown, val: unknown): boolean => {
-    if (cond === undefined) return true;
-    if (cond && typeof cond === "object") {
-      const c = cond as Record<string, unknown>;
-      if ("in" in c) return Array.isArray(c.in) ? c.in.includes(val) : false;
-      if ("lt" in c) return val !== null && val !== undefined && val < (c.lt as Date | number);
-      if ("lte" in c) return val !== null && val !== undefined && val <= (c.lte as Date | number);
-      if ("gt" in c) return val !== null && val !== undefined && val > (c.gt as Date | number);
-      if ("gte" in c) return val !== null && val !== undefined && val >= (c.gte as Date | number);
-      return true;
-    }
-    return val === cond;
+jest.mock("@/lib/sqlite", () => {
+  const swingJobs: Array<Record<string, any>> = [];
+  const swingSignals: Array<Record<string, any>> = [];
+  const trackers: Array<Record<string, any>> = [];
+
+  const statusMatch = (rowStatus: unknown, status?: string | string[]): boolean => {
+    if (status === undefined) return true;
+    const wants = Array.isArray(status) ? status : [status];
+    return wants.includes(rowStatus as string);
   };
 
-  const whereMatches = (row: Record<string, any>, where: Record<string, any> | undefined): boolean => {
-    if (!where) return true;
-    return Object.entries(where).every(([key, cond]) => compare(cond, row[key]));
-  };
-
-  const applyData = (row: Record<string, any>, data: Record<string, any>): void => {
-    for (const [key, value] of Object.entries(data)) {
-      if (value && typeof value === "object" && "increment" in value) {
-        row[key] = (row[key] ?? 0) + (value as { increment: number }).increment;
-      } else {
-        row[key] = value;
+  const fallback = {
+    getSwingAnalysisJobs: jest.fn(
+      ({ status, limit }: { status?: string | string[]; limit?: number } = {}) => {
+        const rows = swingJobs
+          .filter((j) => statusMatch(j.status, status))
+          .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0));
+        return limit !== undefined ? rows.slice(0, limit) : rows;
+      },
+    ),
+    getSwingAnalysisJob: jest.fn((id: string) => swingJobs.find((j) => j.id === id) ?? null),
+    upsertSwingAnalysisJob: jest.fn((row: Record<string, any>) => {
+      const idx = swingJobs.findIndex((j) => j.id === row.id);
+      if (idx >= 0) {
+        Object.assign(swingJobs[idx], row);
+        return swingJobs[idx];
       }
-    }
-  };
-
-  const swingAnalysisJob = {
-    findFirst: jest.fn(async (args?: { where?: Record<string, any>; orderBy?: { createdAt?: "asc" | "desc" } }) => {
-      const matched = jobs.filter((j) => whereMatches(j, args?.where));
-      matched.sort((a, b) =>
-        args?.orderBy?.createdAt === "asc"
-          ? a.createdAt.getTime() - b.createdAt.getTime()
-          : b.createdAt.getTime() - a.createdAt.getTime(),
+      swingJobs.push(row);
+      return row;
+    }),
+    getSwingSignals: jest.fn((jobId: string) => swingSignals.filter((s) => s.jobId === jobId)),
+    upsertSwingSignal: jest.fn((row: Record<string, any>) => {
+      const idx = swingSignals.findIndex(
+        (s) =>
+          s.jobId === row.jobId &&
+          String(s.symbol).toUpperCase() === String(row.symbol).toUpperCase(),
       );
-      return matched[0] ?? null;
-    }),
-    findUnique: jest.fn(async ({ where }: { where: { id: string } }) => jobs.find((j) => j.id === where.id) ?? null),
-    create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
-      const row: Record<string, any> = {
-        id: `job-${jobs.length + 1}`,
-        status: "pending",
-        payload: null,
-        generatedAt: new Date(),
-        startedAt: null,
-        completedAt: null,
-        error: null,
-        stockCount: 0,
-        analyzedCount: 0,
-        attemptCount: 0,
-        templateCount: 0,
-        totalRaw: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        ...data,
-      };
-      jobs.push(row);
+      if (idx >= 0) {
+        Object.assign(swingSignals[idx], row);
+        return swingSignals[idx];
+      }
+      swingSignals.push(row);
       return row;
     }),
-    update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, any> }) => {
-      const row = jobs.find((j) => j.id === where.id);
-      if (!row) throw new Error("swingAnalysisJob not found");
-      applyData(row, data);
-      return row;
-    }),
-    updateMany: jest.fn(async ({ where, data }: { where: Record<string, any>; data: Record<string, any> }) => {
-      const matched = jobs.filter((j) => whereMatches(j, where));
-      for (const row of matched) applyData(row, data);
-      return { count: matched.length };
-    }),
-  };
-
-  // v3.14.0: stateful in-memory SwingSignal store mirroring the persistence
-  // queries — createMany with skipDuplicates (jobId+symbol unique) and
-  // updateMany scoped to { jobId, symbol } (AI-level patch). Exposed as
-  // `__swingSignals` for the orchestration assertions.
-  const signals: Array<Record<string, any>> = [];
-
-  const swingSignal = {
-    createMany: jest.fn(
-      async ({
-        data,
-        skipDuplicates,
+    getRecommendationTrackers: jest.fn(
+      ({
+        symbolIn,
+        status,
+        limit,
       }: {
-        data: Array<Record<string, any>>;
-        skipDuplicates?: boolean;
-      }) => {
-        let created = 0;
-        for (const d of data) {
-          if (skipDuplicates && signals.some((s) => s.jobId === d.jobId && s.symbol === d.symbol)) {
-            continue;
-          }
-          signals.push({
-            id: `signal-${signals.length + 1}`,
-            status: "active",
-            currentPrice: null,
-            returnPercent: null,
-            lastCheckedAt: null,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            ...d,
-          });
-          created++;
-        }
-        return { count: created };
+        symbolIn?: string[];
+        status?: string[];
+        limit?: number;
+      } = {}) => {
+        const rows = trackers.filter(
+          (t) =>
+            (symbolIn === undefined ||
+              symbolIn.some(
+                (sym) => String(sym).toUpperCase() === String(t.symbol).toUpperCase(),
+              )) &&
+            (status === undefined || status.includes(t.status)),
+        );
+        return limit !== undefined ? rows.slice(0, limit) : rows;
       },
     ),
-    updateMany: jest.fn(
-      async ({ where, data }: { where: Record<string, any>; data: Record<string, any> }) => {
-        const matched = signals.filter((s) => whereMatches(s, where));
-        for (const row of matched) applyData(row, data);
-        return { count: matched.length };
-      },
-    ),
+    upsertRecommendationTracker: jest.fn((row: Record<string, any>) => {
+      const idx = trackers.findIndex((t) => t.id === row.id);
+      if (idx >= 0) {
+        Object.assign(trackers[idx], row);
+        return trackers[idx];
+      }
+      trackers.push(row);
+      return row;
+    }),
   };
 
   return {
     __esModule: true,
-    default: { $queryRaw: jest.fn(), swingAnalysisJob, swingSignal },
-    __swingJobs: jobs,
-    __swingSignals: signals,
+    getSqliteFallback: jest.fn(() => fallback),
+    swingJobs,
+    swingSignals,
+    trackers,
   };
 });
 
@@ -178,12 +146,10 @@ import {
   analysisStatusAfterBatch,
   swingTrackerDraft,
   persistSwingTrackers,
-  type SwingTrackerDb,
   swingSignalDraft,
   swingSignalAnalysisPatch,
   persistSwingSignals,
   patchSwingSignalAnalysis,
-  type SwingSignalDb,
   SWING_TOP_N,
   SWING_JOB_MAX_ATTEMPTS,
   jobToResponse,
@@ -191,6 +157,16 @@ import {
 import type { UnifiedScreenerResult } from "@/lib/services/chartinkUnifiedScreenerService";
 import type { SwingResponse, SwingStock, SignalFamily } from "@/lib/services/swing-types";
 import { staticCache } from "@/lib/cache";
+
+// Re-import the SQLite mirror arrays + accessor so every describe mutates the
+// SAME store the @/lib/sqlite mock returns (clearAllMocks resets call
+// history but NOT the arrays — explicit `.length = 0` in each beforeEach).
+const { getSqliteFallback, swingJobs, swingSignals, trackers } = jest.requireMock("@/lib/sqlite") as {
+  getSqliteFallback: jest.Mock;
+  swingJobs: Array<Record<string, any>>;
+  swingSignals: Array<Record<string, any>>;
+  trackers: Array<Record<string, any>>;
+};
 
 // ─── templateFamilies ────────────────────────────────────────────────────
 
@@ -533,54 +509,55 @@ describe("swingTrackerDraft", () => {
 });
 
 describe("persistSwingTrackers", () => {
-  const makeDb = () => {
-    const createMany = jest.fn().mockResolvedValue({ count: 1 });
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const db: SwingTrackerDb & { calls: string[] } = {
-      calls: [],
-      recommendationTracker: {
-        findMany: jest.fn().mockImplementation(async ({ where }) => {
-          return where.symbol.in.includes("EXISTING") ? [{ symbol: "EXISTING" }] : [];
-        }),
-        createMany,
-        updateMany,
-      },
-    };
-    return db;
-  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    trackers.length = 0;
+  });
 
   it("creates new swing trackers and refreshes existing ones", async () => {
-    const db = makeDb();
-    const res = await persistSwingTrackers(
-      [analyzedStock("NEW", "LONG"), analyzedStock("EXISTING", "SHORT")],
-      db,
-    );
-
-    expect(db.recommendationTracker.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ timeHorizon: "swing", status: "active" }),
-      }),
-    );
-    // Only NEW is created
-    expect(db.recommendationTracker.createMany).toHaveBeenCalledWith({
-      data: [expect.objectContaining({ symbol: "NEW", aiRecommendation: "BUY", timeHorizon: "swing" })],
-      skipDuplicates: true,
+    // Seed an existing active swing tracker in the mirror.
+    trackers.push({
+      id: "tracker-existing",
+      symbol: "EXISTING",
+      status: "active",
+      timeHorizon: "swing",
+      currentPrice: 480,
+      updatedAt: new Date(2026, 0, 1),
     });
-    // EXISTING gets a price/lastCheckedAt refresh (targets untouched)
-    expect(db.recommendationTracker.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ symbol: "EXISTING", timeHorizon: "swing", status: "active" }),
-        data: expect.objectContaining({ currentPrice: 500, lastCheckedAt: expect.any(Date) }),
-      }),
-    );
+
+    const res = await persistSwingTrackers([
+      analyzedStock("NEW", "LONG"),
+      analyzedStock("EXISTING", "SHORT"),
+    ]);
+
+    expect(getSqliteFallback().getRecommendationTrackers).toHaveBeenCalledWith({
+      symbolIn: ["NEW", "EXISTING"],
+      status: ["active"],
+      limit: 500,
+    });
+    // Only NEW is created
+    const created = trackers.filter((t) => t.symbol === "NEW");
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      symbol: "NEW",
+      aiRecommendation: "BUY",
+      timeHorizon: "swing",
+      status: "active",
+      id: expect.any(String),
+    });
+    // EXISTING gets an in-place price refresh (targets untouched)
+    const existing = trackers.find((t) => t.id === "tracker-existing")!;
+    expect(existing.currentPrice).toBe(500);
+    expect(existing.updatedAt).toBeInstanceOf(Date);
+    expect(trackers).toHaveLength(2);
     expect(res).toEqual({ created: 1, updated: 1 });
   });
 
   it("does nothing when no stock carries AI analysis", async () => {
-    const db = makeDb();
-    const res = await persistSwingTrackers([makeSwingStock("A")], db);
+    const res = await persistSwingTrackers([makeSwingStock("A")]);
     expect(res).toEqual({ created: 0, updated: 0 });
-    expect(db.recommendationTracker.findMany).not.toHaveBeenCalled();
+    expect(getSqliteFallback().getRecommendationTrackers).not.toHaveBeenCalled();
+    expect(trackers).toHaveLength(0);
   });
 });
 
@@ -605,16 +582,7 @@ describe("getSwingRecommendations audit logging", () => {
   };
   const prisma = jest.requireMock("@/lib/prisma").default as {
     $queryRaw: jest.Mock;
-    swingAnalysisJob: {
-      findFirst: jest.Mock;
-      findUnique: jest.Mock;
-      create: jest.Mock;
-      update: jest.Mock;
-      updateMany: jest.Mock;
-    };
   };
-  const swingJobs = jest.requireMock("@/lib/prisma").__swingJobs as Array<Record<string, any>>;
-  const swingSignals = jest.requireMock("@/lib/prisma").__swingSignals as Array<Record<string, any>>;
 
   const fakeUnified = {
     symbol: "RELIANCE",
@@ -709,7 +677,7 @@ describe("getSwingRecommendations audit logging", () => {
 
     // The job row is the durable source of truth.
     expect(swingJobs).toHaveLength(1);
-    expect(swingJobs[0].status).toBe("pending");
+    expect(swingJobs[0].status).toBe("running");
     expect(swingJobs[0].stockCount).toBe(1);
 
     // v3.14.0: the posted feed is snapshotted into SwingSignal at posting —
@@ -717,7 +685,7 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingSignals).toHaveLength(1);
     expect(swingSignals[0].jobId).toBe(swingJobs[0].id);
     expect(swingSignals[0].symbol).toBe("RELIANCE");
-    expect(swingSignals[0].status).toBe("active");
+    expect(swingSignals[0].status).toBe("tracking");
     expect(swingSignals[0].analysis).toBeNull();
     expect(swingSignals[0].aiRecommendation).toBeNull();
     expect(swingSignals[0].targetPrice).toBeNull();
@@ -794,16 +762,17 @@ describe("getSwingRecommendations audit logging", () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
-    await prisma.swingAnalysisJob.create({
-      data: {
-        ...makeJobInput(),
-        status: "done",
-        analyzedCount: 1,
-        payload: {
-          stocks: (makeJobInput().payload as { stocks: unknown[] }).stocks,
-          analysisStatus: "done",
-          analysisError: null,
-        },
+    // Seed a completed job directly in the mirror.
+    swingJobs.push({
+      ...makeJobInput(),
+      id: "job-done",
+      createdAt: new Date(Date.now() - 60_000),
+      status: "done",
+      analyzedCount: 1,
+      payload: {
+        stocks: (makeJobInput().payload as { stocks: unknown[] }).stocks,
+        analysisStatus: "done",
+        analysisError: null,
       },
     });
     runChartinkUnifiedScreeners.mockRejectedValue(new Error("must not scan"));
@@ -820,7 +789,7 @@ describe("getSwingRecommendations audit logging", () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
-    await prisma.swingAnalysisJob.create({ data: makeJobInput() });
+    swingJobs.push({ ...makeJobInput(), id: "job-pending", createdAt: new Date(Date.now() - 60_000) });
     runChartinkUnifiedScreeners.mockRejectedValue(new Error("must not scan"));
 
     const response = await getSwingRecommendations({ analyze: true }); // no force
@@ -834,8 +803,10 @@ describe("getSwingRecommendations audit logging", () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
-    await prisma.swingAnalysisJob.create({
-      data: { ...makeJobInput(), id: "job-old" },
+    swingJobs.push({
+      ...makeJobInput(),
+      id: "job-old",
+      createdAt: new Date(Date.now() - 60_000),
     });
     // Force refresh triggers a fresh scan + job, failing the stale pending one.
     const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
@@ -846,7 +817,7 @@ describe("getSwingRecommendations audit logging", () => {
     expect(old.status).toBe("failed");
     expect(old.error).toBe("Superseded by a newer force refresh");
     const fresh = swingJobs.find((j) => j.id !== "job-old")!;
-    expect(fresh.status).toBe("pending");
+    expect(fresh.status).toBe("running");
     expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
   });
 
@@ -866,7 +837,7 @@ describe("getSwingRecommendations audit logging", () => {
         error: "boom",
       },
     ]);
-    await prisma.swingAnalysisJob.create({ data: makeJobInput() });
+    swingJobs.push({ ...makeJobInput(), id: "job-once", createdAt: new Date(Date.now() - 60_000) });
 
     await Promise.all([
       maybeProcessSwingAnalysis(),
@@ -897,14 +868,15 @@ describe("getSwingRecommendations audit logging", () => {
     ]);
 
     // Attempt 1 died mid-run (instance recycle) — stale >45min, claim-count 1.
-    const stale = await prisma.swingAnalysisJob.create({
-      data: {
-        ...makeJobInput(),
-        status: "running",
-        startedAt: new Date(Date.now() - 60 * 60 * 1000),
-        attemptCount: 1,
-      },
+    swingJobs.push({
+      ...makeJobInput(),
+      id: "job-stale",
+      createdAt: new Date(Date.now() - 60_000),
+      status: "running",
+      startedAt: new Date(Date.now() - 60 * 60 * 1000),
+      attemptCount: 1,
     });
+    const stale = swingJobs.find((j) => j.id === "job-stale")!;
     await maybeProcessSwingAnalysis();
     // Retried (recovery → pending) then claimed again → attemptCount 2 → failed.
     expect(swingJobs[0].status).toBe("failed");
@@ -912,13 +884,13 @@ describe("getSwingRecommendations audit logging", () => {
     expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
 
     // Attempt 2 also died — attempts exhausted → failed WITHOUT running AI.
-    await prisma.swingAnalysisJob.create({
-      data: {
-        ...makeJobInput(),
-        status: "running",
-        startedAt: new Date(Date.now() - 60 * 60 * 1000),
-        attemptCount: SWING_JOB_MAX_ATTEMPTS,
-      },
+    swingJobs.push({
+      ...makeJobInput(),
+      id: "job-exhausted",
+      createdAt: new Date(Date.now() - 120_000),
+      status: "running",
+      startedAt: new Date(Date.now() - 60 * 60 * 1000),
+      attemptCount: SWING_JOB_MAX_ATTEMPTS,
     });
     await maybeProcessSwingAnalysis();
     const exhausted = swingJobs.find((j) => j.id !== stale.id)!;
@@ -939,20 +911,24 @@ describe("getSwingRecommendations audit logging", () => {
           resolveAnalysis = () => resolve([]);
         }),
     );
-    const job = await prisma.swingAnalysisJob.create({ data: makeJobInput() });
+    swingJobs.push({ ...makeJobInput(), id: "job-mid", createdAt: new Date(Date.now() - 60_000) });
+    const job = swingJobs.find((j) => j.id === "job-mid")!;
 
     const processing = processSwingAnalysisJob(job);
     await new Promise((r) => setTimeout(r, 0)); // let the claim land
 
     // Force refresh supersedes while the analysis is in flight.
-    await prisma.swingAnalysisJob.update({
-      where: { id: job.id },
-      data: { status: "failed", error: "Superseded by a newer force refresh", completedAt: new Date() },
+    const sqlite = getSqliteFallback();
+    sqlite.upsertSwingAnalysisJob({
+      ...job,
+      status: "failed",
+      error: "Superseded by a newer force refresh",
+      completedAt: new Date(),
     });
     resolveAnalysis();
     await processing;
 
-    const fresh = await prisma.swingAnalysisJob.findUnique({ where: { id: job.id } });
+    const fresh = sqlite.getSwingAnalysisJob(job.id);
     expect(fresh!.status).toBe("failed");
     expect(fresh!.error).toBe("Superseded by a newer force refresh");
     expect(staticCache.get("swing:recommendations:ai")).toBeUndefined();
@@ -1108,100 +1084,62 @@ describe("swingSignalAnalysisPatch", () => {
   });
 });
 
-// ─── persistSwingSignals / patchSwingSignalAnalysis (inline db override) ────
+// ─── persistSwingSignals / patchSwingSignalAnalysis (SQLite mirror) ─────────
 
-describe("swing signal persistence (db override)", () => {
-  const store: Array<Record<string, any>> = [];
-
-  const makeDb = (): SwingSignalDb => {
-    const swingSignal = {
-      createMany: jest.fn(async ({ data }: { data: Array<Record<string, any>> }) => {
-        let created = 0;
-        for (const d of data) {
-          if (store.some((s) => s.jobId === d.jobId && s.symbol === d.symbol)) continue;
-          store.push({ id: `s-${store.length + 1}`, status: "active", ...d });
-          created++;
-        }
-        return { count: created };
-      }),
-      updateMany: jest.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { jobId: string; symbol: string };
-          data: Record<string, any>;
-        }) => {
-          const matched = store.filter((s) => s.jobId === where.jobId && s.symbol === where.symbol);
-          for (const row of matched) Object.assign(row, data);
-          return { count: matched.length };
-        },
-      ),
-    };
-    return { swingSignal };
-  };
-
+describe("swing signal persistence (SQLite mirror)", () => {
   beforeEach(() => {
-    store.length = 0;
+    jest.clearAllMocks();
+    swingSignals.length = 0;
   });
 
   it("persists one draft per stock at job creation and skips duplicate jobId+symbol rows", async () => {
-    const db = makeDb();
-    const res1 = await persistSwingSignals(
-      "job-1",
-      [makeSwingStock("RELIANCE"), makeSwingStock("TATASTEEL")],
-      db,
-    );
+    const res1 = await persistSwingSignals("job-1", [
+      makeSwingStock("RELIANCE"),
+      makeSwingStock("TATASTEEL"),
+    ]);
     expect(res1.created).toBe(2);
 
     // Idempotent re-persist of the same job+symbol (mirrors @@unique +
     // skipDuplicates) — creates nothing new.
-    const res2 = await persistSwingSignals("job-1", [makeSwingStock("RELIANCE")], db);
+    const res2 = await persistSwingSignals("job-1", [makeSwingStock("RELIANCE")]);
     expect(res2.created).toBe(0);
-    expect(store).toHaveLength(2);
-    expect(store[0]).toMatchObject({ jobId: "job-1", symbol: "RELIANCE", status: "active" });
-    expect(store[0].analysis).toBeNull();
-    expect(store[0].aiRecommendation).toBeNull();
+    expect(swingSignals).toHaveLength(2);
+    expect(swingSignals[0]).toMatchObject({ jobId: "job-1", symbol: "RELIANCE", status: "tracking" });
+    expect(swingSignals[0].analysis).toBeNull();
+    expect(swingSignals[0].aiRecommendation).toBeNull();
   });
 
   it("persists nothing for an empty feed", async () => {
-    const db = makeDb();
-    const res = await persistSwingSignals("job-1", [], db);
+    const res = await persistSwingSignals("job-1", []);
     expect(res.created).toBe(0);
-    expect(store).toHaveLength(0);
+    expect(swingSignals).toHaveLength(0);
   });
 
   it("patches only stocks that carry analysis, scoped to jobId+symbol", async () => {
-    const db = makeDb();
-    await persistSwingSignals(
-      "job-1",
-      [makeSwingStock("RELIANCE"), makeSwingStock("TATASTEEL")],
-      db,
-    );
+    await persistSwingSignals("job-1", [
+      makeSwingStock("RELIANCE"),
+      makeSwingStock("TATASTEEL"),
+    ]);
 
-    const patched = await patchSwingSignalAnalysis(
-      "job-1",
-      [
-        makeSwingStock("RELIANCE", {
-          analysis: {
-            action: "LONG",
-            confidence: 82,
-            entryPrice: 2500,
-            targetPrice: 2750,
-            stopLoss: 2375,
-            timeHorizon: "short",
-            logic: "x",
-            momentumScore: 71,
-            riskFactors: [],
-          },
-        }),
-        makeSwingStock("TATASTEEL"), // no analysis → skipped
-      ],
-      db,
-    );
+    const patched = await patchSwingSignalAnalysis("job-1", [
+      makeSwingStock("RELIANCE", {
+        analysis: {
+          action: "LONG",
+          confidence: 82,
+          entryPrice: 2500,
+          targetPrice: 2750,
+          stopLoss: 2375,
+          timeHorizon: "short",
+          logic: "x",
+          momentumScore: 71,
+          riskFactors: [],
+        },
+      }),
+      makeSwingStock("TATASTEEL"), // no analysis → skipped
+    ]);
 
     expect(patched.patched).toBe(1);
-    const rel = store.find((s) => s.symbol === "RELIANCE")!;
+    const rel = swingSignals.find((s) => s.symbol === "RELIANCE")!;
     expect(rel.aiRecommendation).toBe("BUY");
     expect(rel.confidence).toBe(82);
     expect(rel.targetPrice).toBe(2750);
@@ -1209,7 +1147,7 @@ describe("swing signal persistence (db override)", () => {
     expect(rel.updatedAt).toBeInstanceOf(Date);
 
     // Unpatched symbols keep the posting snapshot (level-less → can only expire).
-    const tata = store.find((s) => s.symbol === "TATASTEEL")!;
+    const tata = swingSignals.find((s) => s.symbol === "TATASTEEL")!;
     expect(tata.aiRecommendation).toBeNull();
     expect(tata.targetPrice).toBeNull();
     expect(tata.stopLoss).toBeNull();
