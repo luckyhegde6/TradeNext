@@ -334,6 +334,22 @@ export interface SqliteFallback {
   ): void;
   /** Get captured Chartink result rows for a screener (fresh, non-expired). */
   getChartinkResults(templateId: string): Array<Record<string, unknown>>;
+  // Plan 09 Phase 6 — jobs write SQLite-first: recommendation / swing / perf
+  // job rows land in the mirror via write-through, the 6h push promotes them.
+  /** Write-through: upsert one daily-recommendation run row. */
+  upsertDailyRecommendationRun(row: Record<string, unknown>): void;
+  /** Write-through: upsert one daily-recommendation stock row. */
+  upsertDailyRecommendationStock(row: Record<string, unknown>): void;
+  /** Write-through: upsert one recommendation tracker row. */
+  upsertRecommendationTracker(row: Record<string, unknown>): void;
+  /** Write-through: append one recommendation status-history row. */
+  appendRecommendationStatusHistory(row: Record<string, unknown>): void;
+  /** Write-through: insert one recommendation archive row. */
+  insertRecommendationArchive(row: Record<string, unknown>): void;
+  /** Write-through: upsert one swing analysis job row. */
+  upsertSwingAnalysisJob(row: Record<string, unknown>): void;
+  /** Write-through: upsert one swing signal row. */
+  upsertSwingSignal(row: Record<string, unknown>): void;
 }
 
 let _instance: SqliteFallback | null = null;
@@ -925,7 +941,6 @@ const SCHEMA_SQL = `
   -- job tables mirrored so the write-through helpers round-trip full rows and
   -- the 6h push can promote them to Prisma. Columns mirror the Prisma models
   -- (camelCase to snake_case). Json/arrays stored as TEXT (serialized).
-  -- Comments must stay semicolon-free (schema split).
   -- Comments must stay semicolon-free (schema split).
   CREATE TABLE IF NOT EXISTS recommendation_tracker (
     id                  TEXT PRIMARY KEY,
@@ -3153,9 +3168,38 @@ function recordSyncOutbox(
   }
 }
 
+// Plan 09 Phase 6: value normalisers shared by the write-through helpers.
+// Dates must never be bound raw (`String(Date)` yields locale text — same
+// class of bug as the v3.30.0 upsertCronJob fix); JSON-ish values are stored
+// as TEXT (or NULL).
+function toIsoVal(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  return String(v);
+}
+function toJsonVal(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  return JSON.stringify(v);
+}
+
 const OUTBOX_DRAIN_LIMIT = 50_000;
 const OUTBOX_DELETE_CHUNK = 200;
-const OUTBOX_TABLES = ["symbols", "daily_price", "corporate_action", "chartink_screener_result"] as const;
+const OUTBOX_TABLES = [
+  "symbols",
+  "daily_price",
+  "corporate_action",
+  "chartink_screener_result",
+  // Plan 09 Phase 6 — jobs write SQLite-first; promoted by the id-keyed sinks
+  // in lib/sqlitePushSinks.ts (pushByIdUpsert).
+  "daily_recommendation_run",
+  "daily_recommendation_stock",
+  "recommendation_tracker",
+  "recommendation_status_history",
+  "recommendation_archive",
+  "swing_analysis_job",
+  "swing_signal",
+] as const;
 
 type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
 
@@ -4027,6 +4071,290 @@ function createFallback(db: Database): SqliteFallback {
       } catch (err) {
         logger.debug({
           msg: "SQLite: upsertWorkerStatus failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    // ---- Plan 09 Phase 6: write-through helpers (jobs write SQLite-first) -----
+    // Every row is upserted into the mirror and enqueued to `_sync_outbox` so the
+    // 6h push (pushTable → lib/sqlitePushSinks.ts) promotes it to Prisma.
+    // Column names mirror the Prisma models (camelCase input; snake_case DDL).
+
+    upsertDailyRecommendationRun(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO daily_recommendation_run (
+             id, run_date, status, total_screeners, successful_screeners, total_stocks,
+             unique_stocks, ai_processed, ai_failed, execution_time_ms, error_message,
+             triggered_by, metadata, created_at, completed_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            toIsoVal(row.runDate ?? row.run_date ?? now),
+            String(row.status ?? "completed"),
+            Number(row.totalScreeners ?? 0),
+            Number(row.successfulScreeners ?? 0),
+            Number(row.totalStocks ?? 0),
+            Number(row.uniqueStocks ?? 0),
+            Number(row.aiProcessed ?? 0),
+            Number(row.aiFailed ?? 0),
+            row.executionTimeMs != null ? Number(row.executionTimeMs) : null,
+            row.errorMessage != null ? String(row.errorMessage) : null,
+            String(row.triggeredBy ?? "system"),
+            toJsonVal(row.metadata),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.completedAt ?? row.completed_at),
+          ],
+        );
+        recordSyncOutbox(db, "daily_recommendation_run", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertDailyRecommendationRun failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertDailyRecommendationStock(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO daily_recommendation_stock (
+             id, run_id, tracker_id, symbol, price, change_val, change_percent, volume,
+             ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning,
+             risk_factors, screener_attribution, screener_count, ai_tokens_used,
+             ai_execution_ms, ai_success, ai_error, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.runId ?? row.run_id ?? ""),
+            row.trackerId != null ? String(row.trackerId) : null,
+            String(row.symbol ?? "").toUpperCase(),
+            row.price != null ? Number(row.price) : null,
+            row.change != null ? Number(row.change) : null,
+            row.changePercent != null ? Number(row.changePercent) : null,
+            row.volume != null ? Number(row.volume) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.timeHorizon != null ? String(row.timeHorizon) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            Number(row.screenerCount ?? 0),
+            Number(row.aiTokensUsed ?? 0),
+            Number(row.aiExecutionMs ?? 0),
+            row.aiSuccess ? 1 : 0,
+            row.aiError != null ? String(row.aiError) : null,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "daily_recommendation_stock", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertDailyRecommendationStock failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertRecommendationTracker(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_tracker (
+             id, symbol, status, entry_price, current_price, target_price, stop_loss,
+             time_horizon, confidence, ai_recommendation, reasoning, risk_factors,
+             screener_attribution, last_checked_at, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            String(row.status ?? "tracking"),
+            row.entryPrice != null ? Number(row.entryPrice) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.timeHorizon != null ? String(row.timeHorizon) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            toIsoVal(row.lastCheckedAt ?? row.last_checked_at),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_tracker", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertRecommendationTracker failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    appendRecommendationStatusHistory(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        const id = String(row.id ?? "");
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_status_history (
+             id, tracker_id, previous_status, new_status, trigger_source, metadata, created_at
+           ) VALUES (?,?,?,?,?,?,?)`,
+          [
+            id,
+            String(row.trackerId ?? row.tracker_id ?? ""),
+            row.previousStatus != null ? String(row.previousStatus) : null,
+            String(row.newStatus ?? row.new_status ?? ""),
+            String(row.triggerSource ?? row.trigger_source ?? "cron_check"),
+            toJsonVal(row.metadata),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_status_history", id, "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: appendRecommendationStatusHistory failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    insertRecommendationArchive(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO recommendation_archive (
+             id, symbol, tracker_id, last_run_id, run_date, entry_price, current_price,
+             target_price, stop_loss, category, ai_recommendation, confidence, reasoning,
+             risk_factors, screener_attribution, final_status, return_percent, days_tracked,
+             status_history, archived_reason, archived_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            String(row.trackerId ?? row.tracker_id ?? ""),
+            row.lastRunId != null ? String(row.lastRunId) : null,
+            toIsoVal(row.runDate ?? row.run_date ?? now),
+            row.entryPrice != null ? Number(row.entryPrice) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.category != null ? String(row.category) : null,
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.reasoning != null ? String(row.reasoning) : null,
+            toJsonVal(row.riskFactors),
+            toJsonVal(row.screenerAttribution),
+            String(row.finalStatus ?? row.final_status ?? "archived"),
+            row.returnPercent != null ? Number(row.returnPercent) : null,
+            Number(row.daysTracked ?? 0),
+            toJsonVal(row.statusHistory),
+            String(row.archivedReason ?? row.archived_reason ?? "age_360d"),
+            toIsoVal(row.archivedAt ?? row.archived_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "recommendation_archive", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: insertRecommendationArchive failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertSwingAnalysisJob(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO swing_analysis_job (
+             id, status, payload, generated_at, started_at, completed_at, error,
+             stock_count, analyzed_count, attempt_count, template_count, total_raw,
+             created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.status ?? "pending"),
+            toJsonVal(row.payload),
+            toIsoVal(row.generatedAt ?? row.generated_at),
+            toIsoVal(row.startedAt ?? row.started_at),
+            toIsoVal(row.completedAt ?? row.completed_at),
+            row.error != null ? String(row.error) : null,
+            row.stockCount != null ? Number(row.stockCount) : null,
+            row.analyzedCount != null ? Number(row.analyzedCount) : null,
+            row.attemptCount != null ? Number(row.attemptCount) : null,
+            row.templateCount != null ? Number(row.templateCount) : null,
+            row.totalRaw != null ? Number(row.totalRaw) : null,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "swing_analysis_job", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertSwingAnalysisJob failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    upsertSwingSignal(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT OR REPLACE INTO swing_signal (
+             id, job_id, symbol, name, price, change, change_percent, volume, market_cap,
+             screener_names, screener_count, families, template_ids, source, indicators,
+             momentum_score, analysis, ai_recommendation, confidence, target_price, stop_loss,
+             current_price, return_percent, status, last_checked_at, posted_at, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            String(row.id ?? ""),
+            String(row.jobId ?? row.job_id ?? ""),
+            String(row.symbol ?? "").toUpperCase(),
+            row.name != null ? String(row.name) : null,
+            row.price != null ? Number(row.price) : null,
+            row.change != null ? Number(row.change) : null,
+            row.changePercent != null ? Number(row.changePercent) : null,
+            row.volume != null ? Number(row.volume) : null,
+            row.marketCap != null ? Number(row.marketCap) : null,
+            toJsonVal(row.screenerNames),
+            row.screenerCount != null ? Number(row.screenerCount) : null,
+            toJsonVal(row.families),
+            toJsonVal(row.templateIds),
+            String(row.source ?? "chartink"),
+            toJsonVal(row.indicators),
+            row.momentumScore != null ? Number(row.momentumScore) : null,
+            toJsonVal(row.analysis),
+            row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.confidence != null ? Number(row.confidence) : null,
+            row.targetPrice != null ? Number(row.targetPrice) : null,
+            row.stopLoss != null ? Number(row.stopLoss) : null,
+            row.currentPrice != null ? Number(row.currentPrice) : null,
+            row.returnPercent != null ? Number(row.returnPercent) : null,
+            String(row.status ?? "tracking"),
+            toIsoVal(row.lastCheckedAt ?? row.last_checked_at),
+            toIsoVal(row.postedAt ?? row.posted_at),
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
+            toIsoVal(row.updatedAt ?? row.updated_at ?? now),
+          ],
+        );
+        recordSyncOutbox(db, "swing_signal", String(row.id ?? ""), "upsert");
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertSwingSignal failed",
           error: err instanceof Error ? err.message : String(err),
         });
       }
