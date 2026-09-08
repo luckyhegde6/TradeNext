@@ -1,6 +1,6 @@
 # Plan 09 — SQLite-First NSE Read Architecture + Low-Frequency Prisma Sync
 
-> **Status:** DRAFT-REV3 for human approval — no code until approved.
+> **Status:** ✅ COMPLETE — implemented on branch `fix/v3.29.1-header-watchlist`, code + tests committed `9303bd7`→`653b617` (9 commits). Verification: sqlite.test.ts **68/68** (11 new P8), full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake), tsc **46 = exact baseline (0 new)**, no migration. **Deferred (plan rev-v3 c/d)**: `query_cache` + db-health monthly-ops window NOT implemented (follow-up). Doc commit pending user.
 > **Spec:** `.agents/specs/09-sqlite-first-read-architecture.md`
 > **Revision (v2):** sync direction corrected — **6h = ONE-WAY SQLite → Prisma PUSH via `_sync_outbox`; the ONLY Prisma → SQLite flow is boot hydration.** Locks: outbox tracking, daily_price new/changed-bars push, jobs SQLite-first, admin datasets SQLite-first.
 > **Revision (v3, 2026-09-07 user directives):** (a) **Plan limit is now MONTHLY — 200K ops/mo resetting on the 2nd** (Prisma dashboard authoritative; was 10K/day model). (b) **Prisma calls ALLOWED ONLY at 3 moments: boot hydration, 6h SQLite→Prisma push, and ONE hourly ops-usage write (hour+day granularity). Zero Prisma between.** (c) **NEW SQLite `query_cache`** — recently-fetched top-query results stored in SQLite so repeat reads never touch Prisma. (d) **db-health gains "Total Ops (Monthly Window)" + "Recent 7 Days"** (read/write/cached/hit/miss/total) persisted daily in SQLite. New phases 4b + 4c; Phase 8 extended.

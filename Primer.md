@@ -5,6 +5,8 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-09 (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync; Plan 09 on `fix/v3.29.1-header-watchlist` on top of committed v3.30.0; see Current Project Status below)
+
 2026-09-07 (v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.2 `1e907f1`; see Current Project Status below)
 
 2026-09-07 (v3.29.2 — Admin AI model management: true built-ins permanently locked — `openrouter/free` + `openrouter/auto` can NEVER be removed (API 400 + UI), catalog (8) + custom models stay removable; "Model Library" UI + 3-optgroup active-model select; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.1 `6e8db23`; see Current Project Status below)
@@ -20,6 +22,18 @@
 ---
 
 ## Current Project Status
+
+### v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync (Sep 09 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `9303bd7`→`653b617` (9 commits) + DOC COMMIT PENDING
+**User directive**: plan limit is now **monthly 200K ops/mo (resetting 2nd)** + **Prisma calls ALLOWED ONLY at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between**.
+**(1) sync_history ledger** (`9303bd7`): durable `sync_history` table (`direction` `prisma_to_sqlite`|`sqlite_to_prisma`, `trigger`, `leaderGated`, `rowsSynced`, `durationMs`, `error?`) + `recordSyncHistory()` (prune-100) + `recentSyncs` in health; also fixed the SCHEMA_SQL stray-`;`-in-`--`-comment sql.js parse error (root cause of v3.30.0 boot noise).
+**(2) Boot hydration on every instance** (`d9bda6b`): `syncFromPrisma(opts)` `reason`=`boot|probe|admin` / `skipReconcile` / `leaderBypass` / `force`; `initSqliteBackup()` → `{reason:"boot", skipReconcile:true, leaderBypass:true}` — every instance pulls, reconcile only on probe/admin/force.
+**(3) NSE rate guard** (`56ee538`): NEW `lib/services/nseRateGuard.ts` (single-flight, throttle, burst cooldown) + 6 tests; wired `nse-client.ts` + `market-cache.ts`.
+**(4) `_sync_outbox` + 6h PUSH engine** (`a681a48`+`63736f5`): `_sync_outbox` table + `pushSqliteToPrisma` (grouped latest-op-wins, chunk-200 sinks, `reconcileControlToPrisma`); NEW `lib/sqlitePushSinks.ts`; 6h probe pivots PULL→PUSH. **Prod bug fixed**: `if (!isLeader("sqlite-sync"))` never fired (isLeader returns Promise) → awaited.
+**(5) NSE captures SQLite+outbox only** (`f7e56b5`): auto-promote off, env-gated `NSE_PROMOTE_ENABLED=1`.
+**(6) Jobs write SQLite-first (recs/swing/perf)** (`ae44431`+`0013dae`): 5 mirror tables + 7 write-through helpers; pipelines mirror-first with Prisma fallback.
+**(7) Admin long-lived datasets SQLite-first** (`a2bffd9`): +7 `SqliteFallback` helpers + 4 admin CRUD routes flipped.
+**(8) db-health wiring** (`653b617`): GET spreads `outboxPending`/`derivedCounts`/sync-history; POST `push_to_prisma`; db-health UI Outbox + Derived-counts cards + Push button + Direction/Trigger columns; 5 hot-route header comments document the read chain.
+**Tests**: sqlite.test.ts **68/68** (11 new P8); instrumentation +1; NEW nseRateGuard 6; full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no schema change → no migration. **Deferred (plan rev-v3 c/d)**: `query_cache` + db-health monthly-ops window NOT implemented.
 
 ### v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging (Sep 07 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `8af65cc` + DOC COMMIT
 **User directive**: "i don't want to see this every time — defaults in `.env` on Netlify" — the recurring db-health noise traced to root causes fixed here (schema-init failure was making SQLite never-ready → every SQLite-first read silently fell back to Prisma). Also "Commit fix + doc the whole v3.30.0".

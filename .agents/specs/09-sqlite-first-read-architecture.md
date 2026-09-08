@@ -1,7 +1,7 @@
 # Spec 09 — SQLite-First NSE Read Architecture + Low-Frequency Prisma Sync
 
-> **Status:** DRAFT for human approval — no code until approved.
-> **Branch:** `feat/sqlite-first-read-architecture` (create from `main`)
+> **Status:** ✅ COMPLETE — implemented on branch `fix/v3.29.1-header-watchlist` (not the originally-noted `feat/sqlite-first-read-architecture`), code + tests committed `9303bd7`→`653b617` (9 commits). Verification: sqlite.test.ts **68/68**, full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake), tsc **46 = exact baseline (0 new)**, no migration. **Deferred (plan rev-v3 c/d)**: `query_cache` + db-health monthly-ops window NOT implemented (follow-up). Doc commit pending user.
+> **Branch:** `fix/v3.29.1-header-watchlist` (implemented; originally planned as `feat/sqlite-first-read-architecture` from `main`)
 > **Prereq:** prod WASM build fix (see §7) — SQLite cannot initialize on Netlify without it.
 > **Revision (v2):** sync model corrected per user directive — **the 6h sync is SQLite → Prisma (ONE-WAY PUSH); the ONLY Prisma → SQLite flow is boot hydration.** V2 also locks four previously-open decisions: `_sync_outbox` change tracking, daily_prices push = new/changed bars only, jobs write SQLite-first, admin long-lived datasets write SQLite-first.
 
@@ -252,7 +252,7 @@ Ensure the hot routes already falling back to SQLite stay correct and document t
 - tsc: **46 = exact baseline (0 new)**; full suite green; no schema change → **no Prisma migration** (SQLite-only tables via `CREATE TABLE IF NOT EXISTS`).
 
 ## 10. Rollout / Verification / Risks
-1. Branch `feat/sqlite-first-read-architecture` from `main`.
+1. Branch `fix/v3.29.1-header-watchlist` (on top of committed v3.30.0; originally planned as `feat/sqlite-first-read-architecture` from `main`).
 2. Implement in this order: WASM fix → `sync_history` table + recording → boot-hydration opts → nseRateGuard → `_sync_outbox` + push engine → NSE capture outbox + remove auto-promote → job SQLite-first mirrors → admin datasets → db-health UI/push action → read-helper wiring.
 3. Verify locally (:3000): SQLite Ready; Recent Sync History shows boot rows (direction `prisma_to_sqlite`) and push rows (direction `sqlite_to_prisma`); restart server → history persists; POST `push_to_prisma` → Prisma `daily_prices`/recs/admin rows updated; `GET /api/recommendations`, `/swing`, `/performance`, db-health all serve with 0 Prisma calls on their hot paths (readTier counters); outbox row counts drop to 0 after a successful push.
 4. Full Jest suite + tsc 46 baseline + targeted suites.
