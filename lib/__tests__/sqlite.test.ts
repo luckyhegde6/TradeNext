@@ -21,12 +21,17 @@ jest.mock("sql.js", () => {
       const stmts = sql.split(";").map((s) => s.trim()).filter(Boolean);
       for (let raw of stmts) {
         // Drop full-line SQL comments (e.g. the `-- Write-behind ...` header
-        // that precedes CREATE TABLE wb_api_request in SCHEMA_SQL).
+        // that precedes CREATE TABLE wb_api_request in SCHEMA_SQL) AND strip
+        // double-quoted identifiers (e.g. the reserved-word `"transaction"`
+        // table). SQLite treats quoted === unquoted identifiers, so removing
+        // the quotes keeps the (\w+) classification regexes working while the
+        // real engine accepts the quoted reserved name.
         raw = raw
           .split("\n")
           .map((l) => l.trim())
           .filter((l) => !l.startsWith("--"))
-          .join(" ");
+          .join(" ")
+          .replace(/"/g, "");
         const stmt = raw.trim();
         const upper = stmt.toUpperCase();
         if (!stmt) continue;
@@ -117,25 +122,27 @@ jest.mock("sql.js", () => {
     }
 
     exec(sql: string, params: any[] = []) {
-      const upper = sql.trim().toUpperCase();
+      // Strip quoted identifiers — quoted === unquoted in SQLite (see run()).
+      const q = sql.replace(/"/g, "");
+      const upper = q.trim().toUpperCase();
       if (!upper.startsWith("SELECT")) return [];
 
       // Parse the requested columns (SELECT col1, col2 FROM ... or SELECT *)
-      const selectM = sql.match(/SELECT\s+(.+?)\s+FROM/i);
+      const selectM = q.match(/SELECT\s+(.+?)\s+FROM/i);
       const requestedCols = selectM
         ? selectM[1].split(",").map((c: string) => c.trim().replace(/"/g, ""))
         : null; // null = SELECT *
 
       // COUNT(*) handling
       if (upper.includes("COUNT(*)")) {
-        const tableM = sql.match(/FROM (\w+)/i);
+        const tableM = q.match(/FROM (\w+)/i);
         if (!tableM) return [];
         const t = store[tableM[1]];
         if (!t) return [{ columns: ["cnt"], values: [[0]] }];
         return [{ columns: ["cnt"], values: [[t.rows.length]] }];
       }
 
-      const tableM = sql.match(/FROM (\w+)/i);
+      const tableM = q.match(/FROM (\w+)/i);
       if (!tableM) return [];
       const t = store[tableM[1]];
       if (!t) return [];
@@ -143,14 +150,14 @@ jest.mock("sql.js", () => {
       let rows = [...t.rows];
 
       // WHERE col = ?
-      const whereM = sql.match(/WHERE\s+(\w+)\s*=\s*\?/i);
+      const whereM = q.match(/WHERE\s+(\w+)\s*=\s*\?/i);
       if (whereM && params.length > 0) {
         const idx = t.columns.indexOf(whereM[1]);
         if (idx >= 0) rows = rows.filter((r) => r[idx] === params[0]);
       }
 
       // WHERE col LIKE '<prefix>%' — filter literal LIKE against the column.
-      const likeM = sql.match(/WHERE\s+(\w+)\s+LIKE\s+'([^']+)'%/i);
+      const likeM = q.match(/WHERE\s+(\w+)\s+LIKE\s+'([^']+)'%/i);
       if (likeM) {
         const idx = t.columns.indexOf(likeM[1]);
         const prefix = likeM[2];
@@ -158,7 +165,7 @@ jest.mock("sql.js", () => {
       }
 
       // ORDER BY col DESC/ASC
-      const orderM = sql.match(/ORDER BY\s+(\w+)\s+(DESC|ASC)/i);
+      const orderM = q.match(/ORDER BY\s+(\w+)\s+(DESC|ASC)/i);
       if (orderM) {
         const idx = t.columns.indexOf(orderM[1]);
         if (idx >= 0) {
@@ -177,7 +184,7 @@ jest.mock("sql.js", () => {
       }
 
       // LIMIT n
-      const limitM = sql.match(/LIMIT\s+(\d+)/i);
+      const limitM = q.match(/LIMIT\s+(\d+)/i);
       if (limitM) rows = rows.slice(0, parseInt(limitM[1]));
 
       // If specific columns were requested (not *), project only those
@@ -1499,6 +1506,11 @@ describe("SQLite backup fallback", () => {
       expect(sql.toUpperCase()).toContain("INSERT INTO DAILY_PRICES");
       expect(sql.toUpperCase()).toContain("ON CONFLICT");
       expect(params.length).toBeGreaterThanOrEqual(4);
+      // Regression: numbered $N placeholders, never bare "?" — the Prisma 7
+      // read/write driver adapter passes a literal "?" through to Postgres,
+      // which fails with 42601 (v3.31.0 live push-sink bug).
+      expect(sql).toContain("$1");
+      expect(sql).not.toContain("?");
       expect(outboxRows().length).toBe(0);
     });
 
@@ -1977,6 +1989,70 @@ describe("SQLite backup fallback", () => {
       expect(row).toBeDefined();
       expect(row!.trigger).toBe("probe");
       expect(row!.leaderGated).toBe(true);
+    });
+  });
+
+  describe("SCHEMA_SQL real-sql.js parse (reserved-keyword regression)", () => {
+    it("every SCHEMA_SQL statement parses against real SQLite and creates ALL tables incl. reserved 'transaction'", async () => {
+      // The file-scoped jest.mock("sql.js") above shadows the real module for
+      // the app under test, and a mock is too lenient to catch nearest-token
+      // failures: its CREATE classification regex is /CREATE TABLE IF NOT
+      // EXISTS (\w+)/, so an UNQUOTED `transaction` still matches and never
+      // throws. Use the REAL sql.js (bypasses the mock) so an unquoted SQLite
+      // reserved keyword — or a stray `;` inside a -- comment — fails this
+      // guard exactly as it would fail `initSqliteBackup` at boot.
+      //
+      // jest resolves sql.js to the BROWSER build (sql-wasm-browser.js), whose
+      // emscripten glue FETCHES the wasm via locateFile — a Windows absolute
+      // path fails with "both async and sync fetching of the wasm failed".
+      // Feed the wasm bytes directly via wasmBinary (standard emscripten
+      // option) so no fetch/path resolution happens at all.
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: {
+          locateFile?: (file: string) => string;
+          wasmBinary?: Uint8Array;
+        },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: any[]): void;
+          exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+
+      const SCHEMA_SQL = require("../sqlite").SCHEMA_SQL as string;
+      expect(SCHEMA_SQL.length).toBeGreaterThan(0);
+
+      const statements = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
+      // The mirror expects pre-existing tables (idempotent CREATE TABLE IF NOT
+      // EXISTS). SCHEMA_SQL's first CREATEs already carry IF NOT EXISTS, so no
+      // schema pre-seed / dry-run is needed — each statement must run cleanly.
+      for (const stmt of statements) {
+        // A lone `-- comment` fragment (from a stray ; inside a comment) would
+        // throw here; a real mismatch (`near "transaction"`) throws on the
+        // CREATE itself. Comments preceding a statement are valid to run alone
+        // in SQLite, but filter them for a precise failure.
+        const stripped = stmt
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (!stripped) continue;
+        expect(() => db.run(stripped)).not.toThrow();
+      }
+
+      // The reserved-keyword table must actually exist now.
+      const rows = db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='transaction'`);
+      expect(rows.length).toBe(1);
+      expect((rows[0].values[0][0] as string).toLowerCase()).toBe("transaction");
+
+      db.close();
     });
   });
 });

@@ -34,7 +34,7 @@ const sv = (v: unknown): string | number | null => {
  *  match the outbox row_id contracts above. */
 function readMirrorMap(db: Database, tableName: string): Map<string, Record<string, unknown>> {
   const map = new Map<string, Record<string, unknown>>();
-  const res = db.exec(`SELECT * FROM ${tableName}`);
+  const res = db.exec(`SELECT * FROM "${tableName}"`);
   if (!res.length || !res[0].values.length) return map;
   const cols = res[0].columns;
   for (const row of res[0].values) {
@@ -117,7 +117,14 @@ async function pushDailyPrice(db: Database, rows: OutboxRow[]): Promise<number> 
   const CHUNK = 200;
   for (let i = 0; i < pushes.length; i += CHUNK) {
     const chunk = pushes.slice(i, i + CHUNK);
-    const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+    // Numbered $N placeholders — required under the Prisma 7 read/write driver
+    // adapter: bare "?" reaches Postgres as a literal and fails with 42601
+    // (same pattern as historicalPriceSyncService.buildUpsertSql). Numbering
+    // runs sequentially across ALL rows of the statement.
+    let ph = 0;
+    const placeholders = chunk
+      .map(() => `(${Array.from({ length: 8 }, () => `$${++ph}`).join(", ")})`)
+      .join(", ");
     const params: Array<string | number | null> = [];
     for (const p of chunk) {
       params.push(p.ticker, p.tradeDate, p.open, p.high, p.low, p.close, p.volume, p.vwap);
@@ -286,9 +293,11 @@ type GenCol = {
  *  INSERT ... ON CONFLICT (id) DO UPDATE over `<prismaTable>`. Uses 1 raw op
  *  per chunk of PUSH_CHUNK rows (not N per-row client ops) — the job tables are
  *  low-volume, so this stays well inside the db-health op budget. Deletes are
- *  raw `DELETE ... WHERE id = ?`. JSON columns bind `CAST(? AS jsonb)`, array
- *  columns `CAST(? AS text[])` (value must be a PG literal — toPgArrayLiteral),
- *  booleans `CAST(? AS boolean)`.
+ *  raw `DELETE ... WHERE id = $1`. JSON columns bind `CAST($N AS jsonb)`, array
+ *  columns `CAST($N AS text[])` (value must be a PG literal — toPgArrayLiteral),
+ *  booleans `CAST($N AS boolean)`. Placeholder numbering runs sequentially
+ *  across the whole chunk — the Prisma 7 read/write driver adapter rejects bare
+ *  "?" placeholders with 42601 (see historicalPriceSyncService.buildUpsertSql).
  *
  *  Supersedes the per-table `prisma.model.upsert/createMany` suggestions in
  *  spec §4.6 — same semantics, far fewer Prisma ops. */
@@ -319,20 +328,36 @@ async function pushByIdUpsert(
   let applied = 0;
   if (upserts.length) {
     const colSql = cols.map((c) => c.sql).join(", ");
-    const valSql = cols
-      .map((c) =>
-        c.json ? "CAST(? AS jsonb)" : c.arr ? "CAST(? AS text[])" : c.bool ? "CAST(? AS boolean)" : "?",
-      )
-      .join(", ");
     const setSql = cols
       .filter((c) => c.sql !== "id")
       .map((c) => `${c.sql} = EXCLUDED.${c.sql}`)
       .join(", ");
     for (let i = 0; i < upserts.length; i += PUSH_CHUNK) {
       const chunk = upserts.slice(i, i + PUSH_CHUNK);
-      const placeholders = chunk.map(() => `(${valSql})`).join(", ");
+      // Numbered $N placeholders — bare "?" reaches Postgres as a literal and
+      // fails with 42601 under the Prisma 7 read/write driver adapter.
+      // Numbering runs sequentially across ALL rows of the chunk, so params =
+      // chunk.flatMap(u => u.data) stays cols.length × chunk.length values.
+      let ph = 0;
+      const placeholders = chunk
+        .map(() => {
+          const vals = cols
+            .map((c) => {
+              const p = `$${++ph}`;
+              return c.json
+                ? `CAST(${p} AS jsonb)`
+                : c.arr
+                  ? `CAST(${p} AS text[])`
+                  : c.bool
+                    ? `CAST(${p} AS boolean)`
+                    : p;
+            })
+            .join(", ");
+          return `(${vals})`;
+        })
+        .join(", ");
       await prisma.$executeRawUnsafe(
-        `INSERT INTO ${prismaTable} (${colSql}) VALUES ${placeholders}
+        `INSERT INTO "${prismaTable}" (${colSql}) VALUES ${placeholders}
          ON CONFLICT (id) DO UPDATE SET ${setSql}`,
         ...chunk.flatMap((u) => u.data),
       );
@@ -340,7 +365,10 @@ async function pushByIdUpsert(
     }
   }
   for (const id of deletes) {
-    await prisma.$executeRawUnsafe(`DELETE FROM ${prismaTable} WHERE id = ?`, id);
+    // $1 with no cast: PrismaPg infers the param type from the column, so the
+    // same sink serves Int ids (admin_announcements) and String cuid ids
+    // (Alert / Transaction).
+    await prisma.$executeRawUnsafe(`DELETE FROM "${prismaTable}" WHERE id = $1`, id);
     applied++;
   }
   return applied;

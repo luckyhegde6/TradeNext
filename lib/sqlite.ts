@@ -690,7 +690,7 @@ export async function restoreSqliteBackup(bytes: Uint8Array): Promise<{ db: numb
 // Schema
 // ---------------------------------------------------------------------------
 
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS _backup_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -1143,7 +1143,7 @@ const SCHEMA_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_alert_created ON alert (created_at);
   CREATE INDEX IF NOT EXISTS idx_alert_triggered ON alert (triggered);
-  CREATE TABLE IF NOT EXISTS transaction (
+  CREATE TABLE IF NOT EXISTS "transaction" (
     id             TEXT PRIMARY KEY,
     portfolio_id   TEXT,
     user_id        INTEGER,
@@ -1156,9 +1156,9 @@ const SCHEMA_SQL = `
     fees           REAL,
     notes          TEXT
   );
-  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON transaction (portfolio_id);
-  CREATE INDEX IF NOT EXISTS idx_transaction_user ON transaction (user_id);
-  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON transaction (trade_date);
+  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON "transaction" (portfolio_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_user ON "transaction" (user_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON "transaction" (trade_date);
   CREATE TABLE IF NOT EXISTS ai_config (
     id         TEXT PRIMARY KEY,
     key        TEXT,
@@ -3471,7 +3471,7 @@ export function getSqliteDerivedCounts(): Record<string, number> {
   const out: Record<string, number> = {};
   for (const t of DERIVED_COUNT_TABLES) {
     try {
-      const res = state.db.exec(`SELECT COUNT(*) FROM ${t}`);
+      const res = state.db.exec(`SELECT COUNT(*) FROM "${t}"`);
       out[t] = Number(res.length && res[0].values.length ? res[0].values[0][0] : 0);
     } catch {
       out[t] = 0;
@@ -3753,12 +3753,12 @@ async function syncTable(
   try {
     const data = await fetchData();
     if (!data || data.rows.length === 0) {
-      db.run(`DELETE FROM ${tableName}`);
+      db.run(`DELETE FROM "${tableName}"`);
       return 0;
     }
-    db.run(`DELETE FROM ${tableName}`);
+    db.run(`DELETE FROM "${tableName}"`);
     const stmt = db.prepare(
-      `INSERT OR REPLACE INTO ${tableName} (${data.columns}) VALUES (${data.placeholders})`,
+      `INSERT OR REPLACE INTO "${tableName}" (${data.columns}) VALUES (${data.placeholders})`,
     );
     for (const row of data.rows) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5347,7 +5347,7 @@ function createFallback(db: Database): SqliteFallback {
         }
         const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
         const rows = db.exec(
-          `SELECT * FROM transaction${where} ORDER BY trade_date DESC LIMIT ?`,
+          `SELECT * FROM "transaction"${where} ORDER BY trade_date DESC LIMIT ?`,
           [...params, Math.min(opts?.limit ?? 2000, 5000)],
         );
         if (!rows.length || !rows[0].values.length) return [];
@@ -5382,7 +5382,7 @@ upsertTransaction(row: Record<string, unknown>): void {
         const num = (v: unknown): number | null =>
           v == null || v === "" ? null : Number(v);
         db.run(
-          `INSERT INTO transaction (
+          `INSERT INTO "transaction" (
              id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side,
              quantity, price, fees, notes
            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
@@ -5423,7 +5423,7 @@ upsertTransaction(row: Record<string, unknown>): void {
     deleteTransaction(id: string): void {
       if (!db || !id) return;
       try {
-        db.run("DELETE FROM transaction WHERE id = ?", [String(id)]);
+        db.run('DELETE FROM "transaction" WHERE id = ?', [String(id)]);
         recordSyncOutbox(db, "transaction", String(id), "delete");
       } catch (err) {
         logger.debug({
