@@ -5,6 +5,7 @@ import { executeTask } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { getCorrectedNow, getCronFrom } from "@/lib/services/timeCorrection";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
@@ -594,7 +595,7 @@ export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
         await prisma.cronJob.update({
             where: { id: job.id },
             data: {
-                nextRun: calculateNextRun(job.cronExpression),
+                nextRun: calculateNextRun(job.cronExpression, getCronFrom()),
                 updatedAt: new Date()
             },
         });
@@ -627,7 +628,7 @@ export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
     await prisma.cronJob.update({
         where: { id: job.id },
         data: {
-            nextRun: calculateNextRun(job.cronExpression),
+            nextRun: calculateNextRun(job.cronExpression, getCronFrom()),
             updatedAt: new Date()
         },
     });
@@ -638,7 +639,10 @@ export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
  * (exported for tests)
  */
 export async function checkScheduledJobs() {
-    const now = new Date();
+    // v3.32.0: use the corrected clock so a drifted server timezone ("IST-as-UTC")
+    // still fires and advances nextRun on IST wall time. Identity when no
+    // correction is persisted.
+    const now = getCorrectedNow();
 
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN,
     // skip the cron-due read entirely — the prod "Cron daemon resync deferred

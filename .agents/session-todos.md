@@ -1,6 +1,22 @@
 # Session Todos
 
-## Current (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
+## Current (v3.32.0 — Admin Time Synchronisation)
+
+**User directive**: "in admin db health screen display server time and db time. and also admin can enter ist time so if server time is misaligned it can be corrected through admin entered input for timezone corrections."
+
+**ROOT CAUSE**: Netlify host clock treats IST wall-clock as UTC → stored cron `nextRun` skew ≈ +5.5h; `calculateNextRun` takes `from` from the server clock. **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard compared parsed-UTC vs IST input.
+
+**Shipped (working tree on `fix/sqlite-init-reserved-keyword` @ `8c67e89`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
+- [x] `lib/sqlite.ts` probe + persistence (`probeDbTimeNow`, keys `time_correction`/`time_probe_db`, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60s`; types `:1753-1789`, fallback `:5978-5983`)
+- [x] NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through; `getTimeDiagnostics()`)
+- [x] db-health POST `probe_time` (30s throttle) / `set_time_correction` / `clear_time_correction` + GET zero-Prisma `time`
+- [x] Time Synchronisation card in db-health UI; `lib/audit.ts` +2 actions
+- [x] Wiring `getCronFrom()`/`getCorrectedNow()` in `recommendationCronService.ts` + `worker-engine.ts` (nextRun + due-claim)
+- [x] Tests — `timeCorrection.test.ts` 20/20, sqlite 71/71, targeted **118/118**, full **1106/4/1** (1 = documented pre-existing flake), tsc 46 = baseline, no migration, no new packages
+- [x] Docs — versions-v3.32.md, AGENTS/CHANGELOG/TODO rows, Primer, agent-memory, Lessons #111, session archive
+- [ ] **COMMIT PENDING USER** (branch name user decides); live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
+
+## Completed earlier (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
 
 Branch `fix/v3.29.1-header-watchlist`, on top of committed v3.30.0; user directive "Plan limit is now MONTHLY 200K ops/mo (resetting 2nd)" + "Prisma calls ALLOWED ONLY at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between". **Code COMPLETE + TESTS VERIFIED, COMMITTED `9303bd7`→`653b617` (9 commits)**: **(1) sync_history ledger** (durable table + `recordSyncHistory()` prune-100 + `recentSyncs` in health; SCHEMA_SQL stray-`;`-in-comment parse error fixed — root cause of v3.30.0 boot noise), **(2) boot hydration on every instance** (`syncFromPrisma(opts)` reason/skipReconcile/leaderBypass/force; `initSqliteBackup()` → boot/skipReconcile/leaderBypass), **(3) NSE rate guard** (NEW `lib/services/nseRateGuard.ts` single-flight/throttle/burst-cooldown + 6 tests; wired `nse-client.ts` + `market-cache.ts`), **(4) `_sync_outbox` + 6h PUSH engine** (`pushSqliteToPrisma` grouped latest-op-wins chunk-200 sinks + `reconcileControlToPrisma`; NEW `lib/sqlitePushSinks.ts`; 6h probe pivots PULL→PUSH; **prod bug** `if (!isLeader("sqlite-sync"))` never fired — isLeader returns Promise → awaited), **(5) NSE captures SQLite+outbox only** (auto-promote off, `NSE_PROMOTE_ENABLED=1`), **(6) jobs write SQLite-first (recs/swing/perf)** (5 mirror tables + 7 write-through helpers), **(7) admin long-lived datasets SQLite-first** (+7 helpers + 4 CRUD routes flipped), **(8) db-health wiring** (GET outbox/derived-counts/sync-history; POST `push_to_prisma`; UI Outbox + Derived-counts + Push button; 5 hot-route headers). **Tests**: sqlite.test.ts **68/68** (11 new P8); instrumentation +1; NEW nseRateGuard 6; full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration. **Deferred (plan rev-v3 c/d)**: `query_cache` + db-health monthly-ops window NOT implemented. **Remaining: DOC COMMIT (pending user approval)** + no push/merge/deploy without explicit approval.
 

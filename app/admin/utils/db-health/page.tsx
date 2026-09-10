@@ -126,6 +126,23 @@ interface DbHealthData {
       historicalCache: { keys: number; stats: { hits: number; misses: number; ksize: number; vsize: number }; hitRate: number };
     };
   };
+  // v3.32.0: time-correction diagnostics (server clock vs DB time vs offset).
+  time: {
+    serverIso: string;
+    serverUtcOffsetMinutes: number;
+    serverTz: string;
+    istIso: string;
+    dbIso: string | null;
+    dbProbeAt: string | null;
+    misaligned: boolean | null;
+    correctedNowIso: string;
+    correction: {
+      offsetMinutes: number;
+      istInput: string;
+      appliedAt: string;
+      serverNowIso: string;
+    } | null;
+  };
 }
 
 type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
@@ -227,12 +244,20 @@ export default function DbHealthPage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [logDownloadMsg, setLogDownloadMsg] = useState<string | null>(null);
+  // v3.32.0: Time Synchronisation card state.
+  const [timeMsg, setTimeMsg] = useState<string | null>(null);
+  const [timeImeInput, setTimeImeInput] = useState<string>("");
+  const [probingTime, setProbingTime] = useState(false);
+  const [savingTime, setSavingTime] = useState(false);
 
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/db-health");
       if (res.ok) {
-        setData(await res.json());
+        const body = await res.json();
+        setData(body);
+        // v3.32.0: prefill the IST correction input once (YYYY-MM-DDTHH:mm).
+        setTimeImeInput((prev) => prev || body.time?.istIso?.slice(0, 16) || "");
       }
     } catch (e) {
       console.error("Failed to fetch DB health:", e);
@@ -477,6 +502,89 @@ export default function DbHealthPage() {
     }
   };
 
+  // v3.32.0: Time Synchronisation — probe the Postgres clock + persist the
+  // server-clock offset (entered IST wall time − server now) so scheduling math
+  // computes nextRun against the corrected clock.
+  const triggerProbeTime = async () => {
+    setProbingTime(true);
+    setTimeMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "probe_time" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        // Throttled POST still returns 200 — surface the message either way.
+        setTimeMsg(body.probed ? "DB time probe complete" : (body.message ?? "DB time probe done"));
+        await fetchHealth();
+      } else if (body.message) {
+        setTimeMsg(body.message);
+      } else {
+        setTimeMsg(`Probe failed: ${body.error ?? "no data"}`);
+      }
+    } catch (e) {
+      setTimeMsg(`Probe error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setProbingTime(false);
+    }
+  };
+
+  const triggerSetTimeCorrection = async () => {
+    if (!timeImeInput) {
+      setTimeMsg("Enter the current IST wall time first (or leave blank to match the server clock).");
+      return;
+    }
+    setSavingTime(true);
+    setTimeMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_time_correction", istDateTime: timeImeInput }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setTimeMsg(
+          body.offsetMinutes
+            ? `Correction saved: server clock is ${Math.abs(body.offsetMinutes)} min ${body.offsetMinutes < 0 ? "FAST" : "SLOW"} (offset ${body.offsetMinutes})`
+            : "Correction saved: server clock matches the entered IST time (offset 0).",
+        );
+        await fetchHealth();
+      } else {
+        setTimeMsg(`Save failed: ${body.error}`);
+      }
+    } catch (e) {
+      setTimeMsg(`Save error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingTime(false);
+    }
+  };
+
+  const triggerClearTimeCorrection = async () => {
+    setSavingTime(true);
+    setTimeMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_time_correction" }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setTimeMsg("Time correction cleared — scheduling uses the raw server clock.");
+        await fetchHealth();
+      } else {
+        setTimeMsg(`Clear failed: ${body.error}`);
+      }
+    } catch (e) {
+      setTimeMsg(`Clear error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingTime(false);
+    }
+  };
+
   if (status === "loading" || loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -493,7 +601,7 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache, time } = data;
   const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
@@ -1423,6 +1531,126 @@ export default function DbHealthPage() {
           {sqlite.syncHistoryTable
             ? "Rows persist in the SQLite `sync_history` ledger (last 100 kept) and survive restarts."
             : "Ledger table unavailable — showing the in-memory ring only (does not survive restarts)."}
+        </p>
+      </div>
+
+      {/* v3.32.0: Time synchronisation — server clock vs DB time vs offset */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
+          Time Synchronisation
+        </h3>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          Shows the server clock vs Postgres time and applies a persisted offset to scheduling math.
+          If the server clock drifts (e.g. IST rendered as UTC), enter the correct current IST wall
+          time to align the next-run calculations. The offset is stored in SQLite (zero Prisma ops)
+          and applied at every scheduling call site.
+        </p>
+
+        {timeMsg && (
+          <div className="mb-4 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            {timeMsg}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-slate-400">Server clock (UTC)</p>
+            <p className="text-sm text-gray-900 dark:text-white font-mono truncate">{time.serverIso}</p>
+            <p className="text-xs text-gray-400 dark:text-slate-500">
+              offset {time.serverUtcOffsetMinutes} min · {time.serverTz}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-slate-400">Derived IST (server + 5:30)</p>
+            <p className="text-sm text-gray-900 dark:text-white font-mono truncate">{time.istIso}</p>
+            <p className="text-xs text-gray-400 dark:text-slate-500">what the server <em>thinks</em> the local time is</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-slate-400">Postgres NOW()</p>
+            {time.dbIso ? (
+              <>
+                <p className="text-sm text-gray-900 dark:text-white font-mono truncate">{time.dbIso}</p>
+                <p className="text-xs text-gray-400 dark:text-slate-500">probed {formatTimeAgo(time.dbProbeAt)}</p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400 dark:text-slate-500">Not probed</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {time.misaligned === null ? (
+            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-slate-300">
+              Alignment unknown — probe the DB clock
+            </span>
+          ) : time.misaligned ? (
+            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+              <XCircleIcon className="w-4 h-4 inline mr-1" />
+              Drift detected — DB clock differs from the corrected server clock by &gt;60s
+            </span>
+          ) : (
+            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+              <CheckCircleIcon className="w-4 h-4 inline mr-1" />
+              Aligned — DB clock within 60s of the corrected server clock
+            </span>
+          )}
+          {time.correction ? (
+            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+              <ClockIcon className="w-4 h-4 inline mr-1" />
+              Offset {time.correction.offsetMinutes} min saved ({formatTimeAgo(time.correction.appliedAt)})
+            </span>
+          ) : (
+            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              No correction saved — using the raw server clock
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">
+              Correct current IST wall time (for drift correction)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="datetime-local"
+                value={timeImeInput}
+                onChange={(e) => setTimeImeInput(e.target.value)}
+                disabled={savingTime}
+                className="block w-full text-sm text-gray-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={triggerSetTimeCorrection}
+              disabled={savingTime}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {savingTime && !probingTime ? "Saving..." : "Save Correction"}
+            </button>
+            <button
+              onClick={triggerProbeTime}
+              disabled={probingTime}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <ArrowPathIcon className={`w-4 h-4 ${probingTime ? "animate-spin" : ""}`} />
+              {probingTime ? "Probing..." : "Probe DB Clock"}
+            </button>
+            <button
+              onClick={triggerClearTimeCorrection}
+              disabled={savingTime}
+              className="px-4 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-gray-400 dark:text-slate-500 italic">
+          The offset only affects scheduling math (next-run calculation); the in-process cron daemon's
+          firing clock is OS-bound and cannot be shifted in JS — aligning the server TZ/UTC env is the
+          durable fix. {time.correction?.offsetMinutes ? `Active offset: ${time.correction.offsetMinutes} min.` : ""}
         </p>
       </div>
 

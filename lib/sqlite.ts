@@ -243,6 +243,23 @@ export interface SqliteFallback {
   persistDbErrorCounts(): void;
   /** Restore the Prisma per-type DB error counts when they match today (IST). */
   restoreDbErrorCounts(): void;
+  /** Persist the admin time-correction record into SQLite (`_backup_meta`). */
+  persistTimeCorrection(record: TimeCorrectionRecord): void;
+  /** Remove the persisted admin time-correction record (never throws). */
+  deleteTimeCorrection(): void;
+  /** Restore the admin time-correction record, or null when absent/invalid. */
+  restoreTimeCorrection(): TimeCorrectionRecord | null;
+  /** Persist the last known DB time probe into SQLite (`_backup_meta`). */
+  persistTimeProbe(record: TimeProbeRecord): void;
+  /** Restore the last known DB time probe, or null when absent/invalid. */
+  restoreTimeProbe(): TimeProbeRecord | null;
+  /** On-demand Postgres `SELECT NOW()` probe (admin `probe_time` action). */
+  probeDbTimeNow(): Promise<{
+    available: boolean;
+    dbIso: string | null;
+    latencyMs: number;
+    error: string | null;
+  }>;
   /** Enqueue a log write for later bulk-flush to Prisma (zero Prisma ops). */
   enqueueWriteBehind(kind: WriteBehindKind, row: Record<string, unknown>): void;
   /** Bulk-flush pending write-behind rows to Prisma. */
@@ -690,7 +707,7 @@ export async function restoreSqliteBackup(bytes: Uint8Array): Promise<{ db: numb
 // Schema
 // ---------------------------------------------------------------------------
 
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS _backup_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -1143,7 +1160,7 @@ const SCHEMA_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_alert_created ON alert (created_at);
   CREATE INDEX IF NOT EXISTS idx_alert_triggered ON alert (triggered);
-  CREATE TABLE IF NOT EXISTS transaction (
+  CREATE TABLE IF NOT EXISTS "transaction" (
     id             TEXT PRIMARY KEY,
     portfolio_id   TEXT,
     user_id        INTEGER,
@@ -1156,9 +1173,9 @@ const SCHEMA_SQL = `
     fees           REAL,
     notes          TEXT
   );
-  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON transaction (portfolio_id);
-  CREATE INDEX IF NOT EXISTS idx_transaction_user ON transaction (user_id);
-  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON transaction (trade_date);
+  CREATE INDEX IF NOT EXISTS idx_transaction_portfolio ON "transaction" (portfolio_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_user ON "transaction" (user_id);
+  CREATE INDEX IF NOT EXISTS idx_transaction_trade_date ON "transaction" (trade_date);
   CREATE TABLE IF NOT EXISTS ai_config (
     id         TEXT PRIMARY KEY,
     key        TEXT,
@@ -1718,6 +1735,156 @@ export function restoreDbErrorCounts(): void {
     }
   } catch (err) {
     logger.error({ msg: "SQLite: restore db error counts failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Time-correction persistence (v3.32.0)
+// ---------------------------------------------------------------------------
+// The admin DB-health "Time Synchronisation" card lets the operator enter the
+// correct IST time when the app-server clock behaves off (e.g. Netlify boxes
+// that drift ~+5.5h "IST-as-UTC", which corrupts calculateNextRun's `from`
+// base and the cron due-gate). The computed offset is persisted into
+// `_backup_meta` key `time_correction` (local SQLite only — zero Prisma ops)
+// and `time_probe_db` stores the last known Postgres NOW() from the manual
+// probe. The offset is applied LAZILY by lib/services/timeCorrection.ts at
+// every scheduling call site — no boot-time mutation required.
+
+export interface TimeCorrectionRecord {
+  /** trueNow − serverNow, in minutes (negative = server clock is FAST). */
+  offsetMinutes: number;
+  /** IST wall time the admin entered, "YYYY-MM-DDTHH:mm" (local, no zone). */
+  istInput: string;
+  /** ISO instant the correction was applied. */
+  appliedAt: string;
+  /** Server clock reading (ISO) at save time. */
+  serverNowIso: string;
+}
+
+export interface TimeProbeRecord {
+  /** Postgres NOW() as ISO (authoritative clock for comparison). */
+  dbIso: string;
+  /** ISO instant the probe ran. */
+  probedAt: string;
+}
+
+const TIME_CORRECTION_KEY = "time_correction";
+const TIME_PROBE_DB_KEY = "time_probe_db";
+
+function isTimeCorrectionRecord(v: unknown): v is TimeCorrectionRecord {
+  const r = v as TimeCorrectionRecord;
+  return (
+    !!r &&
+    typeof r.offsetMinutes === "number" &&
+    Number.isFinite(r.offsetMinutes) &&
+    typeof r.istInput === "string" &&
+    typeof r.appliedAt === "string" &&
+    typeof r.serverNowIso === "string"
+  );
+}
+
+function isTimeProbeRecord(v: unknown): v is TimeProbeRecord {
+  const r = v as TimeProbeRecord;
+  return !!r && typeof r.dbIso === "string" && typeof r.probedAt === "string";
+}
+
+/** Persist the current time-correction record. Never throws. */
+export function persistTimeCorrection(record: TimeCorrectionRecord): void {
+  if (!state.db || !state.ready) return;
+  try {
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      TIME_CORRECTION_KEY,
+      JSON.stringify(record),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist time correction failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Remove the persisted time-correction record. Never throws. */
+export function deleteTimeCorrection(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    state.db.run("DELETE FROM _backup_meta WHERE key = ?", [TIME_CORRECTION_KEY]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: delete time correction failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Restore the persisted time-correction record, or null when absent/invalid. */
+export function restoreTimeCorrection(): TimeCorrectionRecord | null {
+  if (!state.db || !state.ready) return null;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [TIME_CORRECTION_KEY]);
+    if (!result.length || !result[0].values.length) return null;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isTimeCorrectionRecord(parsed) ? parsed : null;
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore time correction failed", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/** Persist the last known DB time probe. Never throws. */
+export function persistTimeProbe(record: TimeProbeRecord): void {
+  if (!state.db || !state.ready) return;
+  try {
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      TIME_PROBE_DB_KEY,
+      JSON.stringify(record),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist db time probe failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Restore the last known DB time probe, or null when absent/invalid. */
+export function restoreTimeProbe(): TimeProbeRecord | null {
+  if (!state.db || !state.ready) return null;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [TIME_PROBE_DB_KEY]);
+    if (!result.length || !result[0].values.length) return null;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isTimeProbeRecord(parsed) ? parsed : null;
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore db time probe failed", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * v3.32.0 manual-trigger DB clock probe (admin db-health `probe_time` action).
+ * Runs ONE explicit `SELECT NOW()` against Postgres (the authoritative clock)
+ * and persists the result to `time_probe_db`. This is the ONLY on-demand DB
+ * read for the time card — the GET dashboard path stays Prisma-free and the
+ * 200K-ops/mo budget keeps the probe on manual clicks only.
+ */
+export async function probeDbTimeNow(): Promise<{
+  available: boolean;
+  dbIso: string | null;
+  latencyMs: number;
+  error: string | null;
+}> {
+  const start = Date.now();
+  try {
+    const rows = await prisma.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
+    const dbNow = rows?.[0]?.now;
+    const dbIso = dbNow ? new Date(dbNow).toISOString() : null;
+    if (dbIso) {
+      persistTimeProbe({ dbIso, probedAt: new Date().toISOString() });
+    }
+    return { available: true, dbIso, latencyMs: Date.now() - start, error: null };
+  } catch (err) {
+    return {
+      available: false,
+      dbIso: null,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -3471,7 +3638,7 @@ export function getSqliteDerivedCounts(): Record<string, number> {
   const out: Record<string, number> = {};
   for (const t of DERIVED_COUNT_TABLES) {
     try {
-      const res = state.db.exec(`SELECT COUNT(*) FROM ${t}`);
+      const res = state.db.exec(`SELECT COUNT(*) FROM "${t}"`);
       out[t] = Number(res.length && res[0].values.length ? res[0].values[0][0] : 0);
     } catch {
       out[t] = 0;
@@ -3753,12 +3920,12 @@ async function syncTable(
   try {
     const data = await fetchData();
     if (!data || data.rows.length === 0) {
-      db.run(`DELETE FROM ${tableName}`);
+      db.run(`DELETE FROM "${tableName}"`);
       return 0;
     }
-    db.run(`DELETE FROM ${tableName}`);
+    db.run(`DELETE FROM "${tableName}"`);
     const stmt = db.prepare(
-      `INSERT OR REPLACE INTO ${tableName} (${data.columns}) VALUES (${data.placeholders})`,
+      `INSERT OR REPLACE INTO "${tableName}" (${data.columns}) VALUES (${data.placeholders})`,
     );
     for (const row of data.rows) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5347,7 +5514,7 @@ function createFallback(db: Database): SqliteFallback {
         }
         const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
         const rows = db.exec(
-          `SELECT * FROM transaction${where} ORDER BY trade_date DESC LIMIT ?`,
+          `SELECT * FROM "transaction"${where} ORDER BY trade_date DESC LIMIT ?`,
           [...params, Math.min(opts?.limit ?? 2000, 5000)],
         );
         if (!rows.length || !rows[0].values.length) return [];
@@ -5382,7 +5549,7 @@ upsertTransaction(row: Record<string, unknown>): void {
         const num = (v: unknown): number | null =>
           v == null || v === "" ? null : Number(v);
         db.run(
-          `INSERT INTO transaction (
+          `INSERT INTO "transaction" (
              id, portfolio_id, user_id, portfolio_name, trade_date, ticker, side,
              quantity, price, fees, notes
            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
@@ -5423,7 +5590,7 @@ upsertTransaction(row: Record<string, unknown>): void {
     deleteTransaction(id: string): void {
       if (!db || !id) return;
       try {
-        db.run("DELETE FROM transaction WHERE id = ?", [String(id)]);
+        db.run('DELETE FROM "transaction" WHERE id = ?', [String(id)]);
         recordSyncOutbox(db, "transaction", String(id), "delete");
       } catch (err) {
         logger.debug({
@@ -5808,6 +5975,12 @@ upsertTransaction(row: Record<string, unknown>): void {
     restoreOpsCounter,
     persistDbErrorCounts,
     restoreDbErrorCounts,
+    persistTimeCorrection,
+    deleteTimeCorrection,
+    restoreTimeCorrection,
+    persistTimeProbe,
+    restoreTimeProbe,
+    probeDbTimeNow,
     enqueueWriteBehind,
     drainWriteBehind,
     getWriteBehindStats,

@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
-import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
+import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
 import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
 import { getReadMetrics } from "@/lib/services/readTier";
 import { getCacheMetrics } from "@/lib/cache";
+import {
+  getTimeDiagnostics,
+  parseIstDateTimeLocal,
+  computeCorrectionOffsetMinutes,
+  saveCorrection,
+  clearCorrection,
+  type TimeCorrectionRecord,
+} from "@/lib/services/timeCorrection";
+
+/** v3.32.0: `probe_time` throttle — one on-demand Postgres NOW() per 30s per instance. */
+const DB_TIME_PROBE_THROTTLE_MS = 30_000;
+let lastDbTimeProbeAt = 0;
+
+const TIME_CORRECTION_INPUT_SCHEMA = z.object({
+  istDateTime: z.string().min(1, "istDateTime is required"),
+});
 
 /**
  * v3.23.x: the GET path performs NO Prisma reads (probe + table counts moved
@@ -184,6 +201,9 @@ export async function GET(req: Request) {
       // deploy/restart and flush, and most hot reads short-circuit at the
       // SQLite mirror, so a low value is EXPECTED right after boot.
     },
+    // v3.32.0: time-correction diagnostics (server clock vs DB time vs the
+    // persisted admin offset). Zero Prisma ops — reads SQLite `_backup_meta`.
+    time: getTimeDiagnostics(),
     leader: {
       self: LEADER_SELF,
       worker: await getLeaderInfo("worker"),
@@ -199,7 +219,7 @@ export async function GET(req: Request) {
  * Trigger a manual SQLite sync from Prisma, flush daily prices, or perform an
  * admin backup / restore of the in-memory SQLite backup layer.
  *
- * Body: { action?: "sync_sqlite" | "flush_prices" | "flush_logs" | "push_to_prisma" | "deploy_prep" | "backup" | "restore" }
+ * Body: { action?: "sync_sqlite" | "flush_prices" | "flush_logs" | "push_to_prisma" | "deploy_prep" | "backup" | "restore" | "probe_time" | "set_time_correction" | "clear_time_correction" }
  *  - backup:      returns { data: base64 } of the exported .sqlite blob
  *  - restore:     { data: <base64 sqlite> } applies the uploaded backup
  *  - deploy_prep: run the "Prepare for Deploy" sequence — flush write-behind logs
@@ -370,6 +390,96 @@ export async function POST(req: Request) {
         { status: 500 },
       );
     }
+  }
+
+  if (action === "probe_time") {
+    // v3.32.0: on-demand Postgres NOW() probe for the Time Synchronisation
+    // card. Throttled to one probe per 30s per instance; DB-down degrades
+    // gracefully (200 + available:false) so the card can render "Not probed".
+    const now = Date.now();
+    if (now - lastDbTimeProbeAt < DB_TIME_PROBE_THROTTLE_MS) {
+      return NextResponse.json({
+        success: false,
+        probed: false,
+        message: "Probe throttled — wait 30s between probes",
+      });
+    }
+    lastDbTimeProbeAt = now;
+    try {
+      const probe = await probeDbTimeNow();
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_SYNC",
+        resource: "time-probe",
+        responseStatus: 200,
+        metadata: { available: probe.available, latencyMs: probe.latencyMs, dbIso: probe.dbIso },
+      });
+      return NextResponse.json({ success: true, probed: true, ...probe, time: getTimeDiagnostics() });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "DB time probe failed", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (action === "set_time_correction") {
+    // v3.32.0: persist the server-clock offset. The admin enters the correct
+    // current IST wall time; offset = enteredIST − serverNow (negative = the
+    // server clock is FAST, e.g. −330 for the observed ~+5.5h drift). Applied
+    // lazily to scheduling math via getCorrectedNow()/getCronFrom().
+    let body: { istDateTime?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    }
+    const parsedBody = TIME_CORRECTION_INPUT_SCHEMA.safeParse(body);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: "istDateTime is required (YYYY-MM-DDTHH:mm IST wall time)" },
+        { status: 400 },
+      );
+    }
+    const istInput = parseIstDateTimeLocal(parsedBody.data.istDateTime);
+    if (!istInput) {
+      return NextResponse.json(
+        { error: "istDateTime must be a real IST wall time (YYYY-MM-DDTHH:mm)" },
+        { status: 400 },
+      );
+    }
+    const serverNow = new Date();
+    const offsetMinutes = computeCorrectionOffsetMinutes(istInput, serverNow);
+    const record: TimeCorrectionRecord = {
+      offsetMinutes,
+      istInput: parsedBody.data.istDateTime,
+      appliedAt: serverNow.toISOString(),
+      serverNowIso: serverNow.toISOString(),
+    };
+    saveCorrection(record);
+    void createAuditLog({
+      userId: session.user.id ? parseInt(session.user.id) : undefined,
+      userEmail: session.user.email,
+      action: "ADMIN_DB_TIME_CORRECTION_SET",
+      resource: "time-correction",
+      responseStatus: 200,
+      metadata: record,
+    });
+    return NextResponse.json({ success: true, ...record, time: getTimeDiagnostics() });
+  }
+
+  if (action === "clear_time_correction") {
+    clearCorrection();
+    void createAuditLog({
+      userId: session.user.id ? parseInt(session.user.id) : undefined,
+      userEmail: session.user.email,
+      action: "ADMIN_DB_TIME_CORRECTION_CLEARED",
+      resource: "time-correction",
+      responseStatus: 200,
+      metadata: { clearedAt: new Date().toISOString() },
+    });
+    return NextResponse.json({ success: true, cleared: true, time: getTimeDiagnostics() });
   }
 
   if (action === "probe_prisma") {
