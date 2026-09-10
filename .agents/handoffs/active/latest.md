@@ -1,33 +1,35 @@
 ---
-handoff: v3.32.1-db-health-body-once-fix
-session_id: v3.32.1-db-health-body-once-fix
+handoff: v3.33.0-leader-watchdog-self-heal
+session_id: v3.33.0-leader-watchdog-self-heal
 date: 2026-09-10
-branch: main (HEAD b75deb0; v3.32.0 PR #117 merge 38a27bf present; NO new branch created)
-last_commits: b75deb0 (main HEAD), 38a27bf (PR #117 merge), df7959d + e74ae54 (v3.32.0 docs/feat) — v3.32.1 code+tests+docs are in the WORKING TREE, NOT committed
-dev: local :3000 (dev PID 12096 — will be killed at cleanup; MCP 4096 do not kill, pg docker 5432 do not kill)
+branch: fix/leader-watchdog-self-heal (HEAD bcde7ae = committed v3.32.1; on top of v3.32.0 PR #117 merge 38a27bf)
+last_commits: bcde7ae (v3.32.1 committed), b75deb0 (v3.32.0 docs update), 38a27bf (PR #117 merge)
+dev: local :3000 (dev PID 12096 — do not kill; MCP 4096 do not kill; pg docker 5432 do not kill)
 status: in_progress
-commit: pending user approval
+commit: pending user approval (commit 1 = v3.33.0 watchdog + docs, commit 2 = v3.33.1 swing; staged by workstream, not yet committed)
 ---
 
-# Handoff — v3.32.1 — db-health POST double-`req.json()` hotfix (restore + set_time_correction 400s)
+# Handoff — v3.33.0 Leader watchdog self-heal + v3.33.1 Swing touch-tracking fix
 
 ## Summary
-**Fix + regression test + full doc set are DONE and VERIFIED in the working tree on `main` (COMMIT PENDING USER — no push/merge/deploy).**
-v3.32.0 (Admin Time Synchronisation) MERGED to `main` via PR #117 (`38a27bf`; `e74ae54` feat · `df7959d` docs · `b75deb0` docs update). Post-merge live triage exposed: POST `/api/admin/db-health` reads `req.json()` at the top (~:238) for `action`, then `restore` (~:272) and `set_time_correction` (~:434) RE-READ the body — a Web `Request` body stream is single-use (`bodyUsed` after the first `json()`) → second read throws → both 400'd as `"Invalid restore payload"`/`"Invalid payload"` (`restore` broken since v3.21.2; `set_time_correction` inherited the pattern in v3.32.0).
+**Both workstreams are CODE-COMPLETE, TEST-VERIFIED and DOCUMENTED in the working tree on branch `fix/leader-watchdog-self-heal` (on top of committed v3.32.1 `bcde7ae`). Two commits pending per the user-approved commit plan — no push/merge/deploy.**
 
-## What shipped (v3.32.1 — surgical, route only)
-- Hoisted the body read at the POST top: `let action = "sync_sqlite"; let requestBody = {}; try { requestBody = (await req.json()) ... }` with `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`.
-- `restore` reuses `requestBody as { data?: string; file?: string }` — unparseable body → `{}` → existing `400 "Missing base64 sqlite data"` path (honest error).
-- `set_time_correction` reuses `requestBody as { istDateTime?: string }` — missing → zod `400 "istDateTime is required"` (was masked `"Invalid payload"`).
-- NEW `lib/__tests__/dbHealthRoute.test.ts` **5/5** — real `Request` via `jsonPost` helper enforcing `bodyUsed` (restore valid/invalid, set_time_correction valid/missing-istDateTime, unknown action → `sync_sqlite` default).
+## v3.33.0 — Leader watchdog self-heal (spec 11)
+User directive: "don't let this happen again" — prod scheduler dead since ~2026-09-08 07:06 UTC, NO automatic recovery (only manual admin "Start Engine"). Root cause: leadership was ONE-SHOT — `acquireLeaderLock()` at boot + `startLeaderHeartbeat(role, onLost)`; v3.28.2 stops engines on `onLost` but NOTHING ever re-acquires → standby pollers forever.
+- NEW `watchLeaderRole(role, handlers)` (`lib/services/leader.ts`): standby → adaptive probe (fresh foreign row = SLOW re-probe `LEADER_CLAIM_SLOW_MS` 300s; stale/absent = claim via `updateMany` count>0 | `create` | P2002 → false | `isDbUnavailableError` → fail-open) → re-probe OWN row (null/not-ours → `failOpenEvents++`) → **leader** + heartbeat `LEADER_HEARTBEAT_MS` 300s; renewal 0 → internal onLost → standby + `handlers.onLost` + FAST re-probe `LEADER_CLAIM_FAST_MS` 60s; `stop()`; phase-guard (no double `onAcquired`); steady-state 1 `findUnique`/300s/instance.
+- `LEADER_STALENESS_MS` 15→**10 min** (human-approved); NEW `LeaderWatchHandlers`/`LeaderWatchStatus` + `getLeaderWatchStatuses()` (globalThis `__leaderWatchStatus`, zero-Prisma, mirrors `readTier`).
+- Wiring (`instrumentation.ts`, "LEADER WATCHDOGS (v3.33.0, spec 11): replaces the one-shot boot election"): worker `onAcquired → startWorker(30_000)` / `onLost → stopWorkerEngine`; cron-daemon `onAcquired → startCronDaemon().then(...)` / `onLost → stopCronDaemon`; sqlite-sync log-only (`onAcquired: () => {}`).
+- db-health: route 7 leader imports at :8, GET leader block :207–225, POST :242; page client-only `leaderWatch`/`leaderTuning` (must NOT import server-only `lib/services/leader`).
+
+## v3.33.1 — Swing touch-tracking fix
+Root cause: `checkSwingPerformance` evaluated target/stop hits with the LATEST CLOSE only → an intraday HIGH/LOW touch that closed back inside the range was never counted (missed exits / wrong "still open"). Fix: `SwingSignalStatusInput` NEW `maxHighSincePosting`/`minLowSincePosting` (omit/null → close-only preserved); windowByTicker from ONE `$queryRaw` over `daily_prices` (`WHERE ticker = ANY(${symbols}) AND "tradeDate" >= MIN(postedAt)`, ASC; per-signal JS filter); live-quote bridge captures `dayHigh`/`dayLow`; BUY intraday-touch target-wins the tie; reason strings `touched … intraday (high/low X, close Y)` vs `crossed`; status-change audit metadata +2 fields. Files for the commit: `lib/services/swingPerformanceService.ts` + `lib/__tests__/swingPerformanceService.test.ts` ONLY.
 
 ## Verification
-- `dbHealthRoute.test.ts` **5/5**; tsc **46 = exact baseline (0 new)**; no migration; no new packages.
-- **Live-verified** (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors.
+- NEW `leaderWatch.test.ts` **8/8** + `instrumentation.test.ts` 7 rewritten + `dbHealthRoute.test.ts` +1 + `cron-daemon.test.ts` +1 (engine restart); constant fixes `leader.test.ts:68`/`sqlite.test.ts:282`; targeted **125/125**; full **1154 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); swing **27/27**; tsc **46 = exact baseline (0 new)**; no migration; no new packages; **+17 new tests**.
 
 ## Deferred / Next
-- **Deferred** (v3.32.0): live `probe_time` DB check (local Postgres not running); durable fix = correct `TZ`/`UTC` env on Netlify (header-documented).
-- **Next**: cleanup (verify + kill dev PID 12096 + temp dev-server log; keep MCP 4096 + pg docker 5432) → run `/pre-commit-check` → stage the v3.32.1 file set (`M app/api/admin/db-health/route.ts`, `?? lib/__tests__/dbHealthRoute.test.ts`, AGENTS.md, `.agents/changelog/versions-v3.32.md`, TODO.md, HANDOFF.md, Primer.md, Lessons.md, agent-memory.md, `.agents/handoffs/active/latest.md`, `.agents/sessions/2026-09-10-time-correction/{flow,decisions}.md`, `.agents/session-todos.md`, `.agents/CHANGELOG.md`) → commit `fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)` → **no push/merge/deploy without explicit approval**.
+- **Deferred (unchanged)**: live `probe_time` DB check; durable Netlify `TZ`/`UTC` env fix (v3.32.0). v3.32.1 (`bcde7ae`) still NOT merged/deployed → live admin Save Correction still 400s.
+- **Next**: delete `.dev-otel.log` → stage + commit 1 `feat(leader): v3.33.0 watchdog self-heal — watchLeaderRole replaces one-shot boot election (spec 11)` (watchdog code/tests + `.agents/plans/11-scheduler-self-heal.md` + `.agents/specs/11-scheduler-self-heal.md` + ALL docs incl. `.agents/changelog/versions-v3.33.md`) → stage + commit 2 `fix(swing): v3.33.1 touch-tracking — intraday HIGH/LOW counts as target/stop hit` (ONLY swing service + test) → `/pre-commit-check` → **no push/merge/deploy without explicit user approval**.
 
 ## Session archive
-`.agents/sessions/2026-09-10-time-correction/` — decisions.md (D1-D6) + flow.md (v3.32.0 trace + v3.32.1 hotfix trace). Plus spec/plan `10-admin-time-correction.md` (v3.32.0) + `.agents/changelog/versions-v3.32.md` (v3.32.0 + v3.32.1 sections).
+No session archive created for v3.33.x (per approved 15-item plan — session-todos/HANDOFF/latest.md updated instead). Spec/plan 11: `.agents/specs/11-scheduler-self-heal.md` + `.agents/plans/11-scheduler-self-heal.md`. Changelog: `.agents/changelog/versions-v3.33.md` (v3.33.0 + v3.33.1 sections).

@@ -16,10 +16,12 @@
  * the handler returns 200 and calls the expected services — pre-fix they all
  * 400'd on the double read. The pure timeCorrection functions are covered by
  * `lib/__tests__/timeCorrection.test.ts`; here only the route plumbing is
- * exercised (deps mocked).
+ * exercised (deps mocked). The GET describe additionally pins the v3.33.0
+ * leader-watchdog response block (`leader` / `leaderWatch` / `leaderTuning` /
+ * `liveness`) with zero-Prisma mocks.
  */
 
-import { POST } from "@/app/api/admin/db-health/route";
+import { GET, POST } from "@/app/api/admin/db-health/route";
 import { auth } from "@/lib/auth";
 import { createAuditLog } from "@/lib/audit";
 import {
@@ -77,7 +79,12 @@ jest.mock("@/lib/services/priceCache", () => ({
 }));
 jest.mock("@/lib/services/leader", () => ({
   getLeaderInfo: jest.fn(() => ({})),
+  getLeaderWatchStatuses: jest.fn(() => ({})),
   LEADER_SELF: "test-instance",
+  LEADER_STALENESS_MS: 10 * 60_000,
+  LEADER_HEARTBEAT_MS: 5 * 60_000,
+  LEADER_CLAIM_FAST_MS: 60_000,
+  LEADER_CLAIM_SLOW_MS: 300_000,
 }));
 jest.mock("@/lib/services/readTier", () => ({ getReadMetrics: jest.fn(() => ({})) }));
 jest.mock("@/lib/cache", () => ({ getCacheMetrics: jest.fn(() => ({})) }));
@@ -168,5 +175,30 @@ describe("POST /api/admin/db-health — request body single-read (v3.32.1 regres
     expect(json.cleared).toBe(true);
     expect(mockClearCorrection).toHaveBeenCalledTimes(1);
     expect(mockGetTimeDiagnostics).toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/admin/db-health — leader watchdog block (v3.33.0)", () => {
+  it("returns 200 with self, empty watchdog registry, tuning constants and liveness", async () => {
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.leader).toEqual({
+      self: "test-instance",
+      worker: {},
+      cronDaemon: {},
+      sqliteSync: {},
+    });
+    // Zero-Prisma watchdog registry (mocked empty here; real empty before any
+    // watchLeaderRole registers) + the cadence constants those loops run on.
+    expect(json.leaderWatch).toEqual({});
+    expect(json.leaderTuning).toEqual({
+      stalenessMs: 10 * 60_000,
+      heartbeatMs: 5 * 60_000,
+      claimFastMs: 60_000,
+      claimSlowMs: 300_000,
+    });
+    expect(json.liveness).toEqual([]);
   });
 });

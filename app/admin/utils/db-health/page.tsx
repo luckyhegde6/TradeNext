@@ -98,6 +98,28 @@ interface DbHealthData {
     cronDaemon: Record<string, unknown> | null;
     sqliteSync: Record<string, unknown> | null;
   };
+  // v3.33.0 (spec 11): watchdog self-heal status (zero-Prisma in-memory
+  // registry fed by watchLeaderRole in instrumentation.ts) + the tuning
+  // constants the watchdog runs on. All values come from the API response —
+  // the page must NOT import lib/services/leader (server-only: os/prisma).
+  leaderWatch: Record<
+    string,
+    {
+      role: string;
+      phase: "standby" | "leader";
+      claimAttempts: number;
+      failOpenEvents: number;
+      lastClaimAt: string | null;
+      lastLostAt: string | null;
+      lastProbeAt: string | null;
+    }
+  >;
+  leaderTuning: {
+    stalenessMs: number;
+    heartbeatMs: number;
+    claimFastMs: number;
+    claimSlowMs: number;
+  };
   liveness: Array<Record<string, unknown>>;
   // v3.23.x: dated DB-log archive files available for download.
   dbLogFiles: Array<{ date: string; size: number }>;

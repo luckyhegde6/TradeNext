@@ -279,7 +279,7 @@ jest.mock("@/lib/services/leader", () => ({
   getLeaderInfo: jest.fn().mockResolvedValue(null),
   leaderWorkerId: jest.fn((role: string) => `leader-${role}`),
   LEADER_SELF: "unit-test-host-1",
-  LEADER_STALENESS_MS: 15 * 60_000,
+  LEADER_STALENESS_MS: 10 * 60_000,
   LEADER_HEARTBEAT_MS: 300_000,
 }));
 // eslint-disable-next-line @typescript-eslint/no-require-imports

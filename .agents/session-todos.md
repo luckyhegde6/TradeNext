@@ -1,25 +1,33 @@
 # Session Todos
 
-## Current (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
+## Current (v3.33.0 — Leader watchdog self-heal; v3.33.1 — Swing touch-tracking fix)
 
-**User directive**: "in admin db health screen display server time and db time. and also admin can enter ist time so if server time is misaligned it can be corrected through admin entered input for timezone corrections."
+Branch `fix/leader-watchdog-self-heal`, on top of committed v3.32.1 `bcde7ae`. **v3.33.0 + v3.33.1 VERIFIED + docs updated + session-todos/HANDOFF/latest.md rewritten; COMMIT 1 (watchdog + docs) + COMMIT 2 (swing only) pending; no push/merge/deploy without user approval.**
 
-**ROOT CAUSE**: Netlify host clock treats IST wall-clock as UTC → stored cron `nextRun` skew ≈ +5.5h; `calculateNextRun` takes `from` from the server clock. **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard compared parsed-UTC vs IST input.
+**User directive (v3.33.0)**: "don't let this happen again" — prod scheduler dead since ~2026-09-08 07:06 UTC with NO automatic recovery (recovery = manual admin "Start Engine" click).
+**ROOT CAUSE (v3.33.0)**: leadership was ONE-SHOT — `acquireLeaderLock()` at boot + `startLeaderHeartbeat(role, onLost)`; v3.28.2 STOPPED worker/cron engines on `onLost` but NOTHING ever re-acquired → after a lost/stale claim every instance stays a standby poller forever.
 
-**Shipped**: v3.32.0 MERGED to `main` via PR #117 `38a27bf` (`e74ae54` feat · `df7959d` docs · `b75deb0` docs update); **v3.32.1 hotfix on working tree (HEAD `b75deb0`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
-- [x] `lib/sqlite.ts` probe + persistence (`probeDbTimeNow`, keys `time_correction`/`time_probe_db`, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60s`; types `:1753-1789`, fallback `:5978-5983`)
-- [x] NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through; `getTimeDiagnostics()`)
-- [x] db-health POST `probe_time` (30s throttle) / `set_time_correction` / `clear_time_correction` + GET zero-Prisma `time`
-- [x] Time Synchronisation card in db-health UI; `lib/audit.ts` +2 actions
-- [x] Wiring `getCronFrom()`/`getCorrectedNow()` in `recommendationCronService.ts` + `worker-engine.ts` (nextRun + due-claim)
-- [x] Tests — `timeCorrection.test.ts` 20/20, sqlite 71/71, targeted **118/118**, full **1106/4/1** (1 = documented pre-existing flake), tsc 46 = baseline, no migration, no new packages
-- [x] Docs — versions-v3.32.md, AGENTS/CHANGELOG/TODO rows, Primer, agent-memory, Lessons #111, session archive
-- [x] v3.32.1 root cause: POST `app/api/admin/db-health/route.ts` re-reads `req.json()` in `restore` (~:272) and `set_time_correction` (~:434) after the top read (:238) — Web `Request` body single-use (`bodyUsed`) → both 400 (`"Invalid restore payload"` since v3.21.2; `"Invalid payload"` in v3.32.0)
-- [x] v3.32.1 fix (route only): hoisted `let action = "sync_sqlite"; let requestBody = {}; try { requestBody = (await req.json()) ... }` at POST top with `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`; `restore`/`set_time_correction` reuse typed `requestBody` → honest 400s (`"Missing base64 sqlite data"` / zod `"istDateTime is required"`)
-- [x] v3.32.1 regression: NEW `lib/__tests__/dbHealthRoute.test.ts` **5/5** (real `Request` via `jsonPost` helper enforcing `bodyUsed`); tsc **46 = exact baseline (0 new)**; no migration; no new packages
-- [x] v3.32.1 live-verified (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors
-- [x] v3.32.1 docs: AGENTS.md v3.32.1 row + v3.32.0 MERGED amend, versions-v3.32.md v3.32.1 section, CHANGELOG index + TODO.md rows, HANDOFF.md, Primer.md, Lessons #112, agent-memory, latest.md handoff rewrite, sessions flow/decisions
-- [ ] **COMMIT PENDING USER** (v3.32.1: route + test + docs; do NOT include unrelated v3.28.x-era working-tree changes; message `fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)`; run `/pre-commit-check` first); live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
+**Shipped (v3.33.0 — watchdog self-heal, spec 11)**:
+- [x] NEW `watchLeaderRole(role, handlers)` loop (`lib/services/leader.ts`): standby → adaptive probe (fresh foreign row = SLOW re-probe `LEADER_CLAIM_SLOW_MS` 300s; stale/absent = claim `updateMany` count>0 | `create` | P2002 → false | `isDbUnavailableError` → fail-open) → re-probe OWN row (null/not-ours → `failOpenEvents++`) → **leader** + heartbeat `LEADER_HEARTBEAT_MS` 300s; renewal 0 → internal `onLost` → standby + `handlers.onLost` + FAST re-probe `LEADER_CLAIM_FAST_MS` 60s; `stop()`; phase-guard (no double `onAcquired`); steady-state 1 `findUnique`/300s/instance
+- [x] `LEADER_STALENESS_MS` 15→**10 min** (human-approved); NEW `LeaderWatchHandlers`/`LeaderWatchStatus` + `getLeaderWatchStatuses()` (globalThis `__leaderWatchStatus`, zero-Prisma, mirrors `readTier`)
+- [x] Wiring (`instrumentation.ts`, "LEADER WATCHDOGS (v3.33.0, spec 11): replaces the one-shot boot election"): worker `onAcquired → startWorker(30_000)` / `onLost → stopWorkerEngine`; cron-daemon `onAcquired → startCronDaemon().then(...)` / `onLost → stopCronDaemon`; sqlite-sync log-only (`onAcquired: () => {}`)
+- [x] db-health: route 7 leader imports at :8, GET leader block :207–225, POST :242; page client-only `leaderWatch`/`leaderTuning` (must NOT import server-only `lib/services/leader`)
+- [x] Tests — NEW `leaderWatch.test.ts` **8/8** + `instrumentation.test.ts` 7 rewritten + `dbHealthRoute.test.ts` +1 + `cron-daemon.test.ts` +1 (engine restart); constant fixes `leader.test.ts:68`/`sqlite.test.ts:282`; targeted **125/125**; full **1154 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages
+- [x] Spec `.agents/specs/11-scheduler-self-heal.md` + plan `.agents/plans/11-scheduler-self-heal.md` — DONE
+
+**Shipped (v3.33.1 — swing touch tracking)**:
+- [x] Root cause: `checkSwingPerformance` evaluated target/stop hits with the LATEST CLOSE only → an intraday HIGH/LOW touch that closed back inside the range was never counted (missed exits / wrong "still open")
+- [x] Fix: `SwingSignalStatusInput` NEW `maxHighSincePosting`/`minLowSincePosting` (omit/null → close-only preserved); windowByTicker from ONE `$queryRaw` over `daily_prices` (`WHERE ticker = ANY(${symbols}) AND "tradeDate" >= MIN(postedAt)`, ASC; per-signal JS filter); live-quote bridge captures `dayHigh`/`dayLow`; BUY intraday-touch target-wins the tie; reason strings `touched … intraday (high/low X, close Y)` vs `crossed`; status-change audit metadata +2 fields
+- [x] Tests — `swingPerformanceService.test.ts` **27/27**; full **1154 pass / 4 skip / 1 fail** (pre-existing flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages
+
+**Docs — DONE (both versions)**: NEW `.agents/changelog/versions-v3.33.md` (v3.33.0 + v3.33.1 sections); AGENTS.md v3.33.0 + v3.33.1 rows + v3.32.1 row amend ("commit `bcde7ae` on branch `fix/leader-watchdog-self-heal`, on top of v3.32.0 merge `38a27bf`; **not yet pushed/merged/deployed — live admin Save Correction still 400s**"); `.agents/CHANGELOG.md` index; TODO.md rows; Lessons.md #113 + Update Log bullet; Primer.md (Last Updated + Current Project Status ×2); agent-memory.md ×2; session-todos.md (this file); HANDOFF.md; latest.md handoff rewrite. No session archive (per approved 15-item plan).
+
+**v3.32.1 (committed `bcde7ae`, NOT deployed)**: commit DONE by previous workstream `bcde7ae fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)` — live admin Save Correction still 400s until merged/deployed; `probe_time` live DB check + durable Netlify `TZ`/`UTC` env fix still deferred.
+
+- [ ] **COMMIT 1 (v3.33.0 watchdog)** — stage: watchdog code/tests (`lib/services/leader.ts`, `instrumentation.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `lib/__tests__/leaderWatch.test.ts`, `lib/__tests__/instrumentation.test.ts`, `lib/__tests__/dbHealthRoute.test.ts`, `lib/__tests__/cron-daemon.test.ts`, `lib/__tests__/leader.test.ts`, `lib/__tests__/sqlite.test.ts`) + plan/spec (`11-scheduler-self-heal.md` under `.agents/plans/` + `.agents/specs/`) + ALL doc files (AGENTS.md, `.agents/CHANGELOG.md`, TODO.md, Lessons.md, Primer.md, agent-memory.md, `.agents/changelog/versions-v3.33.md`, session-todos.md, HANDOFF.md, latest.md); message `feat(leader): v3.33.0 watchdog self-heal — watchLeaderRole replaces one-shot boot election (spec 11)`; run `/pre-commit-check` first
+- [ ] **COMMIT 2 (v3.33.1 swing)** — stage ONLY `lib/services/swingPerformanceService.ts` + `lib/__tests__/swingPerformanceService.test.ts`; message `fix(swing): v3.33.1 touch-tracking — intraday HIGH/LOW counts as target/stop hit`; run `/pre-commit-check` first
+- [ ] Delete `.dev-otel.log` before commits
+- [ ] No push/merge/deploy without explicit user approval
 
 ## Completed earlier (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
 

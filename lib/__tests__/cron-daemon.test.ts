@@ -318,6 +318,32 @@ describe("getCronDaemonStatus + stopCronDaemon", () => {
   });
 });
 
+describe("restart after stopCronDaemon (watchdog onLost → stop → re-acquire self-heal path)", () => {
+  it("stop followed by a fresh start re-registers tasks as a NON-idempotent boot", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+    expect(getCronDaemonStatus().running).toBe(true);
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+
+    // Instrumentation's cron onLost → stopCronDaemon() (v3.28.2).
+    stopCronDaemon();
+    expect(getCronDaemonStatus().running).toBe(false);
+    expect(getRegisteredJobIds()).toEqual([]);
+    expect(mockScheduled[0].task.destroy).toHaveBeenCalled();
+
+    // Later onAcquired → startCronDaemon() again. The stale `running` guard
+    // must NOT short-circuit the restart (alreadyRunning false = real boot),
+    // and the jobs must be re-registered on the scheduler.
+    const restart = await startCronDaemon();
+    expect(restart).toEqual({ alreadyRunning: false, registeredJobs: 1 });
+    expect(mockSchedule).toHaveBeenCalledTimes(2);
+    expect(getRegisteredJobIds()).toEqual(["job-1"]);
+    expect(getCronDaemonStatus().running).toBe(true);
+    // one initial heartbeat per start (the interval timer is cleared on stop)
+    expect(mockSqliteHeartbeat).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("isDaemonHeartbeatFresh", () => {
   it("false for null heartbeat", () => {
     expect(isDaemonHeartbeatFresh(null)).toBe(false);

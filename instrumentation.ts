@@ -27,60 +27,59 @@ export async function register() {
       import("@/lib/logger"),
     ]);
 
-    // LEADER ELECTION (v3.22.0): a multi-instance deploy (Netlify cold-start
-    // burst / scale) would otherwise start a cron daemon, a worker poll loop,
-    // and a full SQLite sync on EVERY instance — multiplying Prisma ops and
-    // firing duplicate cron jobs. Only the elected leader starts each.
-    // DB-unavailable degrades to running locally (leader.ts) so cron/work
-    // never halt; leadership re-elects once the DB recovers.
+    // LEADER WATCHDOGS (v3.33.0, spec 11): replaces the one-shot boot election
+    // below. Before, each role elected a leader exactly ONCE at boot and NO ONE
+    // ever re-claimed the lock — a crashed/recycled leader left the scheduler /
+    // worker engine dead until a manual admin "Start Engine" click. Each
+    // `watchLeaderRole` block is now a self-healing loop:
+    //   standby → adaptive probe → claim stale/absent lock → onAcquired
+    //   leader  → existing heartbeat (leader.ts) → row lost → onLost → standby
+    // DB-unavailable degrade (fail-open local leader) is preserved by leader.ts.
     const leader = await import("@/lib/services/leader");
 
-    const workerLeader = await leader.acquireLeaderLock("worker");
-    if (workerLeader) {
-      // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
-      startWorker(30_000);
-      // v3.28.2: actually stop the poll loop when leadership is lost. Without
-      // this, a fail-open DB blip lets EVERY instance start a worker; when the
-      // DB recovers only one keeps the leader row but the losers kept polling
-      // forever → multiple active workers/tasks.
-      leader.startLeaderHeartbeat("worker", () => {
+    leader.watchLeaderRole("worker", {
+      onAcquired: () => {
+        // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
+        // startWorker is idempotent (guards on its interval handle) so a
+        // re-acquire after onLost restarts it without double-polling.
+        startWorker(30_000);
+      },
+      onLost: () => {
+        // v3.28.2: actually stop the poll loop when leadership is lost. Without
+        // this, a fail-open DB blip lets EVERY instance start a worker; when the
+        // DB recovers only one keeps the leader row but the losers kept polling
+        // forever → multiple active workers/tasks.
         logger.warn({ msg: "Lost worker leadership — stopping poll loop", self: leader.LEADER_SELF });
         stopWorkerEngine();
-      });
-    } else {
-      logger.warn({ msg: "Worker engine NOT started (another instance is worker leader)", self: leader.LEADER_SELF });
-    }
+      },
+    });
 
-    const cronLeader = await leader.acquireLeaderLock("cron-daemon");
-    if (cronLeader) {
-      startCronDaemon().then(() =>
-        logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
-      );
-      leader.startLeaderHeartbeat("cron-daemon", () => {
+    leader.watchLeaderRole("cron-daemon", {
+      onAcquired: () => {
+        startCronDaemon().then(() =>
+          logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
+        );
+      },
+      onLost: () => {
         logger.warn({ msg: "Lost cron leadership — stopping daemon", self: leader.LEADER_SELF });
         stopCronDaemon();
-      });
-    } else {
-      logger.warn({ msg: "Cron daemon NOT started (another instance is cron leader)", self: leader.LEADER_SELF });
-    }
+      },
+    });
 
     // Pre-load intelligence cache from DB so there's no cold-start penalty
     await restoreIntelligenceCacheFromDB().catch((err: unknown) =>
       logger.warn({ msg: "Intelligence cache restore failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
 
-    // Acquire the sqlite-sync leader lock so the Prisma->SQLite sync inside
-    // initSqliteBackup runs on exactly ONE instance (syncFromPrisma gates on
-    // isLeader). Standing-by instances still init SQLite locally for fallback
-    // reads + write-behind buffering, but skip the heavy full sync.
-    const syncLeader = await leader.acquireLeaderLock("sqlite-sync");
-    if (syncLeader) {
-      leader.startLeaderHeartbeat("sqlite-sync", () => {
-        logger.warn({ msg: "Lost sqlite-sync leadership — stopping sync", self: leader.LEADER_SELF });
-      });
-    } else {
-      logger.warn({ msg: "SQLite sync will be skipped (another instance is sqlite-sync leader)", self: leader.LEADER_SELF });
-    }
+    // sqlite-sync is LOG-ONLY (no engine to stop): the Prisma→SQLite sync
+    // inside initSqliteBackup is gated per-run by isLeader, so a lost row just
+    // means this instance stops doing the heavy sync until it re-claims.
+    leader.watchLeaderRole("sqlite-sync", {
+      onAcquired: () => {},
+      onLost: () => {
+        logger.warn({ msg: "Lost sqlite-sync leadership — sync will be skipped", self: leader.LEADER_SELF });
+      },
+    });
 
     // Initialize SQLite backup (background sync, non-blocking). NOTE: the
     // Prisma->SQLite sync inside is leader-gated (sqlite-sync) — SQLite itself

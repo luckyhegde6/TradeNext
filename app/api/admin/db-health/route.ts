@@ -5,7 +5,7 @@ import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorL
 import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
-import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
+import { getLeaderInfo, getLeaderWatchStatuses, LEADER_CLAIM_FAST_MS, LEADER_CLAIM_SLOW_MS, LEADER_HEARTBEAT_MS, LEADER_SELF, LEADER_STALENESS_MS } from "@/lib/services/leader";
 import { getReadMetrics } from "@/lib/services/readTier";
 import { getCacheMetrics } from "@/lib/cache";
 import {
@@ -209,6 +209,18 @@ export async function GET(req: Request) {
       worker: await getLeaderInfo("worker"),
       cronDaemon: await getLeaderInfo("cron-daemon"),
       sqliteSync: await getLeaderInfo("sqlite-sync"),
+    },
+    // v3.33.0 (spec 11): watchdog self-heal telemetry + tuning constants.
+    // leaderWatch = zero-Prisma in-memory registry (globalThis) fed by the
+    // watchLeaderRole loops in instrumentation.ts; leaderTuning = the staleness
+    // + heartbeat + claim cadences those loops run on. The `leader` block above
+    // stays the authoritative DB read; this is the live watchdog view.
+    leaderWatch: getLeaderWatchStatuses(),
+    leaderTuning: {
+      stalenessMs: LEADER_STALENESS_MS,
+      heartbeatMs: LEADER_HEARTBEAT_MS,
+      claimFastMs: LEADER_CLAIM_FAST_MS,
+      claimSlowMs: LEADER_CLAIM_SLOW_MS,
     },
     liveness: getSqliteFallback()?.getLivenessHeartbeats() ?? [],
   });

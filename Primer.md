@@ -5,6 +5,8 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-10 (v3.33.0 — Leader Watchdog Self-Heal: NEW `watchLeaderRole` replaces the one-shot boot election so a dead scheduler self-heals with zero manual intervention — "don't let this happen again"; see Current Project Status below)
+2026-09-10 (v3.33.1 — Swing performance touch-tracking fix: intraday HIGH/LOW touches count as target/stop hits; see Current Project Status below)
 2026-09-10 (v3.32.1 — db-health POST double-`req.json()` hotfix: parse the body ONCE and reuse `requestBody` — restores `restore` (broken since v3.21.2) + honest `set_time_correction` zod validation; post-merge of v3.32.0 PR #117 `38a27bf`, on `main` working tree; see Current Project Status below)
 2026-09-10 (v3.32.0 — Admin Time Synchronisation: on-demand Postgres NOW() probe + persisted server-clock offset fixing IST-as-UTC cron nextRun corruption; **MERGED to `main` via PR #117** `38a27bf`; see Current Project Status below)
 2026-09-09 (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync; Plan 09 on `fix/v3.29.1-header-watchlist` on top of committed v3.30.0; see Current Project Status below)
@@ -24,6 +26,17 @@
 ---
 
 ## Current Project Status
+
+### v3.33.0 — Leader Watchdog Self-Heal (Sep 10 2026) — ✅ CODE + TESTS + VERIFIED (targeted 125/125, full **1154 pass / 4 skip / 1 fail**, tsc 46 = exact baseline); COMMITTED as own workstream commit (push/merge/deploy pending user)
+**User directive**: "don't let this happen again" — prod scheduler dead since ~2026-09-08 07:06 UTC with NO automatic recovery (only manual admin "Start Engine" recovered).
+**Root cause**: leadership was ONE-SHOT — `acquireLeaderLock()` at boot + `startLeaderHeartbeat(role, onLost)`; v3.28.2 STOPPED worker/cron engines on `onLost` but NOTHING ever re-acquired → after a lost/stale claim every instance stays a standby poller forever.
+**Design**: NEW `watchLeaderRole(role, handlers)` (`lib/services/leader.ts`) — standby → adaptive probe (fresh foreign row = SLOW re-probe `LEADER_CLAIM_SLOW_MS` 300s; stale/absent = claim via `updateMany` count>0 | `create` | P2002 → false | `isDbUnavailableError` → fail-open) → re-probe OWN row (null/not-ours → `failOpenEvents++`) → **leader** + heartbeat `LEADER_HEARTBEAT_MS` 300s; renewal 0 → internal `onLost` → standby + `handlers.onLost` + FAST re-probe `LEADER_CLAIM_FAST_MS` 60s; `stop()` clears timers; phase-guard (no double `onAcquired`); steady-state = 1 `findUnique`/300s. `LEADER_STALENESS_MS` 15→**10 min**; NEW `LeaderWatchStatus`/`getLeaderWatchStatuses()` (globalThis `__leaderWatchStatus`, zero-Prisma). Wiring: worker/cron-daemon `onAcquired`/`onLost` (idempotent starts), sqlite-sync log-only. db-health: 7 leader imports at :8, GET leader block :207–225, POST :242; page `leaderWatch`/`leaderTuning` (no server-only import).
+**Tests**: NEW `leaderWatch.test.ts` 8 + `instrumentation.test.ts` 7 rewritten + `dbHealthRoute.test.ts` +1 + `cron-daemon.test.ts` +1 (engine restart); constant fixes `leader.test.ts:68`/`sqlite.test.ts:282`; targeted **125/125**; full **1154 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages. Spec/plan 11 (`.agents/specs/11-scheduler-self-heal.md` + `.agents/plans/11-scheduler-self-heal.md`) + ALL docs (versions-v3.33.md, AGENTS.md rows, CHANGELOG, TODO, Primer, agent-memory, Lessons #113, session-todos, HANDOFF, latest.md) committed with commit 1. **Push/merge/deploy pending user.**
+
+### v3.33.1 — Swing performance touch-tracking fix (Sep 10 2026) — ✅ CODE + TESTS + VERIFIED (swing **27/27**; full **1154 pass / 4 skip / 1 fail**; tsc 46 = exact baseline); COMMITTED as own workstream commit (push/merge/deploy pending user)
+**Root cause**: `checkSwingPerformance` evaluated target/stop hits using the LATEST CLOSE only → intraday touches that closed back inside the range never counted (missed exits / wrong "still open").
+**Fix**: NEW `maxHighSincePosting`/`minLowSincePosting` on `SwingSignalStatusInput` (omit/null → close-only preserved); `checkSwingPerformance` builds `windowByTicker` from ONE `$queryRaw` over `daily_prices` (`ticker = ANY(${symbols}) AND "tradeDate" >= MIN(postedAt)`, ASC; per-signal JS filter); live-quote bridge captures `dayHigh`/`dayLow`; BUY intraday-touch target-wins tie; reason strings `touched … intraday (high/low X, close Y)` vs `crossed`; audit metadata +2.
+**Tests**: `swingPerformanceService.test.ts` **27/27**; full **1154 pass / 4 skip / 1 fail** (pre-existing flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages. Commit 2 files ONLY: `lib/services/swingPerformanceService.ts` + `lib/__tests__/swingPerformanceService.test.ts`. **Push/merge/deploy pending user.**
 
 ### v3.32.1 — db-health POST double-`req.json()` hotfix (Sep 10 2026) — ✅ CODE + TESTS VERIFIED (NEW `dbHealthRoute.test.ts` 5/5, tsc 46 = exact baseline); DOC COMMIT PENDING USER
 **User directive**: none (post-merge triage of the v3.32.0 time-correction card — restore + set_time_correction both 400'd).
