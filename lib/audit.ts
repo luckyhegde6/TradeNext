@@ -45,6 +45,9 @@ export type AuditAction =
   | 'ADMIN_DB_DEPLOY_PREP'
   | 'ADMIN_DB_BACKUP'
   | 'ADMIN_DB_RESTORE'
+  // Admin time-correction actions (v3.32.0)
+  | 'ADMIN_DB_TIME_CORRECTION_SET'
+  | 'ADMIN_DB_TIME_CORRECTION_CLEARED'
   // Admin-triggered recommendation / performance / swing jobs (v3.22.x)
   | 'ADMIN_RECOMMENDATION_RUN'
   | 'ADMIN_PERFORMANCE_CHECK'

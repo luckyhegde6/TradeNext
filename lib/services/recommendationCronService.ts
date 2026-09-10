@@ -2,6 +2,7 @@
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { calculateNextRun } from "@/lib/cron-parser";
+import { getCronFrom } from "@/lib/services/timeCorrection";
 
 /**
  * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0)
@@ -114,7 +115,7 @@ export async function recordCronRun(jobName: string, success: boolean, options?:
     };
     if (!options?.skipSpawnCounted) {
       data.runCount = { increment: 1 };
-      data.nextRun = calculateNextRun(job.cronExpression);
+      data.nextRun = calculateNextRun(job.cronExpression, getCronFrom());
     }
 
     const updated = await prisma.cronJob.update({
@@ -183,7 +184,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
         where: { name: def.name },
       });
 
-      const nextRun = calculateNextRun(def.cronExpression);
+      const nextRun = calculateNextRun(def.cronExpression, getCronFrom());
 
       if (existing) {
         // Self-heal: keep the job active + fix schedule if drifted. nextRun

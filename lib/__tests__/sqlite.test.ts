@@ -311,6 +311,7 @@ import {
   getOutboxPending,
   getSqliteDerivedCounts,
 } from "../sqlite";
+import type { TimeCorrectionRecord, TimeProbeRecord } from "../sqlite";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 function resetState() {
@@ -707,7 +708,42 @@ describe("SQLite backup fallback", () => {
     });
   });
 
-  describe("db error counts persist / restore roundtrip", () => {
+  describe("time correction persist / restore roundtrip", () => {
+      it("persists a time-correction record to _backup_meta and restores it", () => {
+        const fb = getSqliteFallback()!;
+        const record: TimeCorrectionRecord = {
+          offsetMinutes: -330,
+          istInput: "2026-09-10T15:30",
+          appliedAt: "2026-09-10T10:00:00.000Z",
+          serverNowIso: "2026-09-10T10:00:00.000Z",
+        };
+        fb.persistTimeCorrection(record);
+        expect(fb.restoreTimeCorrection()).toEqual(record);
+      });
+
+      it("deletes the correction and roundtrips the DB probe record", () => {
+        const fb = getSqliteFallback()!;
+        const record: TimeCorrectionRecord = {
+          offsetMinutes: -330,
+          istInput: "2026-09-10T15:30",
+          appliedAt: "2026-09-10T10:00:00.000Z",
+          serverNowIso: "2026-09-10T10:00:00.000Z",
+        };
+        fb.persistTimeCorrection(record);
+        fb.deleteTimeCorrection();
+        expect(fb.restoreTimeCorrection()).toBeNull();
+
+        const probe: TimeProbeRecord = {
+          dbIso: "2026-09-10T10:00:02.000Z",
+          probedAt: "2026-09-10T10:00:01.000Z",
+        };
+        fb.persistTimeProbe(probe);
+        expect(fb.restoreTimeProbe()).toEqual(probe);
+        expect(fb.restoreTimeProbe()).not.toBeNull();
+      });
+    });
+
+    describe("db error counts persist / restore roundtrip", () => {
     it("persists per-type counts to SQLite and restores them on demand", async () => {
       const { dbErrorCounts } = await import("@/lib/prisma");
       const prev = { ...dbErrorCounts.counts };
