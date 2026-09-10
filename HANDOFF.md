@@ -12,24 +12,20 @@ status: "in_progress"             # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-09-09T00:00:00Z"
-feature: "v3.31.0-sqlite-first-read-architecture"
+last_updated: "2026-09-10T00:00:00Z"
+feature: "v3.32.0-admin-time-correction"
 ```
 
 ## Handoff Required?
 
-**On `fix/v3.29.1-header-watchlist` (HEAD `653b617` = v3.31.0 code P8; v3.30.0 `8af65cc` + v3.29.2 `1e907f1` + v3.29.1 `6e8db23` committed) — v3.31.0 SQLite-first NSE read architecture + low-frequency Prisma sync (Plan 09): CODE + TESTS COMMITTED `9303bd7`→`653b617` (9 commits); DOC COMMIT PENDING USER (no push/merge/deploy).**
-- **(1) sync_history ledger** — durable `sync_history` table + `recordSyncHistory()` (prune-100) + `recentSyncs` in health; SCHEMA_SQL stray-`;`-in-comment sql.js parse error fixed (root cause of v3.30.0 boot noise; converted `--` comment `;` → `/* */`).
-- **(2) Boot hydration on every instance** — `syncFromPrisma(opts)` (`reason`/`skipReconcile`/`leaderBypass`/`force`); `initSqliteBackup()` → `{boot, skipReconcile, leaderBypass}`.
-- **(3) NSE rate guard** — NEW `lib/services/nseRateGuard.ts` + 6 tests (single-flight, throttle, burst cooldown); wired `nse-client.ts` + `market-cache.ts`.
-- **(4) `_sync_outbox` + 6h PUSH engine** — `_sync_outbox` table + `pushSqliteToPrisma` (grouped latest-op-wins, chunk-200 sinks, `reconcileControlToPrisma`); NEW `lib/sqlitePushSinks.ts`; 6h probe pivots PULL→PUSH. **Prod bug FIXED**: `if (!isLeader("sqlite-sync"))` never fired (isLeader returns `Promise` — always truthy) → awaited.
-- **(5) NSE captures SQLite+outbox only** — auto-promote off (`NSE_PROMOTE_ENABLED=1` env-gated).
-- **(6) Jobs write SQLite-first (recs/swing/perf)** — 5 mirror tables + 7 write-through helpers; pipelines mirror-first with Prisma fallback.
-- **(7) Admin long-lived datasets SQLite-first** — +7 helpers (`admin_announcement`/`alert`/`transaction`/`corporate_action`) + 4 admin CRUD routes flipped.
-- **(8) db-health wiring** — GET spreads outbox/derived-counts/sync-history; POST `push_to_prisma`; UI Outbox + Derived-counts + Push button; 5 hot-route headers document the read chain.
-- **Verification**: sqlite.test.ts **68/68** (11 new P8); instrumentation +1; NEW nseRateGuard 6; full **1105 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no schema change → no migration.
-- **Deferred (plan rev-v3 c/d)**: SQLite `query_cache` + db-health monthly-ops window NOT implemented (follow-up).
-- **Next**: doc commit — stage the doc files (changelog versions-v3.31.md + CHANGELOG index + AGENTS.md + TODO.md + Primer.md + agent-memory.md + Lessons.md + session-todos.md + plan + spec) → run `/pre-commit-check` → commit `docs(sqlite): v3.31.0 Plan 09 SQLite-first read architecture (AGENTS/CHANGELOG/TODO/Primer/memory/Lessons)` (no code — code already landed).
+**Working tree on `fix/sqlite-init-reserved-keyword` (HEAD `8c67e89`; v3.32.0 code+tests+docs UNCOMMITTED — no new branch created) — v3.32.0 Admin Time Synchronisation: CODE + TESTS VERIFIED (targeted 118/118, tsc 46 = exact baseline); DOC COMMIT PENDING USER (no push/merge/deploy).**
+- **(1) DB probe + persistence** (`lib/sqlite.ts`) — `probeDbTimeNow()` (`SELECT NOW()` via `$queryRawUnsafe`, 10s timeout, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60_000`) + `persistTimeCorrection`/`deleteTimeCorrection`/`restoreTimeCorrection`/`persistTimeProbe`/`restoreTimeProbe` (`_backup_meta` keys `time_correction`/`time_probe_db`; types `:1753-1789`, interface `:247-257`, fallback `:5978-5983`).
+- **(2) Correction engine** — NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through, no cache; `getTimeDiagnostics()`); **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard → `toIstIso(parsed).slice(0,16) === input` (epoch = `Date.UTC(y,m-1,d,h,min) − offset`).
+- **(3) Device API/UI** — POST `probe_time` (`route.ts:395-425`, 30s throttle → 200-throttled; PG-down → 200 `available:false`; audit `ADMIN_DB_SYNC`/`time-probe`) + `set_time_correction`/`clear_time_correction`; GET zero-Prisma `time` block; **Time Synchronisation card** (`page.tsx:247/505-515/1540`); `lib/audit.ts` +`ADMIN_DB_TIME_CORRECTION_SET`/`ADMIN_DB_TIME_CORRECTION_CLEARED`.
+- **(4) Scheduling wiring** — `getCronFrom()` (`recommendationCronService.ts` + `worker-engine.ts` nextRun sites `:598`/`:631`); `getCorrectedNow()` at due-claim `:645`/`:657`.
+- **Verification**: NEW `timeCorrection.test.ts` 20/20 (full manual `@/lib/sqlite` mock, no `process.env.TZ`); sqlite.test.ts **71/71**; targeted **118/118**; full **1106 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 modified +565/−10 + 6 new files (2 code, 2 spec/plan, versions-v3.32.md, session archive).
+- **Deferred**: live `probe_time` DB check (local Postgres not running); durable TZ fix = correct `TZ`/`UTC` env on Netlify.
+- **Next**: stage EXACTLY the v3.32.0 working-tree files (7 modified code + 2 new code + 2 spec/plan + 9 doc updates + 2 new docs; `.visual.html` untracked — do NOT commit) → run `/pre-commit-check` → commit `feat(admin): v3.32.0 Admin Time Synchronisation (probe_time + persisted time-correction engine)` (branch/name user decides) → no push/merge/deploy without approval.
 - **Unrelated open**: PR #114 (v3.26.0 fixes + Accelerate docs) pending merge against `main`; v3.28.0/v3.27.0 diffs pending user commit; Phase 0 (Prisma Postgres provisioning) REQUIRED before Dec 1 2026 Accelerate retirement (BUGS.md #14); deferred daily recommendation job failures (Issue 3); held (req text not provided — no guess-implement): `dailyRecommendationService` AI-unavailable fallback + rate re-capture wiring.
 
 ---

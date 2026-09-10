@@ -5,6 +5,7 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-10 (v3.32.0 — Admin Time Synchronisation: on-demand Postgres NOW() probe + persisted server-clock offset fixing IST-as-UTC cron nextRun corruption; on working tree `fix/sqlite-init-reserved-keyword` @ `8c67e89`; see Current Project Status below)
 2026-09-09 (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync; Plan 09 on `fix/v3.29.1-header-watchlist` on top of committed v3.30.0; see Current Project Status below)
 
 2026-09-07 (v3.30.0 — Daemon control-plane cadence + SQLite mirror touch-freshness + `upsertCronJob` Date-binding fix + Netlify WASM staging; on `fix/v3.29.1-header-watchlist` on top of committed v3.29.2 `1e907f1`; see Current Project Status below)
@@ -22,6 +23,16 @@
 ---
 
 ## Current Project Status
+
+### v3.32.0 — Admin Time Synchronisation (Sep 10 2026) — ✅ CODE + TESTS VERIFIED (targeted 118/118, tsc 46 = exact baseline); DOC COMMIT PENDING USER
+**User directive**: "in admin db health screen display server time and db time. and also admin can enter ist time so if server time is misaligned it can be corrected through admin entered input for timezone corrections."
+**Root cause**: Netlify host clock treats IST wall-clock as UTC → stored cron `nextRun` skew ≈ +5.5h; `calculateNextRun` (UTC-correct) takes `from` from the server clock.
+**(1) DB probe + persistence** (`lib/sqlite.ts`): NEW `probeDbTimeNow()` (`SELECT NOW()` via `$queryRawUnsafe`, 10s timeout, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60_000`) + `persistTimeCorrection`/`deleteTimeCorrection`/`restoreTimeCorrection`/`persistTimeProbe`/`restoreTimeProbe` (`_backup_meta` keys `time_correction`/`time_probe_db`; types `:1753-1789`, interface `:247-257`, fallback `:5978-5983`).
+**(2) Correction engine**: NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through, no cache; `getTimeDiagnostics()`); **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard → `toIstIso(parsed).slice(0,16) === input` (epoch = `Date.UTC(y,m-1,d,h,min) − offset`).
+**(3) Device API/UI**: db-health POST `probe_time` (`route.ts:395-425`, 30s throttle → 200-throttled; PG-down → 200 `available:false`; audit `ADMIN_DB_SYNC`/`time-probe`) + `set_time_correction`/`clear_time_correction`; GET zero-Prisma `time` block; **Time Synchronisation card** (`page.tsx:247/505-515/1540`); `lib/audit.ts` +`ADMIN_DB_TIME_CORRECTION_SET`/`ADMIN_DB_TIME_CORRECTION_CLEARED`.
+**(4) Scheduling wiring**: `getCronFrom()` (`recommendationCronService.ts` + `worker-engine.ts` nextRun sites `:598`/`:631`); `getCorrectedNow()` at due-claim `:645`/`:657`.
+**Tests**: NEW `timeCorrection.test.ts` 20/20 (full manual `@/lib/sqlite` mock — no `...actual` spread, no `process.env.TZ`); sqlite.test.ts **71/71**; targeted **118/118**; full **1106 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 modified +565/−10.
+**Deferred**: live `probe_time` DB check (local Postgres not running); durable fix = correct `TZ`/`UTC` env on Netlify. Implemented on the existing working tree `fix/sqlite-init-reserved-keyword` @ `8c67e89` — final branch name user decides.
 
 ### v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync (Sep 09 2026) — ✅ CODE + TESTS + VERIFIED, COMMITTED `9303bd7`→`653b617` (9 commits) + DOC COMMIT PENDING
 **User directive**: plan limit is now **monthly 200K ops/mo (resetting 2nd)** + **Prisma calls ALLOWED ONLY at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between**.
