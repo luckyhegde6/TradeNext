@@ -3,7 +3,7 @@
 > Generated from spec: `.agents/specs/10-admin-time-correction.md`
 > Branch: `feat/admin-time-correction` (from current worktree state — user decides)
 > Created: 2026-09-10
-> ✅ **IMPLEMENTED 2026-09-10** — all 7 phases complete + verified (targeted 118/118, tsc 46 = exact baseline, full 1106 pass / 4 skip / 1 documented pre-existing flake); docs in `.agents/changelog/versions-v3.32.md` + standard doc set. Implemented on the existing working tree `fix/sqlite-init-reserved-keyword` @ `8c67e89` — final branch name user decides.
+> ✅ **IMPLEMENTED 2026-09-10** — all 7 phases complete + verified (targeted 118/118, tsc 46 = exact baseline, full 1106 pass / 4 skip / 1 documented pre-existing flake); docs in `.agents/changelog/versions-v3.32.md` + standard doc set. **MERGED to `main` via PR #117 (`38a27bf`; `e74ae54` feat · `df7959d` docs · `b75deb0` docs update); post-merge hotfix in v3.32.1 (db-health POST body-parsed-once — commit pending user).**
 
 ## Spec Reference
 

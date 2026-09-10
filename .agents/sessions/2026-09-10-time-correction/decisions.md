@@ -36,3 +36,14 @@
 - **Context**: v3.32.0 code+tests+docs are uncommitted; `8c67e89` is already pushed.
 - **Why**: Avoids an orphan branch and a spurious push; the user decides the commit/branch narrative.
 - **Impact**: `HANDOFF.md` + latest.md both record "NO push/merge/deploy without explicit approval".
+
+---
+
+## D6 (v3.32.1 — db-health POST body-parsed-once hotfix, 2026-09-10)
+
+- **Context**: Post-merge live triage of v3.32.0 on `main` (PR #117 `38a27bf` merged; HEAD `b75deb0`) found POST `/api/admin/db-health` 400s on `restore` (`"Invalid restore payload"`) and `set_time_correction` (`"Invalid payload"`).
+- **Root cause**: the route reads `req.json()` at the POST top (~:238), then RE-READS it in the `restore` (~:272) and `set_time_correction` (~:434) branches. A Web `Request` body stream is single-use (`bodyUsed` after the first `json()`) → the second read throws → mapped to a generic 400. `restore` broken since v3.21.2; `set_time_correction` inherited the pattern in v3.32.0.
+- **Decision**: parse the body ONCE at the POST top (`let action = "sync_sqlite"; let requestBody = {}; try { requestBody = (await req.json()) ... }` + `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`) and reuse `requestBody` in every branch that needs payload fields. Surgical route-only diff — no service changes, no schema change, no new packages.
+- **Why not a full refactor**: the goal is a minimal hotfix restoring two broken admin actions with zero behavioral change to the rest of the POST switch (probe_time throttle, audit tags, ops counters). Existing validation already yields honest per-action errors (base64 guard / zod) once the body is parsed once.
+- **Tests**: NEW `lib/__tests__/dbHealthRoute.test.ts` 5/5 using a `jsonPost` helper that builds a real `Request` — the route's body re-read throws exactly as in prod, so the regression proves the fix. tsc 46 = exact baseline (0 new).
+- **Impact**: full v3.32.1 doc set (AGENTS.md / CHANGELOG / TODO / HANDOFF / Primer / Lessons #112 / agent-memory / latest.md / flow.md / session-todos / .agents/CHANGELOG.md); commit pending user approval — NO push/merge/deploy without explicit approval.

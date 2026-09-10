@@ -12,20 +12,20 @@ status: "in_progress"             # ready | in_progress | handoff_required | rec
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-09-10T00:00:00Z"
-feature: "v3.32.0-admin-time-correction"
+last_updated: "2026-09-10T12:00:00Z"
+feature: "v3.32.1-db-health-body-once-fix"
 ```
 
 ## Handoff Required?
 
-**Working tree on `fix/sqlite-init-reserved-keyword` (HEAD `8c67e89`; v3.32.0 code+tests+docs UNCOMMITTED — no new branch created) — v3.32.0 Admin Time Synchronisation: CODE + TESTS VERIFIED (targeted 118/118, tsc 46 = exact baseline); DOC COMMIT PENDING USER (no push/merge/deploy).**
+**v3.32.0 MERGED to `main` via PR #117 (`38a27bf` merge; `e74ae54` feat · `df7959d` docs · `b75deb0` docs update). Post-merge hotfix on `main` working tree = v3.32.1 (db-health POST double-`req.json()` → parse the body ONCE + reuse `requestBody`): code+tests verified (NEW `dbHealthRoute.test.ts` 5/5) + live re-verified; DOC COMMIT PENDING USER (no push/merge/deploy).**
 - **(1) DB probe + persistence** (`lib/sqlite.ts`) — `probeDbTimeNow()` (`SELECT NOW()` via `$queryRawUnsafe`, 10s timeout, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60_000`) + `persistTimeCorrection`/`deleteTimeCorrection`/`restoreTimeCorrection`/`persistTimeProbe`/`restoreTimeProbe` (`_backup_meta` keys `time_correction`/`time_probe_db`; types `:1753-1789`, interface `:247-257`, fallback `:5978-5983`).
 - **(2) Correction engine** — NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through, no cache; `getTimeDiagnostics()`); **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard → `toIstIso(parsed).slice(0,16) === input` (epoch = `Date.UTC(y,m-1,d,h,min) − offset`).
 - **(3) Device API/UI** — POST `probe_time` (`route.ts:395-425`, 30s throttle → 200-throttled; PG-down → 200 `available:false`; audit `ADMIN_DB_SYNC`/`time-probe`) + `set_time_correction`/`clear_time_correction`; GET zero-Prisma `time` block; **Time Synchronisation card** (`page.tsx:247/505-515/1540`); `lib/audit.ts` +`ADMIN_DB_TIME_CORRECTION_SET`/`ADMIN_DB_TIME_CORRECTION_CLEARED`.
 - **(4) Scheduling wiring** — `getCronFrom()` (`recommendationCronService.ts` + `worker-engine.ts` nextRun sites `:598`/`:631`); `getCorrectedNow()` at due-claim `:645`/`:657`.
-- **Verification**: NEW `timeCorrection.test.ts` 20/20 (full manual `@/lib/sqlite` mock, no `process.env.TZ`); sqlite.test.ts **71/71**; targeted **118/118**; full **1106 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 modified +565/−10 + 6 new files (2 code, 2 spec/plan, versions-v3.32.md, session archive).
+- **Verification (v3.32.1)**: NEW `dbHealthRoute.test.ts` **5/5** (real `Request` via `jsonPost` helper enforcing `bodyUsed`; restore/set_time_correction reuse the ONCE-parsed body — regressions fail pre-fix) + live re-verified Save/Clear on :3000. **Verification (v3.32.0)**: NEW `timeCorrection.test.ts` 20/20 (full manual `@/lib/sqlite` mock, no `process.env.TZ`); sqlite.test.ts **71/71**; targeted **118/118**; full **1106 pass / 4 skip / 1 fail** (1 = documented pre-existing `intelligence.test.ts` flake); tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 modified +565/−10 + 6 new files (2 code, 2 spec/plan, versions-v3.32.md, session archive).
 - **Deferred**: live `probe_time` DB check (local Postgres not running); durable TZ fix = correct `TZ`/`UTC` env on Netlify.
-- **Next**: stage EXACTLY the v3.32.0 working-tree files (7 modified code + 2 new code + 2 spec/plan + 9 doc updates + 2 new docs; `.visual.html` untracked — do NOT commit) → run `/pre-commit-check` → commit `feat(admin): v3.32.0 Admin Time Synchronisation (probe_time + persisted time-correction engine)` (branch/name user decides) → no push/merge/deploy without approval.
+- **Next**: stage EXACTLY the v3.32.1 working-tree files (M `app/api/admin/db-health/route.ts` + ?? `lib/__tests__/dbHealthRoute.test.ts` + the v3.32.1 doc set: AGENTS.md, versions-v3.32.md, TODO.md, HANDOFF.md, Primer.md, Lessons.md #112, agent-memory.md, latest.md, sessions archive flow/decisions, session-todos.md, .agents/CHANGELOG.md) → run `/pre-commit-check` → commit `fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)` → no push/merge/deploy without explicit approval.
 - **Unrelated open**: PR #114 (v3.26.0 fixes + Accelerate docs) pending merge against `main`; v3.28.0/v3.27.0 diffs pending user commit; Phase 0 (Prisma Postgres provisioning) REQUIRED before Dec 1 2026 Accelerate retirement (BUGS.md #14); deferred daily recommendation job failures (Issue 3); held (req text not provided — no guess-implement): `dailyRecommendationService` AI-unavailable fallback + rate re-capture wiring.
 
 ---

@@ -2,7 +2,7 @@
 
 > Branch: `feat/admin-time-correction` (from current worktree state — user decides)
 > Date: 2026-09-10
-> ✅ **IMPLEMENTED 2026-09-10** — all IN-scope items delivered (Spec §1–§7); verification in the plan + `.agents/changelog/versions-v3.32.md`. Implemented on the existing working tree `fix/sqlite-init-reserved-keyword` @ `8c67e89` — final branch name user decides.
+> ✅ **IMPLEMENTED 2026-09-10** — all IN-scope items delivered (Spec §1–§7); verification in the plan + `.agents/changelog/versions-v3.32.md`. **MERGED to `main` via PR #117 (`38a27bf`; `e74ae54` feat · `df7959d` docs · `b75deb0` docs update); post-merge hotfix in v3.32.1 (db-health POST body-parsed-once — commit pending user).**
 
 ## 1. Overview
 

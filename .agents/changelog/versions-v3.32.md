@@ -1,8 +1,8 @@
 # v3.32.0 — Admin Time Synchronisation (on-demand Postgres NOW() probe + persisted server-clock offset)
 
 - **Date**: Sep 10 2026
-- **Branch**: `fix/sqlite-init-reserved-keyword` (working tree @ `8c67e89`; code + tests + docs NOT yet committed — user approval pending)
-- **Status**: Code + tests verified; doc commit pending user (no push/merge/deploy without explicit approval)
+- **Branch**: `fix/sqlite-init-reserved-keyword` → **MERGED to `main` via PR #117** (`38a27bf` merge; `e74ae54` feat · `df7959d` docs · `b75deb0` docs update). v3.32.1 hotfix (below) on `main` working tree, commit pending user
+- **Status**: v3.32.0 MERGED + deployed via PR #117; **v3.32.1 post-merge hotfix** (db-health body-parsed-once) code+tests verified + live re-verified, docs + commit pending user (no push/merge/deploy without explicit approval)
 - **Spec**: `.agents/specs/10-admin-time-correction.md` · **Plan**: `.agents/plans/10-admin-time-correction.md`
 
 ## User directive (confirmed)
@@ -32,3 +32,36 @@
 - No schema change → **no migration**; no new packages.
 - Diff: **7 modified files, +565/−10** (`app/admin/utils/db-health/page.tsx` +232, `lib/sqlite.ts` +173, `app/api/admin/db-health/route.ts` +114, `lib/__tests__/sqlite.test.ts` +38, `lib/services/worker/worker-engine.ts` 10, `lib/services/recommendationCronService.ts` 5, `lib/audit.ts` +3) + 4 new untracked files (spec, plan, `timeCorrection.ts`, `timeCorrection.test.ts`).
 - **Deferred**: live `probe_time` DB verification (local Postgres/Docker not running this session) — run on prod db-health once deployed, or locally with Docker up.
+
+---
+
+# v3.32.1 — db-health POST double-`req.json()` hotfix (parse the body ONCE, reuse `requestBody`)
+
+- **Date**: Sep 10 2026
+- **Branch**: on `main`, post-merge of v3.32.0 (PR #117 `38a27bf`); working tree = fix + regression test, commit pending user
+- **Status**: code+tests verified (**5/5**) + live re-verified; docs complete; **commit pending user** (no push/merge/deploy without explicit approval)
+
+## Root cause
+
+POST `app/api/admin/db-health/route.ts` reads `req.json()` at the top (~:238) to derive `action`, then BOTH `restore` (~:272) and `set_time_correction` (~:434) RE-READ the body. A Web `Request` body stream is **single-use** (`bodyUsed` = true after the first `json()`), so the second read throws → both actions 400'd with the wrong message:
+- `restore` → `"Invalid restore payload"` — **broken since v3.21.2** (the base64 backup-restore feature never worked through the UI as wired).
+- `set_time_correction` → `"Invalid payload"` — inherited the same pattern in v3.32.0 (masking the real zod `"istDateTime is required"` error).
+
+## Fix (surgical, route only)
+
+Hoisted the body parse to the very top of POST:
+
+```ts
+let action = "sync_sqlite";
+let requestBody = {};
+try { requestBody = (await req.json()) ... }
+```
+
+with `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`. `restore` reuses `requestBody as { data?: string; file?: string }` (unparseable body → `{}` → existing `"Missing base64 sqlite data"` 400 stays honest); `set_time_correction` reuses `requestBody as { istDateTime?: string }` (missing field → zod `"istDateTime is required"` instead of the masked `"Invalid payload"`).
+
+## Tests & verification
+
+- NEW `lib/__tests__/dbHealthRoute.test.ts` — **5/5** (node env; real `Request` objects via a `jsonPost` helper that enforces `bodyUsed` — the regression fails pre-fix).
+- tsc **46 = exact baseline (0 new)**; no migration; no new packages.
+- Live re-verify (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors.
+- **Deferred**: live `probe_time` DB check (local Postgres not running); durable fix = correct `TZ`/`UTC` env on Netlify (v3.32.0).

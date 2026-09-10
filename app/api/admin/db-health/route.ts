@@ -233,12 +233,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // v3.32.1 fix: parse the body ONCE here and reuse `requestBody` in the
+  // `restore` / `set_time_correction` branches. A Web `Request` body stream is
+  // single-use (`bodyUsed`), so a second `req.json()` threw and every Save
+  // Correction returned 400 "Invalid payload" (and restore 400 "Invalid
+  // restore payload") — only `probe_time`/`clear_time_correction` worked.
   let action = "sync_sqlite";
+  let requestBody: Record<string, unknown> = {};
   try {
-    const body = await req.json();
-    if (body?.action) action = body.action;
+    requestBody = (await req.json()) as Record<string, unknown>;
+    if (typeof requestBody?.action === "string") action = requestBody.action;
   } catch {
-    // default to sync_sqlite
+    // default to sync_sqlite (branches below read the empty object → 400)
   }
 
   if (action === "backup") {
@@ -267,12 +273,10 @@ export async function POST(req: Request) {
   }
 
   if (action === "restore") {
-    let body: { data?: string; file?: string } = {};
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: "Invalid restore payload" }, { status: 400 });
-    }
+    // v3.32.1: reuse the body parsed once at POST top — `req.json()` cannot
+    // be called twice on the same Request (threw → 400 on EVERY restore
+    // since v3.21.2).
+    const body = requestBody as { data?: string; file?: string };
     const b64 = body?.data || body?.file;
     if (!b64 || typeof b64 !== "string") {
       return NextResponse.json({ error: "Missing base64 sqlite data" }, { status: 400 });
@@ -429,12 +433,10 @@ export async function POST(req: Request) {
     // current IST wall time; offset = enteredIST − serverNow (negative = the
     // server clock is FAST, e.g. −330 for the observed ~+5.5h drift). Applied
     // lazily to scheduling math via getCorrectedNow()/getCronFrom().
-    let body: { istDateTime?: string } = {};
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
-    }
+    // v3.32.1: reuse the body parsed once at POST top — `req.json()` cannot
+    // be called twice on the same Request (threw → 400 "Invalid payload" on
+    // every Save Correction from the UI since v3.32.0 shipped).
+    const body = requestBody as { istDateTime?: string };
     const parsedBody = TIME_CORRECTION_INPUT_SCHEMA.safeParse(body);
     if (!parsedBody.success) {
       return NextResponse.json(

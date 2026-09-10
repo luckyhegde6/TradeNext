@@ -1,12 +1,12 @@
 # Session Todos
 
-## Current (v3.32.0 — Admin Time Synchronisation)
+## Current (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
 
 **User directive**: "in admin db health screen display server time and db time. and also admin can enter ist time so if server time is misaligned it can be corrected through admin entered input for timezone corrections."
 
 **ROOT CAUSE**: Netlify host clock treats IST wall-clock as UTC → stored cron `nextRun` skew ≈ +5.5h; `calculateNextRun` takes `from` from the server clock. **REAL BUG FIXED**: `parseIstDateTimeLocal` round-trip guard compared parsed-UTC vs IST input.
 
-**Shipped (working tree on `fix/sqlite-init-reserved-keyword` @ `8c67e89`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
+**Shipped**: v3.32.0 MERGED to `main` via PR #117 `38a27bf` (`e74ae54` feat · `df7959d` docs · `b75deb0` docs update); **v3.32.1 hotfix on working tree (HEAD `b75deb0`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
 - [x] `lib/sqlite.ts` probe + persistence (`probeDbTimeNow`, keys `time_correction`/`time_probe_db`, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60s`; types `:1753-1789`, fallback `:5978-5983`)
 - [x] NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through; `getTimeDiagnostics()`)
 - [x] db-health POST `probe_time` (30s throttle) / `set_time_correction` / `clear_time_correction` + GET zero-Prisma `time`
@@ -14,7 +14,12 @@
 - [x] Wiring `getCronFrom()`/`getCorrectedNow()` in `recommendationCronService.ts` + `worker-engine.ts` (nextRun + due-claim)
 - [x] Tests — `timeCorrection.test.ts` 20/20, sqlite 71/71, targeted **118/118**, full **1106/4/1** (1 = documented pre-existing flake), tsc 46 = baseline, no migration, no new packages
 - [x] Docs — versions-v3.32.md, AGENTS/CHANGELOG/TODO rows, Primer, agent-memory, Lessons #111, session archive
-- [ ] **COMMIT PENDING USER** (branch name user decides); live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
+- [x] v3.32.1 root cause: POST `app/api/admin/db-health/route.ts` re-reads `req.json()` in `restore` (~:272) and `set_time_correction` (~:434) after the top read (:238) — Web `Request` body single-use (`bodyUsed`) → both 400 (`"Invalid restore payload"` since v3.21.2; `"Invalid payload"` in v3.32.0)
+- [x] v3.32.1 fix (route only): hoisted `let action = "sync_sqlite"; let requestBody = {}; try { requestBody = (await req.json()) ... }` at POST top with `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`; `restore`/`set_time_correction` reuse typed `requestBody` → honest 400s (`"Missing base64 sqlite data"` / zod `"istDateTime is required"`)
+- [x] v3.32.1 regression: NEW `lib/__tests__/dbHealthRoute.test.ts` **5/5** (real `Request` via `jsonPost` helper enforcing `bodyUsed`); tsc **46 = exact baseline (0 new)**; no migration; no new packages
+- [x] v3.32.1 live-verified (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors
+- [x] v3.32.1 docs: AGENTS.md v3.32.1 row + v3.32.0 MERGED amend, versions-v3.32.md v3.32.1 section, CHANGELOG index + TODO.md rows, HANDOFF.md, Primer.md, Lessons #112, agent-memory, latest.md handoff rewrite, sessions flow/decisions
+- [ ] **COMMIT PENDING USER** (v3.32.1: route + test + docs; do NOT include unrelated v3.28.x-era working-tree changes; message `fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)`; run `/pre-commit-check` first); live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
 
 ## Completed earlier (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
 
