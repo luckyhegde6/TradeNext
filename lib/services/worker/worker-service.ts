@@ -145,15 +145,20 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
  * system jobs (previously only recommendations + recommendation_performance
  * were recorded; market_data and ai_connection_test stayed 0 forever).
  */
-async function recordSystemRunOutcome(taskId: string, taskType: string, success: boolean): Promise<void> {
+export async function recordSystemRunOutcome(taskId: string, taskType: string, success: boolean): Promise<void> {
   const jobName = SYSTEM_JOB_NAME_BY_TASK_TYPE[taskType] ?? null;
   if (!jobName) return;
   try {
     const task = await prisma.workerTask.findUnique({
       where: { id: taskId },
-      select: { cronJobId: true },
+      select: { cronJobId: true, status: true },
     });
-    if (task?.cronJobId) {
+    // v3.37.0 (issue #119): only record while the task is still RUNNING. The
+    // engine's timeout path and the stale-task reaper now record the outcome
+    // themselves (BEFORE their failed-status write); a late background
+    // continuation of executeTask() finishes afterwards and must skip here so
+    // the ledger is never double-counted for one run.
+    if (task?.cronJobId && task.status === "running") {
       await recordCronRun(jobName, success, { skipSpawnCounted: true });
     }
   } catch (error) {

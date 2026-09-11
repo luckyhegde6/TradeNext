@@ -8,8 +8,9 @@
 // instrumentation entry vs this route, so the in-memory module state here can
 // read as "not running" even though the real daemon (same daemonId) is alive
 // and heartbeating in the instrumentation context. We therefore cross-check
-// the persisted worker_status heartbeat row — in `next start` (single server
-// bundle) both agree.
+// the persisted worker_status heartbeat rows — the daemon's own row AND the
+// shared leader-cron-daemon row (v3.37.0, issue #119 Fix 5) — in `next start`
+// (single server bundle) both agree.
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
@@ -18,6 +19,7 @@ import {
   isDaemonHeartbeatFresh,
   DAEMON_ID,
 } from "@/lib/services/worker/cron-daemon";
+import { leaderWorkerId, LEADER_STALENESS_MS } from "@/lib/services/leader";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -30,11 +32,26 @@ export async function GET() {
     }
 
     const status = getCronDaemonStatus();
-    const heartbeat = await prisma.workerStatus
-      .findUnique({ where: { workerId: DAEMON_ID } })
-      .catch(() => null);
-    const lastHeartbeatAt = heartbeat?.lastHeartbeat ?? status.lastHeartbeatAt;
-    const running = isDaemonHeartbeatFresh(lastHeartbeatAt) || status.running;
+    const [heartbeat, leaderRow] = await Promise.all([
+      prisma.workerStatus
+        .findUnique({ where: { workerId: DAEMON_ID } })
+        .catch(() => null),
+      // v3.37.0 (issue #119 Fix 5): the in-process daemon ALSO refreshes the
+      // shared leader-cron-daemon row (watchLeaderRole heartbeats it every
+      // LEADER_HEARTBEAT_MS), so even in a split module graph the leader row
+      // proves the scheduler is alive on SOME instance of this server.
+      prisma.workerStatus
+        .findUnique({ where: { workerId: leaderWorkerId("cron-daemon") } })
+        .catch(() => null),
+    ]);
+    const lastHeartbeatAt =
+      [status.lastHeartbeatAt, heartbeat?.lastHeartbeat, leaderRow?.lastHeartbeat]
+        .filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()))
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+    const leaderFresh =
+      leaderRow?.lastHeartbeat != null &&
+      Date.now() - leaderRow.lastHeartbeat.getTime() < LEADER_STALENESS_MS;
+    const running = status.running || isDaemonHeartbeatFresh(lastHeartbeatAt) || leaderFresh;
     return NextResponse.json({
       ...status,
       running,

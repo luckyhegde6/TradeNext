@@ -60,6 +60,13 @@ export default function WorkersPage() {
   const { data: session, status } = useSession();
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
   const [workers, setWorkers] = useState<WorkerStatus[]>([]);
+
+  // Fix 3 (issue #119): `worker_status` rows also include the leader-election
+  // ownership rows (`workerId: leader-<role>`, v3.33.0 watchdogs). They are NOT
+  // task workers — render them as a separate Scheduler Leadership row and keep
+  // them out of the Active Workers grid.
+  const leaderWorkers = workers.filter((w) => w.workerId.startsWith("leader-"));
+  const activeWorkers = workers.filter((w) => !w.workerId.startsWith("leader-"));
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -505,13 +512,42 @@ export default function WorkersPage() {
         {(activeTab === "tasks" || activeTab === "workers") && (
           <div className="mb-8">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Active Workers</h2>
-            {workers.length === 0 ? (
+            {leaderWorkers.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Scheduler Leadership</h3>
+                <div className="flex flex-wrap gap-2">
+                  {leaderWorkers.map((worker) => {
+                    const role = worker.workerId.replace("leader-", "");
+                    const ageMs = Date.now() - new Date(worker.lastHeartbeat).getTime();
+                    const fresh = Number.isFinite(ageMs) && ageMs < 10 * 60_000;
+                    const roleLabel =
+                      role === "worker" ? "Worker engine"
+                      : role === "cron-daemon" ? "Cron daemon"
+                      : role === "sqlite-sync" ? "SQLite sync"
+                      : role;
+                    return (
+                      <span
+                        key={worker.workerId}
+                        className="px-2 py-1 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                        title={`${role} leader`}
+                      >
+                        {roleLabel}: {worker.workerName ?? "unknown"}
+                        <span className={`ml-1 ${fresh ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
+                          {fresh ? "● holding" : "● stale"}
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {activeWorkers.length === 0 ? (
               <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-gray-200 dark:border-slate-800 text-center text-gray-500">
                 No workers connected. Workers will appear here when they check in.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {workers.map((worker) => (
+                {activeWorkers.map((worker) => (
                   <div
                     key={worker.workerId}
                     className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800"
