@@ -5,6 +5,7 @@
 > 🔄 Handoff System: Read `@HANDOFF.md` for orchestration state and `.agents/handoffs/active/latest.md` for current session handoff.
 
 ## Last Updated
+2026-09-11 (v3.35.0 — Flaky `intelligence.test.ts` CI fix: prisma mock isolates the fire-and-forget `IntelligenceCache` upsert — zero real-DB writes in tests; un-awaited `upsert` (`cache.ts` :101-124) raced the `beforeEach` `deleteMany` teardown → stale row → spurious `INTELLIGENCE_CACHE_HIT` flaky fails at :187/:246/:279; test-only +21, targeted 13/13, FIRST fully-green full run 86/86 suites / 1170 pass / 4 skip / 0 fail, tsc 46 exact baseline; on PR #118 branch on top of v3.34.1 merge `05b91e8`; see Current Project Status below)
 2026-09-11 (v3.34.1 — sql.js WASM async-load gate fix: synchronous `wasmBinary` load + memoized `getSqlJs()` eliminates "Cannot log after tests are done" noise; commit `d91fb01` on `feat/db-health-monthly-ops`, merged into PR #118 branch; see Current Project Status below)
 2026-09-11 (v3.34.0 — Monthly Query Consumption — db-health monthly-ops window (deferred Plan 09 rev-v3 c/d): NEW pure `lib/services/opsMonthly.ts` ledger on globalThis `__opsMonthly`, SQLite `_backup_meta` `"ops_monthly"` persistence + db-health "Monthly Query Consumption" card; on `feat/db-health-monthly-ops` on top of committed v3.30.0 `653b617`; see Current Project Status below)
 2026-09-10 (v3.33.1 — Swing performance touch-tracking fix: intraday HIGH/LOW touches count as target/stop hits; see Current Project Status below)
@@ -28,6 +29,11 @@
 ---
 
 ## Current Project Status
+
+### v3.35.0 — Flaky `intelligence.test.ts` CI fix (Sep 11 2026) — ✅ CODE + TESTS VERIFIED (targeted 13/13; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run; tsc 46 = exact baseline); TEST-ONLY +21 — DOCS PHASE DONE, COMMIT/PR PENDING USER (on PR #118 branch `fix/leader-watchdog-self-heal`, on top of v3.34.1 merge `05b91e8`)
+**Root cause**: `setIntelligenceCache` (`lib/services/intelligence/cache.ts` :101-124) fires `prisma.intelligenceCache.upsert(...)` UN-AWAITED → the real-Postgres `beforeEach` `deleteMany` teardown (`intelligence.test.ts` :73-80) races the in-flight upsert → stale row → spurious `INTELLIGENCE_CACHE_HIT` → flaky failures at :187/:246/:279 (the "documented pre-existing flake" since v3.25.0, now FIXED).
+**Fix**: NEW full prisma mock factory (`{ __esModule: true, default: { intelligenceCache: { findUnique/upsert/delete/deleteMany/count/findMany → jest.fn() } } }`) inserted between the `beforeEach` close and the Tests header; `jest.clearAllMocks()` clears call history but keeps impls.
+**Verification**: targeted `intelligence.test.ts` **13/13 PASS**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run (no more pre-existing-flake asterisk); tsc **46 = exact baseline (0 new)**; no migration; no new packages. **Push/merge/deploy pending user.**
 
 ### v3.34.1 — sql.js WASM async-load gate fix (Sep 11 2026) — ✅ CODE + TESTS VERIFIED (sqlite + cron-daemon 88/88 under CI=true --runInBand with zero "Cannot log after tests are done" noise; tsc 46 = exact baseline); COMMITTED `d91fb01` on `feat/db-health-monthly-ops` (merged into PR #118 branch `fix/leader-watchdog-self-heal`)
 **Root cause**: `getSqlJs()` loaded `sql-wasm.wasm` via async `fs.readFile`/stream → sql.js init + stray logs landed after a Jest file finished.

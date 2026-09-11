@@ -1,6 +1,6 @@
 # Session Todos
 
-## Current (v3.34.0 + v3.34.1 — Monthly Query Consumption + sql.js WASM gate fix; v3.33.0 + v3.33.1 — Leader watchdog + Swing touch-tracking — MERGED into PR #118 branch `fix/leader-watchdog-self-heal`)
+## Current (v3.35.0 — Flaky `intelligence.test.ts` CI fix: test-only +21 (prisma mock isolates fire-and-forget `IntelligenceCache` upsert); targeted 13/13; full 86/86 suites / 1170 pass / 4 skip / 0 fail — first fully-green full run; v3.34.0 + v3.34.1 — Monthly Query Consumption + sql.js WASM gate fix; v3.33.0 + v3.33.1 — Leader watchdog + Swing touch-tracking — MERGED into PR #118 branch `fix/leader-watchdog-self-heal`)
 
 **User directive** (v3.31.0): plan limit **MONTHLY 200K ops/mo (resetting 2nd)** + Prisma calls only at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between. db-health only showed TODAY's ops; with a monthly plan that's the wrong unit and a restarted instance loses the month's history → implements the deferred Plan 09 rev-v3 c/d monthly-ops window (`query_cache` STAYS deferred).
 
@@ -13,8 +13,9 @@
 - [x] Docs — `.agents/changelog/versions-v3.34.md` NEW + `.agents/sessions/2026-09-11-monthly-ops/` (decisions + flow) + AGENTS.md v3.34.0 row + CHANGELOG index + TODO.md row + agent-memory — DONE
 - [x] Docs — Primer (Last Updated + Current Project Status) + Lessons #113 + Update Log + HANDOFF.md + latest.md handoff rewrite + session-todos (this file) — DONE
 - [x] v3.34.1 — sql.js WASM async-load gate fix (`d91fb01` on `feat/db-health-monthly-ops`, merged into PR #118 branch): `getSqlJs()` loads `sql-wasm.wasm` SYNCHRONOUSLY via `wasmBinary` (`fs.readFileSync`, try/catch per candidate path), memoized — zero "Cannot log after tests are done" noise; sqlite + cron-daemon 88/88 under CI=true --runInBand; full 1154 pass / 4 skip / 1 fail (pre-existing flake); tsc 46 — DONE
+- [x] v3.35.0 — Flaky `intelligence.test.ts` CI fix — prisma mock factory isolates the fire-and-forget `IntelligenceCache` upsert (zero real-DB writes; un-awaited `upsert` in `cache.ts` :101-124 raced the `beforeEach` `deleteMany` teardown → stale row → spurious `INTELLIGENCE_CACHE_HIT` flaky fails at :187/:246/:279; targeted **13/13**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run; tsc 46 = exact baseline (0 new); test-only +21 uncommitted on PR #118 branch on top of v3.34.1 merge `05b91e8`; docs update completed) — DONE
 - [ ] **Deferred**: `query_cache` (Plan 09 rev-v3 c/d)
-- [ ] **PR #118 (v3.33.0 + v3.33.1 + v3.34.0 + v3.34.1 ALL merged into `fix/leader-watchdog-self-heal`) — PUSH/MERGE/DEPLOY PENDING USER** (no push/merge/deploy without explicit approval; run `/pre-commit-check` first)
+- [ ] **PR #118 (v3.33.0 + v3.33.1 + v3.34.0 + v3.34.1 + v3.35.0 ALL merged into `fix/leader-watchdog-self-heal`) — PUSH/MERGE/DEPLOY PENDING USER** (no push/merge/deploy without explicit approval; run `/pre-commit-check` first)
 
 ## Completed earlier (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
 
