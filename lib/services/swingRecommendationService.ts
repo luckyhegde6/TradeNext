@@ -988,23 +988,126 @@ export async function getSwingRecommendations(
     // Mirror orders created_at ASC — the LAST row is the newest job.
     const latestJob = jobs.length > 0 ? jobs[jobs.length - 1] : null;
     if (latestJob && !forceRefresh) {
-      const served = jobToResponse(latestJob);
-      if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
-        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
-      } else {
-        // pending/running — serve the frozen feed; the daemon (or the kick
-        // below) settles it. The job stores the full screener feed, so no
-        // scan is needed here.
-        maybeProcessSwingAnalysis().catch(() => undefined);
+      // Strict manual-only generation: an existing done/failed result is served
+      // INDEFINITELY — no age gate, no auto-regeneration on a plain load. A
+      // manual refresh (force=1) is the ONLY trigger for a new generation.
+      const status = String(latestJob.status ?? "");
+
+      // Liveness for pending/running rows: a job abandoned mid-flight (dead
+      // instance, stuck force refresh) must never hide an older terminal result.
+      const staleBefore = Date.now() - SWING_JOB_STALE_MS;
+      const staleTime =
+        status === "pending"
+          ? latestJob.createdAt instanceof Date
+            ? latestJob.createdAt.getTime()
+            : new Date(String(latestJob.createdAt ?? "")).getTime()
+          : status === "running"
+            ? latestJob.startedAt instanceof Date
+              ? latestJob.startedAt.getTime()
+              : new Date(String(latestJob.startedAt ?? "")).getTime()
+            : Number.NaN;
+      const stale = !Number.isNaN(staleTime) && staleTime < staleBefore;
+
+      // Newest TERMINAL (done/failed) row — the feed the tab should render
+      // when the newest job is fresh in-flight or stale/abandoned.
+      let terminal: Record<string, unknown> | null = null;
+      for (let i = jobs.length - 1; i >= 0; i--) {
+        const s = String(jobs[i].status ?? "");
+        if (s === "done" || s === "failed") {
+          terminal = jobs[i];
+          break;
+        }
       }
-      logger.info({
-        msg: "Swing served from DB job",
-        status: String(latestJob.status ?? ""),
+
+      if (status === "done" || status === "failed") {
+        // Prior run's AI verdicts — cache 24h as a steady-state accelerator.
+        const served = jobToResponse(latestJob);
+        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        logger.info({
+          msg: "Swing served from DB job",
+          status,
+          jobId: String(latestJob.id ?? ""),
+          analyze,
+          forceRefresh,
+        });
+        return served;
+      }
+      if (!stale && (status === "pending" || status === "running")) {
+        // Fresh generation in flight — serve its frozen feed; the daemon (or
+        // the kick below) settles it. The job stores the full screener feed,
+        // so no scan is needed here.
+        const served = jobToResponse(latestJob);
+        maybeProcessSwingAnalysis().catch(() => undefined);
+        logger.info({
+          msg: "Swing served from DB job (in flight)",
+          status,
+          jobId: String(latestJob.id ?? ""),
+          analyze,
+          forceRefresh,
+        });
+        return served;
+      }
+      if (stale && terminal) {
+        // Abandoned job hiding an older result — surface the terminal feed and
+        // keep the drain ticking so recovery settles the stale row.
+        const served = jobToResponse(terminal);
+        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        maybeProcessSwingAnalysis().catch(() => undefined);
+        logger.warn({
+          msg: "Swing stale pending/running job — serving newest terminal result",
+          staleStatus: status,
+          staleJobId: String(latestJob.id ?? ""),
+          terminalStatus: String(terminal.status ?? ""),
+          terminalJobId: String(terminal.id ?? ""),
+        });
+        return served;
+      }
+      // stale && !terminal — abandoned first/only run: nothing better exists,
+      // so keep serving its frozen feed while recovery retries it.
+      const served = jobToResponse(latestJob);
+      maybeProcessSwingAnalysis().catch(() => undefined);
+      logger.warn({
+        msg: "Swing stale pending/running job — no terminal result, serving frozen feed",
+        status,
         jobId: String(latestJob.id ?? ""),
-        analyze,
-        forceRefresh,
       });
       return served;
+    }
+
+    // Mirror EMPTY — the local sql.js mirror may be unavailable or never synced
+    // while Prisma (the promoted source of truth) still holds the latest job.
+    // One lazy fallback read prevents a spurious brand-new job from being
+    // created on every plain load.
+    if (!forceRefresh && jobs.length === 0) {
+      let prismaRow: Record<string, unknown> | null = null;
+      try {
+        const prisma = (await import("@/lib/prisma")).default;
+        prismaRow = (await prisma.swingAnalysisJob.findFirst({
+          orderBy: { createdAt: "desc" },
+        })) as Record<string, unknown> | null;
+      } catch (e) {
+        logger.warn({
+          msg: "Swing Prisma fallback lookup failed — proceeding with fresh run",
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+      if (prismaRow) {
+        const served = jobToResponse(prismaRow);
+        if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
+          staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        } else {
+          // pending/running — frozen feed; the processor settles it.
+          maybeProcessSwingAnalysis().catch(() => undefined);
+        }
+        logger.info({
+          msg: "Swing served from Prisma job (mirror empty)",
+          status: String(prismaRow.status ?? ""),
+          jobId: String(prismaRow.id ?? ""),
+          analyze,
+          forceRefresh,
+        });
+        return served;
+      }
     }
 
     // forceRefresh supersedes any in-flight work so the UI's "Refresh" always
@@ -1013,6 +1116,20 @@ export async function getSwingRecommendations(
     // re-read (status !== running) and discards its result.
     if (forceRefresh) {
       let superseded = 0;
+      // Manual refresh = the moment to settle the PREVIOUS results' status:
+      // any prior terminal (done/failed) job's posted swing signals get a
+      // performance check (target/stop/expiry) before the new generation
+      // supersedes them. Fire-and-forget — a failure never blocks the refresh.
+      if (jobs.some((j) => ["done", "failed"].includes(String(j.status ?? "")))) {
+        import("./swingPerformanceService")
+          .then(({ checkSwingPerformance }) => checkSwingPerformance())
+          .catch((e) => {
+            logger.warn({
+              msg: "Swing performance check kick failed (non-critical)",
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+      }
       for (const row of
         sqlite?.getSwingAnalysisJobs({ status: ["pending", "running"], limit: 500 }) ?? []) {
         sqlite?.upsertSwingAnalysisJob({
