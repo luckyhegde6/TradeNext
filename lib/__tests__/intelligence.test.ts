@@ -97,6 +97,27 @@ beforeEach(async () => {
   mockIsQuotaExhausted.mockReturnValue(false);
 });
 
+// ─── Mock Prisma ─────────────────────────────────────────────────────────────
+// The write-through cache upserts to Prisma fire-and-forget (never awaited), so
+// an in-flight upsert from one test can land AFTER the next test's deleteMany —
+// a real DB row then survives cleanup and the next lookup short-circuits with a
+// stale INTELLIGENCE_CACHE_HIT (the pre-v3.35.0 "async cache flake"). Mocking the
+// store (same pattern as intelligenceCache.test.ts) makes the suite hermetic.
+
+jest.mock("@/lib/prisma", () => ({
+  __esModule: true,
+  default: {
+    intelligenceCache: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+      delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  },
+}));
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("getInvestmentIntelligence", () => {

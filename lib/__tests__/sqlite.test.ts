@@ -279,7 +279,7 @@ jest.mock("@/lib/services/leader", () => ({
   getLeaderInfo: jest.fn().mockResolvedValue(null),
   leaderWorkerId: jest.fn((role: string) => `leader-${role}`),
   LEADER_SELF: "unit-test-host-1",
-  LEADER_STALENESS_MS: 15 * 60_000,
+  LEADER_STALENESS_MS: 10 * 60_000,
   LEADER_HEARTBEAT_MS: 300_000,
 }));
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -312,6 +312,11 @@ import {
   getSqliteDerivedCounts,
 } from "../sqlite";
 import type { TimeCorrectionRecord, TimeProbeRecord } from "../sqlite";
+import {
+  foldOpsCounterIntoMonthly,
+  getOpsMonthlyState,
+  resetOpsMonthlyForTests,
+} from "../services/opsMonthly";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 function resetState() {
@@ -705,6 +710,93 @@ describe("SQLite backup fallback", () => {
       // Restore originals
       dbOpsCounter.reads = prevReads;
       dbOpsCounter.writes = prevWrites;
+    });
+  });
+
+  describe("monthly ops ledger persist / restore roundtrip (v3.34.0)", () => {
+    const sqlModule = require("sql.js") as any;
+
+    // Start each test from a clean mirror AND a clean store so this describe is
+    // order-independent: `getSqliteFallback()` returns `state.db ? _instance :
+    // null`, so without an init every test fails in isolation (the `-t "monthly
+    // ops ledger..."` filter skips the earlier describes that shared-init the DB)
+    // with `TypeError: Cannot read properties of null (reading 'persistOpsMonthly')`.
+    const resetAndInit = async () => {
+      sqlModule.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      jest.clearAllMocks();
+      mockPrisma.workerStatus.upsert = jest.fn().mockResolvedValue({ count: 1 });
+      await ensureSqliteBackup();
+    };
+
+    it("persists the folded ledger to _backup_meta and restores it after a restart", async () => {
+      await resetAndInit();
+      resetOpsMonthlyForTests();
+      foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-08-25", { reads: 1234, writes: 567 });
+      const fb = getSqliteFallback()!;
+      fb.persistOpsMonthly();
+
+      // Simulate a restart: wipe the in-memory ledger, then restore
+      resetOpsMonthlyForTests();
+      expect(getOpsMonthlyState().days).toEqual({});
+      fb.restoreOpsMonthly();
+      expect(getOpsMonthlyState().monthKey).toBe("2026-08");
+      expect(getOpsMonthlyState().days["2026-08-25"]).toEqual({ reads: 1234, writes: 567 });
+
+      resetOpsMonthlyForTests(); // cleanup so later tests start clean
+    });
+
+    it("ignores a stale (previous-month) persisted ledger", async () => {
+      await resetAndInit();
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const prismaModule = require("@/lib/prisma");
+      const originalKey = prismaModule.getIstDayKey;
+
+      try {
+        // Persist a snapshot stamped with LAST month's key
+        prismaModule.getIstDayKey = () => "2026-07-31";
+        resetOpsMonthlyForTests(); // monthKey "2026-07"
+        foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-07-31", { reads: 999, writes: 111 });
+        getSqliteFallback()!.persistOpsMonthly();
+
+        // Now it is August: wipe + restore must NOT apply the July ledger
+        prismaModule.getIstDayKey = () => "2026-08-25";
+        resetOpsMonthlyForTests();
+        getSqliteFallback()!.restoreOpsMonthly();
+        expect(getOpsMonthlyState().days).toEqual({});
+      } finally {
+        prismaModule.getIstDayKey = originalKey;
+        resetOpsMonthlyForTests();
+      }
+    });
+
+    it("persist / restore are no-ops while the mirror is not ready", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      resetOpsMonthlyForTests();
+      foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-08-25", { reads: 5, writes: 6 });
+
+      // Null the REAL module state in place. A `g2.__sqliteBackup = {…}`
+      // replacement (see resetState() in this file) orphans the module's
+      // `state` binding captured at load, so the persist guard below would NOT
+      // return and the dbOpsCounter fold would run (leaking {42,8} into the
+      // in-memory ledger). resetSqliteStateForTests() mutates the shared state
+      // object IN PLACE (sqlite.ts), so the guard fires and nothing folds.
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+
+      expect(() => fb.persistOpsMonthly()).not.toThrow();
+      expect(() => fb.restoreOpsMonthly()).not.toThrow();
+      expect(getOpsMonthlyState().days["2026-08-25"]).toEqual({ reads: 5, writes: 6 });
+
+      // Re-init the shared store: resetSqliteStateForTests() nulled state.db/
+      // ready in place, and the describes that follow this one (time
+      // correction, db error counts — file order) reuse the module store
+      // instead of initializing it, so they'd otherwise see a null fallback.
+      await ensureSqliteBackup();
+
+      resetOpsMonthlyForTests(); // cleanup so later tests start clean
     });
   });
 

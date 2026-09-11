@@ -192,6 +192,12 @@ export function getDbErrorCounts(): { day: string; counts: Record<DbErrorType, n
   return { day: dbErrorCounts._day, counts: { ...dbErrorCounts.counts } };
 }
 
+// The IST-monthly query-consumption ledger (v3.34.0) lives in its own pure
+// module `lib/services/opsMonthly.ts` (see there) — deliberately NOT in this
+// file so test suites that mock `@/lib/prisma` (dbHealthRoute.test.ts,
+// sqlite.test.ts) exercise the REAL ledger logic without extending their mocks.
+// This file only retains the shared IST-day-key source (`getIstDayKey`).
+
 const WRITE_BUDGET = Number(process.env.DB_WRITE_BUDGET) || 8_000;
 
 export function isDbWriteBudgetExceeded(): boolean {

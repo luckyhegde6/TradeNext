@@ -5,7 +5,7 @@ import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorL
 import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
 import { getDailyPriceCacheStatus, flushDailyPricesToDb } from "@/lib/services/priceCache";
-import { getLeaderInfo, LEADER_SELF } from "@/lib/services/leader";
+import { getLeaderInfo, getLeaderWatchStatuses, LEADER_CLAIM_FAST_MS, LEADER_CLAIM_SLOW_MS, LEADER_HEARTBEAT_MS, LEADER_SELF, LEADER_STALENESS_MS } from "@/lib/services/leader";
 import { getReadMetrics } from "@/lib/services/readTier";
 import { getCacheMetrics } from "@/lib/cache";
 import {
@@ -16,6 +16,7 @@ import {
   clearCorrection,
   type TimeCorrectionRecord,
 } from "@/lib/services/timeCorrection";
+import { buildQueryConsumption, getOpsMonthlyState } from "@/lib/services/opsMonthly";
 
 /** v3.32.0: `probe_time` throttle — one on-demand Postgres NOW() per 30s per instance. */
 const DB_TIME_PROBE_THROTTLE_MS = 30_000;
@@ -103,6 +104,7 @@ export async function GET(req: Request) {
   // reads via its own probe). The Prisma dashboard remains authoritative; this
   // snapshot reflects the state right after the rollover check.
   const planLimit = Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000;
+  const monthlyPlanLimit = Number(process.env.DB_PLAN_LIMIT_OPS_MONTHLY) || 200_000;
   const currentDay = getIstDayKey();
   if (dbOpsCounter._day !== currentDay) {
     dbOpsCounter.reads = 0;
@@ -135,6 +137,7 @@ export async function GET(req: Request) {
   // restarts/deploys on the same IST day.
   sqlite?.persistOpsCounter();
   sqlite?.persistDbErrorCounts();
+  sqlite?.persistOpsMonthly();
 
   // Table row counts served from the SQLite mirror (the read tier).
   const prismaTableCounts: Record<string, number> = sqliteHealth?.sqlite.tables ?? {};
@@ -186,6 +189,15 @@ export async function GET(req: Request) {
     dailyPriceCache: priceCacheStatus,
     dbErrors,
     dbErrorSummary,
+    // v3.34.0: IST-monthly query-consumption ledger (mirrors the Prisma Console
+    // "Total Operations" figure; the 200K ops/mo plan resets on the 2nd). Built
+    // purely from the in-memory opsSnapshot above + the globalThis monthly
+    // state — zero Prisma ops on this path.
+    queryConsumption: buildQueryConsumption(
+      getOpsMonthlyState(),
+      { reads: opsSnapshot.reads, writes: opsSnapshot.writes },
+      monthlyPlanLimit,
+    ),
     // v3.22.0: write-behind queue stats + leader election status + liveness
     // heartbeats (SQLite-backed, zero Prisma footprint in the response path).
     writeBehind: getWriteBehindStats(),
@@ -209,6 +221,18 @@ export async function GET(req: Request) {
       worker: await getLeaderInfo("worker"),
       cronDaemon: await getLeaderInfo("cron-daemon"),
       sqliteSync: await getLeaderInfo("sqlite-sync"),
+    },
+    // v3.33.0 (spec 11): watchdog self-heal telemetry + tuning constants.
+    // leaderWatch = zero-Prisma in-memory registry (globalThis) fed by the
+    // watchLeaderRole loops in instrumentation.ts; leaderTuning = the staleness
+    // + heartbeat + claim cadences those loops run on. The `leader` block above
+    // stays the authoritative DB read; this is the live watchdog view.
+    leaderWatch: getLeaderWatchStatuses(),
+    leaderTuning: {
+      stalenessMs: LEADER_STALENESS_MS,
+      heartbeatMs: LEADER_HEARTBEAT_MS,
+      claimFastMs: LEADER_CLAIM_FAST_MS,
+      claimSlowMs: LEADER_CLAIM_SLOW_MS,
     },
     liveness: getSqliteFallback()?.getLivenessHeartbeats() ?? [],
   });

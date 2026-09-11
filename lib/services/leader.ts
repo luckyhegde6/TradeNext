@@ -31,9 +31,22 @@ export function leaderWorkerId(role: LeaderRole): string {
 }
 
 /** Staleness window — a heartbeat older than this means the leader is dead. */
-export const LEADER_STALENESS_MS = 15 * 60_000;
+// v3.33.0: 15 → 10 min (spec 11). A 15-min window meant a crashed leader's row
+// took 15+ min to look dead AND our heartbeat (5 min, 3x margin) was overkill;
+// 10 min keeps a full heartbeat margin (2x) while letting the watchdog re-claim
+// faster after a crash/recycle.
+export const LEADER_STALENESS_MS = 10 * 60_000;
 /** How often we refresh our leadership heartbeat. */
 export const LEADER_HEARTBEAT_MS = 300_000;
+/**
+ * Watchdog cadences (v3.33.0, spec 11). A standby re-probes the leader row on
+ * an ADAPTIVE schedule: slowly (300s) while another instance holds a FRESH
+ * row, or fast (60s) when the row is stale/absent so a dead leader is replaced
+ * quickly. Both sit far below the staleness window (10 min) yet stay DB-op
+ * cheap: steady-state standby = 1 `findUnique` per 300s per instance.
+ */
+export const LEADER_CLAIM_SLOW_MS = 300_000;
+export const LEADER_CLAIM_FAST_MS = 60_000;
 
 /** This instance's unique name (host-pid) so we can tell it's us. */
 export const LEADER_SELF = `${os.hostname()}-${process.pid}`;
@@ -175,7 +188,7 @@ export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
  * Periodically refresh OUR leadership heartbeat for `role` so the row never
  * goes stale inside LEADER_STALENESS_MS (which would let a standby instance
  * claim the lock and split leadership). Uses LEADER_HEARTBEAT_MS (5 min) which
- * is well under the 15-min staleness window (3x). Self-healing: if renewal stops
+ * is well under the 10-min staleness window (2x). Self-healing: if renewal stops
  * returning true (we lost the lock), stop renewing and notify via a callback.
  * Returns a stop() function.
  */
@@ -257,6 +270,191 @@ export async function getLeaderInfo(role: LeaderRole): Promise<LeaderRow | null>
   } catch {
     return null;
   }
+}
+
+// ─── Watchdog self-heal (v3.33.0, spec 11) ───────────────────────────────────
+//
+// Problem: the v3.22.0 model elected a leader ONCE at boot and NEVER re-claimed
+// the lock. If the leader crashed / was recycled, its heartbeat went stale and
+// NO standby ever claimed the row — the scheduler / worker engine stayed dead
+// FOREVER, and a manual admin "Start Engine" click was the only recovery.
+//
+// Fix: `watchLeaderRole` is a per-role watchdog loop. The standby watches the
+// leader row on an ADAPTIVE cadence (fast LEADER_CLAIM_FAST_MS when the row is
+// stale/absent, slow LEADER_CLAIM_SLOW_MS while another instance holds a fresh
+// row) and claims the lock as soon as the row looks dead. Claim success
+// (re)starts the engine via `onAcquired` and runs the EXISTING heartbeat; a
+// lost row keeps the existing `onLost` semantics (engine stop → back to
+// standby → fast re-probe). The atomic claim path itself is unchanged
+// (updateMany stale-claim → create → P2002 stand down) and the DB-unavailable
+// fail-open degrade is preserved.
+//
+// Ops budget (Plan 09): steady-state standby = 1 `findUnique` per 300s per
+// instance (~288 ops/day/instance); promotion paths only on claim.
+//
+// The per-role diagnostic status lives in a globalThis registry (mirrors
+// readTier) so db-health can render it with ZERO Prisma reads.
+
+export interface LeaderWatchHandlers {
+  /** Fired once when THIS instance acquires (or fail-open degrades into) leadership. */
+  onAcquired?: (role: LeaderRole) => void;
+  /** Fired once when THIS instance loses leadership (row taken / stop). */
+  onLost?: (role: LeaderRole) => void;
+}
+
+export interface LeaderWatchStatus {
+  role: LeaderRole;
+  phase: "standby" | "leader";
+  claimAttempts: number;
+  failOpenEvents: number;
+  lastClaimAt: string | null;
+  lastLostAt: string | null;
+  lastProbeAt: string | null;
+}
+
+// globalThis registry so db-health diagnostics work across module graphs.
+const watchGlobal = globalThis as unknown as { __leaderWatchStatus?: Record<string, LeaderWatchStatus> };
+
+/** In-memory watchdog status per role (zero Prisma). Used by /api/admin/db-health. */
+export function getLeaderWatchStatuses(): Record<string, LeaderWatchStatus> {
+  if (!watchGlobal.__leaderWatchStatus) watchGlobal.__leaderWatchStatus = {};
+  return watchGlobal.__leaderWatchStatus;
+}
+
+function newWatchStatus(role: LeaderRole): LeaderWatchStatus {
+  return {
+    role,
+    phase: "standby",
+    claimAttempts: 0,
+    failOpenEvents: 0,
+    lastClaimAt: null,
+    lastLostAt: null,
+    lastProbeAt: null,
+  };
+}
+
+/**
+ * Per-role watchdog loop (v3.33.0, spec 11). Stands by while another instance
+ * holds a fresh leader row, claims the lock as soon as the row is stale/absent,
+ * and re-claims after losing leadership — replacing the one-shot boot election.
+ *
+ * Cadence (adaptive, respects the DB-op budget):
+ *   - row FRESH & foreign → slow probe every LEADER_CLAIM_SLOW_MS (300s)
+ *   - row stale/absent/DB-down → claim now; while standing by, fast re-probe
+ *     every LEADER_CLAIM_FAST_MS (60s)
+ *   - while LEADER → no probing; the existing startLeaderHeartbeat owns renewal
+ *     and fires `onLost` when the row is taken → phase → standby → fast probe
+ *
+ * Returns a stop() that clears the probe timer AND stops the heartbeat.
+ */
+export function watchLeaderRole(role: LeaderRole, handlers: LeaderWatchHandlers = {}): () => void {
+  const status = (getLeaderWatchStatuses()[role] ??= newWatchStatus(role));
+  let phase: "standby" | "leader" = "standby";
+  let stopped = false;
+  let probeTimer: NodeJS.Timeout | null = null;
+  let heartbeatStop: (() => void) | null = null;
+
+  const syncStatus = () => {
+    status.phase = phase;
+  };
+
+  const scheduleProbe = (delayMs: number) => {
+    if (stopped || phase === "leader") return;
+    probeTimer = setTimeout(() => {
+      probeTimer = null;
+      void probe();
+    }, delayMs);
+    probeTimer.unref?.();
+  };
+
+  const onLost = (lostRole: LeaderRole) => {
+    if (stopped) return;
+    phase = "standby";
+    heartbeatStop = null;
+    status.lastLostAt = new Date().toISOString();
+    syncStatus();
+    handlers.onLost?.(lostRole);
+    scheduleProbe(LEADER_CLAIM_FAST_MS);
+  };
+
+  const probe = async () => {
+    if (stopped || phase === "leader") return;
+    status.lastProbeAt = new Date().toISOString();
+
+    let row: LeaderRow | null = null;
+    try {
+      row = await getLeaderInfo(role); // never throws (catches → null)
+    } catch {
+      row = null;
+    }
+
+    const freshForeign =
+      row !== null &&
+      row.workerName !== LEADER_SELF &&
+      Date.now() - row.lastHeartbeat.getTime() < LEADER_STALENESS_MS;
+
+    if (freshForeign) {
+      // Someone healthy leads — stay a standby, probe slowly.
+      scheduleProbe(LEADER_CLAIM_SLOW_MS);
+      return;
+    }
+
+    // Stale / absent row (or DB down) — try to claim.
+    status.claimAttempts += 1;
+    let acquired = false;
+    try {
+      acquired = await acquireLeaderLock(role);
+    } catch (error) {
+      logger.error({
+        msg: "watchLeaderRole claim failed — staying standby",
+        role,
+        workerId: leaderWorkerId(role),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (!acquired) {
+      scheduleProbe(LEADER_CLAIM_SLOW_MS); // another instance won the race
+      return;
+    }
+
+    // Distinguish a real DB claim from the fail-open degrade (DB down): a real
+    // claim leaves OUR row behind; fail-open leaves no readable row.
+    try {
+      const own = await getLeaderInfo(role);
+      if (own === null || own.workerName !== LEADER_SELF) status.failOpenEvents += 1;
+    } catch {
+      status.failOpenEvents += 1;
+    }
+
+    phase = "leader";
+    status.lastClaimAt = new Date().toISOString();
+    syncStatus();
+    logger.info({
+      msg: "watchLeaderRole acquired leadership",
+      role,
+      workerId: leaderWorkerId(role),
+      self: LEADER_SELF,
+    });
+    handlers.onAcquired?.(role);
+    heartbeatStop = startLeaderHeartbeat(role, onLost);
+  };
+
+  // Kick off the loop immediately (same timing as the old boot-time acquire).
+  scheduleProbe(0);
+
+  return () => {
+    stopped = true;
+    if (probeTimer) {
+      clearTimeout(probeTimer);
+      probeTimer = null;
+    }
+    if (heartbeatStop) {
+      heartbeatStop();
+      heartbeatStop = null;
+    }
+    syncStatus();
+  };
 }
 
 // Prisma unique-violation guard (code P2002).

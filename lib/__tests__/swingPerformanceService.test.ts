@@ -235,6 +235,102 @@ describe("evaluateSwingSignalStatus", () => {
     });
     expect(r.status).toBe("active"); // no valid level crossed
   });
+
+  // ── Touch semantics (v3.32.2) — target/stop hit by the intraday range ──
+
+  it("marks BUY target_achieved when the intraday HIGH touched the target (close below)", () => {
+    // PCJEWELLER-style: latest close 13.30 sits below target 13.91, but the
+    // daily high 14.10 crossed it intraday.
+    const r = evaluateSwingSignalStatus({
+      aiRecommendation: "BUY",
+      targetPrice: 13.91,
+      stopLoss: 10.4,
+      currentPrice: 13.3,
+      maxHighSincePosting: 14.1,
+      minLowSincePosting: 12.8,
+      postedDaysAgo: 7,
+    });
+    expect(r.status).toBe("target_achieved");
+    expect(r.reason).toContain("touched target");
+  });
+
+  it("marks BUY stop_loss_hit when the intraday LOW touched the stop (close above)", () => {
+    const r = evaluateSwingSignalStatus({
+      aiRecommendation: "BUY",
+      targetPrice: 2750,
+      stopLoss: 2375,
+      currentPrice: 2600,
+      maxHighSincePosting: 2650,
+      minLowSincePosting: 2360,
+      postedDaysAgo: 7,
+    });
+    expect(r.status).toBe("stop_loss_hit");
+    expect(r.reason).toContain("touched stop");
+  });
+
+  it("inverts touch comparisons for SELL (low touched below target / high touched the stop)", () => {
+    const target = evaluateSwingSignalStatus({
+      aiRecommendation: "SELL",
+      targetPrice: 2300,
+      stopLoss: 2600,
+      currentPrice: 2450, // close inside, low 2280 touched the below-target
+      maxHighSincePosting: 2480,
+      minLowSincePosting: 2280,
+      postedDaysAgo: 7,
+    });
+    expect(target.status).toBe("target_achieved");
+
+    const stop = evaluateSwingSignalStatus({
+      aiRecommendation: "SELL",
+      targetPrice: 2300,
+      stopLoss: 2600,
+      currentPrice: 2500, // close inside, high 2620 touched the above stop
+      maxHighSincePosting: 2620,
+      minLowSincePosting: 2480,
+      postedDaysAgo: 7,
+    });
+    expect(stop.status).toBe("stop_loss_hit");
+  });
+
+  it("keeps a signal active when the intraday range NEVER touched a level", () => {
+    const r = evaluateSwingSignalStatus({
+      aiRecommendation: "BUY",
+      targetPrice: 2750,
+      stopLoss: 2375,
+      currentPrice: 2600,
+      maxHighSincePosting: 2650,
+      minLowSincePosting: 2480,
+      postedDaysAgo: 1,
+    });
+    expect(r.status).toBe("active");
+  });
+
+  it("falls back to close-only evaluation when no intraday range is provided", () => {
+    // Close below target + no range → active (pre-v3.32.2 behaviour unchanged).
+    const r = evaluateSwingSignalStatus({
+      aiRecommendation: "BUY",
+      targetPrice: 2750,
+      stopLoss: 2375,
+      currentPrice: 2600,
+      maxHighSincePosting: null,
+      minLowSincePosting: null,
+      postedDaysAgo: 1,
+    });
+    expect(r.status).toBe("active");
+  });
+
+  it("target wins over stop on an intraday tie", () => {
+    const r = evaluateSwingSignalStatus({
+      aiRecommendation: "BUY",
+      targetPrice: 2500,
+      stopLoss: 2500,
+      currentPrice: 2400,
+      maxHighSincePosting: 2500, // touched both target and stop intraday
+      minLowSincePosting: 2500,
+      postedDaysAgo: 1,
+    });
+    expect(r.status).toBe("target_achieved");
+  });
 });
 
 // ─── checkSwingPerformance (DB path) ───────────────────────────────────────
@@ -404,5 +500,87 @@ describe("checkSwingPerformance", () => {
     // Bridge failure → price unresolvable → signal skipped, run still completes.
     expect(result.checked).toBe(0);
     expect(prisma.swingSignal.update).not.toHaveBeenCalled();
+  });
+
+  // ── Touch semantics via the intraday window query (v3.32.2) ──
+
+  it("flips a BUY signal when the intraday HIGH since posting crossed the target (close below)", async () => {
+    // PCJEWELLER-style: latest close 13.30 < target 13.91, but the window bar
+    // high 14.10 touched it. Query 1 = latest closes, query 2 = window bars.
+    prisma.swingSignal.findMany.mockResolvedValue([
+      makeSignal({ symbol: "PCJEWELLER", targetPrice: 13.91, stopLoss: 10.4 }),
+    ]);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ ticker: "PCJEWELLER", close: 13.3 }])
+      .mockResolvedValueOnce([
+        { ticker: "PCJEWELLER", tradeDate: new Date("2026-08-16T00:00:00.000Z"), high: 14.1, low: 12.8 },
+      ]);
+
+    const result = await checkSwingPerformance();
+    expect(result).toEqual(
+      expect.objectContaining({ checked: 1, targetAchieved: 1, stopLossHit: 0, expired: 0, updated: 1 }),
+    );
+    expect(prisma.swingSignal.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "sig-1" },
+        data: expect.objectContaining({
+          status: "target_achieved",
+          currentPrice: 13.3,
+          returnPercent: expect.closeTo((13.3 - 2500) / 2500 * 100, 5) as number,
+        }),
+      }),
+    );
+    // Audit carries the touch range so the flip is traceable.
+    expect(createAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SWING_SIGNAL_STATUS_CHANGED",
+        metadata: expect.objectContaining({
+          symbol: "PCJEWELLER",
+          newStatus: "target_achieved",
+          currentPrice: 13.3,
+          maxHighSincePosting: 14.1,
+          minLowSincePosting: 12.8,
+          reason: expect.stringContaining("touched target"),
+        }),
+      }),
+    );
+  });
+
+  it("flips a BUY signal to stop_loss_hit when the intraday LOW touched the stop (close above)", async () => {
+    prisma.swingSignal.findMany.mockResolvedValue([makeSignal()]); // target 2750 / stop 2375
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ ticker: "RELIANCE", close: 2600 }])
+      .mockResolvedValueOnce([
+        { ticker: "RELIANCE", tradeDate: new Date("2026-08-16T00:00:00.000Z"), high: 2620, low: 2360 },
+      ]);
+
+    const result = await checkSwingPerformance();
+    expect(result.stopLossHit).toBe(1);
+    expect(prisma.swingSignal.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "stop_loss_hit" }) }),
+    );
+  });
+
+  it("ignores bars BEFORE the signal was posted (per-signal window, no false positive)", async () => {
+    // One pre-posting bar has a high that WOULD cross the target — it must be
+    // excluded for a signal posted AFTER that bar. A global GROUP BY over the
+    // earliest posting would wrongly count it.
+    prisma.swingSignal.findMany.mockResolvedValue([
+      makeSignal({ postedAt: new Date("2026-08-15T10:00:00.000Z") }),
+    ]);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ ticker: "RELIANCE", close: 2500 }])
+      .mockResolvedValueOnce([
+        // tradeDate BEFORE postedAt → excluded; close-only eval keeps it active.
+        { ticker: "RELIANCE", tradeDate: new Date("2026-08-10T00:00:00.000Z"), high: 9999, low: 1 },
+      ]);
+
+    const result = await checkSwingPerformance();
+    // Status stays active (excluded bar → no touch); only the price is refreshed.
+    expect(result).toEqual(
+      expect.objectContaining({ checked: 1, targetAchieved: 0, stopLossHit: 0, expired: 0, updated: 1 }),
+    );
+    // No status key written (active) — price-only refresh.
+    expect(prisma.swingSignal.update.mock.calls[0][0].data.status).toBeUndefined();
   });
 });
