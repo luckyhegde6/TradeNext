@@ -1,7 +1,7 @@
 // lib/services/worker/worker-engine.ts
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { executeTask } from "./worker-service";
+import { executeTask, recordSystemRunOutcome } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
@@ -45,11 +45,20 @@ let lastHeartbeatTaskId: string | undefined;
 //
 // v3.17.0: STALE_MS raised to 45 min, TASK_TIMEOUT_MS to 40 min because
 // prod daily-recommendations still takes 30+ min on slow AI days (free-tier
-// OpenRouter models + retries + 20 batches). TASK_TIMEOUT_MS must stay below
-// STALE_MS so the Promise.race fires first — the catch block marks the task
-// "failed" cleanly instead of the reaper having to discover it.
+// OpenRouter models + retries + 20 batches).
+//
+// v3.37.0 (issue #119): TASK_TIMEOUT_MS raised 40→240 min and a per-task BUSY
+// heartbeat added (TASK_HEARTBEAT_MS below). The old "TASK_TIMEOUT_MS must
+// stay below STALE_MS" rule is GONE: while a task is owned, pollAndExecute
+// refreshes the Prisma worker_status heartbeat every TASK_HEARTBEAT_MS, so the
+// cross-instance reaper keeps the owner in its ALIVE set and never reaps a
+// healthy long-running task (prod: "Manual: Daily Recommendations (System)"
+// reaped mid-flight because the 5-min liveness timer writes SQLite only, so
+// the Prisma lastHeartbeat went stale and the owner looked dead). The 240-min
+// ceiling is now just a last-resort safety net for a truly wedged task.
 export const STALE_MS = 45 * 60_000;
-export const TASK_TIMEOUT_MS = 40 * 60_000; // hard ceiling on any single task execution
+export const TASK_TIMEOUT_MS = 240 * 60_000; // hard ceiling on any single task execution (v3.37.0: raised — busy heartbeat keeps the owner alive)
+export const TASK_HEARTBEAT_MS = 240_000; // v3.37.0: busy heartbeat — keep Prisma worker_status fresh during a long task
 const REAP_INTERVAL_MS = 300_000; // reaper throttled to once per 5 min (v3.30.x: was 1/min; each reap = up to 4 Prisma reads)
 const WORKER_ALIVE_WINDOW_MS = 10 * 60_000; // 10 min — 2x heartbeat cadence (5 min)
 // ─── SQLite-primary control plane (v3.25.x) ────────────────────────────────
@@ -301,8 +310,10 @@ export async function discoverPendingTask(): Promise<any | null> {
 
 /**
  * Poll for pending tasks and execute them one by one
+ *
+ * Exported for tests.
  */
-async function pollAndExecute() {
+export async function pollAndExecute() {
     // 1. Reap stale in-flight tasks (throttled to 1/5min) so a wedged
     // "running" task never blocks new work.
     await maybeReap();
@@ -340,6 +351,16 @@ async function pollAndExecute() {
     lastHeartbeatTaskId = task.id;
     // Write immediate heartbeat for task start (important for real-time status)
     await updateHeartbeat("busy", task.id);
+    // v3.37.0 (issue #119): periodic BUSY heartbeat while we own this task.
+    // The 5-min liveness timer writes SQLite ONLY (`pingLiveness`), so without
+    // this the Prisma worker_status.lastHeartbeat goes stale ~10 min into a
+    // long task and a cross-instance reaper considers us dead — reaping the
+    // healthy running task (prod: "Manual: Daily Recommendations (System)"
+    // reaped by worker-169.254.80.183). Cleared in finally below.
+    const taskHeartbeatTimer = setInterval(() => {
+        updateHeartbeat("busy", task.id).catch(() => {});
+    }, TASK_HEARTBEAT_MS);
+    taskHeartbeatTimer.unref?.();
     const taskLogger = createTaskLogger(task.id);
     await taskLogger.info(`Worker ${WORKER_ID} started task: ${task.name} [${task.taskType}]`);
 
@@ -348,11 +369,15 @@ async function pollAndExecute() {
         // v3.17.0: TASK_TIMEOUT_MS raised to 40 min — the daily-recommendations
         // pipeline (screener + AI pre-flight + 100-stock AI analysis in 20
         // batches × 5 concurrent) legitimately takes 25–35 min on prod with
-        // free-tier OpenRouter models. TASK_TIMEOUT_MS (40 min) is below
-        // STALE_MS (45 min) so the Promise.race fires first and marks the task
-        // "failed" cleanly. When the timeout fires, executeTask() continues in
-        // the background (we can't abort Prisma/HTTP calls cleanly), but the
-        // worker is free to pick up new work.
+        // free-tier OpenRouter models.
+        // v3.37.0 (issue #119): TASK_TIMEOUT_MS raised to 240 min as a pure
+        // last-resort safety net — a legitimately slow task is no longer
+        // failed by the old timeout-vs-STALE_MS race because the busy
+        // heartbeat keeps its owner alive for the reaper. When the timeout
+        // does fire, executeTask() continues in the background (we can't abort
+        // Prisma/HTTP calls cleanly), but the worker is free to pick up new
+        // work and the cron ledger gets the failure recorded here (before the
+        // failed-status write).
         const executePromise = executeTask(task.id, task.taskType, (task.payload as any) || {});
         const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error(`Task timed out after ${Math.round(TASK_TIMEOUT_MS / 60000)} min`)), TASK_TIMEOUT_MS),
@@ -387,6 +412,12 @@ async function pollAndExecute() {
         await taskLogger.info(`Task ${task.id} finished with status: ${result.success ? "completed" : "failed"}`);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        // v3.37.0 (issue #119): record the cron-ledger FAILURE first — the
+        // guard inside recordSystemRunOutcome requires the task status to
+        // still be "running". A late background continuation of executeTask()
+        // (we can't abort it after the timeout) will then skip: the status is
+        // flipped to "failed" below before that continuation finishes.
+        await recordSystemRunOutcome(task.id, task.taskType, false);
         await prisma.workerTask.update({
             where: { id: task.id },
             data: {
@@ -409,6 +440,8 @@ async function pollAndExecute() {
         });
         await taskLogger.error(`Task ${task.id} execution failed`, error);
     } finally {
+        // Stop the per-task busy heartbeat (v3.37.0, issue #119)
+        clearInterval(taskHeartbeatTimer);
         // Update tracked status — heartbeat interval will write to DB on next tick
         lastHeartbeatStatus = "idle";
         lastHeartbeatTaskId = undefined;
@@ -474,13 +507,21 @@ export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<
     try {
         const tasks = await prisma.workerTask.findMany({
             where: { status: "running", startedAt: { lte: cutoff } },
-            select: { id: true, assignedTo: true },
+            select: { id: true, assignedTo: true, taskType: true },
         });
         // Only reap tasks with NO owner or a DEAD owner — a task running on a
         // live worker is a legitimately long-running job (e.g. the AI analysis
         // loop), not a wedged one.
         const reapable = tasks.filter((t) => !t.assignedTo || !aliveWorkerIds!.has(t.assignedTo));
         if (reapable.length > 0) {
+            // v3.37.0 (issue #119): record the cron-ledger OUTCOME (failed)
+            // BEFORE the status write — the guard requires "running". Both
+            // calls are non-throwing; a task whose background executeTask()
+            // already completed in between skips on the status guard (no
+            // double-record).
+            for (const t of reapable) {
+                await recordSystemRunOutcome(t.id, t.taskType, false);
+            }
             await prisma.workerTask.updateMany({
                 where: { id: { in: reapable.map((t) => t.id) } },
                 data: {
@@ -679,6 +720,13 @@ export async function checkScheduledJobs() {
 // for STATEFUL transitions (busy/task-complete/stop) so the stale-task reaper
 // and admin dashboards keep a correct cross-instance view without per-tick
 // DB traffic.
+//
+// v3.37.0 (issue #119): this periodic tick writes SQLite ONLY — during a LONG
+// task the Prisma worker_status.lastHeartbeat went stale ~10 min into
+// execution and the cross-instance reaper considered the owner dead, reaping
+// the healthy running task. pollAndExecute now runs its OWN busy-heartbeat
+// interval (TASK_HEARTBEAT_MS) while it owns a task, keeping the Prisma row
+// fresh so a live owner is never reaped mid-flight.
 async function pingLiveness(): Promise<void> {
     try {
         const sqlite = await import("@/lib/sqlite");

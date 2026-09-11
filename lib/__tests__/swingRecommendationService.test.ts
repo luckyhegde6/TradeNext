@@ -40,7 +40,17 @@ jest.mock("@/lib/services/ai/config", () => ({
  */
 jest.mock("@/lib/prisma", () => ({
   __esModule: true,
-  default: { $queryRaw: jest.fn() },
+  default: {
+    $queryRaw: jest.fn(),
+    // swing's lazy Prisma fallback (mirror empty) reads the latest job
+    // directly; the default `undefined` return keeps the plain first-run
+    // (mirror + Prisma empty) orchestration path unchanged.
+    swingAnalysisJob: { findFirst: jest.fn() },
+  },
+}));
+
+jest.mock("@/lib/services/swingPerformanceService", () => ({
+  checkSwingPerformance: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("@/lib/sqlite", () => {
@@ -582,7 +592,11 @@ describe("getSwingRecommendations audit logging", () => {
   };
   const prisma = jest.requireMock("@/lib/prisma").default as {
     $queryRaw: jest.Mock;
+    swingAnalysisJob: { findFirst: jest.Mock };
   };
+  const { checkSwingPerformance } = jest.requireMock(
+    "@/lib/services/swingPerformanceService",
+  ) as { checkSwingPerformance: jest.Mock };
 
   const fakeUnified = {
     symbol: "RELIANCE",
@@ -632,6 +646,8 @@ describe("getSwingRecommendations audit logging", () => {
     swingJobs.length = 0;
     swingSignals.length = 0;
     prisma.$queryRaw.mockResolvedValue([]);
+    prisma.swingAnalysisJob.findFirst.mockResolvedValue(null);
+    checkSwingPerformance.mockResolvedValue(undefined);
     runChartinkUnifiedScreeners.mockResolvedValue([fakeUnified]);
     staticCache.flushAll();
   });
@@ -799,6 +815,125 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingJobs).toHaveLength(1); // no second job created
   });
 
+  it("serves an old done job indefinitely — no regeneration on plain loads", async () => {
+    swingJobs.push(
+      makeJobInput({
+        id: "job-old-done",
+        createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        status: "done",
+        payload: {
+          stocks: [fakeUnified],
+          analysisStatus: "done",
+          analysisError: null,
+        },
+      }),
+    );
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    runChartinkUnifiedScreeners.mockRejectedValue(new Error("scan should not run"));
+    const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
+    expect(res.analysisStatus).toBe("done");
+    expect(res.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
+    expect(swingJobs).toHaveLength(1); // no new job created
+  });
+
+  it("serves the newest done job when a stale pending job hides behind it — no auto-regen", async () => {
+    swingJobs.push(
+      makeJobInput({
+        id: "job-done-2h",
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        status: "done",
+        payload: {
+          stocks: [fakeUnified],
+          analysisStatus: "done",
+          analysisError: null,
+        },
+      }),
+      makeJobInput({
+        id: "job-stale-pending",
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        status: "pending",
+        payload: { stocks: [fakeUnified] },
+      }),
+    );
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
+    expect(res.analysisStatus).toBe("done");
+    expect(res.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
+    expect(swingJobs).toHaveLength(2); // no new job created
+    expect(checkSwingPerformance).not.toHaveBeenCalled();
+    // (The stale pending job's recovery to failed is covered by the
+    // "recovers a stale running job" test below — asserting it here would be
+    // timing-fragile because the kick is fire-and-forget.)
+  });
+
+  it("falls back to Prisma when the mirror is empty and serves a done job without re-scanning", async () => {
+    prisma.swingAnalysisJob.findFirst.mockResolvedValue(
+      makeJobInput({
+        id: "job-prisma-done",
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        status: "done",
+        payload: {
+          stocks: [fakeUnified],
+          analysisStatus: "done",
+          analysisError: null,
+        },
+      }) as unknown as Record<string, unknown>,
+    );
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
+    expect(prisma.swingAnalysisJob.findFirst).toHaveBeenCalledTimes(1);
+    expect(res.analysisStatus).toBe("done");
+    expect(res.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
+    expect(swingJobs).toHaveLength(0);
+    expect(staticCache.get("swing:recommendations:ai")).toBeDefined();
+  });
+
+  it("creates a durable pending job on a plain first load (mirror + Prisma empty), no in-memory-only run", async () => {
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
+    expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
+    expect(prisma.swingAnalysisJob.findFirst).toHaveBeenCalledTimes(1);
+    expect(swingJobs).toHaveLength(1);
+    expect(swingJobs[0].status).toBe("running"); // claimed by the processor
+    expect(res.analysisStatus).toBe("pending");
+  });
+
+  it("kicks a performance check when force-refreshing with a prior done job", async () => {
+    swingJobs.push(
+      makeJobInput({
+        id: "job-prior-done",
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        status: "done",
+        payload: {
+          stocks: [fakeUnified],
+          analysisStatus: "done",
+          analysisError: null,
+        },
+      }),
+    );
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: true, forceRefresh: true });
+    expect(checkSwingPerformance).toHaveBeenCalledTimes(1);
+    expect(res.analysisStatus).toBe("pending");
+    expect(swingJobs).toHaveLength(2);
+    expect(swingJobs.find((j) => j.id === "job-prior-done")?.status).toBe("done"); // not superseded
+    expect(swingJobs.find((j) => j.id !== "job-prior-done")?.status).toBe("running");
+    expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
+  });
+
   it("force refresh supersedes pending jobs so the UI refresh always wins", async () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
@@ -819,6 +954,8 @@ describe("getSwingRecommendations audit logging", () => {
     const fresh = swingJobs.find((j) => j.id !== "job-old")!;
     expect(fresh.status).toBe("running");
     expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
+    // No prior done/failed job existed (only pending) — the perf-check kick must not fire.
+    expect(checkSwingPerformance).not.toHaveBeenCalled();
   });
 
   it("does not double-run the analysis on concurrent processor kicks", async () => {
