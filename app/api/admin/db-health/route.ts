@@ -16,6 +16,7 @@ import {
   clearCorrection,
   type TimeCorrectionRecord,
 } from "@/lib/services/timeCorrection";
+import { buildQueryConsumption, getOpsMonthlyState } from "@/lib/services/opsMonthly";
 
 /** v3.32.0: `probe_time` throttle — one on-demand Postgres NOW() per 30s per instance. */
 const DB_TIME_PROBE_THROTTLE_MS = 30_000;
@@ -103,6 +104,7 @@ export async function GET(req: Request) {
   // reads via its own probe). The Prisma dashboard remains authoritative; this
   // snapshot reflects the state right after the rollover check.
   const planLimit = Number(process.env.DB_PLAN_LIMIT_OPS) || 10_000;
+  const monthlyPlanLimit = Number(process.env.DB_PLAN_LIMIT_OPS_MONTHLY) || 200_000;
   const currentDay = getIstDayKey();
   if (dbOpsCounter._day !== currentDay) {
     dbOpsCounter.reads = 0;
@@ -135,6 +137,7 @@ export async function GET(req: Request) {
   // restarts/deploys on the same IST day.
   sqlite?.persistOpsCounter();
   sqlite?.persistDbErrorCounts();
+  sqlite?.persistOpsMonthly();
 
   // Table row counts served from the SQLite mirror (the read tier).
   const prismaTableCounts: Record<string, number> = sqliteHealth?.sqlite.tables ?? {};
@@ -186,6 +189,15 @@ export async function GET(req: Request) {
     dailyPriceCache: priceCacheStatus,
     dbErrors,
     dbErrorSummary,
+    // v3.34.0: IST-monthly query-consumption ledger (mirrors the Prisma Console
+    // "Total Operations" figure; the 200K ops/mo plan resets on the 2nd). Built
+    // purely from the in-memory opsSnapshot above + the globalThis monthly
+    // state — zero Prisma ops on this path.
+    queryConsumption: buildQueryConsumption(
+      getOpsMonthlyState(),
+      { reads: opsSnapshot.reads, writes: opsSnapshot.writes },
+      monthlyPlanLimit,
+    ),
     // v3.22.0: write-behind queue stats + leader election status + liveness
     // heartbeats (SQLite-backed, zero Prisma footprint in the response path).
     writeBehind: getWriteBehindStats(),

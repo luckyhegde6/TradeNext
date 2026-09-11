@@ -14,6 +14,7 @@ import {
   TrashIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
+import type { QueryConsumption } from "@/lib/services/opsMonthly";
 
 interface DbErrorEntry {
   at: string;
@@ -42,6 +43,7 @@ interface DbHealthData {
       dayKey: string;
     };
   };
+  queryConsumption: QueryConsumption;
   sqlite: {
     ready: boolean;
     syncing: boolean;
@@ -623,13 +625,18 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache, time } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache, time, queryConsumption } = data;
   const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
     : 0;
   const planOpsPercent = prisma.ops.planLimit > 0
     ? Math.round((prisma.ops.totalOperations / prisma.ops.planLimit) * 100)
+    : 0;
+  // v3.34.0: monthly cumulative consumption (mirrors Prisma Console "Total
+  // Operations"; 200K ops/mo plan resets on the 2nd of every month).
+  const monthlyPlanPercent = queryConsumption?.planLimit > 0
+    ? Math.round((queryConsumption.totalOperations / queryConsumption.planLimit) * 100)
     : 0;
 
   return (
@@ -821,6 +828,74 @@ export default function DbHealthPage() {
           Prisma dashboard is authoritative. This counter is restored from a persisted SQLite snapshot on boot (60s interval) — resets on every deploy.
         </p>
       </div>
+
+      {/* Monthly Plan Ops bar — cumulative reads + writes vs monthly plan (v3.34.0) */}
+      {queryConsumption && (
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+              Monthly Query Consumption (Reads + Writes — {queryConsumption.monthKey})
+            </h3>
+            {monthlyPlanPercent > 80 && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                <ExclamationTriangleIcon className="w-4 h-4" />
+                Monthly Plan {monthlyPlanPercent}% Used
+              </span>
+            )}
+          </div>
+          <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+            <div
+              className={`h-4 rounded-full transition-all duration-500 ${
+                monthlyPlanPercent > 90
+                  ? "bg-red-500"
+                  : monthlyPlanPercent > 70
+                    ? "bg-amber-500"
+                    : "bg-emerald-500"
+              }`}
+              style={{ width: `${Math.min(monthlyPlanPercent, 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-2 text-xs text-gray-500 dark:text-slate-400">
+            <span>
+              {queryConsumption.totalOperations.toLocaleString()} / {queryConsumption.planLimit.toLocaleString()} ops
+              <span className="ml-2 text-gray-400">
+                ({queryConsumption.reads.toLocaleString()} reads · {queryConsumption.writes.toLocaleString()} writes)
+              </span>
+            </span>
+            <span>{queryConsumption.planOperationsRemaining.toLocaleString()} remaining</span>
+          </div>
+          <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+            Monthly cumulative — mirrors the Prisma Console "Total Operations" (200K ops/mo plan, resets on the 2nd).
+            Today's figure is the persisted high-water mark merged over the live counter, so it never
+            double-counts (v3.34.0). Persisted to the SQLite mirror on the 60s interval + boot restore for the
+            current IST month only; a new month starts at zero.
+          </p>
+          {queryConsumption.perDay.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-slate-400 border-b border-gray-200 dark:border-slate-700">
+                    <th className="py-1.5 pr-4 font-medium">Day (IST)</th>
+                    <th className="py-1.5 pr-4 font-medium text-right">Reads</th>
+                    <th className="py-1.5 pr-4 font-medium text-right">Writes</th>
+                    <th className="py-1.5 font-medium text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {queryConsumption.perDay.map((d) => (
+                    <tr key={d.day} className="border-b border-gray-100 dark:border-slate-800 last:border-0">
+                      <td className="py-1.5 pr-4 text-gray-700 dark:text-slate-300 font-mono">{d.day}</td>
+                      <td className="py-1.5 pr-4 text-right text-gray-700 dark:text-slate-300">{d.reads.toLocaleString()}</td>
+                      <td className="py-1.5 pr-4 text-right text-gray-700 dark:text-slate-300">{d.writes.toLocaleString()}</td>
+                      <td className="py-1.5 text-right font-semibold text-gray-900 dark:text-white">{(d.reads + d.writes).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Daily Price Cache */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">

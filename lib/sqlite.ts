@@ -18,13 +18,14 @@
 //   }
 
 import { randomUUID } from "crypto";
-import { existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError, isPlanLimitBreakerOpen, type DbErrorType } from "@/lib/db-utils";
 import { dbOpsCounter, dbErrorCounts, getIstDayKey } from "@/lib/prisma";
+import { foldOpsCounterIntoMonthly, getOpsMonthlyState, type OpsMonthlyEntry } from "@/lib/services/opsMonthly";
 import { resolveLogsDir } from "@/lib/logger";
 import { recordRead } from "@/lib/services/readTier";
 
@@ -243,6 +244,10 @@ export interface SqliteFallback {
   persistDbErrorCounts(): void;
   /** Restore the Prisma per-type DB error counts when they match today (IST). */
   restoreDbErrorCounts(): void;
+  /** Persist the IST-monthly query-consumption ledger into SQLite (`_backup_meta`). */
+  persistOpsMonthly(): void;
+  /** Restore the monthly query-consumption ledger when it matches the current IST month. */
+  restoreOpsMonthly(): void;
   /** Persist the admin time-correction record into SQLite (`_backup_meta`). */
   persistTimeCorrection(record: TimeCorrectionRecord): void;
   /** Remove the persisted admin time-correction record (never throws). */
@@ -440,7 +445,27 @@ let _SQL: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getSqlJs(): Promise<any> {
   if (_SQL) return _SQL;
-  const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
+  // v3.34.1 (gate-fix): load the wasm synchronously via `wasmBinary`. Without
+  // it sql.js's emscripten glue runs its BROWSER branch which does an async
+  // `fetch()` + `instantiateStreaming` for the wasm — on CI the wasm file
+  // resolves to a nonexistent path, the fetch fails, and the glue fires
+  // `console.error` AFTER the owning Jest test file finished → Jest 30
+  // "Cannot log after tests are done" fails an unrelated next test in that
+  // worker (the cron-daemon fireJob CI flake). Passing `wasmBinary` skips the
+  // fetch/streaming path entirely (same pattern as sqlite.test.ts). Fall back
+  // to locateFile when no wasm file exists at all (resolveSqlWasm falls back
+  // to the bare file name, which cannot exist).
+  const wasmPath = resolveSqlWasm("sql-wasm.wasm");
+  // readFileSync returns a Buffer (a Uint8Array view); initSqlJs's wasmBinary
+  // option is typed ArrayBuffer — slice the underlying buffer to the exact
+  // byte range (safe for pooled Buffers) and pass that.
+  const wasmBytes = existsSync(wasmPath) && wasmPath !== "sql-wasm.wasm" ? readFileSync(wasmPath) : null;
+  const SQL =
+    wasmBytes
+      ? await initSqlJs({
+          wasmBinary: wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength),
+        })
+      : await initSqlJs({ locateFile: resolveSqlWasm });
   _SQL = SQL;
   return SQL;
 }
@@ -1416,6 +1441,7 @@ export async function initSqliteBackup(): Promise<void> {
     // per-type DB error counts (v3.21.1).
     restoreOpsCounter();
     restoreDbErrorCounts();
+    restoreOpsMonthly();
     // Move any pre-init buffered log writes into the queue now that SQLite is
     // ready (v3.22.0 write-behind).
     drainWriteBehindBuffer();
@@ -1434,6 +1460,7 @@ export async function initSqliteBackup(): Promise<void> {
     try {
       persistOpsCounter();
       persistDbErrorCounts();
+      persistOpsMonthly();
     } catch {
       // non-fatal
     }
@@ -1634,6 +1661,60 @@ export function restoreOpsCounter(): void {
   }
 }
 
+// ─── Monthly query-consumption ledger persistence (v3.34.0) ────────────────
+// Folds today's live `dbOpsCounter` into the IST-monthly ledger (lib/services/
+// opsMonthly.ts, globalThis `__opsMonthly`) and snapshots it into the SQLite
+// backup (key `ops_monthly`) on the same 60s timer as the daily ops counter.
+// Restore merges with `Math.max` so a restored snapshot can never shrink the
+// ledger. A snapshot for a different IST month is discarded (the Prisma plan
+// resets monthly — a new month starts at zero). Writes go to the local SQLite
+// only -- zero Prisma ops added.
+
+const OPS_MONTHLY_KEY = "ops_monthly";
+
+interface PersistedOpsMonthly {
+  monthKey: string;
+  days: Record<string, OpsMonthlyEntry>;
+}
+
+/** Fold the live counter into the monthly ledger and persist it to SQLite. */
+export function persistOpsMonthly(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    foldOpsCounterIntoMonthly(getOpsMonthlyState(), getIstDayKey(), dbOpsCounter);
+    const snapshot: PersistedOpsMonthly = {
+      monthKey: getOpsMonthlyState().monthKey,
+      days: getOpsMonthlyState().days,
+    };
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [
+      OPS_MONTHLY_KEY,
+      JSON.stringify(snapshot),
+    ]);
+  } catch (err) {
+    logger.error({ msg: "SQLite: persist monthly ops ledger failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Restore the persisted monthly ledger IF its month matches the current IST
+ *  month; stale (previous-month) or missing snapshots are ignored so a new
+ *  month starts at zero. Merged idempotently (Math.max per day). */
+export function restoreOpsMonthly(): void {
+  if (!state.db || !state.ready) return;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [OPS_MONTHLY_KEY]);
+    if (!result.length || !result[0].values.length) return;
+    const raw = result[0].values[0][0];
+    if (typeof raw !== "string") return;
+    const persisted = JSON.parse(raw) as PersistedOpsMonthly;
+    if (persisted.monthKey !== getOpsMonthlyState().monthKey) return;
+    for (const [day, entry] of Object.entries(persisted.days ?? {})) {
+      foldOpsCounterIntoMonthly(getOpsMonthlyState(), day, entry);
+    }
+  } catch (err) {
+    logger.error({ msg: "SQLite: restore monthly ops ledger failed", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 /**
  * Start a background timer that snapshots the Prisma ops counter AND the
  * per-type DB error counts into SQLite every 60s. Idempotent. Called from
@@ -1644,6 +1725,7 @@ export function startOpsCounterPersistence(): void {
   state.opsPersistTimer = setInterval(() => {
     persistOpsCounter();
     persistDbErrorCounts();
+    persistOpsMonthly();
   }, OPS_PERSIST_INTERVAL_MS);
 }
 
@@ -5975,6 +6057,8 @@ upsertTransaction(row: Record<string, unknown>): void {
     restoreOpsCounter,
     persistDbErrorCounts,
     restoreDbErrorCounts,
+    persistOpsMonthly,
+    restoreOpsMonthly,
     persistTimeCorrection,
     deleteTimeCorrection,
     restoreTimeCorrection,

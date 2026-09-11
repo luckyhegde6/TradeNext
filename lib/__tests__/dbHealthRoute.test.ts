@@ -32,6 +32,11 @@ import {
   getTimeDiagnostics,
 } from "@/lib/services/timeCorrection";
 import { restoreSqliteBackup } from "@/lib/sqlite";
+import {
+  foldOpsCounterIntoMonthly,
+  getOpsMonthlyState,
+  resetOpsMonthlyForTests,
+} from "@/lib/services/opsMonthly";
 
 jest.mock("@/lib/auth", () => ({ auth: jest.fn() }));
 jest.mock("@/lib/logger", () => ({
@@ -200,5 +205,54 @@ describe("GET /api/admin/db-health — leader watchdog block (v3.33.0)", () => {
       claimSlowMs: 300_000,
     });
     expect(json.liveness).toEqual([]);
+  });
+});
+
+describe("GET /api/admin/db-health — queryConsumption monthly ledger (v3.34.0)", () => {
+  beforeEach(() => {
+    resetOpsMonthlyForTests();
+  });
+
+  it("returns the v3.34.0 monthly query-consumption block (seeded ledger + merged today)", async () => {
+    foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-09-09", { reads: 100, writes: 20 });
+
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.queryConsumption).toEqual({
+      monthKey: "2026-09",
+      reads: 100,
+      writes: 20,
+      totalOperations: 120,
+      planLimit: 200000,
+      planOperationsRemaining: 199880,
+      today: { dayKey: "2026-09-10", reads: 0, writes: 0 },
+      perDay: [
+        { day: "2026-09-10", reads: 0, writes: 0 },
+        { day: "2026-09-09", reads: 100, writes: 20 },
+      ],
+    });
+  });
+
+  it("always includes today's 0/0 row on an empty ledger", async () => {
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.queryConsumption.monthKey).toBe("2026-09");
+    expect(body.queryConsumption.reads).toBe(0);
+    expect(body.queryConsumption.writes).toBe(0);
+    expect(body.queryConsumption.totalOperations).toBe(0);
+    expect(body.queryConsumption.planLimit).toBe(200000);
+    expect(body.queryConsumption.planOperationsRemaining).toBe(200000);
+    expect(body.queryConsumption.perDay).toEqual([{ day: "2026-09-10", reads: 0, writes: 0 }]);
+  });
+
+  it("rejects unauthenticated requests with 401", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("Unauthorized");
   });
 });

@@ -1,8 +1,24 @@
 # Session Todos
 
-## Current (v3.33.0 — Leader watchdog self-heal; v3.33.1 — Swing touch-tracking fix)
+## Current (v3.34.0 + v3.34.1 — Monthly Query Consumption + sql.js WASM gate fix; v3.33.0 + v3.33.1 — Leader watchdog + Swing touch-tracking — MERGED into PR #118 branch `fix/leader-watchdog-self-heal`)
 
-Branch `fix/leader-watchdog-self-heal`, on top of committed v3.32.1 `bcde7ae`. **v3.33.0 + v3.33.1 VERIFIED + docs updated + session-todos/HANDOFF/latest.md rewritten; COMMIT 1 (watchdog + docs) + COMMIT 2 (swing only) pending; no push/merge/deploy without user approval.**
+**User directive** (v3.31.0): plan limit **MONTHLY 200K ops/mo (resetting 2nd)** + Prisma calls only at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between. db-health only showed TODAY's ops; with a monthly plan that's the wrong unit and a restarted instance loses the month's history → implements the deferred Plan 09 rev-v3 c/d monthly-ops window (`query_cache` STAYS deferred).
+
+**Shipped (code complete + tests verified; docs complete; branch `feat/db-health-monthly-ops` on top of committed v3.30.0 `653b617`, MERGED into PR #118 branch `fix/leader-watchdog-self-heal`; DO NOT PUSH/MERGE PR #118 without user approval)**:
+- [x] NEW pure `lib/services/opsMonthly.ts` — `OpsMonthlyState {monthKey, days}` on globalThis `__opsMonthly`; monthKey = `getIstDayKey().slice(0,7)`; `getOpsMonthlyState()` lazy seed + fresh ledger at rollover; `foldOpsCounterIntoMonthly()` idempotent `Math.max` high-water merge; `buildQueryConsumption()` pure (live merged over persisted, no double count; perDay newest-first ≤31; `DB_PLAN_LIMIT_OPS_MONTHLY` default 200_000); ONLY import `getIstDayKey`, NEVER invoked at module load — DONE
+- [x] `lib/sqlite.ts` +64 — `persistOpsMonthly()`/`restoreOpsMonthly()` (iface :244-250) under `_backup_meta` `"ops_monthly"` (:1653); init restore (:1421) + after-sync persist (:1440) + 60s tick fold (:1705); stale previous-month snapshots discarded — DONE
+- [x] db-health GET `queryConsumption` (+12) + "Monthly Query Consumption" card (+77); `.env.example` +5; no hot-path change (`lib/prisma.ts` = 6-line comment) — DONE
+- [x] Tests — sqlite **83/83**; targeted **94/94** across 7 suites; tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 files +310/−2 + 2 new — DONE
+- [x] Test-trap (Lesson #114): sqlite monthly test-3 ends `await ensureSqliteBackup();` BEFORE `resetOpsMonthlyForTests()` — DONE
+- [x] Docs — `.agents/changelog/versions-v3.34.md` NEW + `.agents/sessions/2026-09-11-monthly-ops/` (decisions + flow) + AGENTS.md v3.34.0 row + CHANGELOG index + TODO.md row + agent-memory — DONE
+- [x] Docs — Primer (Last Updated + Current Project Status) + Lessons #113 + Update Log + HANDOFF.md + latest.md handoff rewrite + session-todos (this file) — DONE
+- [x] v3.34.1 — sql.js WASM async-load gate fix (`d91fb01` on `feat/db-health-monthly-ops`, merged into PR #118 branch): `getSqlJs()` loads `sql-wasm.wasm` SYNCHRONOUSLY via `wasmBinary` (`fs.readFileSync`, try/catch per candidate path), memoized — zero "Cannot log after tests are done" noise; sqlite + cron-daemon 88/88 under CI=true --runInBand; full 1154 pass / 4 skip / 1 fail (pre-existing flake); tsc 46 — DONE
+- [ ] **Deferred**: `query_cache` (Plan 09 rev-v3 c/d)
+- [ ] **PR #118 (v3.33.0 + v3.33.1 + v3.34.0 + v3.34.1 ALL merged into `fix/leader-watchdog-self-heal`) — PUSH/MERGE/DEPLOY PENDING USER** (no push/merge/deploy without explicit approval; run `/pre-commit-check` first)
+
+## Completed earlier (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
+
+Branch `fix/leader-watchdog-self-heal`, on top of committed v3.32.1 `bcde7ae`. **v3.33.0 + v3.33.1 VERIFIED + docs updated + COMMITTED (`6e22eca` + `f86d9d0`); v3.34.0 + v3.34.1 MERGED into this branch (`5d754b7` + `d91fb01`); PR #118 push/merge/deploy pending user approval.**
 
 **User directive (v3.33.0)**: "don't let this happen again" — prod scheduler dead since ~2026-09-08 07:06 UTC with NO automatic recovery (recovery = manual admin "Start Engine" click).
 **ROOT CAUSE (v3.33.0)**: leadership was ONE-SHOT — `acquireLeaderLock()` at boot + `startLeaderHeartbeat(role, onLost)`; v3.28.2 STOPPED worker/cron engines on `onLost` but NOTHING ever re-acquired → after a lost/stale claim every instance stays a standby poller forever.
@@ -24,10 +40,22 @@ Branch `fix/leader-watchdog-self-heal`, on top of committed v3.32.1 `bcde7ae`. *
 
 **v3.32.1 (committed `bcde7ae`, NOT deployed)**: commit DONE by previous workstream `bcde7ae fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)` — live admin Save Correction still 400s until merged/deployed; `probe_time` live DB check + durable Netlify `TZ`/`UTC` env fix still deferred.
 
-- [ ] **COMMIT 1 (v3.33.0 watchdog)** — stage: watchdog code/tests (`lib/services/leader.ts`, `instrumentation.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `lib/__tests__/leaderWatch.test.ts`, `lib/__tests__/instrumentation.test.ts`, `lib/__tests__/dbHealthRoute.test.ts`, `lib/__tests__/cron-daemon.test.ts`, `lib/__tests__/leader.test.ts`, `lib/__tests__/sqlite.test.ts`) + plan/spec (`11-scheduler-self-heal.md` under `.agents/plans/` + `.agents/specs/`) + ALL doc files (AGENTS.md, `.agents/CHANGELOG.md`, TODO.md, Lessons.md, Primer.md, agent-memory.md, `.agents/changelog/versions-v3.33.md`, session-todos.md, HANDOFF.md, latest.md); message `feat(leader): v3.33.0 watchdog self-heal — watchLeaderRole replaces one-shot boot election (spec 11)`; run `/pre-commit-check` first
-- [ ] **COMMIT 2 (v3.33.1 swing)** — stage ONLY `lib/services/swingPerformanceService.ts` + `lib/__tests__/swingPerformanceService.test.ts`; message `fix(swing): v3.33.1 touch-tracking — intraday HIGH/LOW counts as target/stop hit`; run `/pre-commit-check` first
-- [ ] Delete `.dev-otel.log` before commits
-- [ ] No push/merge/deploy without explicit user approval
+- [ ] **PR #118 (merge of v3.33.0/v3.33.1 + v3.34.0/v3.34.1) — PUSH + MERGE PENDING USER** (all committed `6e22eca`/`f86d9d0`/`5d754b7`/`d91fb01`; run `/pre-commit-check` first; no push/merge/deploy without explicit user approval)
+
+**Shipped**: v3.32.0 MERGED to `main` via PR #117 `38a27bf` (`e74ae54` feat · `df7959d` docs · `b75deb0` docs update); **v3.32.1 hotfix on working tree (HEAD `b75deb0`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
+- [x] `lib/sqlite.ts` probe + persistence (`probeDbTimeNow`, keys `time_correction`/`time_probe_db`, `IST_OFFSET_MINUTES = 330`, `TIME_ALIGN_TOLERANCE_MS = 60s`; types `:1753-1789`, fallback `:5978-5983`)
+- [x] NEW `lib/services/timeCorrection.ts` (`offsetMinutes = trueNow − serverNow`; `applyOffset` identity@0; `getCorrectedNow()`/`getCronFrom()` lazy read-through; `getTimeDiagnostics()`)
+- [x] db-health POST `probe_time` (30s throttle) / `set_time_correction` / `clear_time_correction` + GET zero-Prisma `time`
+- [x] Time Synchronisation card in db-health UI; `lib/audit.ts` +2 actions
+- [x] Wiring `getCronFrom()`/`getCorrectedNow()` in `recommendationCronService.ts` + `worker-engine.ts` (nextRun + due-claim)
+- [x] Tests — `timeCorrection.test.ts` 20/20, sqlite 71/71, targeted **118/118**, full **1106/4/1** (1 = documented pre-existing flake), tsc 46 = baseline, no migration, no new packages
+- [x] Docs — versions-v3.32.md, AGENTS/CHANGELOG/TODO rows, Primer, agent-memory, Lessons #111, session archive
+- [x] v3.32.1 root cause: POST `app/api/admin/db-health/route.ts` re-reads `req.json()` in `restore` (~:272) and `set_time_correction` (~:434) after the top read (:238) — Web `Request` body single-use (`bodyUsed`) → both 400 (`"Invalid restore payload"` since v3.21.2; `"Invalid payload"` in v3.32.0)
+- [x] v3.32.1 fix (route only): hoisted `let action = "sync_sqlite"; let requestBody = {}; try { requestBody = (await req.json()) ... }` at POST top with `// v3.32.1 fix: parse the body ONCE here and reuse requestBody`; `restore`/`set_time_correction` reuse typed `requestBody` → honest 400s (`"Missing base64 sqlite data"` / zod `"istDateTime is required"`)
+- [x] v3.32.1 regression: NEW `lib/__tests__/dbHealthRoute.test.ts` **5/5** (real `Request` via `jsonPost` helper enforcing `bodyUsed`); tsc **46 = exact baseline (0 new)**; no migration; no new packages
+- [x] v3.32.1 live-verified (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors
+- [x] v3.32.1 docs: AGENTS.md v3.32.1 row + v3.32.0 MERGED amend, versions-v3.32.md v3.32.1 section, CHANGELOG index + TODO.md rows, HANDOFF.md, Primer.md, Lessons #112, agent-memory, latest.md handoff rewrite, sessions flow/decisions
+- [x] v3.32.1 **COMMITTED** `bcde7ae` (route + test + docs, 16 files) + docs `7e21569` (CHANGELOG.md) — live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
 
 ## Completed earlier (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
 
@@ -109,3 +137,4 @@ Branch: `fix/v3.28.1-sqlite-self-heal` (on top of v3.28.5 `6700076`, committed u
 - [ ] **REQUIRED (Dec 1 2026 Accelerate retirement)**: Phase 0 — manual Prisma Postgres provisioning in Prisma Console at deploy-time (no code); post-move, `withAccelerate()` wrapper may be dropped (Prisma Postgres caches by default; `PRISMA_ACCELERATE_CACHE_TTL` remains the knob); `DATABASE_URL`+`DIRECT_URL` already documented (v3.20.5). See BUGS.md #14 + `.agents/specs/05-prisma-postgres-migration.md`
 - [ ] Post-deploy: live-verify `/admin/utils/db-health` on Netlify (SQLite Ready + Total Ops restored + Cache & Read-Tier Utilisation card)
 - [ ] Prod (post-hold): corporate-actions backfill; remove Prisma Postgres extension from Netlify Dashboard then deploy
+
