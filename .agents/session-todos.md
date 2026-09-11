@@ -1,6 +1,21 @@
 # Session Todos
 
-## Current (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
+## Current (v3.34.0 — Monthly Query Consumption — db-health monthly-ops window, Plan 09 rev-v3 c/d)
+
+**User directive** (v3.31.0): plan limit **MONTHLY 200K ops/mo (resetting 2nd)** + Prisma calls only at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between. db-health only showed TODAY's ops; with a monthly plan that's the wrong unit and a restarted instance loses the month's history → implements the deferred Plan 09 rev-v3 c/d monthly-ops window (`query_cache` STAYS deferred).
+
+**Shipped (code complete + tests verified, docs phase in progress; branch `feat/db-health-monthly-ops`, on top of committed v3.30.0 `653b617`; DO NOT COMMIT/PUSH/MERGE without user approval)**:
+- [x] NEW pure `lib/services/opsMonthly.ts` — `OpsMonthlyState {monthKey, days}` on globalThis `__opsMonthly`; monthKey = `getIstDayKey().slice(0,7)`; `getOpsMonthlyState()` lazy seed + fresh ledger at rollover; `foldOpsCounterIntoMonthly()` idempotent `Math.max` high-water merge; `buildQueryConsumption()` pure (live merged over persisted, no double count; perDay newest-first ≤31; `DB_PLAN_LIMIT_OPS_MONTHLY` default 200_000); ONLY import `getIstDayKey`, NEVER invoked at module load — DONE
+- [x] `lib/sqlite.ts` +64 — `persistOpsMonthly()`/`restoreOpsMonthly()` (iface :244-250) under `_backup_meta` `"ops_monthly"` (:1653); init restore (:1421) + after-sync persist (:1440) + 60s tick fold (:1705); stale previous-month snapshots discarded — DONE
+- [x] db-health GET `queryConsumption` (+12) + "Monthly Query Consumption" card (+77); `.env.example` +5; no hot-path change (`lib/prisma.ts` = 6-line comment) — DONE
+- [x] Tests — sqlite **83/83**; targeted **94/94** across 7 suites; tsc **46 = exact baseline (0 new)**; no migration; no new packages; diff 7 files +310/−2 + 2 new — DONE
+- [x] Test-trap (Lesson #113): sqlite monthly test-3 ends `await ensureSqliteBackup();` BEFORE `resetOpsMonthlyForTests()` — DONE
+- [x] Docs — `.agents/changelog/versions-v3.34.md` NEW + `.agents/sessions/2026-09-11-monthly-ops/` (decisions + flow) + AGENTS.md v3.34.0 row + CHANGELOG index + TODO.md row + agent-memory — DONE
+- [x] Docs — Primer (Last Updated + Current Project Status) + Lessons #113 + Update Log + HANDOFF.md + latest.md handoff rewrite + session-todos (this file) — DONE
+- [ ] **COMMIT + PUSH + NEW PR PENDING USER** (no merge/deploy without explicit approval; do NOT reuse PR #118; run `/pre-commit-check` first)
+- [ ] **Deferred**: `query_cache` (Plan 09 rev-v3 c/d)
+
+## Completed earlier (v3.32.1 — db-health POST body-parsed-once hotfix; v3.32.0 MERGED via PR #117 `38a27bf`)
 
 **User directive**: "in admin db health screen display server time and db time. and also admin can enter ist time so if server time is misaligned it can be corrected through admin entered input for timezone corrections."
 
@@ -19,7 +34,7 @@
 - [x] v3.32.1 regression: NEW `lib/__tests__/dbHealthRoute.test.ts` **5/5** (real `Request` via `jsonPost` helper enforcing `bodyUsed`); tsc **46 = exact baseline (0 new)**; no migration; no new packages
 - [x] v3.32.1 live-verified (Playwright :3000 admin db-health): Save Correction → `"Correction saved: server clock is 1 min SLOW (offset 1)"` + chip + footnote `"Active offset: 1 min"`; Clear → `"No correction saved — using the raw server clock"`; 0 console errors
 - [x] v3.32.1 docs: AGENTS.md v3.32.1 row + v3.32.0 MERGED amend, versions-v3.32.md v3.32.1 section, CHANGELOG index + TODO.md rows, HANDOFF.md, Primer.md, Lessons #112, agent-memory, latest.md handoff rewrite, sessions flow/decisions
-- [ ] **COMMIT PENDING USER** (v3.32.1: route + test + docs; do NOT include unrelated v3.28.x-era working-tree changes; message `fix(admin): v3.32.1 db-health POST body-parsed-once (restore + set_time_correction)`; run `/pre-commit-check` first); live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
+- [x] v3.32.1 **COMMITTED** `bcde7ae` (route + test + docs, 16 files) + docs `7e21569` (CHANGELOG.md) — live `probe_time` DB check deferred (Postgres not running); durable `TZ`/`UTC` env fix on Netlify deferred
 
 ## Completed earlier (v3.31.0 — SQLite-first NSE read architecture + low-frequency Prisma sync, Plan 09)
 
