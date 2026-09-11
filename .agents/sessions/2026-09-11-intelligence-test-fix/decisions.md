@@ -2,7 +2,7 @@
 
 > Decision journal for the v3.35.0 session. Format per `.agents/sessions/README.md`.
 > Branch: PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`).
-> Test-only +21 UNCOMMITTED; docs phase done; diff/commit pending user (no push/merge/deploy without explicit approval).
+> Test-only +21 COMMITTED `2036724` + PUSHED (user-approved push); PR #118 merge/deploy pending user (no merge/deploy without explicit approval).
 
 ## D1. Fix the CI flake at the source — mock `@/lib/prisma` inside `intelligence.test.ts`
 

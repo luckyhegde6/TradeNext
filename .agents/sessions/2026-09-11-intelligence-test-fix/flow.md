@@ -1,8 +1,8 @@
 # Session Flow — 2026-09-11 — v3.35.0 Flaky intelligence.test.ts CI fix
 
 > Execution trace for the v3.35.0 session (branch `fix/leader-watchdog-self-heal`).
-> Working tree: `lib/__tests__/intelligence.test.ts` (+21 test-only) + doc files (docs phase done).
-> Commit pending user approval; no push/merge/deploy of PR #118 without explicit approval.
+> Working tree: clean at HEAD `2036724` (`lib/__tests__/intelligence.test.ts` +21 test-only + all docs committed and pushed per user approval).
+> PR #118 merge/deploy pending user; no merge/deploy of PR #118 without explicit approval.
 
 ## Objective
 Kill the "documented pre-existing flake" (`intelligence.test.ts`, since v3.25.0):
@@ -46,16 +46,17 @@ real-DB writes in tests); first fully-green full run.
 - Doc files (see docs phase list above).
 
 ## git status (working tree)
-- Branch `fix/leader-watchdog-self-heal` (HEAD `05b91e8` = v3.34.1 merge; v3.33.0
-  `6e22eca` + v3.33.1 `f86d9d0` + v3.34.0 `5d754b7` + v3.34.1 `d91fb01` all merged
-  into PR #118 branch)
-- Modified: `lib/__tests__/intelligence.test.ts` (+21) + docs (AGENTS.md, CHANGELOG,
-  TODO.md, Primer.md, Lessons.md, agent-memory.md, session-todos.md, HANDOFF.md,
-  latest.md)
-- Untracked: `.agents/changelog/versions-v3.35.md`,
-  `.agents/sessions/2026-09-11-intelligence-test-fix/` (decisions.md + flow.md)
+- Branch `fix/leader-watchdog-self-heal` (HEAD `2036724` = v3.35.0 committed + pushed;
+  v3.33.0 `6e22eca` + v3.33.1 `f86d9d0` + v3.34.0 `5d754b7` + v3.34.1 `d91fb01`
+  all merged into PR #118 branch)
+- Committed `2036724` (13 files, +228/−18): `lib/__tests__/intelligence.test.ts` (+21)
+  + docs (AGENTS.md, CHANGELOG, TODO.md, Primer.md, Lessons.md, agent-memory.md,
+  session-todos.md, HANDOFF.md, latest.md) + new `.agents/changelog/versions-v3.35.md`
+  + `.agents/sessions/2026-09-11-intelligence-test-fix/` (decisions.md + flow.md);
+  pushed `f86d9d0..2036724` per user approval
 
-## Next
-`/pre-commit-check` (delete `.dev-otel.log` if present; verify git status) -> present
-full diff (code +21 + docs) -> commit ONLY on explicit user approval ->
-**no push/merge/deploy of PR #118 without explicit user approval**.
+## Next (this pass — docs-sync Batch E)
+`/pre-commit-check` (delete `.dev-otel.log` if present; verify git status) -> commit
+docs-only sync (v3.35.0 stale "UNCOMMITTED / pending user" text -> committed `2036724`
++ pushed state, 12 doc files) -> push to `fix/leader-watchdog-self-heal` ->
+**no merge/deploy of PR #118 without explicit user approval**.

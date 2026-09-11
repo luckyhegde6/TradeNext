@@ -3,16 +3,16 @@ handoff: v3.35.0-intelligence-test-fix
 session_id: v3.35.0-intelligence-test-fix
 date: 2026-09-11
 branch: fix/leader-watchdog-self-heal (on top of v3.34.1 merge 05b91e8; v3.33.0 6e22eca + v3.33.1 f86d9d0 + v3.34.0 5d754b7 + v3.34.1 d91fb01 all merged into this PR #118 branch)
-last_commits: 05b91e8 (v3.34.1 merge into PR #118 branch), d91fb01 (v3.34.1 wasm gate fix), 5d754b7 (v3.34.0 monthly ops), f86d9d0 (v3.33.1 swing), 6e22eca (v3.33.0 watchdog), bcde7ae (v3.32.1 committed)
+last_commits: 2036724 (v3.35.0 committed + pushed), 05b91e8 (v3.34.1 merge into PR #118 branch), d91fb01 (v3.34.1 wasm gate fix), 5d754b7 (v3.34.0 monthly ops), f86d9d0 (v3.33.1 swing), 6e22eca (v3.33.0 watchdog), bcde7ae (v3.32.1 committed)
 dev: local :3000 (dev PID 12096 — do not kill; MCP 4096 do not kill; pg docker 5432 do not kill)
 status: in_progress
-commit: pending user approval (v3.35.0 test-only +21 — lib/__tests__/intelligence.test.ts; docs phase done)
+commit: 2036724 (v3.35.0 test-only +21 — lib/__tests__/intelligence.test.ts; pushed; docs-sync pass in progress)
 ---
 
 # Handoff — v3.35.0 Flaky intelligence.test.ts CI fix + v3.34.0 Monthly Query Consumption + v3.34.1 sql.js WASM gate fix + v3.33.0 Leader watchdog self-heal + v3.33.1 Swing touch-tracking fix — merged into PR #118 branch
 
 ## v3.35.0 — Flaky `intelligence.test.ts` CI fix — prisma mock isolates the fire-and-forget `IntelligenceCache` upsert (zero real-DB writes in tests)
-**Test-only +21 UNCOMMITTED on PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`); docs phase DONE; diff/commit pending user approval.**
+**Test-only +21 COMMITTED `2036724` + PUSHED on PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`); PR #118 merge/deploy pending user approval.**
 Root cause: `setIntelligenceCache` (`lib/services/intelligence/cache.ts` :101-124) fires `prisma.intelligenceCache.upsert(...)` UN-AWAITED → the real-Postgres `beforeEach` `deleteMany` teardown (`intelligence.test.ts` :73-80) races the in-flight upsert → stale row → spurious `INTELLIGENCE_CACHE_HIT` → flaky failures at :187/:246/:279 (the "documented pre-existing flake" since v3.25.0, now FIXED).
 Fix: NEW full prisma mock factory (`{ __esModule: true, default: { intelligenceCache: { findUnique/upsert/delete/deleteMany/count/findMany → jest.fn() } } }`) inserted between the `beforeEach` close and the Tests header; `jest.clearAllMocks()` clears call history but keeps impls. Single-file surgical change, test-only (+21).
 **Tests**: `intelligence.test.ts` **13/13 PASS**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run (no more pre-existing-flake asterisk); tsc **46 = exact baseline (0 new)**; no migration; no new packages.
@@ -48,7 +48,7 @@ Root cause: `checkSwingPerformance` evaluated target/stop hits with the LATEST C
 
 ## Deferred / Next (consolidated)
 - **Deferred (unchanged)**: `query_cache` (Plan 09 rev-v3 c/d); live `probe_time` DB check; durable Netlify `TZ`/`UTC` env fix (v3.32.0). v3.32.1 (`bcde7ae`) is merged into this branch but NOT deployed — live admin Save Correction still 400s until PR #118 merges/deploys.
-- **Next**: v3.35.0 docs phase DONE (AGENTS.md/CHANGELOG/TODO/Primer/Lessons #115/agent-memory/session-todos/HANDOFF + versions-v3.35.md + latest.md + session archive `2026-09-11-intelligence-test-fix`); run `/pre-commit-check` (delete `.dev-otel.log` if present) → **no push/merge/deploy of PR #118 without explicit user approval**.
+- **Next**: v3.35.0 committed `2036724` + pushed; docs-sync pass (Batch E) → commit docs + push → **PR #118 merge/deploy pending user approval**.
 
 ## Session archive
 - `.agents/sessions/2026-09-11-intelligence-test-fix/` — decisions.md (D1-D4) + flow.md. Plus `.agents/changelog/versions-v3.35.md` (v3.35.0 full-detail file).

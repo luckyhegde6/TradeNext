@@ -30,10 +30,10 @@
 
 ## Current Project Status
 
-### v3.35.0 — Flaky `intelligence.test.ts` CI fix (Sep 11 2026) — ✅ CODE + TESTS VERIFIED (targeted 13/13; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run; tsc 46 = exact baseline); TEST-ONLY +21 — DOCS PHASE DONE, COMMIT/PR PENDING USER (on PR #118 branch `fix/leader-watchdog-self-heal`, on top of v3.34.1 merge `05b91e8`)
+### v3.35.0 — Flaky `intelligence.test.ts` CI fix (Sep 11 2026) — ✅ CODE + TESTS VERIFIED (targeted 13/13; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run; tsc 46 = exact baseline); TEST-ONLY +21 — COMMITTED `2036724` + PUSHED to PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`); MERGE/DEPLOY PENDING USER
 **Root cause**: `setIntelligenceCache` (`lib/services/intelligence/cache.ts` :101-124) fires `prisma.intelligenceCache.upsert(...)` UN-AWAITED → the real-Postgres `beforeEach` `deleteMany` teardown (`intelligence.test.ts` :73-80) races the in-flight upsert → stale row → spurious `INTELLIGENCE_CACHE_HIT` → flaky failures at :187/:246/:279 (the "documented pre-existing flake" since v3.25.0, now FIXED).
 **Fix**: NEW full prisma mock factory (`{ __esModule: true, default: { intelligenceCache: { findUnique/upsert/delete/deleteMany/count/findMany → jest.fn() } } }`) inserted between the `beforeEach` close and the Tests header; `jest.clearAllMocks()` clears call history but keeps impls.
-**Verification**: targeted `intelligence.test.ts` **13/13 PASS**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run (no more pre-existing-flake asterisk); tsc **46 = exact baseline (0 new)**; no migration; no new packages. **Push/merge/deploy pending user.**
+**Verification**: targeted `intelligence.test.ts` **13/13 PASS**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run (no more pre-existing-flake asterisk); tsc **46 = exact baseline (0 new)**; no migration; no new packages. **Committed `2036724` + pushed; PR #118 merge/deploy pending user.**
 
 ### v3.34.1 — sql.js WASM async-load gate fix (Sep 11 2026) — ✅ CODE + TESTS VERIFIED (sqlite + cron-daemon 88/88 under CI=true --runInBand with zero "Cannot log after tests are done" noise; tsc 46 = exact baseline); COMMITTED `d91fb01` on `feat/db-health-monthly-ops` (merged into PR #118 branch `fix/leader-watchdog-self-heal`)
 **Root cause**: `getSqlJs()` loaded `sql-wasm.wasm` via async `fs.readFile`/stream → sql.js init + stray logs landed after a Jest file finished.

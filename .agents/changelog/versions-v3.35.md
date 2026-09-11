@@ -1,8 +1,8 @@
 # v3.35.0 — Flaky `intelligence.test.ts` CI fix — prisma mock isolates the fire-and-forget `IntelligenceCache` upsert (zero real-DB writes in tests)
 
 - **Date**: Sep 11 2026
-- **Branch**: PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`; test-only +21, **UNCOMMITTED** — push/merge/deploy pending user)
-- **Status**: Code + tests VERIFIED; docs phase DONE; diff/commit PENDING USER (no commit/push/merge without explicit user approval)
+- **Branch**: PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`; test-only +21 **committed `2036724` + pushed** — merge/deploy pending user)
+- **Status**: Code + tests VERIFIED; COMMITTED `2036724` + PUSHED to PR #118 branch; docs-sync pass IN PROGRESS (Batch E); merge/deploy PENDING USER
 - **Plan / Spec**: none — test-only CI flake fix (the "documented pre-existing flake" since v3.25.0, now FIXED)
 
 ## Root cause
