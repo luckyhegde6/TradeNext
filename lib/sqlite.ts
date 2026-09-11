@@ -18,7 +18,7 @@
 //   }
 
 import { randomUUID } from "crypto";
-import { existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import prisma from "@/lib/prisma";
@@ -445,7 +445,27 @@ let _SQL: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getSqlJs(): Promise<any> {
   if (_SQL) return _SQL;
-  const SQL = await initSqlJs({ locateFile: resolveSqlWasm });
+  // v3.34.1 (gate-fix): load the wasm synchronously via `wasmBinary`. Without
+  // it sql.js's emscripten glue runs its BROWSER branch which does an async
+  // `fetch()` + `instantiateStreaming` for the wasm — on CI the wasm file
+  // resolves to a nonexistent path, the fetch fails, and the glue fires
+  // `console.error` AFTER the owning Jest test file finished → Jest 30
+  // "Cannot log after tests are done" fails an unrelated next test in that
+  // worker (the cron-daemon fireJob CI flake). Passing `wasmBinary` skips the
+  // fetch/streaming path entirely (same pattern as sqlite.test.ts). Fall back
+  // to locateFile when no wasm file exists at all (resolveSqlWasm falls back
+  // to the bare file name, which cannot exist).
+  const wasmPath = resolveSqlWasm("sql-wasm.wasm");
+  // readFileSync returns a Buffer (a Uint8Array view); initSqlJs's wasmBinary
+  // option is typed ArrayBuffer — slice the underlying buffer to the exact
+  // byte range (safe for pooled Buffers) and pass that.
+  const wasmBytes = existsSync(wasmPath) && wasmPath !== "sql-wasm.wasm" ? readFileSync(wasmPath) : null;
+  const SQL =
+    wasmBytes
+      ? await initSqlJs({
+          wasmBinary: wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength),
+        })
+      : await initSqlJs({ locateFile: resolveSqlWasm });
   _SQL = SQL;
   return SQL;
 }
