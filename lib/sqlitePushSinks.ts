@@ -490,7 +490,11 @@ async function pushSwingAnalysisJobs(db: Database, rows: OutboxRow[]): Promise<n
     { sql: "id", val: (m) => String(sv(m.id) ?? "") },
     { sql: "status", val: (m) => String(sv(m.status) ?? "pending") },
     { sql: "payload", json: true, val: (m) => sv(m.payload) },
-    { sql: '"generatedAt"', val: (m) => sv(m.generated_at) },
+    // Fall back to created_at: pre-fix rows were written with a NULL mirror
+    // generated_at (generatedAt was only nested inside payload) and Prisma's
+    // generatedAt is NOT NULL — this sinks them instead of failing the whole
+    // chunk with 23502.
+    { sql: '"generatedAt"', val: (m) => sv(m.generated_at) ?? sv(m.created_at) },
     { sql: '"startedAt"', val: (m) => sv(m.started_at) },
     { sql: '"completedAt"', val: (m) => sv(m.completed_at) },
     { sql: "error", val: (m) => sv(m.error) },
