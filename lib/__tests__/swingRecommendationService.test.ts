@@ -909,6 +909,27 @@ describe("getSwingRecommendations audit logging", () => {
     expect(res.analysisStatus).toBe("pending");
   });
 
+  it("stores a top-level generatedAt on the durable job row so the 6h push sink never binds NULL", async () => {
+    // v3.38.0 regression: the creation upsert nested generatedAt ONLY inside
+    // payload → the SQLite mirror's generated_at column was NULL → the 6h
+    // push to Prisma failed with 23502 (NOT NULL "generatedAt") and the
+    // wrap-around 23503 FK cascade on swing_signals every ~6h probe.
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    await getSwingRecommendations({ analyze: true, forceRefresh: false });
+
+    const creationRow = (getSqliteFallback() as any).upsertSwingAnalysisJob.mock.calls.find(
+      (c: any[]) => !!c[0]?.payload,
+    )?.[0] as Record<string, any> | undefined;
+    expect(creationRow).toBeDefined();
+    // Top-level value backs the mirror's generated_at column (Prisma NOT NULL);
+    // the payload copy stays for the prompt/audit consumers.
+    expect(creationRow!.generatedAt).toBeInstanceOf(Date);
+    expect(typeof creationRow!.payload?.generatedAt).toBe("string");
+    expect(creationRow!.createdAt).toBeInstanceOf(Date);
+  });
+
   it("kicks a performance check when force-refreshing with a prior done job", async () => {
     swingJobs.push(
       makeJobInput({

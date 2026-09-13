@@ -79,6 +79,48 @@ export function foldOpsCounterIntoMonthly(
   state.days[dayKey] = day;
 }
 
+/** Exact day override for the db-health admin "Sync Operations Count" tool
+ *  (v3.38.0, scope "today"). Unlike `foldOpsCounterIntoMonthly` (idempotent
+ *  Math.max), this REPLACES the persisted entry so an admin can authority-fix a
+ *  wrong figure (e.g. a lower Prisma Console "Total Operations" total). Values
+ *  clamp at 0. */
+export function setOpsMonthlyDay(
+  state: OpsMonthlyState,
+  dayKey: string,
+  reads: number,
+  writes: number,
+): void {
+  state.days[dayKey] = { reads: Math.max(0, reads), writes: Math.max(0, writes) };
+}
+
+/** Sets the MONTH total to `reads`/`writes` by backfilling the DIFFERENCE into
+ *  the given day (all other days untouched):
+ *    day = max(0, entered - sum(otherDays))
+ *  Returns the applied day entry. Used by the v3.38.0 admin "Sync Month" tool —
+ *  the live daily counter is NOT changed here; when the live counter exceeds the
+ *  backfilled figure, `buildQueryConsumption`'s Math.max merge reports a total
+ *  ABOVE the entered value (honest: real ops keep counting). */
+export function setOpsMonthlyTotal(
+  state: OpsMonthlyState,
+  dayKey: string,
+  reads: number,
+  writes: number,
+): OpsMonthlyEntry {
+  let otherReads = 0;
+  let otherWrites = 0;
+  for (const [d, e] of Object.entries(state.days)) {
+    if (d === dayKey) continue;
+    otherReads += e.reads;
+    otherWrites += e.writes;
+  }
+  const day: OpsMonthlyEntry = {
+    reads: Math.max(0, reads - otherReads),
+    writes: Math.max(0, writes - otherWrites),
+  };
+  state.days[dayKey] = day;
+  return day;
+}
+
 /** Pure aggregation behind the db-health GET `queryConsumption` block. `live`
  *  is today's dbOpsCounter — merged over any persisted entry so a just-restarted
  *  instance with a lower in-memory counter still reports the high-water mark.

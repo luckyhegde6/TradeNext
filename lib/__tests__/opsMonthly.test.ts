@@ -20,6 +20,8 @@ import {
   foldOpsCounterIntoMonthly,
   getOpsMonthlyState,
   resetOpsMonthlyForTests,
+  setOpsMonthlyDay,
+  setOpsMonthlyTotal,
 } from "@/lib/services/opsMonthly";
 
 beforeEach(() => {
@@ -61,6 +63,55 @@ describe("foldOpsCounterIntoMonthly", () => {
     foldOpsCounterIntoMonthly(state, "2026-09-09", { reads: 80, writes: 30 });
     foldOpsCounterIntoMonthly(state, "2026-09-09", { reads: 120, writes: 5 });
     expect(state.days["2026-09-09"]).toEqual({ reads: 120, writes: 30 });
+  });
+});
+
+describe("setOpsMonthlyDay (exact day override, v3.38.0)", () => {
+  it("REPLACES an existing entry exactly (authority-fix a wrong figure)", () => {
+    const state = getOpsMonthlyState();
+    foldOpsCounterIntoMonthly(state, "2026-09-10", { reads: 1234, writes: 567 });
+    setOpsMonthlyDay(state, "2026-09-10", 900, 100);
+    expect(state.days["2026-09-10"]).toEqual({ reads: 900, writes: 100 });
+  });
+
+  it("sets a fresh day when no prior entry exists", () => {
+    const state = getOpsMonthlyState();
+    setOpsMonthlyDay(state, "2026-09-05", 42, 7);
+    expect(state.days["2026-09-05"]).toEqual({ reads: 42, writes: 7 });
+  });
+
+  it("clamps negative values at zero", () => {
+    const state = getOpsMonthlyState();
+    setOpsMonthlyDay(state, "2026-09-10", -5, 10);
+    expect(state.days["2026-09-10"]).toEqual({ reads: 0, writes: 10 });
+  });
+});
+
+describe("setOpsMonthlyTotal (month-total backfill, v3.38.0)", () => {
+  it("backfills the difference into the given day so the month total matches", () => {
+    const state = getOpsMonthlyState();
+    foldOpsCounterIntoMonthly(state, "2026-09-08", { reads: 40, writes: 5 });
+    foldOpsCounterIntoMonthly(state, "2026-09-09", { reads: 100, writes: 20 });
+    const entry = setOpsMonthlyTotal(state, "2026-09-10", 300, 60);
+    expect(entry).toEqual({ reads: 160, writes: 35 }); // 300-140 / 60-25
+    expect(state.days["2026-09-10"]).toEqual({ reads: 160, writes: 35 });
+    // other days untouched
+    expect(state.days["2026-09-09"]).toEqual({ reads: 100, writes: 20 });
+    expect(state.days["2026-09-08"]).toEqual({ reads: 40, writes: 5 });
+  });
+
+  it("clamps at zero when other days already exceed the entered total", () => {
+    const state = getOpsMonthlyState();
+    foldOpsCounterIntoMonthly(state, "2026-09-09", { reads: 500, writes: 50 });
+    const entry = setOpsMonthlyTotal(state, "2026-09-10", 300, 60);
+    expect(entry).toEqual({ reads: 0, writes: 10 });
+    expect(state.days["2026-09-10"]).toEqual({ reads: 0, writes: 10 });
+  });
+
+  it("returns the entered total on an empty month (no other days)", () => {
+    const state = getOpsMonthlyState();
+    const entry = setOpsMonthlyTotal(state, "2026-09-10", 250, 30);
+    expect(entry).toEqual({ reads: 250, writes: 30 });
   });
 });
 

@@ -45,6 +45,7 @@ export type AuditAction =
   | 'ADMIN_DB_DEPLOY_PREP'
   | 'ADMIN_DB_BACKUP'
   | 'ADMIN_DB_RESTORE'
+  | 'ADMIN_DB_SET_OPS_COUNTER'
   // Admin time-correction actions (v3.32.0)
   | 'ADMIN_DB_TIME_CORRECTION_SET'
   | 'ADMIN_DB_TIME_CORRECTION_CLEARED'

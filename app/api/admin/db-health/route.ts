@@ -16,7 +16,12 @@ import {
   clearCorrection,
   type TimeCorrectionRecord,
 } from "@/lib/services/timeCorrection";
-import { buildQueryConsumption, getOpsMonthlyState } from "@/lib/services/opsMonthly";
+import {
+  buildQueryConsumption,
+  getOpsMonthlyState,
+  setOpsMonthlyDay,
+  setOpsMonthlyTotal,
+} from "@/lib/services/opsMonthly";
 
 /** v3.32.0: `probe_time` throttle — one on-demand Postgres NOW() per 30s per instance. */
 const DB_TIME_PROBE_THROTTLE_MS = 30_000;
@@ -24,6 +29,16 @@ let lastDbTimeProbeAt = 0;
 
 const TIME_CORRECTION_INPUT_SCHEMA = z.object({
   istDateTime: z.string().min(1, "istDateTime is required"),
+});
+
+/** v3.38.0: admin authority-fix for the ops counter. `reads`/`writes` come from
+ *  the Prisma Console "Total Operations" dashboard; `scope` "today" sets the
+ *  live counter + today's ledger entry EXACTLY, "month" backfills today's ledger
+ *  entry so the month total matches the entered figure. */
+const OPS_COUNTER_INPUT_SCHEMA = z.object({
+  reads: z.number().int().min(0),
+  writes: z.number().int().min(0),
+  scope: z.enum(["today", "month"]).optional().default("today"),
 });
 
 /**
@@ -328,6 +343,64 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Restore failed", detail: err instanceof Error ? err.message : String(err) },
         { status: 400 },
+      );
+    }
+  }
+
+  if (action === "set_ops_counter") {
+    // v3.38.x: admin authority-fix for the ops counter. `reads`/`writes` come
+    // from the Prisma Console "Total Operations" dashboard; `scope` "today"
+    // sets the live counter + today's ledger entry EXACTLY, "month" backfills
+    // today's ledger entry so the month total matches the entered figure.
+    // Reuses OPS_COUNTER_INPUT_SCHEMA (defined :36) — single source of truth.
+    const parsed = OPS_COUNTER_INPUT_SCHEMA.safeParse(requestBody);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid payload", message: "Invalid set_ops_counter payload", details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const { reads, writes, scope } = parsed.data;
+    try {
+      const dayKey = getIstDayKey();
+      const opsMonthly = getOpsMonthlyState();
+      let entry: ReturnType<typeof setOpsMonthlyDay> | ReturnType<typeof setOpsMonthlyTotal> | null = null;
+
+      if (scope === "today") {
+        setOpsMonthlyDay(opsMonthly, dayKey, reads, writes);
+        const appliedDay = opsMonthly.days[dayKey];
+        if (appliedDay) {
+          entry = appliedDay;
+        }
+      } else {
+        entry = setOpsMonthlyTotal(opsMonthly, dayKey, reads, writes);
+      }
+
+      // Persist the ops counter to the SQLite backup layer (non-fatal).
+      try {
+        getSqliteFallback()?.persistOpsCounter();
+      } catch (sqliteErr) {
+        console.warn({ msg: "persistOpsCounter failed (set_ops_counter)", error: sqliteErr });
+      }
+
+      createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_SET_OPS_COUNTER",
+        resource: "ops_monthly",
+        responseStatus: 200,
+        metadata: { scope, dayKey, reads, writes },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Set ops counter for ${dayKey} (${scope})`,
+        entry,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Failed to set ops counter", detail: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
       );
     }
   }

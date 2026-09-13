@@ -1227,6 +1227,12 @@ export async function getSwingRecommendations(
     sqlite?.upsertSwingAnalysisJob({
       id: jobId,
       status: "pending",
+      // Top-level generatedAt (NOT just inside payload): the SQLite mirror's
+      // generated_at column backs the Prisma NOT NULL generatedAt column via
+      // the 6h push sink. Without a top-level value the mirror stored NULL and
+      // the push failed with 23502 null value in column "generatedAt" (and the
+      // wrap-around 23503 FK on swing_signals) every ~6h probe.
+      generatedAt: new Date(),
       payload: {
         generatedAt: new Date().toISOString(),
         stocks: enriched,

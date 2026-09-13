@@ -183,6 +183,75 @@ describe("POST /api/admin/db-health — request body single-read (v3.32.1 regres
   });
 });
 
+describe("POST /api/admin/db-health — set_ops_counter (v3.38.0)", () => {
+  beforeEach(() => {
+    resetOpsMonthlyForTests();
+  });
+
+  it("scope 'today' REPLACES today's ledger entry exactly + audits ADMIN_DB_SET_OPS_COUNTER", async () => {
+    foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-09-10", { reads: 999, writes: 99 });
+
+    const res = await POST(
+      jsonPost({ action: "set_ops_counter", reads: 400, writes: 50, scope: "today" }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.message).toBe("Set ops counter for 2026-09-10 (today)");
+    expect(json.entry).toEqual({ reads: 400, writes: 50 });
+
+    // Ledger entry was REPLACED, not Math.max-merged (authority-fix semantics).
+    expect(getOpsMonthlyState().days["2026-09-10"]).toEqual({ reads: 400, writes: 50 });
+    expect(mockCreateAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ADMIN_DB_SET_OPS_COUNTER",
+        resource: "ops_monthly",
+        metadata: { scope: "today", dayKey: "2026-09-10", reads: 400, writes: 50 },
+      }),
+    );
+  });
+
+  it("scope 'month' backfills today so the month total matches the entered figure", async () => {
+    foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-09-09", { reads: 100, writes: 20 });
+
+    const res = await POST(
+      jsonPost({ action: "set_ops_counter", reads: 300, writes: 60, scope: "month" }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.entry).toEqual({ reads: 200, writes: 40 }); // 300-100 / 60-20
+
+    const state = getOpsMonthlyState();
+    expect(state.days["2026-09-10"]).toEqual({ reads: 200, writes: 40 });
+    expect(state.days["2026-09-09"]).toEqual({ reads: 100, writes: 20 }); // untouched
+  });
+
+  it("scope defaults to 'today' when omitted", async () => {
+    const res = await POST(jsonPost({ action: "set_ops_counter", reads: 5, writes: 1 }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.message).toBe("Set ops counter for 2026-09-10 (today)");
+    expect(json.entry).toEqual({ reads: 5, writes: 1 });
+  });
+
+  it("400s with a clean error when reads/writes are missing or invalid", async () => {
+    const res = await POST(jsonPost({ action: "set_ops_counter" }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid payload");
+    expect(json.message).toBe("Invalid set_ops_counter payload");
+    expect(mockCreateAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("401s when unauthenticated (no ledger mutation)", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await POST(jsonPost({ action: "set_ops_counter", reads: 10, writes: 1 }));
+    expect(res.status).toBe(401);
+    expect(getOpsMonthlyState().days).toEqual({});
+  });
+});
+
 describe("GET /api/admin/db-health — leader watchdog block (v3.33.0)", () => {
   it("returns 200 with self, empty watchdog registry, tuning constants and liveness", async () => {
     const res = await GET(new Request("http://localhost/api/admin/db-health"));

@@ -1642,6 +1642,36 @@ describe("SQLite backup fallback", () => {
       expect(outboxRows().length).toBe(0);
     });
 
+    it("swing_analysis_job push binds generatedAt from created_at when the mirror generated_at is NULL (23502 regression)", async () => {
+      await resetAndInit();
+      const fb = getSqliteFallback()!;
+      // Pre-fix creation shape (v3.38.0): generatedAt nested ONLY inside
+      // payload → the mirror's generated_at column stores NULL while
+      // created_at is always set (upsertSwingAnalysisJob falls back to now).
+      // The sink must map generatedAt → created_at or Prisma rejects the whole
+      // chunk with 23502 NOT NULL and the swing_signals bump cascades 23503.
+      fb.upsertSwingAnalysisJob({
+        id: "job-null-gen",
+        status: "running",
+        payload: { generatedAt: "2026-09-11T00:00:00.000Z" },
+        createdAt: new Date("2026-09-11T05:00:00.000Z"),
+        updatedAt: new Date("2026-09-11T05:00:00.000Z"),
+      });
+
+      const { pushSqliteToPrisma } = await import("../sqlite");
+      const summary = await pushSqliteToPrisma();
+
+      expect(summary!.failed).toBe(0);
+      expect(summary!.synced).toBe(1);
+      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+      const [sql, ...params] = mockPrisma.$executeRawUnsafe.mock.calls[0];
+      expect(sql.toUpperCase()).toContain('INSERT INTO "SWING_ANALYSIS_JOBS"');
+      // Column order: id, status, payload, "generatedAt", … → params[3] is the
+      // generatedAt binding. Pre-fix null → 23502; the fallback binds created_at.
+      expect(params[3]).toBe("2026-09-11T05:00:00.000Z");
+      expect(outboxRows().length).toBe(0);
+    });
+
     it("pushes chartink rows to prisma createMany and clears their outbox rows", async () => {
       await resetAndInit();
       const fb = getSqliteFallback()!;

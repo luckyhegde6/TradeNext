@@ -24,9 +24,18 @@ jest.mock("@/lib/prisma", () => ({
 jest.mock("@/lib/sqlite", () => ({
   __esModule: true,
   getSqliteFallback: jest.fn(),
+  // trackAiCall → persistAiCallToDb fire-and-forgets `enqueueWriteBehind`
+  // after a dynamic import — the mock must export it or the seeded `.then()`
+  // throws an unhandled rejection in the v3.38.1 tests.
+  enqueueWriteBehind: jest.fn(),
 }));
 
-import { getPersistedAiCalls } from "@/lib/services/ai/ai-monitoring";
+import {
+  getPersistedAiCalls,
+  getAiCallsMerged,
+  trackAiCall,
+  clearAiCalls,
+} from "@/lib/services/ai/ai-monitoring";
 import prisma from "@/lib/prisma";
 import { getSqliteFallback } from "@/lib/sqlite";
 
@@ -186,5 +195,80 @@ describe("getPersistedAiCalls two-tier merge (AI Monitoring visibility)", () => 
     expect(entries).toHaveLength(2);
     expect(entries[0]!.action).toBe("promoted"); // newest
     expect(entries[1]!.action).toBe("w1"); // second-newest; w2 sliced
+  });
+});
+
+describe("getAiCallsMerged memory-buffer timeframe filter (v3.38.1)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    clearAiCalls();
+    // Isolate the memory ring: persist only [p1] for the error-row case, else
+    // the memory-only path so source is deterministic. clearAllMocks keeps
+    // implementations, so ALSO neutralise the sqlite fallback mock the first
+    // describe installed (mockReturnValue persists across describe blocks).
+    findManyMock.mockResolvedValue([]);
+    getSqliteFallbackMock.mockReturnValue(null);
+  });
+
+  it("excludes buffered calls older than the timeframe from a 'Last hour' view", async () => {
+    // The live bug: on Sep 13 the admin "Last hour" list showed Sep 11 calls
+    // because getAiCallsMerged never filtered the in-memory ring — only
+    // getAiStatsMerged re-filtered after merging. Seed one 2-day-old call
+    // plus one fresh call.
+    const oldTs = "2026-09-11T18:00:00Z"; // > 60 min before any test run
+    const freshTs = new Date().toISOString();
+    await trackAiCall({
+      timestamp: oldTs,
+      action: "connection_test",
+      model: "openrouter/free",
+      status: "success",
+      tokensUsed: 0,
+      responseTimeMs: 1200,
+    });
+    await trackAiCall({
+      timestamp: freshTs,
+      action: "recommendation_batch",
+      model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+      status: "success",
+      tokensUsed: 1024,
+      responseTimeMs: 38000,
+    });
+
+    // Persisted tiers empty → the memory ring is the only source.
+    const { calls, source } = await getAiCallsMerged(50, 60);
+
+    // Regression: pre-fix the old call passed through unfiltered so a
+    // "Last hour" view listed it. Post-fix only the fresh call remains.
+    expect(source).toBe("memory");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.action).toBe("recommendation_batch");
+    expect(calls[0]!.timestamp).toBe(freshTs);
+  });
+
+  it("returns all buffered calls when no timeframe is given (full history)", async () => {
+    await trackAiCall({
+      timestamp: "2026-09-11T18:00:00Z",
+      action: "connection_test",
+      model: "openrouter/free",
+      status: "success",
+      tokensUsed: 0,
+      responseTimeMs: 1200,
+    });
+    await trackAiCall({
+      timestamp: new Date().toISOString(),
+      action: "swing_analysis_batch",
+      model: "openrouter/free",
+      status: "success",
+      tokensUsed: 700,
+      responseTimeMs: 52000,
+    });
+
+    const { calls } = await getAiCallsMerged(50);
+
+    expect(calls).toHaveLength(2);
+    // Newest-first: the fresh call leads, the 2-day-old call is still listed
+    // for the untimed full-history view.
+    expect(calls[0]!.action).toBe("swing_analysis_batch");
+    expect(calls[1]!.action).toBe("connection_test");
   });
 });

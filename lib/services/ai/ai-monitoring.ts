@@ -328,7 +328,16 @@ export async function getAiCallsMerged(
   limit = 50,
   timeframeMinutes?: number,
 ): Promise<{ calls: AiCallEntry[]; source: "memory" | "database" | "hybrid" }> {
-  const memoryCalls = getAiCalls(limit);
+  // Apply the same timeframe cutoff to the in-memory ring as the persisted
+  // tier — otherwise a "Last hour" view would list every buffered call,
+  // including ones from days ago (v3.38.1 fix; previously only
+  // getAiStatsMerged re-filtered after merging).
+  const cutoff = timeframeMinutes
+    ? Date.now() - timeframeMinutes * 60 * 1000
+    : 0;
+  const memoryCalls = getAiCalls(limit).filter(
+    (c) => !cutoff || new Date(c.timestamp).getTime() > cutoff,
+  );
   const persisted = await getPersistedAiCalls(limit, timeframeMinutes);
 
   if (memoryCalls.length === 0 && persisted.length === 0) {
