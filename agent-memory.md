@@ -15,6 +15,15 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-13 | Netlify deploy fix — `@netlify/blobs` RE-ADDED `^11.0.3` — PR #123 merged, deploy GREEN, live-verified 0 console errors (branch `docs-blobs-lessons` for docs commit; fix was on branch per user merge)
+- **Action**: Triage + fix of the production deploy failure caused by the v3.38.2 dependency cleanup.
+- **Root cause**: `07f42fe` (v3.38.2) removed `@netlify/blobs` from `package.json` (zero source refs — 56 grep matches all in CHANGELOG) but the Netlify **Edge bundler** imports it internally → build failed ("Build script returned non-zero exit code: 2", failed build `6aa6d681de472d000829d0eb`). Local `npm run quickbuild` does NOT exercise the Edge bundler — only the deploy confirms.
+- **Fix**: `e84fb34` re-added `"@netlify/blobs": "^11.0.3"` (2 files +380/−4 — package.json + package-lock.json, blobs-11.0.3.tgz). Identical precedent `c1b27cb` fixed the same failure with `^10.7.7` — the package was re-added TWICE, it MUST stay in package.json.
+- **Verification**: tsc 46 = exact baseline (0 new) + full build OK pre-fix-commit; PR #123 MERGED (`9166601`) → Netlify deploy GREEN (`#BEF9C6`) → live site dashboard serving with **0 console errors** (1 benign INFO-level report-only CSP notice @ `/_next/static/chunks/3zfpuu3o318py.js:5` — Next.js inline telemetry, nonce present, no action).
+- **Files Modified (fix)**: `package.json` + `package-lock.json` (blobs RE-ADDED ^11.0.3).
+- **Docs**: Primer.md Last Updated + Current Project Status blocks; HANDOFF.md YAML + Handoff Required incident paragraph; agent-memory.md entry — on branch `docs-blobs-lessons` (docs-only commit; no push to main).
+- **Status**: ✅ RESOLVED + DEPLOYED + LIVE-VERIFIED. `main` at `86595f0` (clean). PR #121 (v3.38.x) + PR #118 remain merge/deploy PENDING USER. Lesson recorded: ALWAYS run full build + tsc baseline before EVERY commit; keep `@netlify/blobs`.
+
 ### 2026-09-13 | v3.38.2 — Dependabot vulnerability-fix batch: next/third-parties/nodemailer/morgan/csv-parse bumps, mysql2 override 3.24.4, @netlify/blobs removal, npm-audit 0 critical / 3 high (branch `fix/db-health-ops-count-manual-sync` on top of pushed v3.38.1 `36f2c9b`; package.json + package-lock.json only; full 88/88 suites / 1207 pass / 4 skip / 0 fail exit 0; tsc 46 = exact baseline; no migration; committed + pushed; PR #121 OPEN — merge/deploy PENDING USER)
 
 ### 2026-09-13 | v3.38.0 + v3.38.1 — Admin SET_OPS_COUNTER authority fix + db-health "Sync Operations Count" UI; Swing generatedAt push-sink NULL guard (Prisma 23502/23503) + AI-monitoring "Last hour" timeframe filter (branch `fix/db-health-ops-count-manual-sync`)
