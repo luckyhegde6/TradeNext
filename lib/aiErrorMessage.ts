@@ -9,19 +9,25 @@
 //   - Error                                → .message
 //   - { error: string }                    → .error          (/api/ai/query 400s)
 //   - { error: { message: string } }       → .error.message  (/api/ai/query 500 body shape)
+//   - { detail: string }                   → .detail         (gateway 500 / deploy-prep 503 shapes)
 //   - { message: string }                  → .message
 //   - anything else (null, undefined, …)   → fallback
+//
+// Precedence: error (string, then nested .message) → detail → message. So a
+// route-shaped `{ error: "…", detail: "…" }` keeps error, while a gateway body
+// carrying ONLY `detail` (or `message`) no longer renders "undefined".
 
 export function extractErrorMessage(err: unknown, fallback = "AI analysis failed"): string {
   if (typeof err === "string") return err || fallback;
   if (err instanceof Error) return err.message || fallback;
   if (err !== null && typeof err === "object") {
-    const e = err as { error?: unknown; message?: unknown };
+    const e = err as { error?: unknown; detail?: unknown; message?: unknown };
     if (typeof e.error === "string" && e.error) return e.error;
     if (e.error !== null && typeof e.error === "object") {
       const nested = e.error as { message?: unknown };
       if (typeof nested.message === "string" && nested.message) return nested.message;
     }
+    if (typeof e.detail === "string" && e.detail) return e.detail;
     if (typeof e.message === "string" && e.message) return e.message;
   }
   return fallback;

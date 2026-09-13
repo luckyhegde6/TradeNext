@@ -15,6 +15,7 @@ import {
   ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 import type { QueryConsumption } from "@/lib/services/opsMonthly";
+import { extractErrorMessage } from "@/lib/aiErrorMessage";
 
 interface DbErrorEntry {
   at: string;
@@ -505,7 +506,7 @@ export default function DbHealthPage() {
         );
         await fetchHealth();
       } else {
-        setDeployMsg(`Deploy prep failed: ${body.error ?? body.detail}`);
+        setDeployMsg(`Deploy prep failed: ${extractErrorMessage(body, `HTTP ${res.status}`)}`);
       }
     } catch (e) {
       setDeployMsg(`Deploy prep error: ${e instanceof Error ? e.message : String(e)}`);
