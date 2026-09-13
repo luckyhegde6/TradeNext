@@ -204,6 +204,23 @@ function safeStringify(value: unknown): string {
   }
 }
 
+// Parse a fetch() response body defensively. A route can return a non-JSON
+// body (Next.js HTTP error page, Netlify/Accelerate proxy error page, 30s
+// function-wall) — a bare res.json() would throw "JSON.parse: unexpected
+// character at line 1 column 1" and the caller's catch would surface that
+// cryptic message instead of a real status. Never throws; falls back to a
+// readable { error, raw } shape so the existing body.error/detail branches
+// render a meaningful message.
+async function parseJsonBody(res: Response): Promise<any> {
+  const text = await res.text().catch(() => "");
+  if (!text) return { error: `Empty response from server (HTTP ${res.status})`, status: res.status };
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: `Non-JSON response from server (HTTP ${res.status})`, raw: text.slice(0, 200), status: res.status };
+  }
+}
+
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
@@ -282,7 +299,7 @@ export default function DbHealthPage() {
     try {
       const res = await fetch("/api/admin/db-health");
       if (res.ok) {
-        const body = await res.json();
+        const body = await parseJsonBody(res);
         setData(body);
         // v3.32.0: prefill the IST correction input once (YYYY-MM-DDTHH:mm).
         setTimeImeInput((prev) => prev || body.time?.istIso?.slice(0, 16) || "");
@@ -311,7 +328,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "sync_sqlite" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setSyncMsg(`SQLite sync completed`);
         await fetchHealth();
@@ -334,7 +351,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "push_to_prisma" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setSyncMsg(body.pushed ? body.message : `Push skipped: ${body.message}`);
         await fetchHealth();
@@ -357,7 +374,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "flush_prices" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setSyncMsg(body.message ?? `Flushed ${body.rows} rows`);
         await fetchHealth();
@@ -380,7 +397,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "flush_logs" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         const counts = body.flushedCounts
           ? Object.entries(body.flushedCounts)
@@ -417,7 +434,7 @@ export default function DbHealthPage() {
           writes: Number(opsWrites) || 0,
         }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setOpsMsg(
           `Ops counter synced (${scope}) — month total now ${body.queryConsumption.totalOperations.toLocaleString()}`,
@@ -449,7 +466,7 @@ export default function DbHealthPage() {
       }
       const res = await fetch(`/api/admin/db-health?${params.toString()}`);
       if (!res.ok) {
-        const body = await res.json().catch(() => null);
+        const body = await parseJsonBody(res);
         setLogDownloadMsg(`Download failed: ${body?.error ?? res.status}`);
         return;
       }
@@ -480,7 +497,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "deploy_prep" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setDeployMsg(
           body.message ??
@@ -506,7 +523,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "backup" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (!res.ok || !body.data) {
         setBackupMsg(`Backup failed: ${body.error ?? "no data"}`);
         return;
@@ -548,7 +565,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "restore", data: b64 }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setBackupMsg(body.message ?? "SQLite backup restored");
         setRestoreFile(null);
@@ -575,7 +592,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "probe_time" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         // Throttled POST still returns 200 — surface the message either way.
         setTimeMsg(body.probed ? "DB time probe complete" : (body.message ?? "DB time probe done"));
@@ -605,7 +622,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "set_time_correction", istDateTime: timeImeInput }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setTimeMsg(
           body.offsetMinutes
@@ -632,7 +649,7 @@ export default function DbHealthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clear_time_correction" }),
       });
-      const body = await res.json();
+      const body = await parseJsonBody(res);
       if (res.ok) {
         setTimeMsg("Time correction cleared — scheduling uses the raw server clock.");
         await fetchHealth();
