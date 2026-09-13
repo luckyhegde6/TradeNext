@@ -1,6 +1,18 @@
 # Session Todos
 
-## Current (v3.35.0 — Flaky `intelligence.test.ts` CI fix: test-only +21 (prisma mock isolates fire-and-forget `IntelligenceCache` upsert); targeted 13/13; full 86/86 suites / 1170 pass / 4 skip / 0 fail — first fully-green full run; v3.34.0 + v3.34.1 — Monthly Query Consumption + sql.js WASM gate fix; v3.33.0 + v3.33.1 — Leader watchdog + Swing touch-tracking — MERGED into PR #118 branch `fix/leader-watchdog-self-heal`)
+## Current (v3.38.1 — Swing generatedAt push-sink NULL guard (Prisma 23502/23503) + AI-monitoring "Last hour" timeframe filter: full 88/88 suites / 1207 pass / 4 skip / 0 fail, tsc 46 = exact baseline, no migration, no new packages, diff 6 files +157/−3, live :3000 "Last hour" clean + 0 console errors; on `fix/db-health-ops-count-manual-sync` on top of committed v3.38.0 `d5645a9`; docs + commit/push/PR pending user — merge/deploy PENDING USER)
+
+**User directive** (v3.38.1): db-health "Recent DB Errors" showed repeating Prisma 23502 NOT NULL on `swing_signals.create` every ~6h; the AI-monitoring "Last hour" filter appeared broken.
+
+**Shipped (v3.38.1 — code + tests + live-verified; DOCS IN PROGRESS → commit/push/PR pending user)**:
+- **Fix 1** (`lib/services/swingRecommendationService.ts` ~L1227) — NEW top-level `generatedAt: new Date()` binding on `upsertSwingAnalysisJob`; root cause: `created_at` was bound ONLY inside the `payload` object → SQLite mirror `generated_at` stayed NULL → swing push sinks passed `generatedAt: undefined` → Prisma 23502 NOT NULL every 6h PUSH + 23503 FK cascade (victory rows destroyed) → ResolverFailed → `runScheduledOps` recoverySync → `recordDbError` ring.
+- **Fix 2** (`lib/sqlitePushSinks.ts` ~L497) — swing sink `generatedAt` fallback `() => (row.generatedAt as string) ?? row.created_at` (cast `tbl.date(...)`) heals pre-fix mirror rows.
+- **Fix 3** (`lib/services/ai/ai-monitoring.ts` L331-340) — `getAiCallsMerged` now applies the memory-ring cutoff `cutoff = Date.now() - timeframeMinutes*60*1000` (only `getAiStatsMerged` re-filtered before → "Last hour" showed ~all calls) + passes `timeframeMinutes` to `getPersistedAiCalls`.
+- **Tests** — `ai-monitoring.test.ts` +86 (NEW "memory-buffer timeframe filter (v3.38.1)" describe 5/5 incl. `enqueueWriteBehind` mock; Lessons #117/#118), `sqlite.test.ts` +30 (23502 regression: `params[3]` created_at binding + `job-null-gen` row), `swingRecommendationService.test.ts` +21 (40/40). Full **88/88 suites / 1207 pass / 4 skip / 0 fail**; tsc 46 = exact baseline; no migration; no new packages.
+- **Live-verified** :3000 — AI-monitoring "Last hour" clean + 0 console errors.
+- **Docs** — this session: Lessons #117/#118 + v3.38.1 Update Log entry; Primer v3.38.1 + v3.38.0 sections; HANDOFF yaml + paragraph; CHANGELOG/TODO/AGENTS/versions-v3.38/agent-memory already in (v3.38.0 committed `d5645a9`).
+
+**COMMIT/PUSH/PR PENDING USER — do NOT commit/push/merge without explicit user approval.**
 
 **User directive** (v3.31.0): plan limit **MONTHLY 200K ops/mo (resetting 2nd)** + Prisma calls only at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between. db-health only showed TODAY's ops; with a monthly plan that's the wrong unit and a restarted instance loses the month's history → implements the deferred Plan 09 rev-v3 c/d monthly-ops window (`query_cache` STAYS deferred).
 
