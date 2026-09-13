@@ -3,7 +3,7 @@
 - **Date**: Sep 13 2026
 - **Branch**: `fix/db-health-ops-count-manual-sync`
 - **Commit**: `d5645a9` (committed; push/PR pending user)
-- **Status**: Committed `d5645a9`; merge/deploy PENDING USER (PR to be created after v3.38.1 docs commit)
+- **Status**: Committed `d5645a9`; **PR #121 OPEN** covering `d5645a9` + the v3.38.1 bundle; merge/deploy PENDING USER
 - **Plan**: follow-on to Plan `.agents/plans/01-db-ops-reduction.md` (db-ops-reduction / monthly-ops window) · user directive: admin must be able to correct the ops-usage count used for plan display
 
 ## User directive
@@ -63,7 +63,7 @@ the delicate live counter protected from being zeroed by a misuse of the tool.
 
 - **Date**: Sep 13 2026
 - **Branch**: `fix/db-health-ops-count-manual-sync` (on top of committed v3.38.0 `d5645a9`)
-- **Status**: Code + tests VERIFIED; commit/push/PR pending user; merge/deploy PENDING USER
+- **Status**: Code + tests VERIFIED; COMMITTED `d35343e` (feature) + `36f2c9b` (docs); PUSHED; PR #121 OPEN; merge/deploy PENDING USER
 - **Fix scope**: 6 files +157/−3 uncommitted (v3.38.1 bundle)
 
 ## Root cause 1 — swing rows wiped / blanked by the ~6h SQLite→Prisma push
