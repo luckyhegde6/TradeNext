@@ -273,6 +273,10 @@ export default function DbHealthPage() {
   const [timeImeInput, setTimeImeInput] = useState<string>("");
   const [probingTime, setProbingTime] = useState(false);
   const [savingTime, setSavingTime] = useState(false);
+  const [opsReads, setOpsReads] = useState("");
+  const [opsWrites, setOpsWrites] = useState("");
+  const [syncingOps, setSyncingOps] = useState(false);
+  const [opsMsg, setOpsMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -393,6 +397,39 @@ export default function DbHealthPage() {
       setSyncMsg(`Flush error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setFlushingLogs(false);
+    }
+  };
+
+  // v3.38.0: authority-fix the ops counter from the Prisma Console "Total
+  // Operations" dashboard (reads/writes). scope "today" sets the live counter +
+  // today's ledger entry exactly; scope "month" backfills today's ledger entry.
+  const triggerSetOps = async (scope: "today" | "month") => {
+    setSyncingOps(true);
+    setOpsMsg(null);
+    try {
+      const res = await fetch("/api/admin/db-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set_ops_counter",
+          scope,
+          reads: Number(opsReads) || 0,
+          writes: Number(opsWrites) || 0,
+        }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setOpsMsg(
+          `Ops counter synced (${scope}) — month total now ${body.queryConsumption.totalOperations.toLocaleString()}`,
+        );
+        await fetchHealth();
+      } else {
+        setOpsMsg(`Sync failed: ${body.error}`);
+      }
+    } catch (e) {
+      setOpsMsg(`Sync error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncingOps(false);
     }
   };
 
@@ -896,6 +933,79 @@ export default function DbHealthPage() {
           )}
         </div>
       )}
+
+      {/* Sync Operations Count (v3.38.0) — admin authority-fix for the ops counter */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
+          Sync Operations Count
+        </h3>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          Enter the reads/writes from the Prisma Console &quot;Total Operations&quot; dashboard to
+          authority-fix the ops counter. <span className="font-medium text-gray-700 dark:text-slate-300">Sync Today</span>{" "}
+          sets today&apos;s counter + ledger entry exactly (overrides a wrong high-water);{" "}
+          <span className="font-medium text-gray-700 dark:text-slate-300">Sync Month</span> backfills
+          today&apos;s ledger entry so the month total matches the entered figure (real ops keep
+          counting). Current month total:{" "}
+          <span className="font-mono text-gray-900 dark:text-white">
+            {(queryConsumption?.totalOperations ?? 0).toLocaleString()}
+          </span>
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label
+              className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1"
+              htmlFor="opsReadsInput"
+            >
+              Reads (from Prisma Console)
+            </label>
+            <input
+              id="opsReadsInput"
+              type="number"
+              min={0}
+              value={opsReads}
+              onChange={(e) => setOpsReads(e.target.value)}
+              placeholder="e.g. 184050"
+              className="w-full rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label
+              className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1"
+              htmlFor="opsWritesInput"
+            >
+              Writes (from Prisma Console)
+            </label>
+            <input
+              id="opsWritesInput"
+              type="number"
+              min={0}
+              value={opsWrites}
+              onChange={(e) => setOpsWrites(e.target.value)}
+              placeholder="e.g. 3420"
+              className="w-full rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => triggerSetOps("today")}
+            disabled={syncingOps}
+            className="rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-4 py-2 text-sm font-medium text-white"
+          >
+            {syncingOps ? "Syncing..." : "Sync Today"}
+          </button>
+          <button
+            type="button"
+            onClick={() => triggerSetOps("month")}
+            disabled={syncingOps}
+            className="rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-sm font-medium text-white"
+          >
+            {syncingOps ? "Syncing..." : "Sync Month"}
+          </button>
+          {opsMsg && <span className="text-xs text-gray-600 dark:text-slate-300">{opsMsg}</span>}
+        </div>
+      </div>
 
       {/* Daily Price Cache */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">

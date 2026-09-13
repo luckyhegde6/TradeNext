@@ -43,11 +43,12 @@ describe('Audit Logging Types', () => {
         'ADMIN_DB_DEPLOY_PREP',
         'ADMIN_DB_BACKUP',
         'ADMIN_DB_RESTORE',
+        'ADMIN_DB_SET_OPS_COUNTER',
         'ADMIN_RECOMMENDATION_RUN',
         'ADMIN_PERFORMANCE_CHECK',
         'ADMIN_SWING_PERFORMANCE_CHECK',
       ];
-      expect(actions.length).toBe(9);
+      expect(actions.length).toBe(10);
       actions.forEach((a) => expect(typeof a).toBe('string'));
     });
   });
