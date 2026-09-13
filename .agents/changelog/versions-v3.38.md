@@ -133,3 +133,31 @@ previously only getAiStatsMerged re-filtered after merging").
   0 console errors. Swing 23502/23503 verified via regression tests + code
   review (the stale `dbErrorRing` in-memory entries pre-date the fix; a restart
   clears them).
+
+# v3.38.2 — Dependabot vulnerability-fix batch (next/third-parties bumps + mysql2 override + @netlify/blobs removal)
+
+- **Date**: Sep 13 2026
+- **Branch**: `fix/db-health-ops-count-manual-sync` (on top of pushed v3.38.1 `36f2c9b`)
+- **Commit**: feature commit (package.json + package-lock.json) + docs commit
+- **Status**: Committed + pushed; **PR #121 OPEN** — merge/deploy PENDING USER
+- **Plan**: user directive "run npm audit --fix and fix what can be fixed" — the dependabot batch
+
+## User directive
+`npm audit --fix` + fix what can be fixed; do not break the build and do not downgrade Prisma.
+
+## Changes (package.json + package-lock.json only — no schema/migration, no new packages)
+1. **Dependency bumps**: `next` 16.3.1→**16.3.5**, `eslint-config-next`→**16.3.5**, `@next/third-parties` 16.2.0→**16.3.5**, `csv-parse` 6.1.0→**7.0.2**, `morgan` 1.11.0→**1.12.1**, `nodemailer` 9.0.3→**9.1.1**.
+2. **Removal**: `@netlify/blobs` — v3.11.3 (full serverless purge) leftover; zero code references (only `@netlify/streaming-storage` remains).
+3. **NEW `overrides` block**:
+   - `mysql2` → **3.24.4** — GHSA-rgwj-5xj2-c3m3 (HIGH, prototype pollution via `createPool`/`createConnection` config); `prisma` pins exact `3.22.0` through its mysql adapter chain → override resolves 3.24.4 (`npm ls mysql2` verified).
+   - `@eslint/eslintrc` → `{ "js-yaml": "4.3.2" }` — GHSA-2rj7-9f4x-w5w5 (code injection via `!!` prefix), eslint-config-next chain.
+   - `@istanbuljs/load-nyc-config` → `{ "js-yaml": "3.15.2" }` — same advisory via istanbul's `^3.13.1`.
+   - `@humanfs/node` → **0.16.8** — latest.
+   - `fast-uri` → **3.1.6** — CVE-2025-6613 (DoS via `encodeURIComponent`), pinned 2.x via `@fastify/ajv-compiler`.
+4. **Audit outcome**: `npm ls` clean; `npm audit` → **0 critical / 3 high** (all remaining = `deepmerge-ts` 7.1.5 via `@prisma/config`; GHSA-ggr8-5vv4-36mx affects <8.0.0 and NO 7.x patched release exists; the only "fix" would be downgrading Prisma 7→6 which breaks Prisma Postgres → documented, do NOT override; automated dependabot PRs for deepmerge-ts will keep failing until the upstream patch lands).
+
+## Verification
+- Full suite: **88/88 suites / 1207 pass / 4 skip / 0 fail**, exit 0
+- `npx tsc --noEmit`: **46 = exact baseline (0 new)**
+- `npm run quickbuild`: OK
+- no migration, no schema change, no new packages

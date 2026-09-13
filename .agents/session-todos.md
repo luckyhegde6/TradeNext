@@ -1,6 +1,6 @@
 # Session Todos
 
-## Current (v3.38.1 — Swing generatedAt push-sink NULL guard (Prisma 23502/23503) + AI-monitoring "Last hour" timeframe filter: full 88/88 suites / 1207 pass / 4 skip / 0 fail, tsc 46 = exact baseline, no migration, no new packages, diff 6 files +157/−3, live :3000 "Last hour" clean + 0 console errors; on `fix/db-health-ops-count-manual-sync` on top of committed v3.38.0 `d5645a9`; committed `d35343e` (feature) + `36f2c9b` (docs); pushed; **PR #121 OPEN — merge/deploy PENDING USER**)
+## Current (v3.38.2 — Dependabot vulnerability-fix batch — next/third-parties/nodemailer/morgan/csv-parse bumps + mysql2 override + @netlify/blobs removal (npm-audit 0 critical / 3 high): full 88/88 suites / 1207 pass / 4 skip / 0 fail exit 0, tsc 46 = exact baseline (0 new), npm ls clean, npm run quickbuild OK, no migration, no new packages, diff package.json + package-lock.json ONLY; on `fix/db-health-ops-count-manual-sync` on top of pushed v3.38.1 docs `36f2c9b`; committed + pushed; **PR #121 OPEN — merge/deploy PENDING USER**)
 
 **User directive** (v3.38.1): db-health "Recent DB Errors" showed repeating Prisma 23502 NOT NULL on `swing_signals.create` every ~6h; the AI-monitoring "Last hour" filter appeared broken.
 
