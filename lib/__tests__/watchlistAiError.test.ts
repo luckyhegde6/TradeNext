@@ -34,4 +34,26 @@ describe("extractErrorMessage", () => {
   it("supports a custom fallback", () => {
     expect(extractErrorMessage(null, "Analysis unavailable")).toBe("Analysis unavailable");
   });
+
+  it("prefers a string err.error over err.detail (route-shaped deploy-prep 503)", () => {
+    expect(
+      extractErrorMessage({ error: "Deploy prep failed", detail: "circuit breaker open" }),
+    ).toBe("Deploy prep failed");
+  });
+
+  it("extracts err.detail when error is absent — gateway 500 / deploy-prep 503 body", () => {
+    expect(extractErrorMessage({ detail: "circuit breaker open" })).toBe("circuit breaker open");
+  });
+
+  it("still reads err.message when only message is present", () => {
+    expect(extractErrorMessage({ message: "Internal server error" })).toBe("Internal server error");
+  });
+
+  it("falls back when detail is an empty string", () => {
+    expect(extractErrorMessage({ detail: "" })).toBe("AI analysis failed");
+  });
+
+  it("ignores non-string detail values", () => {
+    expect(extractErrorMessage({ detail: { nested: true } })).toBe("AI analysis failed");
+  });
 });

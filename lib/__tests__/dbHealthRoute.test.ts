@@ -31,7 +31,8 @@ import {
   parseIstDateTimeLocal,
   getTimeDiagnostics,
 } from "@/lib/services/timeCorrection";
-import { restoreSqliteBackup } from "@/lib/sqlite";
+import { restoreSqliteBackup, flushWriteBehind } from "@/lib/sqlite";
+import { openPlanLimitBreaker, closePlanLimitBreaker } from "@/lib/db-utils";
 import {
   foldOpsCounterIntoMonthly,
   getOpsMonthlyState,
@@ -109,6 +110,7 @@ const mockParseIst = parseIstDateTimeLocal as jest.Mock;
 const mockGetTimeDiagnostics = getTimeDiagnostics as jest.Mock;
 const mockRestoreSqliteBackup = restoreSqliteBackup as jest.Mock;
 const mockCreateAuditLog = createAuditLog as jest.Mock;
+const mockFlushWriteBehind = flushWriteBehind as jest.Mock;
 
 function jsonPost(body: unknown): Request {
   return new Request("http://localhost/api/admin/db-health", {
@@ -323,5 +325,32 @@ describe("GET /api/admin/db-health — queryConsumption monthly ledger (v3.34.0)
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("Unauthorized");
+  });
+});
+
+describe("POST /api/admin/db-health — deploy_prep breaker-open fast-fail (v3.39.0)", () => {
+  it("returns 503 with a concrete error/detail while the breaker is open", async () => {
+    openPlanLimitBreaker();
+    try {
+      const res = await POST(jsonPost({ action: "deploy_prep" }));
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.error).toBe("Deploy prep failed");
+      expect(body.detail).toContain("circuit breaker");
+      // Gate must short-circuit BEFORE any Prisma-work: no flush, no audit.
+      expect(mockFlushWriteBehind).not.toHaveBeenCalled();
+      expect(mockCreateAuditLog).not.toHaveBeenCalled();
+    } finally {
+      closePlanLimitBreaker();
+    }
+  });
+
+  it("proceeds past the gate (not short-circuited) when the breaker is closed", async () => {
+    const res = await POST(jsonPost({ action: "deploy_prep" }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toContain("SQLite backup not initialized");
+    // Fast-fail gate did not trip; the flush still ran before the mirror check.
+    expect(mockFlushWriteBehind).toHaveBeenCalledTimes(1);
   });
 });
