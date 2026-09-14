@@ -1055,6 +1055,89 @@ describe("SQLite backup fallback", () => {
     });
   });
 
+  // ── upsertWorkerTask/upsertWorkerStatus date-bind guard ──────────────
+  // worker_task.started_at/completed_at/created_at and worker_status
+  // last_heartbeat/created_at were bound raw (`as string` cast — no runtime
+  // conversion) so: (a) omitting keys produced literal `undefined`; (b)
+  // callers passing real `Date` objects (worker-engine.ts does) bound a raw
+  // Date that real sql.js rejects with "Wrong API use : tried to bind a
+  // value of an unknown type …". Both fixed via `toIsoVal()` which normalises
+  // `null`/`undefined` → SQL NULL and `Date` → ISO string, matching the
+  // v3.30.0 upsertCronJob precedent.
+  describe("upsertWorkerTask / upsertWorkerStatus date-bind guard", () => {
+    beforeEach(async () => {
+      // The sql.js mock store is shared/global across mock DB instances — clear
+      // it + re-init so each test starts from a clean mirror.
+      const sqljs: any = require("sql.js");
+      sqljs.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      await ensureSqliteBackup();
+    });
+
+    it("binds null (not undefined) when startedAt/completedAt are omitted", () => {
+      const fb = getSqliteFallback()!;
+      const id = "task-undefined-bind";
+      fb.upsertWorkerTask({
+        id,
+        name: "run_daily_recommendations",
+        taskType: "recommendations",
+        status: "completed",
+        priority: 1,
+        error: null,
+        triggeredBy: "cron",
+        createdAt: new Date("2026-09-14T05:00:00.000Z"),
+        assignedTo: null,
+        cronJobId: null,
+        payload: null,
+      });
+
+      const row = fb.getWorkerTasks().find((r) => r.id === id);
+      expect(row).toBeDefined();
+      // Regression: the mock store passes raw values through, so a pre-fix
+      // `undefined` bind reads back as `undefined` — must be SQL null via
+      // toIsoVal (`undefined == null` → null).
+      expect(row!.started_at).toBeNull();
+      expect(row!.completed_at).toBeNull();
+      expect(row!.created_at).toBe("2026-09-14T05:00:00.000Z");
+    });
+
+    it("binds Date objects as ISO strings, never locale String(Date)", () => {
+      const fb = getSqliteFallback()!;
+      const id = "task-iso-bind";
+      fb.upsertWorkerTask({
+        id,
+        name: "run_swing_analysis",
+        taskType: "swing",
+        status: "running",
+        startedAt: new Date("2026-09-14T05:30:00.000Z"),
+        completedAt: null,
+      });
+
+      const row = fb.getWorkerTasks().find((r) => r.id === id);
+      expect(row).toBeDefined();
+      expect(row!.started_at).toBe("2026-09-14T05:30:00.000Z");
+      expect(row!.completed_at).toBeNull();
+    });
+
+    it("upsertWorkerStatus: normalises Date objects on lastHeartbeat/created_at", () => {
+      const fb = getSqliteFallback()!;
+      const workerId = "worker-date-bind";
+      fb.upsertWorkerStatus({
+        workerId,
+        workerName: "cron-daemon",
+        status: "idle",
+        lastHeartbeat: new Date("2026-09-14T06:00:00.000Z"),
+        createdAt: new Date("2026-09-14T05:00:00.000Z"),
+      });
+
+      const row = fb.getWorkerStatuses().find((r) => r.worker_id === workerId);
+      expect(row).toBeDefined();
+      expect(row!.last_heartbeat).toBe("2026-09-14T06:00:00.000Z");
+      expect(row!.created_at).toBe("2026-09-14T05:00:00.000Z");
+    });
+  });
+
   // ── v3.22.0: write-behind logging queue ─────────────────────────────────
   describe("write-behind log queue", () => {
     beforeEach(async () => {
