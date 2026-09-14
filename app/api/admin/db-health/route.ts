@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
 import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
@@ -605,6 +606,16 @@ export async function POST(req: Request) {
   }
 
   if (action === "deploy_prep") {
+    // Fail fast when the plan-limit circuit breaker is open: every Prisma call
+    // in deploy-prep would otherwise stall up to the per-query timeout and the
+    // gateway kills the request before it returns — leaving the admin UI with
+    // "Deploy prep failed: undefined". 503 carries a real message instead.
+    if (isPlanLimitBreakerOpen()) {
+      return NextResponse.json(
+        { error: "Deploy prep failed", detail: "Plan-limit circuit breaker is open (recent DB query timeouts/hold) — try again in a few minutes" },
+        { status: 503 },
+      );
+    }
     // "Prepare for Deploy": the SQLite backup layer is an in-memory sql.js DB,
     // so a deploy/restart wipes the queued write-behind logs + heartbeat data.
     // Step 1 — bulk-flush pending write-behind logs (APIRequestLog/ServerLog/
