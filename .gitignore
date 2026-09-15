@@ -66,6 +66,10 @@ server_logs/
 # App server logs (logs/ directory under the app folder)
 logs/
 
+# SQLite mirror snapshot — must never land at the repo root (jsdom test env
+# regression guard; non-server contexts fall back to os.tmpdir())
+/sqlite-mirror.sqlite
+
 # E2E walkthrough screenshots (generated during testing)
 /e2e-screenshots/
 /screenshots/
