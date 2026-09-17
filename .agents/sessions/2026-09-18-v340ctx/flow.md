@@ -160,8 +160,26 @@ Verified: `JSON.parse` OK — `agents=16 (primary=3, subagents=13)`, `commands=1
 `orchestrate.agent=orchestrator`, template resolves; both new files present; budget
 **73.0 KB / 100 KB** (AGENTS.md 19.8 → 20.0 KB, +0.2 KB).
 
+### Phase 5 (W5+W6) — Subagent health + handoff upgrade — DONE
+
+- NEW `.agents/agents/orchestrator-health.md` — per-stream-type timeout budget table (60 s → 900 s,
+  120 s default), liveness check at 50 %/100 % of budget, max-1-retry rule, closed failure taxonomy
+  (`provider-blocked` · `timeout` · `stalled` · `error` · `completed`) with retry permitted only for
+  the transient three, and a "why not retry until it works" rationale.
+- MOD `.agents/handoffs/SCHEMA.md` — bumped to **v1.1**: §8 `## Subagent Status` (one bounded row
+  per dispatch, closed outcome vocabulary) + §9 `## Handoff Summary` (≤ 15 lines, resumable without
+  the conversation) + an explicit **Backwards Compatibility** clause (1.1 is strictly additive; 1.0
+  files stay valid; sections 1–7 must never be deleted to "upgrade").
+- MOD `.agents/handoffs/flow/agent-to-agent.md` — rewrote the diagram with the orchestrator as the
+  entry point for ≥2 independent workstreams, and added a **Tier Downgrade Path** (probe → Tier A/B;
+  per-stream stalled/timeout/error → retry once → Tier B; provider error → no retry, whole-turn B).
+- MOD `.agents/handoffs/active/latest.md` — rewritten under v1.1 (`status: in_progress`,
+  `tier: B`), W1–W4 marked done with hashes, new Learnings (incl. the memory-search gotcha),
+  refreshed Verification table, Subagent Status + Handoff Summary sections.
+
+Verified: frontmatter well-formed; handoff contains both new sections; no section 1–7 removed.
+
 ### Next up
 
-Phase 5 (W5+W6) health monitoring + handoff schema → Phase 6 (W7) harness → Phase 7 tests →
-Phase 8 docs → Phase 9 verification.
+Phase 6 (W7) harness → Phase 7 tests → Phase 8 docs → Phase 9 verification.
 

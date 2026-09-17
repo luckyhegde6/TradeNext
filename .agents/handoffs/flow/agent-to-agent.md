@@ -5,10 +5,47 @@
 ## Flow Diagram
 
 ```
-GH Helper  ──> Integrator  ──> QA  ──> DevOps ──> Deploy
-    │              │             │         │
-    └────── Observability Checker ────────┘
+                          ┌──────────────────┐
+                          │   Orchestrator   │  probe capability → decompose
+                          │  (Tier A | B)    │  dispatch + monitor + record
+                          └────────┬─────────┘
+                                   │
+     ┌─────────────┬───────────────┼───────────────┬─────────────┐
+     ▼             ▼               ▼               ▼             ▼
+ GH Helper    Integrator          QA           DevOps     Observability
+     │             │               │               │             │
+     └─────────────┴───────────────┴───────────────┴─────────────┘
+                                   │
+                                   ▼
+                       Handoff (status + Subagent Status)
 ```
+
+> **The orchestrator is the entry point for any task with ≥ 2 independent workstreams.** It picks
+> the tier, dispatches, monitors health, and owns the handoff. See `.agents/agents/orchestrator.md`.
+
+## Tier Downgrade Path
+
+The orchestrator must never wait indefinitely and never block on subagents being available.
+
+```
+probe (1 trivial dispatch)
+  ├── success ─────────────────────► Tier A  (parallel dispatch, budgets + liveness)
+  └── provider error ──────────────► Tier B  (chunked sequential inline)
+                                        say so ONCE, do not retry
+
+per stream (Tier A):
+  budget exceeded, no output ──────► stalled ──► retry once ──► still failing ──► Tier B (that stream)
+  budget exceeded, some output ────► timeout ──► retry once ──► still failing ──► Tier B (that stream)
+  non-zero exit / error ───────────► error ────► retry once ──► still failing ──► Tier B (that stream)
+  provider error ─────────────────► provider-blocked ──► NO retry ──► Tier B (whole turn)
+```
+
+Rules:
+
+- **Max 1 retry per stream**; never a retry loop (`.agents/agents/orchestrator-health.md`).
+- A downgrade affects **only that stream** — other streams keep running.
+- Every dispatch outcome is recorded in `## Subagent Status` (one row each).
+- The tier actually used is stated in the response **and** in `## Handoff Summary`.
 
 ## Agent Collaboration Model
 
