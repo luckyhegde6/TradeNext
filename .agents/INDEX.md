@@ -82,6 +82,9 @@
 | Skill machines (auto-discovered) | `.opencode/skills/<name>/SKILL.md` |
 | Skill human mirror | `.agents/skills/` |
 | Agent profiles | `.agents/agents/` |
+| Orchestrator agent (decompose → dispatch → monitor → handoff) | `.agents/agents/orchestrator.md` |
+| Subagent health rules (timeouts, retries, failure taxonomy) | `.agents/agents/orchestrator-health.md` |
+| `/orchestrate` command template | `.agents/commands/orchestrate.md` |
 | `/command` templates | `.agents/commands/` |
 | Wiring | `.opencode/opencode.json` |
 | Architecture deep-dive | `ARCHITECTURE.md`, `docs/architecture.html` |

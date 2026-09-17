@@ -141,8 +141,27 @@ error paths return exit 1 with usage; empty input writes nothing.
 - Revert is a one-line change. Effect is host-side, so it is observed as fewer compaction
   *occurrences* per unit of work, not as a smaller per-request cost.
 
+### Phase 4 (W4) — Orchestrator agent — DONE
+
+- NEW `.agents/agents/orchestrator.md` — decomposition policy (independence test → parallel vs
+  sequential), capability probe, health rules, context discipline, boundaries, handoff triggers.
+- NEW `.agents/commands/orchestrate.md` — `/orchestrate` template + required output shape.
+- MOD `.opencode/opencode.json` — registered `orchestrator` in `agent` and `orchestrate` in `command`.
+- MOD `.agents/RULES.md` section 0 — normative line: ≥2 independent workstreams → prefer parallel
+  dispatch, else Tier B; always declare the tier used.
+- MOD `AGENTS.md` (compact row), `.agents/AGENT-SKILL-MATRIX.md` (core matrix + command inventory),
+  `.agents/INDEX.md` (section 6 rows).
+- **Design decision**: `mode: "primary"`, not `subagent` — subagents cannot dispatch subagents, so
+  a subagent orchestrator could never fulfil its mandate. The `tools` block is deliberately omitted
+  so the agent inherits defaults (including `task` for dispatch + Write/Edit for handoffs) instead
+  of inventing an unverified tool key.
+
+Verified: `JSON.parse` OK — `agents=16 (primary=3, subagents=13)`, `commands=11`,
+`orchestrate.agent=orchestrator`, template resolves; both new files present; budget
+**73.0 KB / 100 KB** (AGENTS.md 19.8 → 20.0 KB, +0.2 KB).
+
 ### Next up
 
-Phase 4 (W4) orchestrator agent + `/orchestrate` → Phase 5 (W5+W6) health monitoring + handoff
-upgrade → Phase 6 (W7) harness → Phase 7 tests → Phase 8 docs → Phase 9 verification.
+Phase 5 (W5+W6) health monitoring + handoff schema → Phase 6 (W7) harness → Phase 7 tests →
+Phase 8 docs → Phase 9 verification.
 
