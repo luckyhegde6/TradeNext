@@ -92,6 +92,31 @@ Relations should be in active voice and meaningful without extra context:
 4. Never bulk-read a doc "to get oriented" — use `.agents/INDEX.md` to pick the one doc.
 ```
 
+## Query semantics — learned the hard way
+
+`search_nodes` is a **literal, contiguous substring match of the *entire* query** against an
+entity's `name`, `entityType`, and `observations`. It is **not** tokenised, ranked, or fuzzy.
+
+| Query | Result | Why |
+|---|---|---|
+| `Injected context budget doc-size` | **0 matches** | The whole 5-word string never appears contiguously |
+| `Injected context budget` | 1 match | Exactly matches an entity **name** |
+| `baseline` | 2 matches | Substring appears inside **observations** |
+
+Rules:
+
+```
+□ Use SHORT queries — one distinctive noun phrase: "tsc baseline", "turbopackIgnore", "compaction"
+□ Prefer a phrase you expect to be an entity NAME (names are matched directly)
+□ Empty result does NOT mean "no memory" — retry shorter / different wording BEFORE opening a doc
+□ The graph is SHARED across workspaces (other projects' entities are present). Scope with a
+  project word (e.g. "TradeNext") or check the entity name/type before trusting a hit
+```
+
+> Observed live on 2026-09-18: a 5-word natural-language query returned empty against a graph that
+> demonstrably contained the answer. Without this note the query-before-read rule would silently
+> fail and agents would fall back to re-reading docs — the exact loop it exists to prevent.
+
 ## Anti-patterns
 
 | Anti-pattern | Why it hurts |
@@ -101,6 +126,7 @@ Relations should be in active voice and meaningful without extra context:
 | Using `.remember/` for cross-session knowledge | It is local-only; a fresh clone won't have it |
 | Using the graph for secrets | Never — it is not a secrets store |
 | Rewriting `now.md` history | Loses the audit trail; append instead |
+| Querying with a long natural-language phrase, getting 0 hits, concluding "no memory" | The search is literal — you will re-read docs for facts you already stored |
 | Re-reading a doc because "it's easier" | That is exactly the loop this rule exists to break |
 
 ## Verification
