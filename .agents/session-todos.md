@@ -1,6 +1,27 @@
 # Session Todos
 
-## Current (v3.39.3 — Netlify deploy triage: `npm run quickbuild` mandatory pre-commit gate; `@netlify/plugin-emails` "emails" bundling failure root-caused; docs/config only, on `main` HEAD `112b281`; commits `dbeba23` + `112b281` LOCAL — behind origin/main by 1; **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
+## Current (2026-09-18 — context-optimization standing directive + Turbopack tracing harness; branch `fix/turbopack-tracing-harness` on top of `a7e3709` = origin/main)
+
+**User directive (verbatim)**: "optimise the things using best practices and make it agent friendly coding with less context consumption and document it a break the larger files or docs into modular and referrence them for better coding experience" + "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+
+**Standing rule (this message)**: when a new message arrives mid-execution → update the Todo (TODO.md / .agents/session-todos.md) to reflect it, then continue or ask for clarification if unsure.
+
+**Ground truth (re-verified this turn)**: 5 injected instruction files ≈ **358 KB/session** — AGENTS.md 191,017 B (375 lines; version-history L7–120 = offload target), TODO.md 134,054 B (566 lines), README.md 19,156 B, .agents/rules/README.md 3,571 B, .agents/rules/checklist.md 10,204 B. Non-injected bloat suspects: Primer.md 231,628 B · agent-memory.md 249,495 B · Lessons.md 213,024 B · .agents/CHANGELOG.md 67,734 B · .agents/session-todos.md 35,495 B · HANDOFF.md 17,101 B · lib/sqlite.ts 6,475 lines. Branch-inclusion: `origin/feat/sqlite-durable-mirror` **MERGED**; `origin/fix/sqlite-upsert-worker-undefined-bind` **NOT merged** (`85c18d9` = `app/api/admin/nse-warm/route.ts` +76 + `lib/nse-client.ts` +4). Netlify deploy **GREEN** (`6aac5808fb995300084f46af` ready, commit `11d6947`, no `emails` fn).
+
+- [x] Todo update per standing rule (branch-inclusion result + mid-execution-message rule + context directive recorded here + TODO.md Quick Reference row) — DONE
+- [x] Present findings + targeted approval questions (slim scope; version-history offload; context dir; 85c18d9; netlify.toml/11d6947; orchestrator) — DONE (all 6 decisions locked)
+- [x] Docs restructure — `AGENTS.md` 191,017 → **20,260 B** (version history → `.agents/changelog/versions-index.md`); `TODO.md` 134,054 → **20,792 B** (Quick Reference → `.agents/changelog/todo-quick-reference-archive.md`); NEW `.agents/INDEX.md`; NEW `.agents/session-archive/` (`Primer.md` 1159 → 213 lines, `agent-memory.md` 1092 → 373 lines via NEW `.context/chunk-history.mjs`; `Lessons.md` NOT age-chunked — live rulebook); NEW context-budget rule (`.agents/rules/session-memory-rules.md` §7); NEW `scripts/dev-checks/check-doc-sizes.mjs` — **DONE** (injected total **358 KB → 72.2 KB**; size check OK 72.2/100 KB) — DONE
+- [x] Turbopack `/*turbopackIgnore: true*/` edits — all **33** sites applied (`lib/logger.ts` 9, `lib/services/ingestService.ts` 2, `lib/services/worker/worker-logger.ts` 14, `lib/sqlite.ts` 8) → `npx tsc --noEmit` **46 = exact baseline** → `npm run quickbuild` **BUILD_OK, 0 Turbopack warnings** (was 33), 185/185 pages — DONE
+- [x] Repo docs updated (v3.39.4) — `versions-index.md` row, `.agents/CHANGELOG.md` index row + header note, `Primer.md` status entry, `agent-memory.md` activity entry, `Lessons.md` **Lesson 119**, `.agents/session-todos.md` — DONE
+- [ ] **Request commit approval** for the v3.39.4 batch (AGENTS.md, TODO.md, Primer.md, agent-memory.md, Lessons.md, `.agents/rules/session-memory-rules.md`, `.agents/CHANGELOG.md`, `.agents/changelog/*`, `.agents/INDEX.md`, `.agents/session-archive/*`, `scripts/dev-checks/check-doc-sizes.mjs`, `.gitignore`, lib turbopack edits, `netlify.toml`) on `fix/turbopack-tracing-harness` — PENDING USER
+- [ ] Context-offload system (chunked files + memory MCP): destination dir approval (`.context\` vs temp dir) + `.remember` source resolution + stale memory-graph cleanup
+- [ ] Self-improve orchestrator (subagent health + parallel handoffs): locate orchestrator file → design proposal
+- [ ] `@netlify/plugin-nextjs` 5.15.8 → 5.16.0 bump (flag-risk check first)
+- [ ] Lighthouse pass incl. PWA
+- [ ] 85c18d9 disposal decision (open PR / cherry-pick / discard)
+- [ ] ` M netlify.toml` + keep/revert `11d6947` decision (deploy currently GREEN — emails fn absent; verify whether `@netlify/plugin-emails` UI removal still needed)
+
+## Completed earlier (v3.39.3 — Netlify deploy triage: `npm run quickbuild` mandatory pre-commit gate; `@netlify/plugin-emails` "emails" bundling failure root-caused; docs/config only, on `main` HEAD `112b281`; commits `dbeba23` + `112b281` LOCAL — behind origin/main by 1; **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
 
 **User directive (implicit — Netlify deploy blocked)**: deploys failed with `Bundling of function "emails" failed` — `.netlify/functions-internal/emails/index.js` is CommonJS but the nearest package.json declares `"type": "module"`. Root cause: `@netlify/plugin-emails` (a Netlify-UI-added integration, NOT in package.json/lockfile) creates the `emails` function AFTER the Next build and WIPES the pre-seeded in-directory `package.json` commonjs guard before bundling; repo has NO `emails/` dir, ZERO `@netlify/emails` refs (real email path = nodemailer `lib/alerts/delivery/email.ts`). **User fix PENDING**: remove/disable the `@netlify/plugin-emails` integration in the Netlify UI. Ruled out: dropping root `"type":"module"` (breaks tracked ESM `.js` — `jest.setup.js`, `scripts/*.js`, `scripts/dev-checks/*.js`, `__mocks__/@openrouter/agent.js`).
 

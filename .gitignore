@@ -57,6 +57,9 @@ nul
 # sql.js WASM binary — generated at build time by scripts/copy-sql-wasm.mjs
 /public/sql-wasm.wasm
 
+# Agent context scratch space (workspace-local chunk/context files, never committed)
+/.context/
+
 # Worker logs
 worker_logs/
 

@@ -104,3 +104,34 @@ Netlify cold starts with **zero additional Prisma ops**.
 - Full suite: **89/89 suites · 1234 passed / 4 skipped / 0 failed** (aggregate unchanged — UI-only batch, no new tests).
 - `npx tsc --noEmit` — **46 = exact baseline (0 new)**; no migration; no new packages.
 - Live check (dev server :3000): pending user permission to start `npm run dev`.
+
+---
+
+## v3.39.4 — Context-optimisation: slim injected instruction files (358 KB → 72 KB/session) + modular read-on-demand docs + Turbopack tracing fixes (Sep 18 2026)
+
+**Branch**: `fix/turbopack-tracing-harness` (on top of `a7e3709` = origin/main). **Commit pending user.**
+
+### Problem (root cause of the session compaction loop)
+`.opencode/opencode.json` → `instructions` injects the **full contents** of every listed file into **every** request. The injected set had grown to **358,002 B ≈ 90K tokens** (`AGENTS.md` 191,017 B, `TODO.md` 134,054 B, `README.md` 19,156 B, `.agents/rules/README.md` 3,571 B, `.agents/rules/checklist.md` 10,204 B). Compaction summarised the conversation, but the next request re-injected all 358 KB → context refilled instantly → compact again. `compaction.reserved` was only 10000, leaving almost no headroom. A handful of small reads was enough to push 7% → 78%.
+
+### Changes
+1. **Injected files slimmed** via NEW `.context/slim-docs.mjs` (marker-based extraction, EOL-preserving, `trimTrail`):
+   - `AGENTS.md` 191,017 → **20,260 B** — version history moved to **NEW `.agents/changelog/versions-index.md`** (171,421 B, not injected) with a pointer + `.agents/INDEX.md` reference.
+   - `TODO.md` 134,054 → **20,792 B** — Quick Reference history moved to **NEW `.agents/changelog/todo-quick-reference-archive.md`** (116,047 B, not injected).
+   - **Injected total 358 KB → 72.2 KB.**
+2. **NEW `.agents/INDEX.md`** — topic → file manifest (operating rules, memory, spec-driven dev, changelog, `.agents/docs/` subsystem deep-dives, skills/agents/commands, root `@File.md` docs).
+3. **NEW `.agents/session-archive/`** via NEW `.context/chunk-history.mjs` (marker-based, append-only archives, reversible — files are git-tracked):
+   - `Primer.md` 1159 → **213 lines** (version log ≤ v3.30.0 + Sessions 1–23 → `primer-history-archive.md`, 959 lines).
+   - `agent-memory.md` 1092 → **373 lines** (→ `agent-memory-archive.md`, 731 lines).
+   - **`Lessons.md` deliberately NOT age-chunked** — it is a live rulebook; old entries are still active rules.
+4. **Guards**:
+   - NEW context-budget rule `.agents/rules/session-memory-rules.md` §7 — injected set ≤ ~100 KB; injected files must be thin indexes/pointers; read large docs on demand via `.agents/INDEX.md`.
+   - NEW `scripts/dev-checks/check-doc-sizes.mjs` — parses `instructions` from `.opencode/opencode.json`, enforces 100 KB total / 32 KB per-file budgets, exits 1 when over.
+5. **Turbopack tracing fixes** — all **33** `Dynamic filesystem access causes tracing of the whole project` warnings resolved with `/*turbopackIgnore: true*/` as the first token of the call args: `lib/logger.ts` (9), `lib/services/ingestService.ts` (2), `lib/services/worker/worker-logger.ts` (14), `lib/sqlite.ts` (8 — bare-import form e.g. `existsSync(/*turbopackIgnore: true*/ candidate)`).
+6. **Docs updated**: `versions-index.md` v3.39.4 row, `.agents/CHANGELOG.md` index row + header note, `Primer.md` status entry, `agent-memory.md` activity entry, `Lessons.md` **Lesson 119**.
+
+### Verification
+- `node scripts/dev-checks/check-doc-sizes.mjs` → **OK — TOTAL 72.2 KB** (budget 100 KB); every file within the 32 KB per-file budget.
+- `npx tsc --noEmit` → **46 = exact baseline (0 new)**.
+- `npm run quickbuild` → **BUILD_OK**, `✓ Compiled successfully`, 185/185 static pages, **0 `Dynamic filesystem access` warnings** (was 33).
+- No migration; no new packages (Node built-ins only).

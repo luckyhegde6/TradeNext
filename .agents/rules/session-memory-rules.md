@@ -82,6 +82,20 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 □ Parallelize independent reads in a single message (batch tool calls)
 ```
 
+### Injected-file budget (context-loop guard, v3.39.4)
+
+`.opencode/opencode.json` → `instructions` injects the **full contents** of every listed file into
+**every** request. A bloated injected set refills context immediately after each compaction →
+compaction loop. Hard rules:
+
+```
+□ Keep the SUM of injected files ≤ ~100 KB (currently AGENTS.md + TODO.md + README.md + rules/README.md + rules/checklist.md)
+□ Injected files are INDEXES/pointers — never bulk history or long tables
+□ Move detail OUT (changelogs, archives, subsystem docs) and link it from `.agents/INDEX.md`
+□ Read large docs on demand via `.agents/INDEX.md`, never add them to `instructions`
+□ After editing an injected file, sanity-check its size (`wc -c` / `ls -l`) — growth is a regression
+```
+
 ## 8. Subagent Sessions (parallel work)
 
 - Launch subagents (`task` tool: explore/general/review/tdd) for independent workstreams
