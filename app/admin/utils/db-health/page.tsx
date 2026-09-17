@@ -438,7 +438,7 @@ export default function DbHealthPage() {
       const body = await parseJsonBody(res);
       if (res.ok) {
         setOpsMsg(
-          `Ops counter synced (${scope}) — month total now ${body.queryConsumption.totalOperations.toLocaleString()}`,
+          `Ops counter synced (${scope}) — month total now ${(body.queryConsumption?.totalOperations ?? 0).toLocaleString()}`,
         );
         await fetchHealth();
       } else {

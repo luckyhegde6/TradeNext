@@ -291,6 +291,7 @@ export default function Header() {
             <div className="flex items-center xl:hidden">
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                aria-label="Toggle mobile menu"
                 className="p-2 rounded-xl text-surface-foreground hover:bg-surface transition-colors focus:outline-none"
               >
                 {isMobileMenuOpen ? (

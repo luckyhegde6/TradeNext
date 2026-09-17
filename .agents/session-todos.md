@@ -1,6 +1,6 @@
 # Session Todos
 
-## Current (v3.38.2 — Dependabot vulnerability-fix batch — next/third-parties/nodemailer/morgan/csv-parse bumps + mysql2 override + @netlify/blobs removal (npm-audit 0 critical / 3 high): full 88/88 suites / 1207 pass / 4 skip / 0 fail exit 0, tsc 46 = exact baseline (0 new), npm ls clean, npm run quickbuild OK, no migration, no new packages, diff package.json + package-lock.json ONLY; on `fix/db-health-ops-count-manual-sync` on top of pushed v3.38.1 docs `36f2c9b`; committed + pushed; **PR #121 OPEN — merge/deploy PENDING USER**)
+## Current (v3.39.0 + v3.39.1 — SQLite Durable Mirror (Spec 12, restart survival, disk + Blobs) + WCAG/UI batch (a11y contrast, flat-change neutral state, index charts → TradingView, mobile-menu aria-label): full 89/89 suites / 1234 pass / 4 skip / 0 fail, tsc 46 = exact baseline (0 new), no migration, no new packages; on `feat/sqlite-durable-mirror` on top of unreleased v3.39.x base fixes `2182687`/`f470e6d`/PR #123 `e84fb34` + PRs #124/#125; committed `e4623a3` (feat) + `e9db4a7` + `d0e792e` (docs) + `309deac` (v3.39.1 UI); **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
 
 **User directive** (v3.38.1): db-health "Recent DB Errors" showed repeating Prisma 23502 NOT NULL on `swing_signals.create` every ~6h; the AI-monitoring "Last hour" filter appeared broken.
 

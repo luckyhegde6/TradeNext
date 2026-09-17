@@ -99,6 +99,12 @@ npx playwright show-trace test-results/.../trace.zip                 # view a tr
 PostgreSQL seeded with the demo user (`npx prisma db seed`), `npx playwright install`
 for browser binaries.
 
+**User preference — headed Chrome for the full suite**: run the whole suite (or at
+least the Chromium / Mobile Chrome projects) **headed** so failures are visible live:
+`npx playwright test --headed --project=chromium --project=chromium-logged-out
+--project="Mobile Chrome"`. Headless is fine for quick targeted checks; the committed
+CI workflow stays headless (see `.github/workflows/playwright.yml`).
+
 ## 4. How the agent uses this suite
 
 ### When to run e2e

@@ -12,6 +12,10 @@
 
 jest.mock("sql.js", () => {
   const store: Record<string, { columns: string[]; rows: any[][] }> = {};
+  // v3.39.x durable mirror: `export()` returns the bytes the test wants the
+  // mirror snapshot to persist (set via __setMirrorExportBytes). Kept OUTSIDE
+  // `store` so __resetStore's Object.keys() sweep never touches it.
+  let mockExportBytes: Uint8Array | null = null;
 
   class MockDatabase {
     run(sql: string, _params: any[] = []) {
@@ -206,6 +210,11 @@ jest.mock("sql.js", () => {
       };
     }
     close() {}
+    // sql.js Database.prototype.export() → Uint8Array of the full DB file.
+    // Return the test-controlled bytes (empty by default = bare empty DB).
+    export() {
+      return mockExportBytes ? mockExportBytes : new Uint8Array(0);
+    }
   }
 
   return {
@@ -218,6 +227,7 @@ jest.mock("sql.js", () => {
       for (const k of Object.keys(store)) store[k] = { columns: [], rows: [] };
     },
     __getStore: () => store,
+    __setMirrorExportBytes: (bytes: Uint8Array | null) => { mockExportBytes = bytes; },
   };
 });
 
@@ -1052,6 +1062,89 @@ describe("SQLite backup fallback", () => {
       expect(rows[0].name).toBe("v2");
       expect(rows[0].cron_expression).toBe("0 5 * * 1-5");
       expect(rows[0].next_run).toBe("2026-09-08T05:00:00.000Z");
+    });
+  });
+
+  // ── upsertWorkerTask/upsertWorkerStatus date-bind guard ──────────────
+  // worker_task.started_at/completed_at/created_at and worker_status
+  // last_heartbeat/created_at were bound raw (`as string` cast — no runtime
+  // conversion) so: (a) omitting keys produced literal `undefined`; (b)
+  // callers passing real `Date` objects (worker-engine.ts does) bound a raw
+  // Date that real sql.js rejects with "Wrong API use : tried to bind a
+  // value of an unknown type …". Both fixed via `toIsoVal()` which normalises
+  // `null`/`undefined` → SQL NULL and `Date` → ISO string, matching the
+  // v3.30.0 upsertCronJob precedent.
+  describe("upsertWorkerTask / upsertWorkerStatus date-bind guard", () => {
+    beforeEach(async () => {
+      // The sql.js mock store is shared/global across mock DB instances — clear
+      // it + re-init so each test starts from a clean mirror.
+      const sqljs: any = require("sql.js");
+      sqljs.__resetStore();
+      const { resetSqliteStateForTests, ensureSqliteBackup } = await import("../sqlite");
+      resetSqliteStateForTests();
+      await ensureSqliteBackup();
+    });
+
+    it("binds null (not undefined) when startedAt/completedAt are omitted", () => {
+      const fb = getSqliteFallback()!;
+      const id = "task-undefined-bind";
+      fb.upsertWorkerTask({
+        id,
+        name: "run_daily_recommendations",
+        taskType: "recommendations",
+        status: "completed",
+        priority: 1,
+        error: null,
+        triggeredBy: "cron",
+        createdAt: new Date("2026-09-14T05:00:00.000Z"),
+        assignedTo: null,
+        cronJobId: null,
+        payload: null,
+      });
+
+      const row = fb.getWorkerTasks().find((r) => r.id === id);
+      expect(row).toBeDefined();
+      // Regression: the mock store passes raw values through, so a pre-fix
+      // `undefined` bind reads back as `undefined` — must be SQL null via
+      // toIsoVal (`undefined == null` → null).
+      expect(row!.started_at).toBeNull();
+      expect(row!.completed_at).toBeNull();
+      expect(row!.created_at).toBe("2026-09-14T05:00:00.000Z");
+    });
+
+    it("binds Date objects as ISO strings, never locale String(Date)", () => {
+      const fb = getSqliteFallback()!;
+      const id = "task-iso-bind";
+      fb.upsertWorkerTask({
+        id,
+        name: "run_swing_analysis",
+        taskType: "swing",
+        status: "running",
+        startedAt: new Date("2026-09-14T05:30:00.000Z"),
+        completedAt: null,
+      });
+
+      const row = fb.getWorkerTasks().find((r) => r.id === id);
+      expect(row).toBeDefined();
+      expect(row!.started_at).toBe("2026-09-14T05:30:00.000Z");
+      expect(row!.completed_at).toBeNull();
+    });
+
+    it("upsertWorkerStatus: normalises Date objects on lastHeartbeat/created_at", () => {
+      const fb = getSqliteFallback()!;
+      const workerId = "worker-date-bind";
+      fb.upsertWorkerStatus({
+        workerId,
+        workerName: "cron-daemon",
+        status: "idle",
+        lastHeartbeat: new Date("2026-09-14T06:00:00.000Z"),
+        createdAt: new Date("2026-09-14T05:00:00.000Z"),
+      });
+
+      const row = fb.getWorkerStatuses().find((r) => r.worker_id === workerId);
+      expect(row).toBeDefined();
+      expect(row!.last_heartbeat).toBe("2026-09-14T06:00:00.000Z");
+      expect(row!.created_at).toBe("2026-09-14T05:00:00.000Z");
     });
   });
 
@@ -2213,4 +2306,233 @@ describe("SQLite backup fallback", () => {
       db.close();
     });
   });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Durable mirror snapshot (v3.39.x, Spec 12, Phase 3).
+    //
+    // MOCKED sql.js environment: export() returns only the bytes set via
+    // __setMirrorExportBytes, and restore never sees sqlite_master, so every
+    // boot here is a FRESH boot and the boot-tail persist rewrites the file /
+    // uploads to the Blobs store. The REAL sql.js round-trip (disk → Blobs →
+    // restore) lives in lib/__tests__/sqliteMirror.test.ts — keep the
+    // FakeBlobsStore contract in sync there.
+    // ──────────────────────────────────────────────────────────────────────
+    describe("durable mirror snapshot", () => {
+      const MIRROR_BLOBS_KEY = "sqlite-mirror.sqlite";
+      const SQLITE_MAGIC = Buffer.from([
+        0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
+        0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+      ]);
+      const nextTick = () => new Promise<void>((r) => setTimeout(r, 10));
+
+      // fs/os/path via inline require to match this file's existing
+      // convention (see the real-WASM schema test above). The module-level
+      // jest.mock("sql.js") is hoisted, so require("sql.js") reaches the mock
+      // export incl. the __setMirrorExportBytes test control.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("fs") as typeof import("fs");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const os = require("os") as typeof import("os");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require("path") as typeof import("path");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const sqlJs = require("sql.js") as unknown as {
+        __setMirrorExportBytes: (bytes: Uint8Array | null) => void;
+      };
+
+      class FakeBlobsStore {
+        private readonly map = new Map<string, Uint8Array>();
+        readonly getCalls: Array<{ key: string; opts?: { type?: string } }> = [];
+        readonly setCalls: Array<{ key: string }> = [];
+
+        async get(key: string, opts?: { type?: string }): Promise<ArrayBuffer | null> {
+          this.getCalls.push({ key, opts });
+          const bytes = this.map.get(key);
+          if (!bytes) return null;
+          return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        }
+
+        async set(key: string, blob: Blob): Promise<void> {
+          this.setCalls.push({ key });
+          try {
+            // Native (node env) Blob has arrayBuffer; jsdom's (mock suite default
+            // env) does not. The module's digest gate is byte-driven on the
+            // CALLER's bytes, so a swallowed storage gap must still let set()
+            // resolve — otherwise the digest is never recorded and every upload
+            // re-attempts (the v3.39 digest-gate regression this guards).
+            this.map.set(key, new Uint8Array(await blob.arrayBuffer()));
+          } catch {
+            // jsdom Blob: record-only; nothing to store for download tests here.
+          }
+        }
+      }
+
+      let tmpRoot: string;
+      let mirrorFile: string;
+      let blobs: FakeBlobsStore;
+
+      const sqlite = () => import("../sqlite");
+
+      /** Fresh boot: initialise, then settle the fire-and-forget boot-tail upload. */
+      async function boot(): Promise<void> {
+        const mod = await sqlite();
+        await mod.ensureSqliteBackup();
+        await nextTick();
+      }
+
+      function setMirrorBlobsStore(store: FakeBlobsStore): void {
+        (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = store;
+      }
+
+      beforeEach(async () => {
+        jest.useRealTimers();
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tn-sqlite-mirror-"));
+        mirrorFile = path.join(tmpRoot, "sqlite-mirror.sqlite");
+        sqlJs.__setMirrorExportBytes(SQLITE_MAGIC);
+        const mod = await sqlite();
+        mod.resetSqliteStateForTests();
+        mod.setMirrorSnapshotPathForTests(mirrorFile);
+        blobs = new FakeBlobsStore();
+        setMirrorBlobsStore(blobs);
+      });
+
+      afterEach(async () => {
+        const mod = await sqlite();
+        mod.resetSqliteStateForTests();
+        jest.useRealTimers();
+        try {
+          fs.rmSync(tmpRoot, { recursive: true, force: true });
+        } catch {
+          // best-effort cleanup
+        }
+      });
+
+      it("fresh boot persists exactly the mocked export bytes (mock cannot create a real DB)", async () => {
+        await boot();
+
+        const mod = await sqlite();
+        expect(mod.persistMirrorSnapshot()).toBe(true);
+        expect(fs.existsSync(mirrorFile)).toBe(true);
+        expect(fs.readFileSync(mirrorFile).equals(SQLITE_MAGIC)).toBe(true);
+      });
+
+      it("persistMirrorSnapshot returns false and writes nothing when the export is empty", async () => {
+        sqlJs.__setMirrorExportBytes(null);
+        await boot();
+
+        const mod = await sqlite();
+        expect(mod.persistMirrorSnapshot()).toBe(false);
+        expect(fs.existsSync(mirrorFile)).toBe(false);
+      });
+
+      it("magic-header-but-not-sqlite file is rewritten to the mock export bytes", async () => {
+        fs.writeFileSync(mirrorFile, Buffer.concat([SQLITE_MAGIC, Buffer.from("junk", "utf8")]));
+
+        await boot(); // must not throw
+
+        expect(fs.existsSync(mirrorFile)).toBe(true);
+        expect(fs.readFileSync(mirrorFile).equals(SQLITE_MAGIC)).toBe(true);
+      });
+
+      it("junk without magic is treated as corrupt and overwritten with the magic header", async () => {
+        fs.writeFileSync(mirrorFile, Buffer.from("GARBAGE", "utf8"));
+
+        await boot();
+
+        const after = fs.readFileSync(mirrorFile);
+        expect(after.subarray(0, 16).equals(SQLITE_MAGIC)).toBe(true);
+      });
+
+      it("boot consults the Blobs store when the disk file is missing", async () => {
+        expect(blobs.getCalls).toHaveLength(0);
+        await boot();
+
+        expect(blobs.getCalls.length).toBeGreaterThanOrEqual(1);
+        expect(
+          blobs.getCalls.some(
+            (c) => c.key === MIRROR_BLOBS_KEY && (c.opts as { type?: string } | undefined)?.type === "arrayBuffer",
+          ),
+        ).toBe(true);
+        // Fresh boot's boot-tail upload lands in the Blobs store.
+        expect(blobs.setCalls.some((c) => c.key === MIRROR_BLOBS_KEY)).toBe(true);
+        expect(fs.existsSync(mirrorFile)).toBe(true);
+      });
+
+      it("continues disk-only without a Blobs store and never throws", async () => {
+        delete (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore;
+
+        await boot(); // lazy real @netlify/blobs getStore fails → null memo, guarded
+
+        expect(fs.existsSync(mirrorFile)).toBe(true);
+      });
+
+      it("Blobs upload is digest-gated: identical bytes skip, changed bytes re-upload", async () => {
+        await boot();
+        const setsAfterBoot = blobs.setCalls.length;
+
+        const mod = await sqlite();
+        await mod.uploadMirrorSnapshotToBlobs(new Uint8Array(SQLITE_MAGIC)); // same digest as boot upload → skip
+        expect(blobs.setCalls.length).toBe(setsAfterBoot);
+
+        const changed = new Uint8Array([...SQLITE_MAGIC, 0x01, 0x02, 0x03]);
+        await mod.uploadMirrorSnapshotToBlobs(changed);
+        expect(blobs.setCalls.length).toBe(setsAfterBoot + 1);
+
+        await mod.uploadMirrorSnapshotToBlobs(changed); // repeat → skip
+        expect(blobs.setCalls.length).toBe(setsAfterBoot + 1);
+      });
+
+      it("skips uploading null and empty byte arrays", async () => {
+        await boot();
+        const setsAfterBoot = blobs.setCalls.length;
+
+        const mod = await sqlite();
+        await mod.uploadMirrorSnapshotToBlobs(null);
+        await mod.uploadMirrorSnapshotToBlobs(new Uint8Array(0));
+        expect(blobs.setCalls.length).toBe(setsAfterBoot);
+      });
+
+      it("resets to the default mirror path after resetSqliteStateForTests", async () => {
+        await boot();
+        expect(fs.existsSync(mirrorFile)).toBe(true); // override path used on first boot
+        const firstBytes = fs.readFileSync(mirrorFile);
+
+        const mod = await sqlite();
+        mod.resetSqliteStateForTests(); // clears path override + blobs memo + digest
+
+        await boot(); // boot-tail persist now goes to the DEFAULT path
+
+        // Default path resolves via the module getter — in the jsdom test env
+        // resolveLogsDir() is '' so it falls back to os.tmpdir() and must NEVER
+        // collapse to a cwd-relative repo file (stray-artifact regression).
+        const defaultFile = mod.getMirrorSnapshotPath();
+        expect(defaultFile).not.toBe(mirrorFile); // override was cleared
+        expect(defaultFile).not.toBe(path.join("", "sqlite-mirror.sqlite")); // never cwd-relative
+        expect(path.isAbsolute(defaultFile)).toBe(true);
+        expect(fs.existsSync(defaultFile)).toBe(true);
+        expect(fs.readFileSync(defaultFile).subarray(0, 16).equals(SQLITE_MAGIC)).toBe(true);
+
+        // The override-path file is untouched (byte-identical).
+        expect(fs.readFileSync(mirrorFile).equals(firstBytes)).toBe(true);
+
+        fs.rmSync(defaultFile, { force: true });
+      });
+
+      it("the ops-persistence tick re-persists the snapshot after state reset", async () => {
+        await boot(); // real timers
+        expect(fs.existsSync(mirrorFile)).toBe(true);
+
+        const mod = await sqlite();
+        mod.resetSqliteStateForTests(); // wipes db + path override + digest
+        mod.setMirrorSnapshotPathForTests(mirrorFile); // re-apply override so the tick lands in tmpRoot
+
+        jest.useFakeTimers();
+        mod.startOpsCounterPersistence();
+        await jest.advanceTimersByTimeAsync(60_000);
+        mod.stopOpsCounterPersistence();
+        jest.useRealTimers();
+
+        expect(fs.existsSync(mirrorFile)).toBe(true); // re-created by the tick
+      });
+    });
 });

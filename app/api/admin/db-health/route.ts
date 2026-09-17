@@ -397,6 +397,17 @@ export async function POST(req: Request) {
         success: true,
         message: `Set ops counter for ${dayKey} (${scope})`,
         entry,
+        // Mirror the GET queryConsumption block (:212) so the page's Sync
+        // confirmation can read totalOperations from THIS response. The live
+        // counter is passed through unchanged (set_ops_counter never zeroes it —
+        // v3.38.0 display-only override), so buildQueryConsumption keeps its
+        // Math.max high-water semantics and reports the honest post-set figure.
+        // monthlyPlanLimit is GET-scope only (:123), hence the inline derivation.
+        queryConsumption: buildQueryConsumption(
+          getOpsMonthlyState(),
+          { reads: dbOpsCounter.reads, writes: dbOpsCounter.writes },
+          Number(process.env.DB_PLAN_LIMIT_OPS_MONTHLY) || 200_000,
+        ),
       });
     } catch (err) {
       return NextResponse.json(

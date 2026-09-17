@@ -161,3 +161,22 @@ previously only getAiStatsMerged re-filtered after merging").
 - `npx tsc --noEmit`: **46 = exact baseline (0 new)**
 - `npm run quickbuild`: OK
 - no migration, no schema change, no new packages
+
+---
+
+# Follow-up fix — `set_ops_counter` response now returns `queryConsumption` (`f470e6d`, Sep 15 2026)
+
+- **Branch**: `fix/sqlite-upsert-worker-undefined-bind` (PR #126) — committed + pushed; merge/deploy PENDING USER
+- **Commit**: `f470e6d` — `fix(admin): set_ops_counter response includes queryConsumption` (3 files, +49/−1)
+- **Why**: the db-health "Sync Operations Count" card's update flow read `queryConsumption` from the POST response, but v3.38.0's `set_ops_counter` returned only `{ success, totalOperations }` → the plan/query-consumption bar showed stale/absent data after an admin Update/Reset until the next GET.
+
+## Changes (3 files, +49/−1 in `f470e6d`)
+1. **`app/api/admin/db-health/route.ts`** — `set_ops_counter` success path now returns `queryConsumption: buildQueryConsumption(getOpsMonthlyState(), { reads: dbOpsCounter.reads, writes: dbOpsCounter.writes }, Number(process.env.DB_PLAN_LIMIT_OPS_MONTHLY) || 200_000)` + `monthlyPlanLimit` (mirrors the GET `:212` block; `Math.max` high-water preserved; live counter NOT zeroed — v3.38.0 display-only override).
+2. **`app/admin/utils/db-health/page.tsx`** (`:441`) — `totalOperations` display hardened to `(body.queryConsumption?.totalOperations ?? 0).toLocaleString()`.
+3. **`lib/__tests__/dbHealthRoute.test.ts`** — regression: pre-seeds day `2026-09-09` (100r/20w), POSTs `set_ops_counter` 400r/50w `scope:"today"`, asserts `entry === { reads: 400, writes: 50 }` + full `queryConsumption` shape in the response.
+
+## Verification
+- `dbHealthRoute` **17/17**; full suite **88/88 suites / 1218 pass / 4 skip / 0 fail**, exit 0
+- `npx tsc --noEmit`: **46 = exact baseline (0 new)**
+- no schema change → no migration; no new packages
+- Live-verified :3000 — both set/reset flows render the alert + ops-usage bar; 0 console errors

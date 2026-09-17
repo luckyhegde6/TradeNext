@@ -4,6 +4,8 @@ import { isMarketOpen, getMillisecondsUntilNextMarketOpen, getRecommendedTTL } f
 import logger from "@/lib/logger";
 import cache from "@/lib/cache";
 import { isNseCooldownActive, NseRateLimitedError } from "@/lib/services/nseRateGuard";
+import { isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
 
 export type DataType = 
   | "corporate_actions" 
@@ -127,34 +129,61 @@ export async function getOrFetchNseData<T>(
       };
     }
 
-    // 2) Persistent DB cache (edge-cached: hot market reads, 5 min TTL)
-    const cached = await prisma.marketCache.findUnique(withAccelerateCache({ ttl: 300, swr: 60 })({
-      where: { cacheKey }
-    }));
+    // v3.39.x hold-proof: when the 200k/mo breaker is OPEN, skip the Prisma
+    // MarketCache read entirely (zero ops) and serve from the SQLITE mirror.
+    // This makes all 14 analytics tabs (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short)
+    // stay servable during the 202k hold + cold Netlify start with zero Prisma.
+    if (isPlanLimitBreakerOpen()) {
+      const sqlite = getSqliteFallback();
+      if (sqlite?.isReady()) {
+        const sqliteRow = sqlite.getMarketCache(cacheKey);
+        if (sqliteRow) {
+          const lastSyncedAt = sqliteRow.last_synced_at ? new Date(sqliteRow.last_synced_at as string) : (sqliteRow.lastSyncedAt ? new Date(sqliteRow.lastSyncedAt as string) : null);
+          // sqlite.getMarketCache already JSON-parses the `data` TEXT column
+          const sqliteData = (sqliteRow.data as T) ?? (sqliteRow as unknown as T);
+          if (lastSyncedAt) cache.set(memKey, { data: sqliteData, lastSyncedAt }, memTtl);
+          logger.debug({ msg: "MarketCache: Serving from SQLITE mirror (breaker open)", cacheKey });
+          return {
+            data: sqliteData,
+            source: "db",
+            needsRefresh: true,
+            lastSyncedAt,
+          };
+        }
+      }
+      // No SQLITE -> fall through to NSE-direct (no DB upsert when breaker open, see below)
+    }
 
-    const lastSyncedAt = cached?.lastSyncedAt || null;
-    const nextSyncAt = cached?.nextSyncAt || null;
-
-    // Check if we need to refresh
-    const shouldRefresh = needsCacheRefresh(lastSyncedAt, nextSyncAt, marketOpen);
-
-    if (!shouldRefresh && cached) {
-      logger.debug({
-        msg: "MarketCache: Serving from DB",
-        cacheKey,
-        lastSyncedAt,
-        marketOpen
-      });
-
-      // Repopulate memory so the next request is a 0-DB-op hit
-      cache.set(memKey, { data: cached.data as T, lastSyncedAt: cached.lastSyncedAt }, memTtl);
-
-      return {
-        data: cached.data as T,
-        source: "db",
-        needsRefresh: false,
-        lastSyncedAt
-      };
+    // 2) Persistent DB cache (edge-cached: hot market reads, 5 min TTL) — skipped when breaker open (zero Prisma ops, SQLITE already checked above)
+    let cached: Awaited<ReturnType<typeof prisma.marketCache.findUnique>> | null = null;
+    let lastSyncedAt: Date | null = null;
+    let nextSyncAt: Date | null = null;
+    let shouldRefresh = true;
+    if (!isPlanLimitBreakerOpen()) {
+      cached = await prisma.marketCache.findUnique(withAccelerateCache({ ttl: 300, swr: 60 })({
+        where: { cacheKey }
+      }));
+      lastSyncedAt = cached?.lastSyncedAt || null;
+      nextSyncAt = cached?.nextSyncAt || null;
+      shouldRefresh = needsCacheRefresh(lastSyncedAt, nextSyncAt, marketOpen);
+      if (!shouldRefresh && cached) {
+        logger.debug({
+          msg: "MarketCache: Serving from DB",
+          cacheKey,
+          lastSyncedAt,
+          marketOpen
+        });
+        cache.set(memKey, { data: cached.data as T, lastSyncedAt: cached.lastSyncedAt }, memTtl);
+        return {
+          data: cached.data as T,
+          source: "db",
+          needsRefresh: false,
+          lastSyncedAt
+        };
+      }
+    } else {
+      // Breaker open: DB read skipped (zero ops). SQLITE already probed above; miss → NSE-direct below.
+      shouldRefresh = true;
     }
 
     // 3) Need to refresh - fetch from NSE
@@ -180,7 +209,35 @@ export async function getOrFetchNseData<T>(
       // Calculate next sync time
       const nextSync = calculateNextSync(marketOpen, ttlSecondsOpen, ttlSecondsClosed);
 
-      // Upsert the cache
+      // v3.39.x hold-proof: when breaker open, skip Prisma upsert (zero ops) and write to SQLITE mirror + memory
+      if (isPlanLimitBreakerOpen()) {
+        const sqlite = getSqliteFallback();
+        const now = new Date();
+        if (sqlite?.isReady()) {
+          sqlite.upsertMarketCache({
+            cacheKey,
+            dataType,
+            indexName: indexName || null,
+            data: nseData as any,
+            recordCount: Array.isArray(nseData) ? nseData.length : 1,
+            nseLastModified: nseLastModified || null,
+            lastSyncedAt: now,
+            nextSyncAt: nextSync,
+            marketStatus: marketOpen ? "open" : "closed",
+            syncStatus: "idle",
+            syncError: null,
+          });
+        }
+        cache.set(memKey, { data: nseData as T, lastSyncedAt: now }, memTtl);
+        return {
+          data: nseData as T,
+          source: "nse",
+          needsRefresh: false,
+          lastSyncedAt: now,
+        };
+      }
+
+      // Upsert the cache (Prisma path, breaker closed)
       const updatedCache = await prisma.marketCache.upsert({
         where: { cacheKey },
         create: {
@@ -236,6 +293,24 @@ export async function getOrFetchNseData<T>(
           needsRefresh: true,
           lastSyncedAt: cached.lastSyncedAt
         };
+      }
+      // v3.39.x hold-proof: when breaker open and Prisma cache is empty, try SQLITE stale
+      if (isPlanLimitBreakerOpen()) {
+        const sqlite = getSqliteFallback();
+        if (sqlite?.isReady()) {
+          const sqliteRow = sqlite.getMarketCache(cacheKey);
+          if (sqliteRow) {
+            const lastSyncedAt = sqliteRow.last_synced_at ? new Date(sqliteRow.last_synced_at as string) : (sqliteRow.lastSyncedAt ? new Date(sqliteRow.lastSyncedAt as string) : null);
+            const sqliteData = sqliteRow.data as T;
+            if (lastSyncedAt) cache.set(memKey, { data: sqliteData, lastSyncedAt }, memTtl);
+            return {
+              data: sqliteData,
+              source: "db" as const,
+              needsRefresh: true,
+              lastSyncedAt,
+            };
+          }
+        }
       }
 
       // No cache and NSE failed - rethrow

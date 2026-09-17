@@ -252,6 +252,43 @@ describe("POST /api/admin/db-health — set_ops_counter (v3.38.0)", () => {
     expect(res.status).toBe(401);
     expect(getOpsMonthlyState().days).toEqual({});
   });
+
+  it("success response includes queryConsumption (regression: page Sync reads it)", async () => {
+    // Pre-seed a prior day so the merge math is visible.
+    foldOpsCounterIntoMonthly(getOpsMonthlyState(), "2026-09-09", { reads: 100, writes: 20 });
+
+    const res = await POST(
+      jsonPost({ action: "set_ops_counter", reads: 400, writes: 50, scope: "today" }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    // Ledger today's entry replaced EXACTLY (v3.38.0 authority-fix semantics).
+    expect(json.entry).toEqual({ reads: 400, writes: 50 });
+
+    // Regression: page.tsx reads body.queryConsumption.totalOperations for the
+    // Sync confirmation — the field was MISSING from this response (TypeError).
+    // Assert the full post-set figure (persisted ledger merged over the live
+    // counter, which set_ops_counter never zeroes).
+    expect(json.queryConsumption).toEqual({
+      monthKey: "2026-09",
+      reads: 500,
+      writes: 70,
+      totalOperations: 570,
+      planLimit: 200000,
+      planOperationsRemaining: 199430,
+      today: { dayKey: "2026-09-10", reads: 400, writes: 50 },
+      perDay: [
+        { day: "2026-09-10", reads: 400, writes: 50 },
+        { day: "2026-09-09", reads: 100, writes: 20 },
+      ],
+    });
+
+    // The response must match the dashboard GET after the set — the Sync
+    // message and the refreshed dashboard always agree.
+    const getRes = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect((await getRes.json()).queryConsumption).toEqual(json.queryConsumption);
+  });
 });
 
 describe("GET /api/admin/db-health — leader watchdog block (v3.33.0)", () => {

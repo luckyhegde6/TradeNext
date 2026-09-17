@@ -191,8 +191,14 @@ export async function GET(request: NextRequest) {
       traceId,
     });
     return NextResponse.json(
-      { success: false, issues: [], error: "Failed to fetch closed IPOs" },
-      { status: 500 }
+      {
+        success: true,
+        issues: [],
+        warning: "Data temporarily unavailable",
+        source: "fallback",
+        timestamp: new Date().toISOString(),
+        traceId,
+      }
     );
   }
 }

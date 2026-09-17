@@ -21,9 +21,20 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
     if (error) return <div className="text-red-500">Failed to load stock data</div>;
     if (!quote) return <div className="animate-pulse bg-gray-100 h-32 rounded"></div>;
 
-    const isPositive = quote.pChange >= 0;
-    const changeColor = isPositive ? 'text-green-600' : 'text-red-600';
-    const bgColor = isPositive ? 'bg-green-50 dark:bg-green-900/10' : 'bg-red-50 dark:bg-red-900/10';
+    // A11y parity v3: three-way change state — flat (0.00) renders neutral gray with no arrow
+    const isPositive = quote.pChange > 0;
+    const isNegative = quote.pChange < 0;
+    const isFlat = !isPositive && !isNegative;
+    const signPrefix = isPositive ? '+' : '';
+    let changeColor = 'text-gray-600 dark:text-gray-400';
+    let bgColor = 'bg-gray-50 dark:bg-slate-800/40';
+    if (isPositive) {
+        changeColor = 'text-green-700 dark:text-green-400';
+        bgColor = 'bg-green-50 dark:bg-green-900/10';
+    } else if (isNegative) {
+        changeColor = 'text-red-700 dark:text-red-400';
+        bgColor = 'bg-red-50 dark:bg-red-900/10';
+    }
 
     return (
         <div className={`${bgColor} rounded-lg p-6 border border-gray-200 dark:border-slate-800`}>
@@ -37,7 +48,7 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
                         {quote.companyName}
                     </p>
                     {quote.industry && (
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {quote.industry} • {quote.sector}
                         </p>
                     )}
@@ -50,9 +61,9 @@ export default function StockQuoteHeader({ symbol }: StockQuoteProps) {
                             ₹{quote.lastPrice?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className={`text-lg font-semibold ${changeColor} flex items-center gap-2 mt-1`}>
-                            <span>{isPositive ? '▲' : '▼'}</span>
-                            <span>{isPositive ? '+' : ''}{quote.change?.toFixed(2)}</span>
-                            <span>({isPositive ? '+' : ''}{quote.pChange?.toFixed(2)}%)</span>
+                            {!isFlat && <span>{isPositive ? '▲' : '▼'}</span>}
+                            <span>{signPrefix}{quote.change?.toFixed(2)}</span>
+                            <span>({signPrefix}{quote.pChange?.toFixed(2)}%)</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">

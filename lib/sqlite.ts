@@ -17,8 +17,8 @@
 //     const health = sqlite.getHealthStatus();
 //   }
 
-import { randomUUID } from "crypto";
-import { existsSync, readFileSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
+import { randomUUID, createHash } from "crypto";
+import { existsSync, readFileSync, appendFileSync, mkdirSync, writeFileSync, readdirSync, statSync, openSync, closeSync, fsyncSync, renameSync } from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import prisma from "@/lib/prisma";
@@ -427,6 +427,9 @@ export interface SqliteFallback {
   /** Mirror delete: one corporate-action row by LOCAL mirror id + natural-key
    *  outbox delete. Returns true when the row existed in the mirror. */
   deleteCorporateAction(id: number): boolean;
+  /** v3.39.x Analytics SQLITE-only: NSE market-cache (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short). */
+  getMarketCache(cacheKey: string): Record<string, unknown> | null;
+  upsertMarketCache(row: Record<string, unknown>): void;
   /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
   getSqliteDerived(): Record<string, unknown>;
 }
@@ -726,6 +729,245 @@ export async function restoreSqliteBackup(bytes: Uint8Array): Promise<{ db: numb
   _instance = createFallback(candidate);
   logger.info({ msg: "SQLite restored from backup", tables: tableNames.length });
   return { db: tableNames.length, missing };
+}
+
+// ---------------------------------------------------------------------------
+// Durable mirror snapshot (v3.39.x, Spec 12)
+// ---------------------------------------------------------------------------
+// The SQLite mirror is in-memory (sql.js), so a restart/deploy loses the last
+// 6h of SQLite-only daemon writes (task status, control-plane heartbeats,
+// swing patches, Plan 09 mirrors). The DURABLE MIRROR SNAPSHOT persists the
+// full mirror binary to disk (logs/sqlite-mirror.sqlite) AND to Netlify Blobs
+// (cold-start recovery), so a warm local reboot or a Netlify instance boots a
+// complete mirror from the snapshot — zero Prisma operations during a
+// plan-limit hold.
+//
+// Snapshot cadence (all fail-open, zero Prisma ops):
+//   - AFTER every successful syncFromPrisma() (disk + fire-and-forget Blobs)
+//   - on the 60s ops-persist tick (disk only — no per-tick Blobs PUTs)
+//   - at boot init (restore disk → Blobs → fresh DB + Prisma boot sync)
+//
+// state.sqliteBytes is ALREADY the in-memory size probe (number) surfaced by
+// the db-health endpoint — the snapshot keeps its OWN bytes
+// (mirrorSnapshotBytes) so it never collides with that field.
+
+const MIRROR_SNAPSHOT_FILENAME = "sqlite-mirror.sqlite";
+// User-approved store name (2026-09-15); the Netlify Blobs key = filename.
+const MIRROR_SNAPSHOT_BLOBS_STORE = "tradenext-sqlite-mirror";
+const MIRROR_SNAPSHOT_BLOBS_KEY = MIRROR_SNAPSHOT_FILENAME;
+const MIRROR_SNAPSHOT_BLOBS_MAX_BYTES = 200 * 1024 * 1024; // 200 MB hard cap
+
+let mirrorSnapshotBytes: Uint8Array | null = null;
+let mirrorSnapshotPathOverride: string | null = null;
+let mirrorBlobsLastDigest: string | null = null; // sha-256 of last successful upload
+
+/** Resolve the on-disk snapshot path (overrideable for tests). */
+export function getMirrorSnapshotPath(): string {
+  if (mirrorSnapshotPathOverride) return mirrorSnapshotPathOverride;
+  // Never collapse to a cwd-relative path: when the logs dir resolution
+  // returns '' (jsdom/non-server test env), fall back to the OS temp dir
+  // (mirrors logger.ts's own Netlify fallback pattern).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const dir = resolveLogsDir() || require("os").tmpdir();
+  return path.join(dir, MIRROR_SNAPSHOT_FILENAME);
+}
+
+/** Test hook — redirect the snapshot file away from logs/ during tests. */
+export function setMirrorSnapshotPathForTests(p: string | null): void {
+  mirrorSnapshotPathOverride = p;
+}
+
+/** Test hook — clear the path override + cached bytes + Blobs digest. */
+export function resetMirrorSnapshotOverrides(): void {
+  mirrorSnapshotPathOverride = null;
+  mirrorSnapshotBytes = null;
+  mirrorBlobsLastDigest = null;
+}
+
+/** Write bytes to the snapshot path atomically (tmp + fsync + rename). Never throws. */
+function writeMirrorSnapshotFile(bytes: Uint8Array): void {
+  const target = getMirrorSnapshotPath();
+  const tmp = `${target}.tmp-${process.pid}`;
+  const fd = openSync(tmp, "w");
+  try {
+    writeFileSync(fd, bytes);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, target);
+}
+
+/** Read the on-disk snapshot file, or null when missing/oversized. */
+function readMirrorSnapshotFile(): Uint8Array | null {
+  try {
+    const target = getMirrorSnapshotPath();
+    if (!existsSync(target)) return null;
+    const st = statSync(target);
+    if (st.size === 0 || st.size > MAX_RESTORE_BYTES) return null;
+    return readFileSync(target);
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror snapshot file read failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * Validate a candidate mirror binary (size cap + SQLite 3 magic header) and
+ * parse it into a fresh DB, requiring the core fallback tables. Returns null
+ * when unusable — callers then fall back to disk→Blobs→fresh DB.
+ */
+async function parseValidatedMirror(bytes: Uint8Array): Promise<{ db: Database; tableNames: string[] } | null> {
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_RESTORE_BYTES) return null;
+  // SQLite files start with the "SQLite format 3\0" magic header.
+  const magic = [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00];
+  for (let i = 0; i < magic.length; i++) {
+    if (bytes[i] !== magic[i]) return null;
+  }
+  try {
+    const SQL = await getSqlJs();
+    const db = new SQL.Database(bytes);
+    const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    const tableNames: string[] = [];
+    if (tables.length) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tableNames.push(...(tables[0].values as any[]).map((row: any) => String(row[0])));
+    }
+    // Require the core fallback tables so we never boot a foreign/empty DB.
+    const required = ["_backup_meta", "daily_recommendation_run"];
+    const missing = required.filter((t) => !tableNames.includes(t));
+    if (missing.length) {
+      db.close();
+      return null;
+    }
+    return { db, tableNames };
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror snapshot parse failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * Persist the current live mirror to the on-disk snapshot file. Sets
+ * mirrorSnapshotBytes for later Blobs uploads. Fail-open (never throws).
+ * Returns true when a snapshot was actually written.
+ */
+export function persistMirrorSnapshot(): boolean {
+  try {
+    if (!state.db || !state.ready) return false;
+    const bytes = state.db.export();
+    if (!bytes || bytes.byteLength === 0) return false;
+    mirrorSnapshotBytes = bytes;
+    writeMirrorSnapshotFile(bytes);
+    logger.debug({ msg: "SQLite: mirror snapshot persisted", bytes: bytes.byteLength });
+    return true;
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror snapshot persist failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}
+
+/**
+ * Load a validated mirror snapshot from disk (→ Netlify Blobs fallback) and
+ * return it as a fresh sql.js DB, or null when nothing usable exists. Does NOT
+ * touch `state` — the caller binds the result. Sets mirrorSnapshotBytes.
+ */
+export async function restoreMirrorSnapshot(): Promise<Database | null> {
+  try {
+    let bytes: Uint8Array | null = readMirrorSnapshotFile();
+    if (!bytes) bytes = await downloadMirrorSnapshotFromBlobs();
+    if (!bytes) return null;
+    const parsed = await parseValidatedMirror(bytes);
+    if (!parsed) return null;
+    mirrorSnapshotBytes = bytes;
+    logger.info({ msg: "SQLite: mirror snapshot restored", bytes: bytes.byteLength, tables: parsed.tableNames.length });
+    return parsed.db;
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror snapshot restore failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/** sha-256 hex digest — gates byte-identical Blobs uploads. */
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Minimal structural subset of @netlify/blobs `Store` used by the mirror
+ * upload/download paths (kept local so the app never depends on those types).
+ */
+interface MirrorBlobsStoreLike {
+  set(key: string, value: Blob): Promise<void>;
+  get(key: string, options: { type: "arrayBuffer" }): Promise<ArrayBuffer | null>;
+}
+
+/**
+ * Resolve the @netlify/blobs store for mirror snapshots, memoized on
+ * globalThis (cross-module-graph stable, mirrors __sqliteBackup). Returns null
+ * when unavailable (non-Netlify runtime / missing env / transient init error)
+ * — callers fail open to disk-only mirroring.
+ */
+async function getMirrorBlobsStore(): Promise<MirrorBlobsStoreLike | null> {
+  const g = globalThis as Record<string, unknown>;
+  if (g.__sqliteMirrorBlobsStore !== undefined) {
+    return (g.__sqliteMirrorBlobsStore as MirrorBlobsStoreLike) ?? null;
+  }
+  try {
+    // Lazy dynamic import keeps @netlify/blobs off the critical server path.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mod: any = await import("@netlify/blobs");
+    const store = mod.getStore?.({ name: MIRROR_SNAPSHOT_BLOBS_STORE }) as MirrorBlobsStoreLike | undefined;
+    g.__sqliteMirrorBlobsStore = store ?? null;
+  } catch (err) {
+    logger.warn({ msg: "SQLite: Netlify Blobs unavailable (disk-only mirror)", error: err instanceof Error ? err.message : String(err) });
+    g.__sqliteMirrorBlobsStore = null;
+  }
+  return (g.__sqliteMirrorBlobsStore as MirrorBlobsStoreLike) ?? null;
+}
+
+/** Test hook — clear the memoized Blobs store + upload digest. */
+export function resetMirrorBlobsOverrides(): void {
+  (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = undefined;
+  mirrorBlobsLastDigest = null;
+}
+
+/**
+ * Upload the mirror bytes to Netlify Blobs (fire-and-forget callers). Skip
+ * when unchanged since the last successful upload. Fail-open — never throws.
+ */
+export async function uploadMirrorSnapshotToBlobs(bytes: Uint8Array | null): Promise<void> {
+  try {
+    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MIRROR_SNAPSHOT_BLOBS_MAX_BYTES) return;
+    const store = await getMirrorBlobsStore();
+    if (!store) return; // disk-only mode
+    const digest = sha256Hex(bytes);
+    if (mirrorBlobsLastDigest === digest) return; // unchanged → skip
+    // Blob/BlobPart types come from lib.dom; the Blob global exists at runtime
+    // in Node 18+ (and Next.js 16 requires newer).
+    await store.set(MIRROR_SNAPSHOT_BLOBS_KEY, new Blob([bytes as unknown as BlobPart]));
+    mirrorBlobsLastDigest = digest;
+    logger.info({ msg: "SQLite: mirror snapshot uploaded to Blobs", bytes: bytes.byteLength });
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror Blobs upload failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Download the mirror snapshot from Netlify Blobs, or null when absent /
+ * unusable. Fail-open — callers fall back to disk / fresh DB.
+ */
+export async function downloadMirrorSnapshotFromBlobs(): Promise<Uint8Array | null> {
+  try {
+    const store = await getMirrorBlobsStore();
+    if (!store) return null;
+    const buf = await store.get(MIRROR_SNAPSHOT_BLOBS_KEY, { type: "arrayBuffer" });
+    if (!buf) return null;
+    return new Uint8Array(buf);
+  } catch (err) {
+    logger.warn({ msg: "SQLite: mirror Blobs download failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1490,29 @@ export const SCHEMA_SQL = `
     at           TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_sync_outbox_table ON _sync_outbox (table_name);
+
+  -- v3.39.x Analytics SQLITE-only: NSE analytics cache mirrored from Prisma market_cache
+  -- so the 14 analytics tabs (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short)
+  -- stay servable during the 202k/200k plan-limit hold with zero Prisma ops (memory -> SQLITE).
+  -- TTL-bounded (market-cache semantics: open 300s / closed ~nextMarketOpen).
+  CREATE TABLE IF NOT EXISTS market_cache (
+    cache_key        TEXT PRIMARY KEY,
+    data_type        TEXT NOT NULL,
+    index_name       TEXT,
+    data             TEXT,
+    record_count     INTEGER DEFAULT 0,
+    nse_last_modified TEXT,
+    last_synced_at   TEXT,
+    next_sync_at     TEXT,
+    market_status    TEXT DEFAULT 'closed',
+    sync_status      TEXT DEFAULT 'idle',
+    sync_error       TEXT,
+    created_at       TEXT,
+    updated_at       TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_market_cache_data_type ON market_cache (data_type);
+  CREATE INDEX IF NOT EXISTS idx_market_cache_index_name ON market_cache (index_name);
+  CREATE INDEX IF NOT EXISTS idx_market_cache_last_synced ON market_cache (last_synced_at);
 `;
 
 // ---------------------------------------------------------------------------
@@ -1415,27 +1680,39 @@ export async function initSqliteBackup(): Promise<void> {
   if (state.db) return;
 
   try {
-    const SQL = await getSqlJs();
-    const db = new SQL.Database();
-    state.db = db;
+    // v3.39.x (Spec 12): restore the durable mirror snapshot FIRST so a warm
+    // local reboot / Netlify cold start boots a complete mirror instead of an
+    // empty DB awaiting the Prisma pull. Fail-open — a missing/corrupt
+    // snapshot falls through to the fresh schema replay below.
+    const restoredMirror = await restoreMirrorSnapshot();
+    const fromSnapshot = restoredMirror !== null;
+    let candidate: Database;
+    if (restoredMirror) {
+      candidate = restoredMirror;
+    } else {
+      const SQL = await getSqlJs();
+      candidate = new SQL.Database();
 
-    // Create all tables (multi-statement split on ;)
-    const stmts = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
-    for (const stmt of stmts) {
-      db.run(stmt);
+      // Create all tables (multi-statement split on ;)
+      const stmts = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
+      for (const stmt of stmts) {
+        candidate.run(stmt);
+      }
     }
     // v3.25.x: add the control-plane columns the daemons need (idempotent,
     // SQLite-only — no Prisma schema change, no migration).
-    ensureControlColumns(db);
     // v3.28.0: add the NSE-store columns older mirror DBs are missing
     // (idempotent, SQLite-only).
-    ensureNseColumns(db);
     // Plan 09 Phase 6: add the recommendation/job columns older mirror DBs
     // are missing (idempotent, SQLite-only).
-    ensureRecommendationColumns(db);
+    // (Restored snapshots may predate these columns — the guards re-apply.)
+    ensureControlColumns(candidate);
+    ensureNseColumns(candidate);
+    ensureRecommendationColumns(candidate);
 
+    state.db = candidate;
     state.ready = true;
-    _instance = createFallback(db);
+    _instance = createFallback(candidate);
     // Restore the persisted Prisma ops counter (same IST day) so the admin
     // dashboard survives restarts/deploys on the same day. Same for the
     // per-type DB error counts (v3.21.1).
@@ -1445,7 +1722,7 @@ export async function initSqliteBackup(): Promise<void> {
     // Move any pre-init buffered log writes into the queue now that SQLite is
     // ready (v3.22.0 write-behind).
     drainWriteBehindBuffer();
-    logger.info({ msg: "SQLite backup initialized" });
+    logger.info({ msg: "SQLite backup initialized", fromSnapshot });
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
     // after the sync completes so the dashboard reflects the latest state.
@@ -1464,6 +1741,11 @@ export async function initSqliteBackup(): Promise<void> {
     } catch {
       // non-fatal
     }
+
+    // v3.39.x (Spec 12): persist the mirror snapshot after boot (disk write)
+    // and fire the Blobs upload — the mirror now survives this instance dying.
+    persistMirrorSnapshot();
+    void uploadMirrorSnapshotToBlobs(mirrorSnapshotBytes);
 
     // Start background recovery probe
     startRecoveryProbe();
@@ -1726,6 +2008,9 @@ export function startOpsCounterPersistence(): void {
     persistOpsCounter();
     persistDbErrorCounts();
     persistOpsMonthly();
+    // v3.39.x (Spec 12): persist the durable mirror snapshot on the same 60s
+    // tick — DISK ONLY (no per-tick Blobs PUTs; uploads happen after syncs).
+    persistMirrorSnapshot();
   }, OPS_PERSIST_INTERVAL_MS);
 }
 
@@ -1758,6 +2043,10 @@ export function resetSqliteStateForTests(): void {
   state.wbLastRetained = {};
   _instance = null;
   _initPromise = null;
+  // v3.39.x (Spec 12): clear the durable-mirror overrides so tests (and the
+  // next real init) start from a clean slate.
+  resetMirrorSnapshotOverrides();
+  resetMirrorBlobsOverrides();
 }
 
 // ---------------------------------------------------------------------------
@@ -3355,6 +3644,35 @@ export async function syncFromPrisma(opts?: {
       };
     });
 
+    // --- Sync market_cache (NSE analytics persistent cache — all 14 tabs) ---
+    // v3.39.x hold-proof: market_cache is the durable NSE analytics cache (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short)
+    // so analytics stays servable from SQLITE during the 202k/200k monthly hold with zero Prisma ops (memory -> SQLITE).
+    totalRows += await syncTable(db, "market_cache", async () => {
+      const rows = await prisma.marketCache.findMany({
+        orderBy: { lastSyncedAt: "desc" },
+        take: 500,
+      });
+      return {
+        columns: "cache_key, data_type, index_name, data, record_count, nse_last_modified, last_synced_at, next_sync_at, market_status, sync_status, sync_error, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((r) => [
+          r.cacheKey,
+          r.dataType,
+          r.indexName,
+          r.data != null ? JSON.stringify(r.data) : null,
+          r.recordCount,
+          r.nseLastModified?.toISOString() ?? null,
+          r.lastSyncedAt?.toISOString() ?? null,
+          r.nextSyncAt?.toISOString() ?? null,
+          r.marketStatus,
+          r.syncStatus,
+          r.syncError ?? null,
+          r.createdAt?.toISOString() ?? null,
+          r.updatedAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
     // --- Sync user sessions (recent 100; sessionToken is NEVER mirrored) ---
     totalRows += await syncTable(db, "user_session", async () => {
       const rows = await prisma.userSession.findMany({
@@ -3436,6 +3754,17 @@ export async function syncFromPrisma(opts?: {
       logger.warn({ msg: "SQLite: sync complete with partial failures", tables: syncErr, totalRows, durationMs });
     } else {
       logger.info({ msg: "SQLite: sync complete", totalRows, durationMs });
+    }
+
+    // v3.39.x (Spec 12): refresh the durable mirror snapshot after every
+    // successful sync — disk write + fire-and-forget Blobs upload. The
+    // plan-limit breaker early-return above means a held / DB-down period never
+    // reaches here, preserving the last-known-good mirror. Fail-open.
+    try {
+      persistMirrorSnapshot();
+      void uploadMirrorSnapshotToBlobs(mirrorSnapshotBytes);
+    } catch (err) {
+      logger.warn({ msg: "SQLite: mirror snapshot refresh failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
     }
   } catch (err) {
     const durationMs = Date.now() - startTime;
@@ -4524,6 +4853,77 @@ function createFallback(db: Database): SqliteFallback {
       }
     },
 
+    // --- Market cache (NSE analytics persistent cache — hold-proof) ---
+    getMarketCache(cacheKey: string): Record<string, unknown> | null {
+      const _start = performance.now();
+      try {
+        const rows = db.exec("SELECT * FROM market_cache WHERE cache_key = ? LIMIT 1", [cacheKey]);
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getMarketCache", _start, 0, false);
+          return null;
+        }
+        const cols = rows[0].columns;
+        const vals = rows[0].values[0];
+        const r: Record<string, unknown> = {};
+        cols.forEach((c, i) => (r[c] = vals[i]));
+        // Rehydrate JSON data column for direct use by market-cache.ts
+        if (typeof r.data === "string") {
+          try { r.data = JSON.parse(r.data as string); } catch { /* keep raw */ }
+        }
+        recordSqliteRead("getMarketCache", _start, 1, true);
+        return r;
+      } catch {
+        recordSqliteRead("getMarketCache", _start, 0, false);
+        return null;
+      }
+    },
+
+    upsertMarketCache(row: Record<string, unknown>): void {
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO market_cache (cache_key, data_type, index_name, data, record_count, nse_last_modified, last_synced_at, next_sync_at, market_status, sync_status, sync_error, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(cache_key) DO UPDATE SET
+             data_type=excluded.data_type,
+             index_name=excluded.index_name,
+             data=excluded.data,
+             record_count=excluded.record_count,
+             nse_last_modified=excluded.nse_last_modified,
+             last_synced_at=excluded.last_synced_at,
+             next_sync_at=excluded.next_sync_at,
+             market_status=excluded.market_status,
+             sync_status=excluded.sync_status,
+             sync_error=excluded.sync_error,
+             updated_at=excluded.updated_at`,
+        );
+        const sv = (v: unknown): string | number | null => {
+          if (v == null) return null;
+          if (typeof v === "string" || typeof v === "number") return v;
+          if (v instanceof Date) return v.toISOString();
+          return JSON.stringify(v);
+        };
+        const now = new Date().toISOString();
+        stmt.run([
+          String(row.cacheKey ?? row.cache_key ?? ""),
+          String(row.dataType ?? row.data_type ?? ""),
+          (row.indexName ?? row.index_name ?? null) as string | null,
+          row.data != null ? (typeof row.data === "string" ? row.data as string : JSON.stringify(row.data)) : null,
+          Number(row.recordCount ?? row.record_count ?? 0),
+          sv(row.nseLastModified ?? row.nse_last_modified),
+          sv(row.lastSyncedAt ?? row.last_synced_at) ?? now,
+          sv(row.nextSyncAt ?? row.next_sync_at),
+          String(row.marketStatus ?? row.market_status ?? "closed"),
+          String(row.syncStatus ?? row.sync_status ?? "idle"),
+          (row.syncError ?? row.sync_error ?? null) as string | null,
+          sv(row.createdAt ?? row.created_at) ?? now,
+          now,
+        ]);
+        stmt.free();
+      } catch (err) {
+        logger.warn({ msg: "SQLite: upsertMarketCache failed", cacheKey: String(row.cacheKey ?? row.cache_key ?? ""), error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
     // --- Server logs ---
     getServerLogs(limit = 100): Array<Record<string, unknown>> {
       try {
@@ -4706,11 +5106,11 @@ function createFallback(db: Database): SqliteFallback {
             String(row.taskType ?? row.task_type ?? row.type ?? "unknown"),
             String(row.status ?? "pending"),
             Number(row.priority ?? 0),
-            (row.startedAt ?? row.started_at) as string | null,
-            (row.completedAt ?? row.completed_at) as string | null,
+            toIsoVal(row.startedAt ?? row.started_at),
+            toIsoVal(row.completedAt ?? row.completed_at),
             row.error != null ? String(row.error) : null,
             (row.triggeredBy ?? row.triggered_by ?? "system") as string,
-            (row.createdAt ?? row.created_at ?? now) as string,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
             (row.assignedTo ?? row.assigned_to ?? null) as string | null,
             (row.cronJobId ?? row.cron_job_id ?? null) as string | null,
             row.payload != null ? JSON.stringify(row.payload) : null,
@@ -4753,10 +5153,10 @@ function createFallback(db: Database): SqliteFallback {
             (row.currentTaskId ?? row.current_task_id ?? null) as string | null,
             Number(row.tasksCompleted ?? row.tasks_completed ?? 0),
             Number(row.tasksFailed ?? row.tasks_failed ?? 0),
-            (row.lastHeartbeat ?? row.last_heartbeat ?? now) as string,
+            toIsoVal(row.lastHeartbeat ?? row.last_heartbeat ?? now),
             row.cpuUsage != null ? Number(row.cpuUsage) : null,
             row.memoryUsage != null ? Number(row.memoryUsage) : null,
-            (row.createdAt ?? row.created_at ?? now) as string,
+            toIsoVal(row.createdAt ?? row.created_at ?? now),
           ],
         );
         db.run(

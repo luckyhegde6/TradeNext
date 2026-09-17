@@ -1,6 +1,7 @@
 // lib/services/worker/screener-service.ts
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { scanStocks } from "@/lib/services/tradingview-service";
 
 /**
@@ -91,9 +92,24 @@ export async function syncDailyScreener(): Promise<{ success: boolean; recordCou
 
 /**
  * Get the latest available screener snapshot
+ * Hold-aware: during a Prisma plan-limit hold (breaker open) this skips the
+ * DB read entirely (fail-open → null) so hot public pages degrade to a live
+ * TradingView scan instead of 500ing. Transient DB errors also degrade to null.
  */
 export async function getLatestScreenerData() {
-    return prisma.dailyScreenerSync.findFirst({
-        orderBy: { syncDate: "desc" },
-    });
+    if (isPlanLimitBreakerOpen()) {
+        logger.warn({ msg: "Screener: breaker open — skipping DB snapshot read" });
+        return null;
+    }
+    try {
+        return await prisma.dailyScreenerSync.findFirst({
+            orderBy: { syncDate: "desc" },
+        });
+    } catch (err) {
+        if (isDbUnavailableError(err) || (err instanceof Error && err.name === "PlanLimitOpenError")) {
+            logger.warn({ msg: "Screener: DB unavailable — degrading to live scan", error: err instanceof Error ? err.message : String(err) });
+            return null;
+        }
+        throw err;
+    }
 }

@@ -31,10 +31,18 @@ interface StockData {
 }
 
 // Fetch stocks - from database cache first, then from TradingView
+// Hold-aware: DB snapshot is best-effort; on PlanLimitHold/Breaker it
+// returns null via screener-service so we skip straight to the live TV scan
+// (zero Prisma ops) and the route never 500s during the monthly hold.
 async function getStocks(): Promise<{ stocks: StockData[]; lastSyncedAt: Date | null }> {
-  // Try database first
-  const latestSync = await getLatestScreenerData();
-  
+  // Try database first (fail-open on hold — never throws)
+  let latestSync: Awaited<ReturnType<typeof getLatestScreenerData>> = null;
+  try {
+    latestSync = await getLatestScreenerData();
+  } catch {
+    latestSync = null;
+  }
+
   if (latestSync?.data && Array.isArray(latestSync.data) && latestSync.data.length > 0) {
     return {
       stocks: latestSync.data as StockData[],

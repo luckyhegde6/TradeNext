@@ -68,6 +68,14 @@ const INDICATOR_PERIODS: Record<Indicator, number> = {
 
 const ALL_INDICATORS: Indicator[] = ["MA20", "MA50", "MA200"];
 
+/** Mode-appropriate text colors for indicator chips/legend — meet WCAG ≥4.5:1 on the
+ *  color+"18" tinted background (light) and slate-900 (dark), unlike INDICATOR_COLORS 500s. */
+const INDICATOR_TEXT_CLASSES: Record<Indicator, string> = {
+    MA20: "text-amber-700 dark:text-amber-300",
+    MA50: "text-violet-700 dark:text-violet-300",
+    MA200: "text-cyan-700 dark:text-cyan-300",
+};
+
 export default function NSEStockChart({ symbol }: NSEChartProps) {
     const [timeframe, setTimeframe] = useState('1D');
     const [activeIndicators, setActiveIndicators] = useState<Set<Indicator>>(new Set(["MA20", "MA50"]));
@@ -221,7 +229,7 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
     return (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-6 shadow-xl border border-gray-100 dark:border-slate-800 transition-all">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Price Chart</h3>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Price Chart</h2>
 
                 {/* Timeframe Selector */}
                 <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-slate-800 rounded-xl overflow-x-auto no-scrollbar">
@@ -230,8 +238,8 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
                             key={tf.value}
                             onClick={() => setTimeframe(tf.value)}
                             className={`px-3 py-1.5 text-xs font-black rounded-lg transition-all whitespace-nowrap ${timeframe === tf.value
-                                ? "bg-white dark:bg-slate-700 text-primary shadow-sm"
-                                : "text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
+                                ? "bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm"
+                                : "text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
                                 }`}
                         >
                             {tf.label}
@@ -242,7 +250,7 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
 
             {/* Indicator toggles */}
             <div className="flex items-center gap-2 mb-6 flex-wrap">
-                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 mr-1">Indicators</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-slate-400 mr-1">Indicators</span>
                 {ALL_INDICATORS.map((ind) => {
                     const active = activeIndicators.has(ind);
                     const period = INDICATOR_PERIODS[ind];
@@ -251,10 +259,10 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
                         <button
                             key={ind}
                             onClick={() => toggleIndicator(ind)}
-                            style={active ? { borderColor: INDICATOR_COLORS[ind], color: INDICATOR_COLORS[ind], backgroundColor: INDICATOR_COLORS[ind] + "18" } : {}}
+                            style={active ? { borderColor: INDICATOR_COLORS[ind], backgroundColor: INDICATOR_COLORS[ind] + "18" } : {}}
                             className={`px-2.5 py-0.5 text-[10px] font-black rounded-full border transition-all ${active
-                                ? "border-current"
-                                : "border-gray-200 dark:border-slate-700 text-gray-400 dark:text-slate-500 hover:border-gray-400"
+                                ? "border-current " + INDICATOR_TEXT_CLASSES[ind]
+                                : "border-gray-300 dark:border-slate-600 text-gray-500 dark:text-slate-400 hover:border-gray-400"
                                 }`}
                         >
                             {ind}
@@ -288,7 +296,7 @@ export default function NSEStockChart({ symbol }: NSEChartProps) {
                     {ALL_INDICATORS.filter(i => activeIndicators.has(i)).map(ind => (
                         <div key={ind} className="flex items-center gap-1.5">
                             <div className="w-4 border-t-2 border-dashed" style={{ borderColor: INDICATOR_COLORS[ind] }} />
-                            <span className="text-[10px] font-bold" style={{ color: INDICATOR_COLORS[ind] }}>{ind}</span>
+                            <span className={`text-[10px] font-bold ${INDICATOR_TEXT_CLASSES[ind]}`}>{ind}</span>
                         </div>
                     ))}
                 </div>
