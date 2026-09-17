@@ -179,7 +179,40 @@ Verified: `JSON.parse` OK — `agents=16 (primary=3, subagents=13)`, `commands=1
 
 Verified: frontmatter well-formed; handoff contains both new sections; no section 1–7 removed.
 
+### Phase 6 (W7) — Harness — DONE
+
+- NEW `scripts/dev-checks/check-tsc-baseline.mjs` — runs `npx tsc --noEmit -p tsconfig.json`, counts
+  `error TS…` lines, splits **total** vs **prod** (errors outside `__tests__/`, matching the hook's
+  classification), compares against a committed baseline, fails on regression, `--update` re-records,
+  `--json` for CI. Exit 0 ok / 1 regression / 2 tsc-never-ran.
+- NEW `scripts/dev-checks/tsc-baseline.json` — `{ "total": 46, "prod": 0, "recorded": "2026-09-18" }`,
+  committed so CI enforces the same number the pre-commit hook assumes.
+- MOD `scripts/dev-checks/check-doc-sizes.mjs` — extracted `checkInjectedBudget()` (spec §4A signature)
+  + `--json` for CI + a `.context/out/` retention warning (advisory above 5 MB; never fails the gate).
+- MOD `.githooks/pre-commit` — NEW section 8: advisory context-budget line (sections 1–7 untouched).
+- MOD `.github/workflows/quality-gate.yml` — NEW job `context-budget` (no `npm ci` — built-ins only, so
+  it runs in seconds) + NEW job `tsc-baseline`; the old `Typecheck` step became **Build + Turbopack
+  warning gate** (builds, then fails on any warning line other than `npm warn`).
+- **Spec deviation (recorded)**: §4A prose says *extend* `check-doc-sizes.mjs` ("not a new one") while
+  the spec's file table lists a NEW `check-context-budget.mjs`. Followed the prose + the plan: extended
+  the existing script and did **not** create `check-context-budget.mjs`. Phase 7's test is therefore
+  `check-doc-sizes.test.ts`, not `check-context-budget.test.ts`.
+- **Two self-inflicted bugs found by running the gate before trusting it**: (1) `prod` was computed as
+  `total − testLines` (the *test* count, mislabelled) → a bogus "+46 prod regression"; fixed to count
+  the non-test lines. (2) the failure path called both `emit()` and `console.error()`, printing the
+  block twice; the helper was split into `emitJson()`.
+
+Verified: `check-tsc-baseline.mjs` → `total 46 / prod 0 / delta +0` → **OK, exit 0** (exactly the
+Phase 0 baseline); `--json` → `{ ok:true, total:46, prod:0, delta:0, newErrors:[] }`.
+`check-doc-sizes.mjs` → **73.0 KB / 100 KB**, `--json` valid (5 files; `.context/out` 27,098 B, within
+threshold). `quality-gate.yml` → `js-yaml` parse OK; jobs = `context-budget, tsc-baseline, quality-gate`.
+The Turbopack gate is grounded on measurement, not a guess: `findstr /i "warn"` over the 306-line
+Phase 0 build log returns **0** matches.
+
 ### Next up
 
-Phase 6 (W7) harness → Phase 7 tests → Phase 8 docs → Phase 9 verification.
+Phase 7 tests → Phase 8 docs → Phase 9 verification.
+
+Phase 7: `check-doc-sizes.test.ts` + `check-tsc-baseline.test.ts` (CLI-spawn style, like
+`chunk-output.test.ts`; run `npm run test` **alone**).
 

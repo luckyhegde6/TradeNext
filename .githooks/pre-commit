@@ -90,6 +90,20 @@ if [ "$DOC_PW_HITS" -gt 0 ] 2>/dev/null; then
     exit 1
 fi
 
+# 8. Context budget (ADVISORY — v3.40.0 / W7)
+#    Injected instruction files are re-sent on EVERY request; a bloated set re-triggers the
+#    compaction loop. Advisory here; the blocking gate is the CI job `context-budget`.
+if command -v node >/dev/null 2>&1 && [ -f "scripts/dev-checks/check-doc-sizes.mjs" ]; then
+    DOC_OUT=$(node scripts/dev-checks/check-doc-sizes.mjs 2>&1)
+    DOC_RC=$?
+    if [ "$DOC_RC" -ne 0 ]; then
+        echo "  WARNING: injected context budget exceeded (advisory):"
+        echo "$DOC_OUT" | grep -E "OVER|TOTAL|FAIL" | sed 's/^/    /'
+    else
+        echo "  Context budget: OK ($(echo "$DOC_OUT" | grep 'TOTAL' | sed 's/^ *//'))"
+    fi
+fi
+
 echo "  Pre-commit checks passed"
 echo ""
 exit 0
