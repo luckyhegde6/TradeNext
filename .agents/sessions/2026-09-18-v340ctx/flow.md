@@ -82,3 +82,44 @@ Session dir: `.agents/sessions/2026-09-18-v340ctx/`
 
 All implementation workstreams W1–W7 in `.agents/specs/v3.40.0-agentic-context-orchestration.md`
 — no production code, config, or rule has been changed for the epic yet.
+
+---
+
+## Phase log (implementation)
+
+### Phase 0 — Baseline — DONE
+
+| Metric | Value |
+|--------|-------|
+| `npx tsc --noEmit` errors | 46 (baseline; regression if > 46) |
+| `npm run quickbuild` | OK — `✓ Compiled successfully in 11.0s` |
+| Static pages | 185 / 185 |
+| Turbopack warnings | 0 (was 33 before `ca56a74`) |
+| Injected doc total | 72.8 KB / 100 KB |
+
+Recorded in `.context/out/phase0-baseline.txt`; build log `.context/out/quickbuild-phase0.log`.
+Note: doc total rose 72.2 → 72.8 KB because `TODO.md` gained the v3.40.0 status block.
+
+### Phase 1 (W1) — Tool-output protocol — DONE
+
+Files:
+- NEW `scripts/dev-checks/chunk-output.mjs` — splits a capture into `<name>.part-NN.txt` + `<name>.index.md`;
+  each part header records its **original** line range; deterministic + idempotent (stale parts pruned);
+  Node built-ins only; exit 1 on missing input / bad `--lines`, exit 0 on empty input.
+- NEW `.agents/rules/tool-output-protocol.md` — the redirect → slice/grep → chunk protocol,
+  retention rules for `.context/`, and an anti-pattern table (incl. the `findstr /i` OR-words trap).
+- NEW `lib/__tests__/chunk-output.test.ts` — **12 tests, all passing** (50.3 s). CLI-level by design
+  to avoid Jest (CJS + jsdom) ↔ ESM `.mjs` transform interop; also asserts `.context/` and
+  `.remember/` are git-ignored.
+- MOD `.agents/INDEX.md` — registered the protocol + the chunker script.
+- MOD `.agents/rules/session-memory-rules.md` §7 — cross-linked the protocol.
+
+Verified: 9 chunks from the 179-line digest with correct ranges; `fc /b` idempotency check passed;
+error paths return exit 1 with usage; empty input writes nothing.
+
+### Next up
+
+Phase 2 (W2) durable memory → Phase 3 (W3) compaction headroom (approved) → Phase 4 (W4)
+orchestrator → Phase 5 (W5+W6) health + handoff → Phase 6 (W7) harness → Phase 7 tests →
+Phase 8 docs → Phase 9 verification.
+

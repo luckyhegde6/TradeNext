@@ -34,8 +34,10 @@
 
 **Branch**: `feat/agentic-context-orchestration` (stacked on `fix/turbopack-tracing-harness` @ `ca56a74`). **Session dir**: `.agents/sessions/2026-09-18-v340ctx/` (`decisions.md` + `flow.md`).
 
-- [ ] **SPEC + PLAN** in `.agents/specs/` + `.agents/plans/` from templates → **human approval gate** (repo rule: mandatory before implementation)
-- [ ] **Tool-output chunking protocol** — redirect large outputs to `.context/out/<name>.log`, chunk + index, read slices/grep; document as a rule
+- [x] **SPEC + PLAN** — **GATE 1 + GATE 2 APPROVED** by user 2026-09-18 (commit `b6552ca`); plan Phases 0–9
+- [x] **Phase 0 baseline** — `tsc` **46** · doc **72.8 KB**/100 KB · `quickbuild` OK **0 Turbopack warnings**, 185/185 pages (`.context/out/phase0-baseline.txt`)
+- [x] **W1 Tool-output chunking protocol** — NEW `.agents/rules/tool-output-protocol.md` + `scripts/dev-checks/chunk-output.mjs` (idempotent, Node built-ins) + NEW `lib/__tests__/chunk-output.test.ts` (**12 tests passing**); registered in `.agents/INDEX.md`; cross-linked from `session-memory-rules.md` §7 — DONE
+- [ ] **W2 Durable memory layer** — `.remember/now.md` convention + memory-MCP graph replacing repeat doc reads; NEW `.agents/rules/durable-memory.md` — NEXT
 - [ ] **Durable memory layer** — `.remember/now.md` convention + memory-MCP graph (entities/relations) replacing repeat doc reads
 - [ ] **`compaction` tuning** — raise `compaction.reserved` (10,000 → e.g. 30,000) in `.opencode/opencode.json` (needs permission)
 - [ ] **Orchestrator self-improvement** — big/multi-item task → prefer PARALLEL subagents by default (not 1 sequential); update orchestrator agent profile + rules

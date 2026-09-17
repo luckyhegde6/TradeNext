@@ -80,6 +80,7 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 □ Keep session-todos short — archives absorb history
 □ Memory tool: use for cross-session knowledge only (entities/relations), not session trivia
 □ Parallelize independent reads in a single message (batch tool calls)
+□ Redirect large outputs to `.context/out/` then slice/grep — see `.agents/rules/tool-output-protocol.md`
 ```
 
 ### Injected-file budget (context-loop guard, v3.39.4)

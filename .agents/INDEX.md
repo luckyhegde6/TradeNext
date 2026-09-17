@@ -34,6 +34,8 @@
 | Code quality rules (ponytail minimal-code) | `.agents/code-hygiene.md` |
 | Documentation standards | `.agents/documentation-standards.md` |
 | Handoff state (orchestration) | `HANDOFF.md`, `.agents/handoffs/active/latest.md`, `.agents/handoffs/flow/` |
+| Tool-output protocol (redirect → slice; context-loop guard) | `.agents/rules/tool-output-protocol.md` |
+| Tool-output chunker (splits `.context/out/` captures into parts + index) | `scripts/dev-checks/chunk-output.mjs` |
 
 ## 3. Spec-Driven Development (MANDATORY for features)
 
