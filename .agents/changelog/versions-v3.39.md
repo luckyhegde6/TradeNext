@@ -2,8 +2,8 @@
 
 - **Date**: Sep 15 2026
 - **Branch**: `feat/sqlite-durable-mirror` (created from HEAD of `fix/sqlite-upsert-worker-undefined-bind` — carries the unreleased v3.39.x base fixes `2182687` toIsoVal, `f470e6d` set_ops_counter queryConsumption response, PR #123 `@netlify/blobs` re-add `e84fb34`, PRs #124/#125)
-- **Commit**: code+tests + docs = 2 commits pending user (no push/merge/deploy)
-- **Status**: Code + tests VERIFIED — full suite green (89/89, 1234 passed); **commit pending user; push/PR/deploy PENDING USER**
+- **Commit**: `e4623a3` (feat — durable mirror) + `e9db4a7` (docs — Spec 12 [skip ci]) + `d0e792e` (docs — e2e headed-Chrome user preference [skip ci]) + `309deac` (v3.39.1 UI batch — see v3.39.1 section below) — all committed on `feat/sqlite-durable-mirror`; no push/merge/deploy
+- **Status**: Code + tests VERIFIED — full suite green (89/89, 1234 passed); **committed** `e4623a3`/`e9db4a7`/`d0e792e`/`309deac`; **push/PR/deploy PENDING USER**
 - **Plan**: Spec + Plan `.agents/specs/12-sqlite-durable-mirror.md` / `.agents/plans/12-sqlite-durable-mirror.md` (Approved 2026-09-15 — human approval included the scope addition of `@netlify/blobs` upload for cold-start durability)
 
 ## User directive
@@ -83,3 +83,24 @@ Netlify cold starts with **zero additional Prisma ops**.
   deliberately NOT fixed in this feature).
 - Stray-file check: no `sqlite-mirror.sqlite` in the repo root after the full test run.
 - Live verify (dev server :3000): pending user permission to start `npm run dev`.
+
+---
+
+## v3.39.1 — WCAG a11y contrast fixes + flat-change neutral state + index chart buttons open TradingView + mobile menu aria-label (Sep 17 2026)
+
+- **Date**: Sep 17 2026
+- **Branch**: `feat/sqlite-durable-mirror` (on top of committed v3.39.0 work)
+- **Commit**: `309deac` — committed on `feat/sqlite-durable-mirror`; push/PR/deploy PENDING USER
+- **Diff**: 9 files changed, +65/−32; no schema change → no migration; no new packages.
+- **User directive**: UI polish batch — index chart buttons were broken for indices (NSE Charting `?symbol=NIFTY-EQ` 404s), flat 0.00 was indistinguishable from a positive change, and several chart/analytics texts failed WCAG contrast.
+
+1. **Index chart buttons → TradingView** (`lib/charting.tsx`, +33/−8) — chart buttons for the market indices now open TradingView (the previous NSE Charting links `charting.nseindia.com/?symbol=SYM-EQ` 404'd for indices). NEW `INDEX_TV_TICKERS`: NIFTY→`NSE-NIFTY`, BANKNIFTY→`NSE-BANKNIFTY`, NIFTYIT→`NSE-CNXIT`, SENSEX→`BSE-SENSEX`, FINNIFTY→`NSE-CNXFINANCE` (Nifty Financial Services is listed as CNXFINANCE on TradingView). Stocks stay `charting.nseindia.com/?symbol=<SYM>-EQ`; unknown symbols fall back to `?symbol=<SYM>`; `getChartButton` title = "View `<symbol>` chart on TradingView" when the index resolves, else "View on NSE Charting".
+2. **Flat-change neutral state** (`app/components/StockQuoteHeader.tsx`) — the CHANGE row is now three-way: flat **0.00** renders a neutral gray pill (`text-gray-600 dark:text-gray-400` / `bg-gray-50 dark:bg-slate-800/40`, no arrow) instead of green (which was indistinguishable from a positive change).
+3. **WCAG contrast fixes** — NEW `INDICATOR_TEXT_CLASSES` in `app/components/NSEStockChart.tsx`: MA20 `text-amber-700 dark:text-amber-300`, MA50 `text-violet-700 dark:text-violet-300`, MA200 `text-cyan-700 dark:text-cyan-300` (WCAG ≥4.5:1 on both themes); "Price Chart" section heading h3→h2; additional contrast adjustments in `app/components/analytics/CorporateDataTabs.tsx`, `app/components/analytics/PiotroskiFScore.tsx`, `app/components/intelligence/CompanyIntelligence.tsx`, `app/components/intelligence/sections/VerdictCard.tsx`, `app/components/UnifiedChart.tsx`.
+4. **Mobile menu** (`app/Header.tsx` +1) — hamburger button gains `aria-label="Toggle mobile menu"`.
+
+## Tests (v3.39.1)
+
+- Full suite: **89/89 suites · 1234 passed / 4 skipped / 0 failed** (aggregate unchanged — UI-only batch, no new tests).
+- `npx tsc --noEmit` — **46 = exact baseline (0 new)**; no migration; no new packages.
+- Live check (dev server :3000): pending user permission to start `npm run dev`.
