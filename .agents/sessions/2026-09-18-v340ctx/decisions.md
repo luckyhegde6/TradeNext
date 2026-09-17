@@ -97,6 +97,17 @@ compaction fires earlier and less often. **Deferred to the approval gate** becau
 agent config. **Why**: with a ~72 KB injected baseline, a 10k reserve is a fraction of a single
 request's cost, which is precisely what makes the loop repeat immediately after compaction.
 
+**Applied (2026-09-18, user-approved)**: `10000` → **`30000`** in `.opencode/opencode.json`.
+Verified: `JSON.parse` OK (`compaction = {"auto":true,"prune":true,"reserved":30000}`) and
+`scripts/dev-checks/check-doc-sizes.mjs` still parses the `instructions` array — **72.8 KB /
+100 KB**, 5/5 files `ok`. Revert is a one-line change.
+
+**Observed effect — honest scope**: not directly measurable from inside a turn. The reserve is
+consumed by the OpenCode host when it chooses where to cut the transcript, so the observable
+proxy is whether turns keep ending in mid-stream compaction. Expect fewer compaction
+*occurrences* per unit of work; the per-request baseline cost is unchanged by design (raising
+this number does not shrink the transcript — that is W1/W2's job).
+
 ## D9. Create an `orchestrator` agent — none exists today
 
 Verified `.agents/agents/` (13 profiles: bug-hunter, code-reviewer, devops, doc-writer,

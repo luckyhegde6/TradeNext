@@ -37,7 +37,9 @@
 - [x] **SPEC + PLAN** — **GATE 1 + GATE 2 APPROVED** by user 2026-09-18 (commit `b6552ca`); plan Phases 0–9
 - [x] **Phase 0 baseline** — `tsc` **46** · doc **72.8 KB**/100 KB · `quickbuild` OK **0 Turbopack warnings**, 185/185 pages (`.context/out/phase0-baseline.txt`)
 - [x] **W1 Tool-output chunking protocol** — NEW `.agents/rules/tool-output-protocol.md` + `scripts/dev-checks/chunk-output.mjs` (idempotent, Node built-ins) + NEW `lib/__tests__/chunk-output.test.ts` (**12 tests passing**); registered in `.agents/INDEX.md`; cross-linked from `session-memory-rules.md` §7 — DONE
-- [ ] **W2 Durable memory layer** — `.remember/now.md` convention + memory-MCP graph replacing repeat doc reads; NEW `.agents/rules/durable-memory.md` — NEXT
+- [x] **W2 Durable memory layer** — NEW `.agents/rules/durable-memory.md` (two-tier model + 7-value `entityType` vocabulary + query-before-read); `.remember/now.md` normalised; memory-MCP graph seeded + **real defect fixed**: `search_nodes` is literal-contiguous → empty result ≠ no memory — DONE (`40181c4`, `db08255`)
+- [x] **W3 Compaction headroom** — `.opencode/opencode.json` `compaction.reserved` **10000 → 30000** (user-approved); JSON + doc-size guard verified (72.8 KB / 100 KB) — DONE
+- [ ] **W4 Orchestrator agent** — `.agents/agents/orchestrator.md` (decomposition + dispatch + tier declaration) + register in `opencode.json` (`agent` + `/orchestrate`) + matrix/RULES/AGENTS updates — NEXT
 - [ ] **Durable memory layer** — `.remember/now.md` convention + memory-MCP graph (entities/relations) replacing repeat doc reads
 - [ ] **`compaction` tuning** — raise `compaction.reserved` (10,000 → e.g. 30,000) in `.opencode/opencode.json` (needs permission)
 - [ ] **Orchestrator self-improvement** — big/multi-item task → prefer PARALLEL subagents by default (not 1 sequential); update orchestrator agent profile + rules

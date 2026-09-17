@@ -117,9 +117,32 @@ Files:
 Verified: 9 chunks from the 179-line digest with correct ranges; `fc /b` idempotency check passed;
 error paths return exit 1 with usage; empty input writes nothing.
 
+### Phase 2 (W2) — Durable memory — DONE
+
+- NEW `.agents/rules/durable-memory.md` — two-tier model (Tier 1 `.remember/now.md` rolling,
+  gitignored; Tier 2 memory MCP graph, durable + queryable), controlled 7-value `entityType`
+  vocabulary, query-before-read decision rule, anti-pattern table.
+- `.agents/INDEX.md` + `session-memory-rules.md` section 7 — registered / cross-linked.
+- `.remember/now.md` — normalised (fixed the Windows TIME-variable leading-space + centisecond
+  quirk), added a self-documenting header.
+- **Found + fixed a real defect in the rule itself**: `memory/search_nodes` is a *literal
+  contiguous substring* match of the **entire** query — not tokenised or ranked. A 5-word
+  natural-language query returned **0 hits against a graph that demonstrably contained the
+  answer**. Left undocumented, the query-before-read rule would silently fail and send agents
+  back to re-reading docs — the exact loop W2 exists to prevent. Added a "Query semantics"
+  section + anti-pattern row, and recorded a `gotcha` entity in the graph.
+- Commits `40181c4` (rule) + `db08255` (correction).
+
+### Phase 3 (W3) — Compaction headroom — DONE
+
+- `.opencode/opencode.json` `compaction.reserved` **10000 → 30000** (user-approved; sensitive op).
+- Verified: `JSON.parse` OK (`reserved: 30000`); `check-doc-sizes.mjs` still parses the
+  `instructions` array → **72.8 KB / 100 KB**, 5/5 `ok`.
+- Revert is a one-line change. Effect is host-side, so it is observed as fewer compaction
+  *occurrences* per unit of work, not as a smaller per-request cost.
+
 ### Next up
 
-Phase 2 (W2) durable memory → Phase 3 (W3) compaction headroom (approved) → Phase 4 (W4)
-orchestrator → Phase 5 (W5+W6) health + handoff → Phase 6 (W7) harness → Phase 7 tests →
-Phase 8 docs → Phase 9 verification.
+Phase 4 (W4) orchestrator agent + `/orchestrate` → Phase 5 (W5+W6) health monitoring + handoff
+upgrade → Phase 6 (W7) harness → Phase 7 tests → Phase 8 docs → Phase 9 verification.
 
