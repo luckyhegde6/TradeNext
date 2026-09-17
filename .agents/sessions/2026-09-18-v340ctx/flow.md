@@ -209,10 +209,53 @@ threshold). `quality-gate.yml` → `js-yaml` parse OK; jobs = `context-budget, t
 The Turbopack gate is grounded on measurement, not a guess: `findstr /i "warn"` over the 306-line
 Phase 0 build log returns **0** matches.
 
+### Phase 7 (tests) — DONE
+
+- NEW `lib/__tests__/check-tsc-baseline.test.ts` — 9 tests. CLI-spawn style (ESM script, CJS+jsdom
+  Jest). A `makeHarness()` mirrors `<root>/scripts/dev-checks/<script>` in a tmpdir and a fake
+  `fake-tsc.cjs` supplies deterministic output through the script's documented test seam
+  `TSC_BASELINE_CMD`, so counts are asserted without a real tsc run.
+  Covers: equal-to-baseline passes; **classification guard** (3 errors = 1 prod + 2 test → `prod` is
+  **1**, pinning the transposed-count bug); prod regression → exit 1 + deltas + `newErrors`; total-only
+  regression → exit 1; improvement → exit 0 with negative deltas; `--update` rewrites the baseline;
+  documented default fallback (46/0) when the baseline file is absent (47 → 1, 46 → 0); empty tsc
+  output → exit 2. Plus a `committed tsc baseline` describe pinning the real file at 46 / 0 / ISO date.
+- NEW `lib/__tests__/check-doc-sizes.test.ts` — 14 tests, two layers. Real-repo read-only assertions:
+  exit 0 + human output shape; `--json` shape (`ok`, `total`, `totalBudget` 100 KB, `fileBudget`
+  32 KB, `files[]`, `scratch.{path,bytes,withinThreshold}`); `files[].path` order equals
+  `config.instructions` and each `bytes` equals `statSync`; within budget. Harness failure modes:
+  33 KB single file → exit 1 + `OVER`; 4 × 30 KB = 120 KB total → exit 1 while every per-file `ok` is
+  true; missing file → exit 1, human `NOT FOUND` + `missing: true`; malformed JSON → exit 1; no
+  `instructions` array → exit 1; budget failure points at `.agents/INDEX.md`. Scratch: > 5 MB → exit 0
+  + `WARN` + `withinThreshold: false`; 10 KB → no `WARN` + `true`. Plus a wiring describe asserting the
+  hook references `check-doc-sizes.mjs` and CI references both scripts.
+
+**Serious self-inflicted bug caught here — the tests were corrupting the repo.** The helper was
+`run(args, cwd, tscCmd)` and hardcoded the repo `SCRIPT` path, so every "harness" test executed the
+**real** script against the **real** repo instead of the temp copy `makeHarness()` had just made. Two
+consequences: (1) all harness assertions failed with real-repo data (doc sizes showed `./README.md`,
+tsc showed `baseline 46`); (2) the `--update` test **overwrote the committed
+`scripts/dev-checks/tsc-baseline.json`** with `{ total: 2, prod: 1 }` — silently poisoning the gate that
+CI and the pre-commit hook trust. Diagnosed from the symptom `baseline.total` read back as `2`.
+Fix: `run(script, args, cwd, tscCmd)` takes the script path explicitly — harness tests pass
+`harness.script`, real-repo tests pass `SCRIPT`. Added defence in depth so this class of mistake is
+impossible to repeat silently: both suites snapshot the protected real file in module scope and assert
+it byte-identical in `afterAll` (tsc → `tsc-baseline.json`, doc-sizes → `.opencode/opencode.json`).
+Recovery: `git checkout -- scripts/dev-checks/tsc-baseline.json` (verified back to 46 / 0 / 2026-09-18).
+Also noted: the script's `--update` writes a **UTC** date (`2026-09-17`), one day behind the IST
+`2026-09-18` in the committed file — cosmetic, and the test asserts the ISO shape only.
+
+Verified: `npm run test -- <both suites>` (run **alone**) → **23/23 passing**; real baseline re-read as
+`total 46 / prod 0`; `check-doc-sizes.mjs` still **73.0 KB / 100 KB**. `git status --short` after the run
+shows only the three intended entries — no stray repo writes.
+
 ### Next up
 
-Phase 7 tests → Phase 8 docs → Phase 9 verification.
+Phase 8 docs → Phase 9 verification.
 
-Phase 7: `check-doc-sizes.test.ts` + `check-tsc-baseline.test.ts` (CLI-spawn style, like
-`chunk-output.test.ts`; run `npm run test` **alone**).
+Phase 8: `TODO.md` + `.agents/session-todos.md` + `Primer.md` + `agent-memory.md` + `Lessons.md`
+(3 lessons: free-tier subagents unusable → verify capability before designing around it; large tool
+outputs are the real context leak, not injected docs; age-chunk only append-only logs, never a live
+rulebook) + `.agents/CHANGELOG.md` + `.agents/changelog/versions-index.md` + `versions-v3.40.md`.
+Phase 9: full tsc baseline, `npm run test` alone, doc-size budget, final handoff under SCHEMA v1.1.
 

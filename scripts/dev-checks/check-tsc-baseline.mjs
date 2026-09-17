@@ -18,6 +18,10 @@
  *   node scripts/dev-checks/check-tsc-baseline.mjs --update   # re-record the baseline
  *
  * Exit: 0 = at or below baseline, 1 = regression, 2 = could not run tsc
+ *
+ * Test seam: `TSC_BASELINE_CMD` overrides the tsc command. It exists ONLY so the unit tests can
+ * feed deterministic output instead of paying a real ~40 s tsc run per case; it is never set in
+ * the pre-commit hook or CI, so the gate always runs the real command there.
  */
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -26,7 +30,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASELINE_PATH = resolve(ROOT, "scripts/dev-checks/tsc-baseline.json");
-const TSC_CMD = "npx tsc --noEmit -p tsconfig.json";
+const TSC_CMD = process.env.TSC_BASELINE_CMD || "npx tsc --noEmit -p tsconfig.json";
 const TSC_TIMEOUT_MS = 600_000;
 
 /** Fallback used when the baseline file is absent (documented default). */
