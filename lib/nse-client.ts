@@ -60,6 +60,10 @@ async function ensureSession() {
 async function rawNseFetch(path: string, qs = "", retryCount = 0) {
   await initFetch();
   await ensureSession();
+  // v3.39.2 hold-proof: corporate tabs (announcements/events/actions) are akamai-sensitive on Netlify IPs — add a settle delay after session
+  if (path.includes("corporate-announcements") || path.includes("event-calendar") || path.includes("corporate-actions")) {
+    await new Promise((r) => setTimeout(r, 1200));
+  }
   const fullUrl = path.startsWith("http") ? path + qs : NSE_BASE + path + qs;
   const endpoint = path + qs;
   const startTime = Date.now();
