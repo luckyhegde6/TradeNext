@@ -79,6 +79,7 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 □ Index files over full dumps (@AGENTS.md, @Lessons.md)
 □ Keep session-todos short — archives absorb history
 □ Memory tool: use for cross-session knowledge only (entities/relations), not session trivia
+□ Query the memory graph BEFORE re-reading a large doc — see `.agents/rules/durable-memory.md`
 □ Parallelize independent reads in a single message (batch tool calls)
 □ Redirect large outputs to `.context/out/` then slice/grep — see `.agents/rules/tool-output-protocol.md`
 ```
