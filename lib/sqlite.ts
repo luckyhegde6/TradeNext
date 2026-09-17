@@ -427,6 +427,9 @@ export interface SqliteFallback {
   /** Mirror delete: one corporate-action row by LOCAL mirror id + natural-key
    *  outbox delete. Returns true when the row existed in the mirror. */
   deleteCorporateAction(id: number): boolean;
+  /** v3.39.x Analytics SQLITE-only: NSE market-cache (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short). */
+  getMarketCache(cacheKey: string): Record<string, unknown> | null;
+  upsertMarketCache(row: Record<string, unknown>): void;
   /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
   getSqliteDerived(): Record<string, unknown>;
 }
@@ -1487,6 +1490,29 @@ export const SCHEMA_SQL = `
     at           TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_sync_outbox_table ON _sync_outbox (table_name);
+
+  -- v3.39.x Analytics SQLITE-only: NSE analytics cache mirrored from Prisma market_cache
+  -- so the 14 analytics tabs (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short)
+  -- stay servable during the 202k/200k plan-limit hold with zero Prisma ops (memory -> SQLITE).
+  -- TTL-bounded (market-cache semantics: open 300s / closed ~nextMarketOpen).
+  CREATE TABLE IF NOT EXISTS market_cache (
+    cache_key        TEXT PRIMARY KEY,
+    data_type        TEXT NOT NULL,
+    index_name       TEXT,
+    data             TEXT,
+    record_count     INTEGER DEFAULT 0,
+    nse_last_modified TEXT,
+    last_synced_at   TEXT,
+    next_sync_at     TEXT,
+    market_status    TEXT DEFAULT 'closed',
+    sync_status      TEXT DEFAULT 'idle',
+    sync_error       TEXT,
+    created_at       TEXT,
+    updated_at       TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_market_cache_data_type ON market_cache (data_type);
+  CREATE INDEX IF NOT EXISTS idx_market_cache_index_name ON market_cache (index_name);
+  CREATE INDEX IF NOT EXISTS idx_market_cache_last_synced ON market_cache (last_synced_at);
 `;
 
 // ---------------------------------------------------------------------------
@@ -3618,6 +3644,35 @@ export async function syncFromPrisma(opts?: {
       };
     });
 
+    // --- Sync market_cache (NSE analytics persistent cache — all 14 tabs) ---
+    // v3.39.x hold-proof: market_cache is the durable NSE analytics cache (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short)
+    // so analytics stays servable from SQLITE during the 202k/200k monthly hold with zero Prisma ops (memory -> SQLITE).
+    totalRows += await syncTable(db, "market_cache", async () => {
+      const rows = await prisma.marketCache.findMany({
+        orderBy: { lastSyncedAt: "desc" },
+        take: 500,
+      });
+      return {
+        columns: "cache_key, data_type, index_name, data, record_count, nse_last_modified, last_synced_at, next_sync_at, market_status, sync_status, sync_error, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?",
+        rows: rows.map((r) => [
+          r.cacheKey,
+          r.dataType,
+          r.indexName,
+          r.data != null ? JSON.stringify(r.data) : null,
+          r.recordCount,
+          r.nseLastModified?.toISOString() ?? null,
+          r.lastSyncedAt?.toISOString() ?? null,
+          r.nextSyncAt?.toISOString() ?? null,
+          r.marketStatus,
+          r.syncStatus,
+          r.syncError ?? null,
+          r.createdAt?.toISOString() ?? null,
+          r.updatedAt?.toISOString() ?? null,
+        ]),
+      };
+    });
+
     // --- Sync user sessions (recent 100; sessionToken is NEVER mirrored) ---
     totalRows += await syncTable(db, "user_session", async () => {
       const rows = await prisma.userSession.findMany({
@@ -4795,6 +4850,77 @@ function createFallback(db: Database): SqliteFallback {
       } catch {
         recordSqliteRead("getCorporateActions", _start, 0, false);
         return [];
+      }
+    },
+
+    // --- Market cache (NSE analytics persistent cache — hold-proof) ---
+    getMarketCache(cacheKey: string): Record<string, unknown> | null {
+      const _start = performance.now();
+      try {
+        const rows = db.exec("SELECT * FROM market_cache WHERE cache_key = ? LIMIT 1", [cacheKey]);
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getMarketCache", _start, 0, false);
+          return null;
+        }
+        const cols = rows[0].columns;
+        const vals = rows[0].values[0];
+        const r: Record<string, unknown> = {};
+        cols.forEach((c, i) => (r[c] = vals[i]));
+        // Rehydrate JSON data column for direct use by market-cache.ts
+        if (typeof r.data === "string") {
+          try { r.data = JSON.parse(r.data as string); } catch { /* keep raw */ }
+        }
+        recordSqliteRead("getMarketCache", _start, 1, true);
+        return r;
+      } catch {
+        recordSqliteRead("getMarketCache", _start, 0, false);
+        return null;
+      }
+    },
+
+    upsertMarketCache(row: Record<string, unknown>): void {
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO market_cache (cache_key, data_type, index_name, data, record_count, nse_last_modified, last_synced_at, next_sync_at, market_status, sync_status, sync_error, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(cache_key) DO UPDATE SET
+             data_type=excluded.data_type,
+             index_name=excluded.index_name,
+             data=excluded.data,
+             record_count=excluded.record_count,
+             nse_last_modified=excluded.nse_last_modified,
+             last_synced_at=excluded.last_synced_at,
+             next_sync_at=excluded.next_sync_at,
+             market_status=excluded.market_status,
+             sync_status=excluded.sync_status,
+             sync_error=excluded.sync_error,
+             updated_at=excluded.updated_at`,
+        );
+        const sv = (v: unknown): string | number | null => {
+          if (v == null) return null;
+          if (typeof v === "string" || typeof v === "number") return v;
+          if (v instanceof Date) return v.toISOString();
+          return JSON.stringify(v);
+        };
+        const now = new Date().toISOString();
+        stmt.run([
+          String(row.cacheKey ?? row.cache_key ?? ""),
+          String(row.dataType ?? row.data_type ?? ""),
+          (row.indexName ?? row.index_name ?? null) as string | null,
+          row.data != null ? (typeof row.data === "string" ? row.data as string : JSON.stringify(row.data)) : null,
+          Number(row.recordCount ?? row.record_count ?? 0),
+          sv(row.nseLastModified ?? row.nse_last_modified),
+          sv(row.lastSyncedAt ?? row.last_synced_at) ?? now,
+          sv(row.nextSyncAt ?? row.next_sync_at),
+          String(row.marketStatus ?? row.market_status ?? "closed"),
+          String(row.syncStatus ?? row.sync_status ?? "idle"),
+          (row.syncError ?? row.sync_error ?? null) as string | null,
+          sv(row.createdAt ?? row.created_at) ?? now,
+          now,
+        ]);
+        stmt.free();
+      } catch (err) {
+        logger.warn({ msg: "SQLite: upsertMarketCache failed", cacheKey: String(row.cacheKey ?? row.cache_key ?? ""), error: err instanceof Error ? err.message : String(err) });
       }
     },
 
