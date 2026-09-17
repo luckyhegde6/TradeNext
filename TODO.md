@@ -8,6 +8,8 @@
 > The completed-feature Quick Reference archive moved to
 > **`.agents/changelog/todo-quick-reference-archive.md`** (read on demand; not auto-injected).
 
+**In progress — v3.39.4 context-optimisation** (branch `fix/turbopack-tracing-harness`): injected instruction files slimmed **358 KB → 72.2 KB/session** (`AGENTS.md`, `TODO.md` → `.agents/changelog/`); NEW `.agents/INDEX.md` manifest; NEW `.agents/session-archive/` (`Primer.md` 1159→213, `agent-memory.md` 1092→373 lines); NEW context-budget rule + `scripts/dev-checks/check-doc-sizes.mjs`; 33 Turbopack tracing warnings → **0** (`tsc` 46 baseline, `quickbuild` 185/185 pages). Commit 1/2 `0430f67` (docs/context) done; commit 2/2 (Turbopack + `netlify.toml`) pending.
+
 ---
 
 ## Phase 4: Intelligence & Reporting — ✅ COMPLETE (v3.2.0)

@@ -4,16 +4,45 @@
 
 **User directive (verbatim)**: "optimise the things using best practices and make it agent friendly coding with less context consumption and document it a break the larger files or docs into modular and referrence them for better coding experience" + "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
 
-**Standing rule (this message)**: when a new message arrives mid-execution → update the Todo (TODO.md / .agents/session-todos.md) to reflect it, then continue or ask for clarification if unsure.
+**Standing rule (reinforced 2026-09-18)**: when a new message arrives mid-execution → update the Todo (TODO.md / `.agents/session-todos.md`) to reflect it, then continue or ask for clarification if unsure.
+> **User (verbatim)**: "update the Todo if you receive the new message during any execcution flow example the current one itself"
+> — **applied to this very message**: it arrived mid-flow (between commit 1/2 of the approved split), so this Todo was updated BEFORE continuing to commit 2.
 
-**Ground truth (re-verified this turn)**: 5 injected instruction files ≈ **358 KB/session** — AGENTS.md 191,017 B (375 lines; version-history L7–120 = offload target), TODO.md 134,054 B (566 lines), README.md 19,156 B, .agents/rules/README.md 3,571 B, .agents/rules/checklist.md 10,204 B. Non-injected bloat suspects: Primer.md 231,628 B · agent-memory.md 249,495 B · Lessons.md 213,024 B · .agents/CHANGELOG.md 67,734 B · .agents/session-todos.md 35,495 B · HANDOFF.md 17,101 B · lib/sqlite.ts 6,475 lines. Branch-inclusion: `origin/feat/sqlite-durable-mirror` **MERGED**; `origin/fix/sqlite-upsert-worker-undefined-bind` **NOT merged** (`85c18d9` = `app/api/admin/nse-warm/route.ts` +76 + `lib/nse-client.ts` +4). Netlify deploy **GREEN** (`6aac5808fb995300084f46af` ready, commit `11d6947`, no `emails` fn).
+**Ground truth (current — post-slim v3.39.4)**: injected instruction files = **72.2 KB/session** (was **358 KB**) — AGENTS.md 20,260 B · TODO.md 20,792 B · README.md 19,156 B · `.agents/rules/README.md` 3,571 B · `.agents/rules/checklist.md` 10,204 B. History moved out (not injected): `.agents/changelog/versions-index.md` 171,421 B · `.agents/changelog/todo-quick-reference-archive.md` 116,047 B · `.agents/session-archive/primer-history-archive.md` 959 lines · `.agents/session-archive/agent-memory-archive.md` 731 lines. Verified: `tsc` **46 = baseline** · `quickbuild` **BUILD_OK, 0 Turbopack warnings**, 185/185 pages · `check-doc-sizes.mjs` **OK 72.2/100 KB**. Branch-inclusion: `origin/feat/sqlite-durable-mirror` **MERGED**; `origin/fix/sqlite-upsert-worker-undefined-bind` **NOT merged** (`85c18d9` = `app/api/admin/nse-warm/route.ts` +76 + `lib/nse-client.ts` +4). Netlify deploy **GREEN** (`6aac5808fb995300084f46af` ready, commit `11d6947`, no `emails` fn).
 
 - [x] Todo update per standing rule (branch-inclusion result + mid-execution-message rule + context directive recorded here + TODO.md Quick Reference row) — DONE
 - [x] Present findings + targeted approval questions (slim scope; version-history offload; context dir; 85c18d9; netlify.toml/11d6947; orchestrator) — DONE (all 6 decisions locked)
 - [x] Docs restructure — `AGENTS.md` 191,017 → **20,260 B** (version history → `.agents/changelog/versions-index.md`); `TODO.md` 134,054 → **20,792 B** (Quick Reference → `.agents/changelog/todo-quick-reference-archive.md`); NEW `.agents/INDEX.md`; NEW `.agents/session-archive/` (`Primer.md` 1159 → 213 lines, `agent-memory.md` 1092 → 373 lines via NEW `.context/chunk-history.mjs`; `Lessons.md` NOT age-chunked — live rulebook); NEW context-budget rule (`.agents/rules/session-memory-rules.md` §7); NEW `scripts/dev-checks/check-doc-sizes.mjs` — **DONE** (injected total **358 KB → 72.2 KB**; size check OK 72.2/100 KB) — DONE
 - [x] Turbopack `/*turbopackIgnore: true*/` edits — all **33** sites applied (`lib/logger.ts` 9, `lib/services/ingestService.ts` 2, `lib/services/worker/worker-logger.ts` 14, `lib/sqlite.ts` 8) → `npx tsc --noEmit` **46 = exact baseline** → `npm run quickbuild` **BUILD_OK, 0 Turbopack warnings** (was 33), 185/185 pages — DONE
 - [x] Repo docs updated (v3.39.4) — `versions-index.md` row, `.agents/CHANGELOG.md` index row + header note, `Primer.md` status entry, `agent-memory.md` activity entry, `Lessons.md` **Lesson 119**, `.agents/session-todos.md` — DONE
-- [ ] **Request commit approval** for the v3.39.4 batch (AGENTS.md, TODO.md, Primer.md, agent-memory.md, Lessons.md, `.agents/rules/session-memory-rules.md`, `.agents/CHANGELOG.md`, `.agents/changelog/*`, `.agents/INDEX.md`, `.agents/session-archive/*`, `scripts/dev-checks/check-doc-sizes.mjs`, `.gitignore`, lib turbopack edits, `netlify.toml`) on `fix/turbopack-tracing-harness` — PENDING USER
+- [x] **Commit approval obtained — user chose SPLIT (option B)**: docs/context commit + separate Turbopack tracing commit (incl. `netlify.toml`) — DONE
+- [x] **Commit 1/2 — docs/context**: `0430f67` "docs(context): slim injected instruction files (358KB->72KB) + modularize history + budget guard" — 16 files, +2243/−1933 (AGENTS.md, TODO.md, Primer.md, agent-memory.md, Lessons.md, `.agents/rules/session-memory-rules.md`, `.agents/CHANGELOG.md`, `.agents/changelog/*`, `.agents/INDEX.md`, `.agents/session-archive/*`, `.gitignore`, `scripts/dev-checks/check-doc-sizes.mjs`); pre-commit hook passed (TypeScript clean) — DONE
+- [x] **Commit 2/2 — Turbopack tracing**: `ca56a74` "fix(build): silence 33 Turbopack dynamic-filesystem-access tracing warnings" — 5 files, +33/−30 (`lib/logger.ts`, `lib/services/ingestService.ts`, `lib/services/worker/worker-logger.ts`, `lib/sqlite.ts`, `netlify.toml`); pre-commit hook passed — DONE
+- [ ] **Commit 3 — Todo/process updates**: this `.agents/session-todos.md` + `TODO.md` live-status (updated mid-flow per user rule) — fold into the v3.40.0 branch work
+
+---
+
+## v3.40.0 EPIC — Agentic context + orchestration + harness (>hotfix → own branch)
+
+**User directive (verbatim, 2026-09-18)**: "also its involving greaterr than a hotfix so do it on a separate branch and update the Todos and the propr handoff and maintain proper decisions and also document and test thing properly use the different subagent for doing tasks parallely whenever needed and to save time and context , also update the orchestrator agent to self improve and make it a habit if a big task is discovered or multipe this in todo prefer the parallel execution using subagents rather than doing with 1 and summarize and do agent to agent handoff better also dcument and self improve the hand off and orchestration and updating the harness to better code, test and build" + "when running subagent always run an orchrestrator to monitor the subagent health so it doesnot hang or gets stuck"
+
+**Prior directive (verbatim, same session)**: "after the compacting and after few toolcalls the context is getting full and going into a loop of compaction use the temp context files to split and chunk the tool call summaries for analysis and then use the .remember and memory and other mcps to efficiently handel them"
+
+**Root cause of the remaining loop (diagnosed)**: injected docs are now only **72.2 KB (~18K tokens)** — the refill source is the **conversation transcript itself**: large tool outputs + long summaries are re-sent on EVERY request, so they stay resident after compaction. `compaction.reserved: 10000` gives almost no headroom. Cures: (a) never land large outputs in-context (redirect → `.context/` chunks → read slices/grep), (b) keep durable facts in `.remember/now.md` + memory MCP instead of re-reading docs, (c) raise `compaction.reserved`, (d) delegate heavy work to subagents.
+
+**`.remember/` findings**: gitignored dir (0 tracked files, `.remember/.gitignore` = `*`); `now.md` = rolling memory `## HH:MM | <session-slug> <one-line summary>`; `logs/` = 28 files; `tmp/` = scratch (`session-slug`, `last-save.json`, `last-ndc.ts`, `case-divergence`).
+
+**Branch**: `feat/agentic-context-orchestration` (stacked on `fix/turbopack-tracing-harness` @ `ca56a74`). **Session dir**: `.agents/sessions/2026-09-18-v340ctx/` (`decisions.md` + `flow.md`).
+
+- [ ] **SPEC + PLAN** in `.agents/specs/` + `.agents/plans/` from templates → **human approval gate** (repo rule: mandatory before implementation)
+- [ ] **Tool-output chunking protocol** — redirect large outputs to `.context/out/<name>.log`, chunk + index, read slices/grep; document as a rule
+- [ ] **Durable memory layer** — `.remember/now.md` convention + memory-MCP graph (entities/relations) replacing repeat doc reads
+- [ ] **`compaction` tuning** — raise `compaction.reserved` (10,000 → e.g. 30,000) in `.opencode/opencode.json` (needs permission)
+- [ ] **Orchestrator self-improvement** — big/multi-item task → prefer PARALLEL subagents by default (not 1 sequential); update orchestrator agent profile + rules
+- [ ] **Subagent health monitoring** — orchestrator watchdog: timeouts, stuck/hang detection, retry/abort policy; document protocol
+- [ ] **Handoff self-improvement** — better summarization + agent-to-agent handoff; improve handoff templates + self-review step
+- [ ] **Harness improvement (code/test/build)** — hooks, `scripts/dev-checks/`, CI gates (tsc baseline, doc-size budget, Turbopack warnings), e2e
+- [ ] **Documentation + tests** for all of the above; maintain `decisions.md`/`flow.md` throughout
 - [ ] Context-offload system (chunked files + memory MCP): destination dir approval (`.context\` vs temp dir) + `.remember` source resolution + stale memory-graph cleanup
 - [ ] Self-improve orchestrator (subagent health + parallel handoffs): locate orchestrator file → design proposal
 - [ ] `@netlify/plugin-nextjs` 5.15.8 → 5.16.0 bump (flag-risk check first)
