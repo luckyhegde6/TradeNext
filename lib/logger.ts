@@ -98,7 +98,7 @@ function ensureLogsDir() {
       logsDirAvailable = false;
       return;
     }
-    if (!fs.existsSync(logsDir)) {
+    if (!fs.existsSync(/*turbopackIgnore: true*/ logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
     }
   } catch (error) {
@@ -123,8 +123,8 @@ function getTodayLogPath(): string {
     const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
     const yearMonth = dateStr.substring(0, 7); // YYYY-MM
 
-    const yearMonthDir = pathModule.join(logsDir, yearMonth);
-    if (!fs.existsSync(yearMonthDir)) {
+    const yearMonthDir = pathModule.join(/*turbopackIgnore: true*/ logsDir, yearMonth);
+    if (!fs.existsSync(/*turbopackIgnore: true*/ yearMonthDir)) {
       fs.mkdirSync(yearMonthDir, { recursive: true });
     }
 
@@ -146,11 +146,11 @@ export async function getLogFiles(): Promise<{ date: string; path: string; size:
     if (!logsDir) return files;
 
     try {
-      if (fs.existsSync(logsDir)) {
-        const yearDirs = fs.readdirSync(logsDir).filter((f: string) => fs.statSync(pathModule.join(logsDir, f)).isDirectory());
+      if (fs.existsSync(/*turbopackIgnore: true*/ logsDir)) {
+        const yearDirs = fs.readdirSync(/*turbopackIgnore: true*/ logsDir).filter((f: string) => fs.statSync(/*turbopackIgnore: true*/ pathModule.join(/*turbopackIgnore: true*/ logsDir, f)).isDirectory());
 
         for (const yearDir of yearDirs) {
-          const yearMonthDir = pathModule.join(logsDir, yearDir);
+          const yearMonthDir = pathModule.join(/*turbopackIgnore: true*/ logsDir, yearDir);
           const logFiles = fs.readdirSync(yearMonthDir).filter((f: string) => f.endsWith('.log'));
 
           for (const logFile of logFiles) {
@@ -193,7 +193,7 @@ export async function readLogsByDate(date: string, limit: number = 1000): Promis
   const yearMonth = date.substring(0, 7); // YYYY-MM
   const filePath = pathModule.join(logsDir, yearMonth, `${date}.log`);
 
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(/*turbopackIgnore: true*/ filePath)) {
     return [];
   }
 

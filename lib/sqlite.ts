@@ -53,7 +53,7 @@ function resolveSqlWasm(file: string): string {
     path.join(process.cwd(), "node_modules", "sql.js", "dist", file), // standard local install
   ];
   for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(/*turbopackIgnore: true*/ candidate)) return candidate;
   }
   // Let sql.js use its own default locateFile as a final fallback.
   return file;
@@ -462,7 +462,10 @@ async function getSqlJs(): Promise<any> {
   // readFileSync returns a Buffer (a Uint8Array view); initSqlJs's wasmBinary
   // option is typed ArrayBuffer — slice the underlying buffer to the exact
   // byte range (safe for pooled Buffers) and pass that.
-  const wasmBytes = existsSync(wasmPath) && wasmPath !== "sql-wasm.wasm" ? readFileSync(wasmPath) : null;
+  const wasmBytes =
+    existsSync(/*turbopackIgnore: true*/ wasmPath) && wasmPath !== "sql-wasm.wasm"
+      ? readFileSync(/*turbopackIgnore: true*/ wasmPath)
+      : null;
   const SQL =
     wasmBytes
       ? await initSqlJs({
@@ -802,10 +805,10 @@ function writeMirrorSnapshotFile(bytes: Uint8Array): void {
 function readMirrorSnapshotFile(): Uint8Array | null {
   try {
     const target = getMirrorSnapshotPath();
-    if (!existsSync(target)) return null;
-    const st = statSync(target);
+    if (!existsSync(/*turbopackIgnore: true*/ target)) return null;
+    const st = statSync(/*turbopackIgnore: true*/ target);
     if (st.size === 0 || st.size > MAX_RESTORE_BYTES) return null;
-    return readFileSync(target);
+    return readFileSync(/*turbopackIgnore: true*/ target);
   } catch (err) {
     logger.warn({ msg: "SQLite: mirror snapshot file read failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
     return null;
@@ -2749,8 +2752,8 @@ export function getDbLogFiles(): { date: string; path: string; size: number }[] 
     return readdirSync(dir)
       .filter((f) => f.endsWith(".ndjson"))
       .map((f) => {
-        const p = path.join(dir, f);
-        return { date: f.replace(".ndjson", ""), path: p, size: statSync(p).size };
+        const p = path.join(/*turbopackIgnore: true*/ dir, f);
+        return { date: f.replace(".ndjson", ""), path: p, size: statSync(/*turbopackIgnore: true*/ p).size };
       })
       .sort((a, b) => b.date.localeCompare(a.date));
   } catch {

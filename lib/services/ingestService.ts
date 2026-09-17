@@ -14,11 +14,11 @@ export async function runIngestion(csvPath?: string): Promise<IngestResult> {
         const filePath =
             csvPath ?? path.join(process.cwd(), 'api', 'sample_nse.csv');
 
-        if (!fs.existsSync(filePath)) {
+        if (!fs.existsSync(/*turbopackIgnore: true*/ filePath)) {
             return { status: 'error', error: 'CSV not found', rows: 0 };
         }
 
-        const csv = fs.readFileSync(filePath, 'utf8');
+        const csv = fs.readFileSync(/*turbopackIgnore: true*/ filePath, 'utf8');
         const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true });
 
         const client = await poolQuery.connect();
