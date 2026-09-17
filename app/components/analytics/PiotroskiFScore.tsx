@@ -58,7 +58,7 @@ export default function PiotroskiFScore({ symbol }: Props) {
 
   const getScoreTextColor = (score: number) => {
     if (score >= 7) return 'text-green-600 dark:text-green-400';
-    if (score >= 5) return 'text-green-500 dark:text-green-400';
+    if (score >= 5) return 'text-green-700 dark:text-green-400';
     if (score >= 3) return 'text-yellow-600 dark:text-yellow-400';
     if (score >= 1) return 'text-orange-600 dark:text-orange-400';
     return 'text-red-600 dark:text-red-400';

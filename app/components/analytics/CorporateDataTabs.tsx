@@ -91,7 +91,7 @@ function FinancialData({ data }: { data: FinancialStatusDTO | null }) {
                     {items.map((item, i) => (
                         <div key={i} className={`p-4 rounded-xl border border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/30`}>
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{item.label}</div>
-                            <div className={`text-sm font-bold ${item.label === 'Net Profit/Loss' ? (profit > 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-900 dark:text-white'
+                            <div className={`text-sm font-bold ${item.label === 'Net Profit/Loss' ? (profit > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400') : 'text-gray-900 dark:text-white'
                                 }`}>
                                 {item.value || 'N/A'}
                             </div>
@@ -137,7 +137,7 @@ function FinancialData({ data }: { data: FinancialStatusDTO | null }) {
                 </div>
             </div>
 
-            <div className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+            <div className="text-[10px] text-gray-500 dark:text-slate-400 italic">
                 * Values are retrieved from NSE and synced to local database. Last updated: {data.re_broadcast_timestamp}
             </div>
         </div>

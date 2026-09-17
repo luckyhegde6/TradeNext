@@ -102,7 +102,7 @@ export default function CompanyIntelligence({ ticker, isAuthenticated }: Company
           <button
             type="button"
             onClick={() => setShowDocs((s) => !s)}
-            className="text-sky-600 dark:text-sky-400 hover:underline"
+            className="text-sky-700 dark:text-sky-400 hover:underline"
             data-testid="toggle-document-inputs"
           >
             {showDocs ? "▼ Hide" : "＋ Add documents"} (annual report / earnings call — optional)
