@@ -7,7 +7,7 @@
 1. **Read state** — @HANDOFF.md → `.agents/handoffs/active/latest.md` → @Primer.md → @Lessons.md → `.agents/session-todos.md` (see `.agents/rules/session-memory-rules.md`)
 2. **Plan** — convert task into verifiable goals (tests pass, tsc clean, docs updated)
 3. **Implement** — minimal code, one todo at a time, update session-todos in real time
-4. **Verify** — `npm run test` (alone, never chained), `npx tsc --noEmit`, `npm run lint`
+4. **Verify** — `npm run test` (alone, never chained), `npx tsc --noEmit`, `npm run lint`, `npm run quickbuild` (**local production build MUST pass before ANY commit** — Netlify runs the same command, so a broken build blocks deploys)
 5. **Document** — @AGENTS.md version entry + @TODO.md + @Lessons.md (mandatory)
 6. **Clean** — git status review, delete junk artifacts (`.agents/code-hygiene.md`)
 7. **Hand off** — update latest.md, archive session, update @HANDOFF.md + @Primer.md
@@ -54,7 +54,7 @@ Merged from the CLAUDE.md operating contract. Tradeoff: **caution over speed** �
 
 ## 3. Verification Before Claims
 
-- **Self-healing:** verify before claiming — run tests/tsc/lint after any change.
+- **Self-healing:** verify before claiming — run tests/tsc/lint + `npm run quickbuild` after any change. **A passing local build is REQUIRED before committing** (Netlify deploys the same command; a broken build = blocked deploys).
 - **Anti-hallucination:** every claim traces to a commit, tracked doc, passing test, or verified live check. Grep/read files — never invent paths or API shapes.
 - **Trust the repo over memory** — re-read files when unsure.
 
@@ -77,7 +77,7 @@ Merged from the CLAUDE.md operating contract. Tradeoff: **caution over speed** �
 - Feature branches: implement → test → commit → push → PR (main ← branch) → squash-merge on green. Full flow in `.agents/linear-history.md`.
 - Never force-push, never `--no-verify` unless intentional, never commit secrets/junk.
 - Commit message: `type(scope): description` (full table in `.agents/linear-history.md`).
-- Pre-push: tests pass + tsc clean + docs updated.
+- Pre-push: tests pass + tsc clean + local build (`npm run quickbuild`) passes + docs updated.
 
 ## 7. Sensitive Operations — ALWAYS ASK
 

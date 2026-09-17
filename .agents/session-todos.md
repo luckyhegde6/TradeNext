@@ -1,6 +1,20 @@
 # Session Todos
 
-## Current (v3.39.0 + v3.39.1 — SQLite Durable Mirror (Spec 12, restart survival, disk + Blobs) + WCAG/UI batch (a11y contrast, flat-change neutral state, index charts → TradingView, mobile-menu aria-label): full 89/89 suites / 1234 pass / 4 skip / 0 fail, tsc 46 = exact baseline (0 new), no migration, no new packages; on `feat/sqlite-durable-mirror` on top of unreleased v3.39.x base fixes `2182687`/`f470e6d`/PR #123 `e84fb34` + PRs #124/#125; committed `e4623a3` (feat) + `e9db4a7` + `d0e792e` (docs) + `309deac` (v3.39.1 UI); **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
+## Current (v3.39.3 — Netlify deploy triage: `npm run quickbuild` mandatory pre-commit gate; `@netlify/plugin-emails` "emails" bundling failure root-caused; docs/config only, on `main` HEAD `112b281`; commits `dbeba23` + `112b281` LOCAL — behind origin/main by 1; **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
+
+**User directive (implicit — Netlify deploy blocked)**: deploys failed with `Bundling of function "emails" failed` — `.netlify/functions-internal/emails/index.js` is CommonJS but the nearest package.json declares `"type": "module"`. Root cause: `@netlify/plugin-emails` (a Netlify-UI-added integration, NOT in package.json/lockfile) creates the `emails` function AFTER the Next build and WIPES the pre-seeded in-directory `package.json` commonjs guard before bundling; repo has NO `emails/` dir, ZERO `@netlify/emails` refs (real email path = nodemailer `lib/alerts/delivery/email.ts`). **User fix PENDING**: remove/disable the `@netlify/plugin-emails` integration in the Netlify UI. Ruled out: dropping root `"type":"module"` (breaks tracked ESM `.js` — `jest.setup.js`, `scripts/*.js`, `scripts/dev-checks/*.js`, `__mocks__/@openrouter/agent.js`).
+
+**Shipped (v3.39.3 — docs/config only; NO code in lib/ app/, NO netlify.toml change)**:
+- [x] `.agents/RULES.md` pre-staged (reference only): Verify step 4 + §3 self-healing bullet + pre-push bullet require `npm run quickbuild` — DONE (already staged)
+- [x] `.agents/pre-commit-workflow.md`: NEW `□ LOCAL BUILD (v3.39.3 — Netlify deploy gate)` block (`□ npm run quickbuild passes (Netlify runs the SAME command — a broken build blocks deploys)`) after TESTING, before DOCUMENTATION; Quick Commands adds `npm run quickbuild  # Production build (Netlify deploy gate)` — DONE
+- [x] `AGENTS.md`: v3.39.3 table row (Sep 18 2026) above v3.39.2 + self-healing bullet now `tsc` + `test` + `lint` + `quickbuild` — DONE
+- [x] `TODO.md`: v3.39.3 Quick Reference row at top — DONE
+- [x] `agent-memory.md`: 2026-09-18 triage entry at top — DONE
+- [x] `.agents/session-todos.md`: this restructure (old v3.39.0/v3.39.1 Current preserved as carried-forward below) — DONE
+- [ ] Deferred (documented, no code): Turbopack 33× `Dynamic filesystem access causes tracing of the whole project` workspace-misreport warnings → planned `/*turbopackIgnore: true*/` at dynamic fs call sites (`lib/logger.ts`, `lib/services/ingestService.ts`, `lib/services/worker/worker-logger.ts`, `lib/sqlite.ts`); `@netlify/plugin-nextjs` 5.15.8 → 5.16.0 upgrade available
+- [ ] **Push/PR/deploy PENDING USER** (HEAD `112b281` LOCAL, behind origin/main by 1; no push/merge/deploy without explicit approval). After user removes `@netlify/plugin-emails` → `npm run quickbuild` → redeploy
+
+## Carried forward — committed earlier (v3.39.0 + v3.39.1 — SQLite Durable Mirror (Spec 12, restart survival, disk + Blobs) + WCAG/UI batch (a11y contrast, flat-change neutral state, index charts → TradingView, mobile-menu aria-label): full 89/89 suites / 1234 pass / 4 skip / 0 fail, tsc 46 = exact baseline (0 new), no migration, no new packages; on `feat/sqlite-durable-mirror` on top of unreleased v3.39.x base fixes `2182687`/`f470e6d`/PR #123 `e84fb34` + PRs #124/#125; committed `e4623a3` (feat) + `e9db4a7` + `d0e792e` (docs) + `309deac` (v3.39.1 UI); **push/PR/deploy PENDING USER**) — see Primer "Current Project Status"
 
 **User directive** (v3.38.1): db-health "Recent DB Errors" showed repeating Prisma 23502 NOT NULL on `swing_signals.create` every ~6h; the AI-monitoring "Last hour" filter appeared broken.
 

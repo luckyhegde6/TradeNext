@@ -1,5 +1,5 @@
 [build]
-  command = "mkdir -p .netlify/functions-internal/emails && echo '{\"type\":\"commonjs\"}' > .netlify/functions-internal/emails/package.json && npx prisma generate && npm run quickbuild"
+  command = "mkdir -p .netlify/functions-internal/emails && echo '{\"type\":\"commonjs\"}' > .netlify/functions-internal/emails/package.json && mkdir -p .netlify && echo '{\"type\":\"commonjs\"}' > .netlify/package.json && npx prisma generate && npm run quickbuild"
   publish = ".next"
 
 [build.environment]

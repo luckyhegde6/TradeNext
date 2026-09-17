@@ -35,6 +35,9 @@ Always maintain `.agents/session-todos.md` from session start until the final co
   □ No test files modified unless intentionally adding/updating tests
   □ New code has tests (jest in lib/__tests__/)
 
+□ LOCAL BUILD (v3.39.3 — Netlify deploy gate)
+  □ npm run quickbuild passes (Netlify runs the SAME command — a broken build blocks deploys)
+
 □ DOCUMENTATION (MANDATORY — task is NOT complete without it)
   □ @AGENTS.md version history updated (date + what changed + files)
   □ @TODO.md Quick Reference updated
@@ -102,6 +105,7 @@ git config core.hooksPath .githooks
 npx tsc --noEmit -p tsconfig.json   # TypeScript type check
 npm run lint                        # ESLint
 npm run test                        # Jest
+npm run quickbuild                  # Production build (Netlify deploy gate)
 git status                          # Review staged files
 ```
 
