@@ -1,10 +1,33 @@
 # Session Todos
 
-## Current (2026-09-18 — BUGS 15/16/17 mirror-contract fixes; branch `fix/mirror-contract-fixes` on `main` @ `e183a3a`)
+## Current (2026-09-19 — v3.40.3 predeploy mirror-preservation guard; branch `feature/predeploy-mirror-preserve` on `main` @ `27c0770`)
+
+**Task**: guarantee a production deploy during the P6003 plan-limit hold (until 2026-10-02) never cold-starts with an EMPTY SQLite mirror (same served-empty class as v3.40.1). Netlify build-time guard: `node scripts/predeploy/preserve-mirror.mjs` calls the LIVE `POST /api/admin/predeploy/preserve` before the new build serves traffic → snapshot + versioned Blobs backup + SQLite→Prisma drain (breaker-closed only). Spec/plan: `.agents/specs/14-predeploy-mirror-preserve.md` + `.agents/plans/14-predeploy-mirror-preserve.md`. Session: `.agents/sessions/2026-09-19-predeploy-guard/`.
+
+**Result**: CODE + TESTS + VERIFIED DONE (commit/push/PR/deploy **PENDING USER**). In scope: `netlify.toml` build chain + self-gating build script (soft-fail exit 0) + guard route (modes `pushed | backed_up | skipped`; P6003 hold → `backed_up`; GET read-only diagnostics) + `lib/sqlite.ts` Phase-1 wiring + OpenAPI + `DEPLOY_GUARD_TOKEN` env (upserted via Netlify MCP). Legacy finding (record-only): `.github/workflows/deploy.yml` publishes `./out` — NOT the real deploy path.
+
+- [x] Recon — production cold-start-empty risk confirmed; no build-time preservation existed (Spec 14 approved) — DONE
+- [x] Spec + plan written (`14-predeploy-mirror-preserve`) + scope approved by user — DONE
+- [x] Branch `feature/predeploy-mirror-preserve` created from `main` `27c0770` — DONE
+- [x] Phase 1 `lib/sqlite.ts` — `SyncTrigger "deploy"`; `MirrorBlobsStoreLike` exported/widened (`list?`/`delete?`); `getMirrorBlobsStore()` exported — DONE
+- [x] NEW `lib/services/mirrorBackup.ts` — versioned keys `backups/sqlite-mirror-<ISO>.sqlite`, `MIRROR_BACKUP_KEEP=5`, `MIRROR_BACKUP_MAX_BYTES=200 MiB`, `createMirrorBackup` fail-open `key|null`, error-tolerant `list`/`prune` — DONE
+- [x] NEW `app/api/admin/predeploy/preserve/route.ts` — ordering contract `getOutboxPending` → snapshot (persist+export+upload Blobs) → backup → **breaker-closed only** `pushSqliteToPrisma({reason:"deploy", leaderGate:false})` → audit `ADMIN_DB_SYNC`; 500 `push_failed` on push throw; GET read-only; `runtime="nodejs"` + `dynamic="force-dynamic"` — DONE
+- [x] Auth — `x-deploy-guard-token` vs `DEPLOY_GUARD_TOKEN` (64-hex, length-checked `timingSafeEqual`, 503 `guard_token_not_configured`) + admin-session fallback `authorize(req)`; token never logged — DONE
+- [x] NEW `scripts/predeploy/preserve-mirror.mjs` — production-gated (`CONTEXT === "production"` OR `--force`), soft-fail exit 0, 20 s timeout, URL chain `DEPLOY_PRIME_URL`→`URL`→`NEXT_PUBLIC_BASE_URL`→fallback, ONE summary line — DONE
+- [x] Wiring — `netlify.toml` build = `node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild`; `package.json` `predeploy:preserve`; `.env.example` `DEPLOY_GUARD_TOKEN=`; OpenAPI block (tags `Admin - Deploy`) — DONE
+- [x] Env — `DEPLOY_GUARD_TOKEN` (64-hex) upserted via Netlify MCP `manage-env-vars` (production, scopes builds+runtime, site `78401e5d-b137-4b6d-94bb-ad1ec8de6b05`; temp file deleted) — DONE
+- [x] Tests — NEW `mirrorBackup.test.ts` (14) + `predeployPreserveRoute.test.ts` (11) = **25/25** — DONE
+- [x] Verification — full `npm run test` **99/99 suites, 1334 pass / 4 skip / 0 fail**; `check-tsc-baseline.mjs` **46/46, prod 0 → OK**; `check-doc-sizes.mjs` **OK 74.9/100 KB**; `npm run lint` **0 errors**; `quickbuild` **185/185** — DONE
+- [x] Docs — Lessons **132/133**; `versions-v3.40.md` §v3.40.3 + §v3.40.1/§v3.40.2 MERGED fixes; `versions-index.md` v3.40.3 row + PR #128/#129 fixes; `CHANGELOG.md` addenda; Primer + agent-memory + TODO.md refresh + handoff + session `decisions.md`/`flow.md` — DONE
+- [ ] **Commit/push/PR/deploy — PENDING USER APPROVAL** (never auto-commit); after deploy: re-verify production `/api/admin/predeploy/preserve` GET diagnostics + one manual `--force` script run
+
+---
+
+## Completed (2026-09-18 — BUGS 15/16/17 mirror-contract fixes; **PR #129 MERGED** `38ee7da`, `main` @ `27c0770`)
 
 **Task**: fix the 3 bugs found during the v3.40.1 live-site verification. User-approved scope: **"15 + 16 + high-impact 17"** + **"add auth to POST too"** (workers/status heartbeat). Spec/plan: `.agents/specs/13-mirror-contract-fixes.md` + `.agents/plans/13-mirror-contract-fixes.md`. Session: `.agents/sessions/2026-09-18-v340ctx/`.
 
-**Result**: CODE + TESTS + DOCS DONE (commit/push/PR/deploy **PENDING USER**). In scope: bug 16 (shared mirror mapper + IST day key), bug 15 (alerts mirror fallback + client guard), bug 17-high (`/api/admin/workers/status` GET+POST auth + mirror fallback + poll backoff; `/api/dividends/calendar` mirror fallback). Out of scope → `BUGS.md` row 17 follow-up: `/api/admin/users` (mirror has no user table), `/api/admin/monitoring` (5 types), `/api/admin/workers`, `/api/admin/cron`, `/api/screener/saved`.
+**Result**: CODE + TESTS + DOCS DONE, **MERGED via PR #129 (`38ee7da`); `main` @ `27c0770`**. In scope: bug 16 (shared mirror mapper + IST day key), bug 15 (alerts mirror fallback + client guard), bug 17-high (`/api/admin/workers/status` GET+POST auth + mirror fallback + poll backoff; `/api/dividends/calendar` mirror fallback). Out of scope → `BUGS.md` row 17 follow-up: `/api/admin/users` (mirror has no user table), `/api/admin/monitoring` (5 types), `/api/admin/workers`, `/api/admin/cron`, `/api/screener/saved`.
 
 - [x] Recon — root causes confirmed at source for all 3 bugs (mirror shape leak / unguarded `.filter` / Prisma-only routes under the P6003 hold) — DONE
 - [x] Spec + plan written (`13-mirror-contract-fixes`) + scope approved by user — DONE
@@ -16,7 +39,7 @@
 - [x] Verification — full `npm run test` **97/97 suites, 1309 pass / 4 skip / 0 fail**; `check-tsc-baseline.mjs` **46/46, prod 0 → OK**; `check-doc-sizes.mjs` **OK 76,669 / 102,400 B**; `npm run lint` **0 errors** (1139 pre-existing warnings) — DONE
 - [x] UI verification (:3000) — `/alerts` renders signed-in (tabs + "No alerts configured"), **0 console errors**; `/markets/calendar` SSR 200 (1.97 s); `/admin/utils/workers` SSR 200; IST day-key semantics proven (22-Sep IST midnight: `toISOString` → `2026-09-21` vs `toDayKey` → `2026-09-22`) — DONE
 - [x] Docs — `BUGS.md` 15/16 ✅ + 17 🟡 Partial; `Lessons.md` 129/130/131; `versions-v3.40.md` §v3.40.2 + `versions-index.md` row; `openapi` `/api/admin/workers/status` entry (`securityAdmin`); Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md` — DONE
-- [ ] **Commit/push/PR/deploy — PENDING USER APPROVAL** (never auto-commit)
+- [x] **Commit/push/PR/deploy — DONE** — PR #129 merged (`38ee7da`), `main` @ `27c0770` (v3.40.2 on main; origin history: `27c0770` changelog → `38ee7da` merge → `46b360e` v3.40.2 fix)
 
 ---
 

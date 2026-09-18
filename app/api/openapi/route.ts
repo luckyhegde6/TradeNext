@@ -1249,6 +1249,41 @@ This API is designed for programmatic access. Key endpoints:
             }
         },
 
+        // ==================== ADMIN - PREDEPLOY PRESERVE ====================
+        // v3.40.3, spec 14 — predeploy mirror-preservation guard. Auth is dual:
+        // the `x-deploy-guard-token` header OR an admin session. When
+        // DEPLOY_GUARD_TOKEN is unset, token callers receive 503
+        // guard_token_not_configured (never open access).
+        '/api/admin/predeploy/preserve': {
+            get: {
+                summary: 'Predeploy guard status (admin): pending outbox, plan-limit breaker, versioned backups',
+                tags: ['Admin - Deploy'],
+                security: securityAdmin,
+                parameters: [
+                    { name: 'x-deploy-guard-token', in: 'header', required: false, schema: { type: 'string', description: 'Shared secret set in DEPLOY_GUARD_TOKEN (builds+runtime scope)' } }
+                ],
+                responses: {
+                    '200': { description: '{ success, breakerOpen, sqliteReady, pending, backups, keep }' },
+                    '401': { description: 'Unauthorized' },
+                    '503': { description: 'guard_token_not_configured' }
+                }
+            },
+            post: {
+                summary: 'Preserve mirror pre-deploy (admin): snapshot → versioned Blobs backup → SQLite→Prisma push (when the breaker is closed)',
+                tags: ['Admin - Deploy'],
+                security: securityAdmin,
+                parameters: [
+                    { name: 'x-deploy-guard-token', in: 'header', required: false, schema: { type: 'string', description: 'Shared secret set in DEPLOY_GUARD_TOKEN (builds+runtime scope)' } }
+                ],
+                responses: {
+                    '200': { description: '{ success, mode: pushed|backed_up|skipped, pendingBefore, snapshotBytes, backupKey, pruned, pushed, synced, failed, breakerOpen, message }' },
+                    '401': { description: 'Unauthorized' },
+                    '500': { description: '{ success: false, error: "push_failed", detail, mode, snapshotBytes, backupKey, pendingBefore }' },
+                    '503': { description: 'guard_token_not_configured' }
+                }
+            }
+        },
+
         // ==================== ADMIN - USERS ====================
         '/api/admin/users': {
             get: {

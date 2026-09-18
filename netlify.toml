@@ -1,5 +1,6 @@
 [build]
-  command = "npx prisma generate && npm run quickbuild"
+  # Predeploy guard runs FIRST (self-gates to CONTEXT=production; soft-fail).
+  command = "node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild"
   publish = ".next"
 
 [build.environment]
