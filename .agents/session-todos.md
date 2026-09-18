@@ -1,6 +1,21 @@
 # Session Todos
 
-## Current (2026-09-18 — context-optimization standing directive + Turbopack tracing harness; branch `fix/turbopack-tracing-harness` on top of `a7e3709` = origin/main)
+## Current (2026-09-18 — v3.40.1 production recovery serving fix; branch `fix/production-analytics-rec-serve` on `main` `898a3f6` = v3.40.0 merged + live)
+
+**User finding (verbatim, 2026-09-18)**: production cold start served EMPTY analytics all day — P6003 plan-limit hold (until 2026-10-02) + empty SQLite mirror (recommendations/screener/corp-actions/swing fell back to nothing).
+
+**Root cause**: `getMirrorBlobsStore()` (memoized on `globalThis` since v3.39.0) THREW during boot (Netlify Blobs region-context resolves ONE-SHOT) → failure **memoized as `null` forever** → the v3.39.0 boot restore chain (disk → Blobs → fresh) never reached Blobs on cold instances → empty mirror all day.
+
+**Fix (code + tests DONE, verified)**: (1) negative-TTL failure cache (`__sqliteMirrorBlobsStoreFailedAt` + `MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS = 60_000`); (2) one-shot `.unref()`'d **30s deferred Blobs restore** (`scheduleDeferredMirrorRestore`/`cancelDeferredMirrorRestore`/`retryDeferredMirrorRestore`/`runMirrorBlobsRetryForTests`; `MIRROR_DEFERRED_RESTORE_DELAY_MS = 30_000`; boot hook after "SQLite backup initialized" when `fromSnapshot === false`); (3) `mirrorHasLiveData()` swap guard; (4) NEW `lib/netlify.ts` `isNetlifyRuntime()`/`netlifyBlobsContextAvailable()`; (5) `/api/health` `isNetlify` + `blobsContextAvailable` + `NETLIFY_BLOBS_REGION` in `SAFE_VARS`. **Order matters**: retry clears failedAt BEFORE download (Lesson 128). Tests: NEW `netlify.test.ts` 11/11 + `sqliteMirror.test.ts` 8/8 (2 golden v3.40.1, get-count-delta assertion) + sqlite/dbOpTiering 97/97 → full **93/93 / 1283 pass / 4 skip / 0 fail**; `tsc` 46 exact; `quickbuild` 185/185; Blobs re-seeded (ETag `4bc5a64f…`).
+
+- [ ] Docs — v3.40.1 applied: agent-memory ✓ · Lessons 128 ✓ · `.agents/CHANGELOG.md` row ✓ · `versions-v3.40.md` section ✓ · Primer (Last Updated + Current Status) ✓ · HANDOFF yaml ✓ · versions-index row ✓ · session-todos ✓ · TODO.md Quick Reference ✓ — **REMAINING: doc-budget check + hygiene** — IN PROGRESS
+- [ ] `node scripts/dev-checks/check-doc-sizes.mjs --json` (doc budget ≤ 100 KB) — pending
+- [ ] Hygiene: `git status` review + delete junk artifacts + pre-commit checks — pending
+- [ ] **COMMIT/PUSH/PR/DEPLOY — PENDING USER APPROVAL (never auto-commit)**
+
+---
+
+## Current (archived 2026-09-18 — context-optimization standing directive + Turbopack tracing harness; branch `fix/turbopack-tracing-harness` on top of `a7e3709` = origin/main)
 
 **User directive (verbatim)**: "optimise the things using best practices and make it agent friendly coding with less context consumption and document it a break the larger files or docs into modular and referrence them for better coding experience" + "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
 
