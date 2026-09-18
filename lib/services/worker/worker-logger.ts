@@ -176,18 +176,18 @@ export function getAllLogFiles(): { taskId: string; path: string; size: number; 
     const path = require("path");
     const logsDir = resolveLogsDir();
     
-    if (!logsDir || !fs.existsSync(logsDir)) {
+    if (!logsDir || !fs.existsSync(/*turbopackIgnore: true*/ logsDir)) {
       return [];
     }
 
-    const files = fs.readdirSync(logsDir);
+    const files = fs.readdirSync(/*turbopackIgnore: true*/ logsDir);
 
     return files
       .filter((f: string) => f.endsWith(".log"))
       .map((f: string) => {
         const taskId = f.replace(".log", "");
-        const filePath = path.join(logsDir, f);
-        const stats = fs.statSync(filePath);
+        const filePath = path.join(/*turbopackIgnore: true*/ logsDir, f);
+        const stats = fs.statSync(/*turbopackIgnore: true*/ filePath);
 
         return {
           taskId,
@@ -213,24 +213,24 @@ export async function readAllLogs(limit = 200): Promise<string> {
     const fs = require("fs");
     const path = require("path");
     const logsDir = resolveLogsDir();
-    if (!logsDir || !fs.existsSync(logsDir)) return "";
+    if (!logsDir || !fs.existsSync(/*turbopackIgnore: true*/ logsDir)) return "";
     const files = fs
-      .readdirSync(logsDir)
+      .readdirSync(/*turbopackIgnore: true*/ logsDir)
       .filter((f: string) => f.endsWith(".log"))
       .sort((a: string, b: string) => {
         // Newest first by mtime
         const mtime = (f: string) =>
-          fs.statSync(path.join(logsDir, f)).mtimeMs;
+          fs.statSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ logsDir, f)).mtimeMs;
         return mtime(b) - mtime(a);
       })
       .slice(0, limit);
 
     const parts: string[] = [];
     for (const file of files) {
-      const filePath = path.join(logsDir, file);
+      const filePath = path.join(/*turbopackIgnore: true*/ logsDir, file);
       if (!filePath.startsWith(logsDir + path.sep)) continue; // traversal guard
       const header = `\n===== ${file} =====\n`;
-      parts.push(header + fs.readFileSync(filePath, "utf-8"));
+      parts.push(header + fs.readFileSync(/*turbopackIgnore: true*/ filePath, "utf-8"));
     }
     return parts.join("\n");
   } catch (error) {
@@ -298,12 +298,12 @@ export async function cleanupLogs(retentionDays = 7): Promise<number> {
       const logsDir = resolveLogsDir();
       const cutoffTime = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
       
-      if (logsDir && fs.existsSync(logsDir)) {
-    const files = fs.readdirSync(logsDir).filter((f: string) => f.endsWith(".log"));
+      if (logsDir && fs.existsSync(/*turbopackIgnore: true*/ logsDir)) {
+    const files = fs.readdirSync(/*turbopackIgnore: true*/ logsDir).filter((f: string) => f.endsWith(".log"));
       
         for (const file of files) {
-          const filePath = path.join(logsDir, file);
-          const stats = fs.statSync(filePath);
+          const filePath = path.join(/*turbopackIgnore: true*/ logsDir, file);
+          const stats = fs.statSync(/*turbopackIgnore: true*/ filePath);
           if (stats.mtimeMs < cutoffTime) {
             fs.unlinkSync(filePath);
             deletedFromFiles++;

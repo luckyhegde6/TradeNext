@@ -104,14 +104,8 @@ export default function IngestCsvPage() {
         }
     }, [session, status, router]);
 
-    if (status === "loading" || !session || session.user.role !== "admin") {
-        return (
-            <div className="flex items-center justify-center min-h-[400px]">
-                <div className="text-gray-500">Checking permissions...</div>
-            </div>
-        );
-    }
-
+    // Effects must run before the early return below (hooks cannot be
+    // called conditionally after a return — react-hooks/rules-of-hooks).
     useEffect(() => {
         if (dealType) {
             fetchHistory();
@@ -124,6 +118,8 @@ export default function IngestCsvPage() {
         }
     }, [selectedDate]);
 
+    // Declared before the early return so the effects above can call it
+    // without hitting a temporal-dead-zone reference.
     const fetchHistory = async () => {
         setLoadingHistory(true);
         try {
@@ -147,6 +143,14 @@ export default function IngestCsvPage() {
             setLoadingHistory(false);
         }
     };
+
+    if (status === "loading" || !session || session.user.role !== "admin") {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-gray-500">Checking permissions...</div>
+            </div>
+        );
+    }
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {

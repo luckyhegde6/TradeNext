@@ -57,6 +57,14 @@ nul
 # sql.js WASM binary — generated at build time by scripts/copy-sql-wasm.mjs
 /public/sql-wasm.wasm
 
+# Agent context scratch space (workspace-local chunk/context files, never committed)
+/.context/
+
+# Local rolling agent memory (`.agents/rules/durable-memory.md` two-tier store);
+# repo-wide rule so fresh clones/CI ignore it too — an untracked inner
+# `.remember/.gitignore` only protects the machine that created it.
+/.remember/
+
 # Worker logs
 worker_logs/
 

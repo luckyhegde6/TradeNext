@@ -14,6 +14,7 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | Agent | Primary skill | Related skills | Command(s) | Trigger |
 |-------|--------------|----------------|------------|---------|
 | **build** (primary) | — | all | — | main work |
+| **orchestrator** (primary) | — | docs-workflow, docs-updater, durable-memory | `/orchestrate` | ≥ 2 independent workstreams; subagent health |
 | **plan** | docs-workflow | docs-updater | `/plan` | before features |
 | **review** | bug-finder | playwright-debug | `/code-review` | pre-commit / PR |
 | **tdd** | bug-finder | ux-enhancer, playwright-debug | `/tdd` | test-first features |
@@ -52,6 +53,7 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | `/find-bugs` | bug-hunter | bug hunt + contract audit |
 | `/ux-audit` | ux-designer | UI/UX audit/enhance |
 | `/nse-integration` | — | NSE API integration patterns |
+| `/orchestrate` | orchestrator | decompose → dispatch → monitor → handoff (Tier A/B) |
 | `/tdd`, `/code-review`, `/build-fix`, `/plan`, `/pre-commit-check` | build/tdd/review | existing flows |
 
 ## Adding a new skill

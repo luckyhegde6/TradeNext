@@ -1,0 +1,144 @@
+#!/usr/bin/env node
+/**
+ * check-tsc-baseline.mjs — TypeScript error-baseline guard (v3.40.0, W7).
+ *
+ * This repo carries a KNOWN number of pre-existing TypeScript errors, so "zero errors" is not a
+ * usable gate. "No MORE than the recorded baseline" is. This script counts tsc errors, compares
+ * them against a committed baseline, and fails on regression.
+ *
+ * Baseline: scripts/dev-checks/tsc-baseline.json (committed, so CI enforces the same number)
+ *   { "total": 46, "prod": 0, "recorded": "YYYY-MM-DD" }
+ *
+ * `total`  = every `error TS…` line
+ * `prod`   = those NOT inside __tests__/ (the pre-commit hook's notion of "production files")
+ *
+ * Usage:
+ *   node scripts/dev-checks/check-tsc-baseline.mjs            # gate — exit 1 on regression
+ *   node scripts/dev-checks/check-tsc-baseline.mjs --json     # machine-readable (CI)
+ *   node scripts/dev-checks/check-tsc-baseline.mjs --update   # re-record the baseline
+ *
+ * Exit: 0 = at or below baseline, 1 = regression, 2 = could not run tsc
+ *
+ * Test seam: `TSC_BASELINE_CMD` overrides the tsc command. It exists ONLY so the unit tests can
+ * feed deterministic output instead of paying a real ~40 s tsc run per case; it is never set in
+ * the pre-commit hook or CI, so the gate always runs the real command there.
+ */
+import { execSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const BASELINE_PATH = resolve(ROOT, "scripts/dev-checks/tsc-baseline.json");
+const TSC_CMD = process.env.TSC_BASELINE_CMD || "npx tsc --noEmit -p tsconfig.json";
+const TSC_TIMEOUT_MS = 600_000;
+
+/** Fallback used when the baseline file is absent (documented default). */
+const DEFAULT_BASELINE = { total: 46, prod: 0 };
+
+const args = process.argv.slice(2);
+const asJson = args.includes("--json");
+const shouldUpdate = args.includes("--update");
+
+/** tsc exits non-zero when errors exist — that is expected, so capture rather than throw. */
+function runTsc() {
+  try {
+    return execSync(TSC_CMD, {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: TSC_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+  }
+}
+
+function readBaseline() {
+  if (!existsSync(BASELINE_PATH)) return { ...DEFAULT_BASELINE, recorded: "(default)" };
+  try {
+    const parsed = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+    return {
+      total: Number(parsed.total) || 0,
+      prod: Number(parsed.prod) || 0,
+      recorded: parsed.recorded ?? "(unknown)",
+    };
+  } catch {
+    return { ...DEFAULT_BASELINE, recorded: "(unreadable)" };
+  }
+}
+
+function countErrors(raw) {
+  const lines = raw.split(/\r?\n/).filter((l) => /error TS\d+/.test(l));
+  // "prod" = errors NOT inside __tests__/ — matches the pre-commit hook's classification.
+  const prod = lines.filter((l) => !/__tests__|__test__/.test(l)).length;
+  return { total: lines.length, prod, errors: lines };
+}
+
+/** JSON goes to stdout; human text goes to stdout on success and stderr on failure. */
+function emitJson(payload) {
+  if (asJson) console.log(JSON.stringify(payload, null, 2));
+}
+
+const raw = runTsc();
+
+// tsc never ran (missing deps / wrong cwd) — distinguish from "clean".
+if (!/error TS\d+/.test(raw) && !/Found \d+ error/i.test(raw) && raw.trim() === "") {
+  const message =
+    "FAIL: `tsc` produced no output — is TypeScript installed? (npm ci / npx tsc --version)";
+  emitJson({ ok: false, error: message, exitCode: 2 });
+  console.error(message);
+  process.exit(2);
+}
+
+const { total, prod, errors } = countErrors(raw);
+const baseline = readBaseline();
+
+if (shouldUpdate) {
+  const next = { total, prod, recorded: new Date().toISOString().slice(0, 10) };
+  writeFileSync(BASELINE_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  emitJson({ ok: true, updated: next, path: BASELINE_PATH });
+  console.log(`Baseline re-recorded: total=${total} prod=${prod} → ${BASELINE_PATH}`);
+  process.exit(0);
+}
+
+const dTotal = total - baseline.total;
+const dProd = prod - baseline.prod;
+const ok = dTotal <= 0 && dProd <= 0;
+
+const payload = {
+  ok,
+  total,
+  prod,
+  baseline: { total: baseline.total, prod: baseline.prod, recorded: baseline.recorded },
+  delta: { total: dTotal, prod: dProd },
+  newErrors: ok ? [] : errors.slice(0, 10),
+};
+
+if (ok) {
+  const human = [
+    "TypeScript error baseline:",
+    "",
+    `  total ${String(total).padStart(4)}  (baseline ${baseline.total}, delta ${dTotal >= 0 ? "+" : ""}${dTotal})`,
+    `  prod  ${String(prod).padStart(4)}  (baseline ${baseline.prod}, delta ${dProd >= 0 ? "+" : ""}${dProd})`,
+    "",
+    "OK: no TypeScript regression.",
+  ].join("\n");
+  emitJson(payload);
+  if (!asJson) console.log(human);
+} else {
+  const human = [
+    "TypeScript error baseline:",
+    "",
+    `  total ${String(total).padStart(4)}  (baseline ${baseline.total}, delta ${dTotal >= 0 ? "+" : ""}${dTotal})`,
+    `  prod  ${String(prod).padStart(4)}  (baseline ${baseline.prod}, delta ${dProd >= 0 ? "+" : ""}${dProd})`,
+    "",
+    `FAIL: TypeScript regression (+${dTotal} total, +${dProd} prod).`,
+    "Fix the new errors, or re-record with --update if the baseline is intentionally changed.",
+    "",
+    ...errors.slice(0, 10).map((l) => `    ${l}`),
+  ].join("\n");
+  emitJson(payload);
+  console.error(human);
+  process.exit(1);
+}

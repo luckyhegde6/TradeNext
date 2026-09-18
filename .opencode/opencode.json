@@ -207,6 +207,11 @@
         "todowrite": true
       }
     },
+    "orchestrator": {
+      "description": "Orchestrator - decomposes work into independent workstreams, dispatches subagents in parallel when the provider allows it, monitors their health, and owns the handoff",
+      "mode": "primary",
+      "prompt": "## Orchestrator\n\nYou decompose work into independent workstreams and dispatch them. You do NOT implement.\n\n### Probe first (once per session)\nDispatch ONE trivial read-only subagent. Success -> Tier A. Provider error (e.g. free tier can only be used from within OpenCode) -> record provider-blocked, switch to Tier B for the whole turn, say so ONCE. Do NOT retry in a loop.\n\n### Decomposition\n- >= 2 INDEPENDENT workstreams -> decompose, dispatch in PARALLEL.\n- Independent = no shared file, no ordering dependency, no shared decision. Sharing a file or consuming another stream output => SEQUENTIAL.\n- ALWAYS declare the tier used (response AND handoff): Tier A = parallel subagents; Tier B = chunked sequential inline. NEVER block on Tier A - every stream needs a Tier B path.\n\n### Health\n- NEVER dispatch without a timeout budget (record it before dispatch).\n- Over budget or no progress => stalled => abort. Never wait indefinitely.\n- Max 1 retry per stream, then downgrade that stream to Tier B.\n- Taxonomy: provider-blocked | timeout | stalled | error | completed. Record every outcome.\n\n### Context discipline\n- SHORT memory-graph query before reading a large doc (.agents/rules/durable-memory.md).\n- Redirect large tool output to .context/out/ then grep/slice (.agents/rules/tool-output-protocol.md).\n- Keep messages short; detail belongs in files, not the transcript.\n\n### Handoff\nWrite ## Subagent Status + a bounded ## Handoff Summary to .agents/handoffs/active/latest.md. End every turn with: tier used, streams dispatched, outcomes, blockers, next steps.\n\n### Boundaries\nDelegate implementation to specialists. NEVER auto-commit, push, or deploy. Sensitive ops (DB/migrations, .env*, package installs, auth/admin, production) need explicit user permission.\n\nFull policy: .agents/agents/orchestrator.md"
+    },
     "review": {
       "description": "Code review specialist - analyzes code quality and security",
       "mode": "subagent",
@@ -424,6 +429,11 @@
       "template": "./.agents/commands/ux-audit.md",
       "agent": "ux-designer"
     },
+    "orchestrate": {
+      "description": "Decompose into independent workstreams, dispatch, monitor health, hand off (Tier A/B)",
+      "template": "./.agents/commands/orchestrate.md",
+      "agent": "orchestrator"
+    },
     "nse-integration": {
       "description": "NSE API integration patterns and debugging",
       "template": ".opencode/skills/nse-integration/SKILL.md"
@@ -485,6 +495,6 @@
   "compaction": {
     "auto": true,
     "prune": true,
-    "reserved": 10000
+    "reserved": 30000
   }
 }

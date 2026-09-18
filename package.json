@@ -21,7 +21,7 @@
     "quickbuild": "node scripts/copy-sql-wasm.mjs && next build && node scripts/copy-sql-wasm-netlify.mjs",
     "build": "npx prisma migrate deploy && node scripts/copy-sql-wasm.mjs && next build && node scripts/copy-sql-wasm-netlify.mjs",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

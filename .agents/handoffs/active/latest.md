@@ -1,55 +1,128 @@
 ---
-handoff: v3.35.0-intelligence-test-fix
-session_id: v3.35.0-intelligence-test-fix
-date: 2026-09-11
-branch: fix/leader-watchdog-self-heal (on top of v3.34.1 merge 05b91e8; v3.33.0 6e22eca + v3.33.1 f86d9d0 + v3.34.0 5d754b7 + v3.34.1 d91fb01 all merged into this PR #118 branch)
-last_commits: 2036724 (v3.35.0 committed + pushed), 05b91e8 (v3.34.1 merge into PR #118 branch), d91fb01 (v3.34.1 wasm gate fix), 5d754b7 (v3.34.0 monthly ops), f86d9d0 (v3.33.1 swing), 6e22eca (v3.33.0 watchdog), bcde7ae (v3.32.1 committed)
-dev: local :3000 (dev PID 12096 — do not kill; MCP 4096 do not kill; pg docker 5432 do not kill)
+handoff: v3.40.0-agentic-context-orchestration
+handoff_version: "1.1"
+session_id: 2026-09-18-v340ctx
+date: 2026-09-18
+branch: feat/agentic-context-orchestration (stacked on ca56a74; parent fix/turbopack-tracing-harness)
+last_commits: ac91571 (W4 orchestrator), f758e67 (W3 compaction), db08255 (W2 fix), 40181c4 (W2), 1f73d3c (W1), b6552ca (spec+plan)
+dev: local :3000 (do not kill); MCP/OpenCode 4096 do not kill; pg docker 5432 do not kill
 status: in_progress
-commit: 2036724 (v3.35.0 test-only +21 — lib/__tests__/intelligence.test.ts; pushed; docs-sync pass in progress)
+tier: B
 ---
 
-# Handoff — v3.35.0 Flaky intelligence.test.ts CI fix + v3.34.0 Monthly Query Consumption + v3.34.1 sql.js WASM gate fix + v3.33.0 Leader watchdog self-heal + v3.33.1 Swing touch-tracking fix — merged into PR #118 branch
+# Handoff — v3.40.0 Agentic Context, Orchestration & Harness (W1–W4 DONE, W5+ in flight)
 
-## v3.35.0 — Flaky `intelligence.test.ts` CI fix — prisma mock isolates the fire-and-forget `IntelligenceCache` upsert (zero real-DB writes in tests)
-**Test-only +21 COMMITTED `2036724` + PUSHED on PR #118 branch `fix/leader-watchdog-self-heal` (on top of v3.34.1 merge `05b91e8`); PR #118 merge/deploy pending user approval.**
-Root cause: `setIntelligenceCache` (`lib/services/intelligence/cache.ts` :101-124) fires `prisma.intelligenceCache.upsert(...)` UN-AWAITED → the real-Postgres `beforeEach` `deleteMany` teardown (`intelligence.test.ts` :73-80) races the in-flight upsert → stale row → spurious `INTELLIGENCE_CACHE_HIT` → flaky failures at :187/:246/:279 (the "documented pre-existing flake" since v3.25.0, now FIXED).
-Fix: NEW full prisma mock factory (`{ __esModule: true, default: { intelligenceCache: { findUnique/upsert/delete/deleteMany/count/findMany → jest.fn() } } }`) inserted between the `beforeEach` close and the Tests header; `jest.clearAllMocks()` clears call history but keeps impls. Single-file surgical change, test-only (+21).
-**Tests**: `intelligence.test.ts` **13/13 PASS**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run (no more pre-existing-flake asterisk); tsc **46 = exact baseline (0 new)**; no migration; no new packages.
+> Superseded: previous handoff content (v3.39.4 slim + Turbopack fix, v3.35.0 flaky
+> `intelligence.test.ts`, v3.34.x, v3.33.x) is recoverable from git history of this file.
 
-## v3.34.0 — Monthly Query Consumption (db-health monthly-ops window, Plan 09 rev-v3 c/d)
-**Code + tests DONE and VERIFIED on `feat/db-health-monthly-ops` and MERGED into PR #118 branch `fix/leader-watchdog-self-heal` (per user-approved plan); PR #118 push/merge/deploy pending user.**
-User directive (v3.31.0): plan limit **MONTHLY 200K ops/mo (resetting 2nd)** + Prisma calls only at 3 moments — boot hydration, 6h SQLite→Prisma push, ONE hourly ops-usage write — zero between. db-health only showed TODAY's ops; with a monthly plan that's the wrong unit and a restarted instance loses the month's history → this implements the deferred Plan 09 rev-v3 c/d monthly-ops window. `query_cache` STAYS deferred.
+## Context
 
-### What shipped (v3.34.0)
-- **Ledger module (pure)** — NEW `lib/services/opsMonthly.ts`: `OpsMonthlyState {monthKey, days}` on globalThis `__opsMonthly`; monthKey = `getIstDayKey().slice(0, 7)` (YYYY-MM); `getOpsMonthlyState()` lazily seeds + fresh ledger at month rollover; `foldOpsCounterIntoMonthly()` idempotent `Math.max` high-water merge; `buildQueryConsumption()` pure aggregation (live day merged over persisted — restarted instance keeps high-water, current-day replaced before summing, no double count; perDay newest-first ≤ 31; `DB_PLAN_LIMIT_OPS_MONTHLY` default 200_000). PURE: only imports `getIstDayKey` from `@/lib/prisma`, NEVER invoked at module load (several suites mock `@/lib/prisma` without named exports).
-- **Persistence** (`lib/sqlite.ts` +64) — `persistOpsMonthly()`/`restoreOpsMonthly()` (iface :244-250) under `_backup_meta` key `"ops_monthly"` (`OPS_MONTHLY_KEY` :1653); restored in `initSqliteBackup()` (:1421) + persisted after initial sync (:1440) + 60s `startOpsCounterPersistence()` tick folds+persists (:1705); `restoreOpsMonthly` discards stale previous-month snapshots.
-- db-health GET `queryConsumption` block (+12) + "Monthly Query Consumption" card (+77); `.env.example` +5.
-- **No hot-path change** — `$allOperations` keeps bumping the live counter; `lib/prisma.ts` diff = 6-line pointer comment only.
+- **Task**: make TradeNext agent-friendly — stop the compaction loop, add an orchestrator that
+  prefers parallel dispatch, monitor subagent health, upgrade handoffs, strengthen the harness.
+- **Branch**: `feat/agentic-context-orchestration`
+- **Files Changed**: `.agents/` (rules, agents, commands, handoffs, INDEX, sessions),
+  `scripts/dev-checks/`, `lib/__tests__/`, `.opencode/opencode.json`, `AGENTS.md`, `TODO.md`
+- **Dependencies**: none added. Node built-ins + markdown only.
+- **Spec/Plan**: `.agents/specs|plans/v3.40.0-agentic-context-orchestration.md` (approved Gate 1+2)
 
-### Test-trap fixed (Lesson #114)
-- **Test-trap fixed (Lesson #114)**: `resetSqliteStateForTests()` nulls state IN PLACE → sqlite monthly test-3 ends `await ensureSqliteBackup();` before `resetOpsMonthlyForTests()`.
+## Progress
 
-## v3.34.1 — sql.js WASM async-load gate fix
-- `getSqlJs()` loaded `sql-wasm.wasm` via async `fs.readFile`/stream → sql.js init + stray "Cannot log after tests are done" lines landed after a Jest file finished. Fix: synchronous `wasmBinary` load (`fs.readFileSync`, try/catch per candidate path) so sql.js boots fully before any test finishes; `getSqlJs()` memoized. sqlite + cron-daemon **88/88** under `CI=true --runInBand` zero noise; full **1154 pass / 4 skip / 1 fail** (the 1 = the pre-existing `intelligence.test.ts` flake — FIXED in v3.35.0 above); tsc **46 = exact baseline (0 new)**; no migration; no new packages. Commit `d91fb01`.
+- [x] **Phase 0** baseline — tsc **46**, budget **72.8 KB**, quickbuild **0 warnings / 185 pages**
+- [x] **W1** tool-output protocol + `chunk-output.mjs` + **12 tests** (`1f73d3c`)
+- [x] **W2** durable memory (two-tier) + memory-MCP **search-semantics fix** (`40181c4`, `db08255`)
+- [x] **W3** `compaction.reserved` 10000 → 30000 (user-approved) (`f758e67`)
+- [x] **W4** orchestrator agent + `/orchestrate` registered as **primary** (`ac91571`)
+- [x] **W5+W6** health rules + handoff schema v1.1 + tier-downgrade flow (this commit)
+- [ ] **W7** harness — `check-tsc-baseline.mjs`, `check-doc-sizes --json`, hook + CI gates
+- [ ] **Phase 7** tests — `check-context-budget.test.ts`, `check-tsc-baseline.test.ts`
+- [ ] **Phase 8** docs — TODO/Primer/agent-memory/Lessons/CHANGELOG/versions-v3.40
+- [ ] **Phase 9** verification + final handoff
 
-## v3.33.0 — Leader watchdog self-heal (spec 11)
-User directive: "don't let this happen again" — prod scheduler dead since ~2026-09-08 07:06 UTC, NO automatic recovery (only manual admin "Start Engine"). Root cause: leadership was ONE-SHOT — `acquireLeaderLock()` at boot + `startLeaderHeartbeat(role, onLost)`; v3.28.2 stops engines on `onLost` but NOTHING ever re-acquires → standby pollers forever.
-- NEW `watchLeaderRole(role, handlers)` (`lib/services/leader.ts`): standby → adaptive probe (fresh foreign row = SLOW re-probe `LEADER_CLAIM_SLOW_MS` 300s; stale/absent = claim via `updateMany` count>0 | `create` | P2002 → false | `isDbUnavailableError` → fail-open) → re-probe OWN row (null/not-ours → `failOpenEvents++`) → **leader** + heartbeat `LEADER_HEARTBEAT_MS` 300s; renewal 0 → internal onLost → standby + `handlers.onLost` + FAST re-probe `LEADER_CLAIM_FAST_MS` 60s; `stop()`; phase-guard (no double `onAcquired`); steady-state 1 `findUnique`/300s/instance.
-- `LEADER_STALENESS_MS` 15→**10 min** (human-approved); NEW `LeaderWatchHandlers`/`LeaderWatchStatus` + `getLeaderWatchStatuses()` (globalThis `__leaderWatchStatus`, zero-Prisma, mirrors `readTier`).
-- Wiring (`instrumentation.ts`, "LEADER WATCHDOGS (v3.33.0, spec 11): replaces the one-shot boot election"): worker `onAcquired → startWorker(30_000)` / `onLost → stopWorkerEngine`; cron-daemon `onAcquired → startCronDaemon().then(...)` / `onLost → stopCronDaemon`; sqlite-sync log-only (`onAcquired: () => {}`).
+## Decisions
 
-## v3.33.1 — Swing touch-tracking fix
-Root cause: `checkSwingPerformance` evaluated target/stop hits with the LATEST CLOSE only → an intraday HIGH/LOW touch that closed back inside the range was never counted (missed exits / wrong "still open"). Fix: `SwingSignalStatusInput` NEW `maxHighSincePosting`/`minLowSincePosting` (omit/null → close-only preserved); windowByTicker from ONE `$queryRaw` over `daily_prices` (`WHERE ticker = ANY(${symbols}) AND "tradeDate" >= MIN(postedAt)`, ASC; per-signal JS filter); live-quote bridge captures `dayHigh`/`dayLow`; BUY intraday-touch target-wins the tie; reason strings `touched … intraday (high/low X, close Y)` vs `crossed`; status-change audit metadata +2 fields. Files for the commit: `lib/services/swingPerformanceService.ts` + `lib/__tests__/swingPerformanceService.test.ts` ONLY.
+Full reasoning in `.agents/sessions/2026-09-18-v340ctx/decisions.md` (D1–D11). Headlines:
 
-## Verification (all workstreams incl. v3.35.0)
-- v3.35.0: `intelligence.test.ts` **13/13**; full **86/86 suites / 1170 pass / 4 skip / 0 fail** — FIRST fully-green full run; tsc **46 = exact baseline (0 new)**; no migration; no new packages.
-- v3.33.0 + v3.34.x: `leaderWatch.test.ts` **8/8** + `instrumentation.test.ts` 7 rewritten + `dbHealthRoute.test.ts` +1 + `cron-daemon.test.ts` +1 (engine restart); constant fixes `leader.test.ts:68`/`sqlite.test.ts:282`; targeted **125/125**; swing **27/27**; tsc **46 = exact baseline (0 new)**; +17 new tests.
+- **D3/D11** — **Subagents are provider-BLOCKED here** (`OpenCode's free tier can only be used from
+  within OpenCode`). Orchestration is capability-detected: **Tier A** (parallel) / **Tier B**
+  (chunked sequential). No workstream may be blocked on Tier A.
+- **D6** — Two-tier memory: `.remember/now.md` (local rolling, gitignored) + memory MCP (durable).
+- **D7** — The remaining compaction loop is the **transcript**, not injected docs.
+- **D8** — `compaction.reserved` 10000 → 30000 (applied; effect is host-side).
+- **D9** — No orchestrator existed (13 profiles, all `subagent`) → created one as **`mode: primary`**,
+  because subagents cannot dispatch subagents.
 
-## Deferred / Next (consolidated)
-- **Deferred (unchanged)**: `query_cache` (Plan 09 rev-v3 c/d); live `probe_time` DB check; durable Netlify `TZ`/`UTC` env fix (v3.32.0). v3.32.1 (`bcde7ae`) is merged into this branch but NOT deployed — live admin Save Correction still 400s until PR #118 merges/deploys.
-- **Next**: v3.35.0 committed `2036724` + pushed; docs-sync pass (Batch E) → commit docs + push → **PR #118 merge/deploy pending user approval**.
+## Blockers
+
+| Blocker | Impact | Status |
+|---------|--------|--------|
+| Subagents fail (provider tier) | Tier A untestable | **Accepted** — Tier B is the live path (D3/D11) |
+| `@netlify/plugin-emails` still installed | Emails function fails on Netlify | Needs **Netlify UI** action by user |
+| No commit/push/install without permission | — | Standing rule |
+
+## Learnings
+
+1. **`memory/search_nodes` is a literal contiguous substring match of the *entire* query** — not
+   tokenised. A 5-word natural-language query returned 0 hits against a graph that provably
+   contained the answer. Empty result ≠ no memory. (Recorded as a `gotcha` entity + in the rule.)
+2. Shrinking *injected* files does not stop a compaction loop once the *transcript* is the leak.
+   Measure both before optimising either.
+3. Verify a capability before designing around it — 4 planned parallel subagents all failed at the
+   provider tier.
+4. Age-chunk only append-only logs; `Lessons.md` is a live rulebook (old entries are active rules).
+5. `filesystem_edit_file` with an `edits` array made multi-spot edits to `.opencode/opencode.json`
+   safe in one shot (no read-modify-write clobbering).
+
+## Next Steps
+
+1. **W7 harness**: `scripts/dev-checks/check-tsc-baseline.mjs` (baseline 46, `--update`) +
+   `check-doc-sizes.mjs --json`; wire advisory gates into `.githooks/pre-commit` (additive only)
+   and `.github/workflows/quality-gate.yml`.
+2. **Phase 7 tests**: `check-context-budget.test.ts`, `check-tsc-baseline.test.ts` (CLI-spawn style,
+   same as `chunk-output.test.ts`). Run `npm run test` **alone**.
+3. **Phase 8 docs**: TODO/Primer/agent-memory/Lessons/CHANGELOG + `versions-v3.40.md`.
+4. **Phase 9**: full gate set (`tsc` ≤ 46, `npm run test`, `npm run lint`, `npm run quickbuild`),
+   then final handoff. Merge/PR only on explicit user request — **never push `main`**.
+
+## Subagent Status
+
+| Dispatch | Agent | Tier | Budget | Outcome | Notes |
+|----------|-------|------|--------|---------|-------|
+| 4 × `explore` (facts A1–A4) | explore | A | 60 s | provider-blocked | free tier — no retry (deterministic) |
+| fallback fact-gathering | — | B | — | completed | `.context/out/facts-digest.txt`, `f2.txt` |
+| all v3.40.0 implementation | — | B | — | completed | W1–W4; no dispatch attempted (known block) |
+
+## Handoff Summary
+- **Tier used**: B — subagents are `provider-blocked` on this provider tier, so no dispatch is attempted
+- **State**: W1–W4 committed (`1f73d3c`, `40181c4`, `db08255`, `f758e67`, `ac91571`); W5+W6 in this commit
+- **Verified**: `tsc` **46** (= baseline) · budget **73.0 KB / 100 KB** · quickbuild **0 warnings, 185/185**
+- **Tests**: `chunk-output.test.ts` **12/12 pass**
+- **Blocked**: nothing on this branch
+- **Next**: W7 harness → Phase 7 tests → Phase 8 docs → Phase 9 verify + handoff
+
+## Verification
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | **46** = exact baseline |
+| `npm run quickbuild` | **0 Turbopack warnings**, 185/185 pages |
+| `check-doc-sizes.mjs` | **OK 73.0 KB / 100 KB** (5/5 files ok) |
+| `npx jest lib/__tests__/chunk-output.test.ts` | **12 passed** |
+| `.opencode/opencode.json` | parses; `agents=16 (primary=3, subagents=13)`, `commands=11` |
+| pre-commit hook | passed on every commit |
+
+## Checkpoints
+
+```bash
+git log --oneline -6
+# ac91571 feat(agents): W4 orchestrator agent + /orchestrate (Tier A/B, health-aware)
+# f758e67 chore(context): W3 compaction headroom - reserved 10000 -> 30000 (user-approved)
+# db08255 fix(context): W2 - document memory-MCP literal search semantics
+# 40181c4 feat(context): W2 durable memory - two-tier protocol
+# 1f73d3c feat(context): W1 tool-output protocol + chunk-output.mjs + 12 tests
+# b6552ca docs(agents): v3.40.0 spec + plan + session artifacts
+```
 
 ## Session archive
-- `.agents/sessions/2026-09-11-intelligence-test-fix/` — decisions.md (D1-D4) + flow.md. Plus `.agents/changelog/versions-v3.35.md` (v3.35.0 full-detail file).
-- `.agents/sessions/2026-09-11-monthly-ops/` — decisions.md (D1-D6) + flow.md. Plus `.agents/changelog/versions-v3.34.md` (v3.34.0 + v3.34.1 full-detail file). v3.33.x: no session archive (per approved 15-item plan); spec/plan 11: `.agents/specs/11-scheduler-self-heal.md` + `.agents/plans/11-scheduler-self-heal.md`.
+
+Prior sessions: `.agents/sessions/` · Chunked history: `.agents/session-archive/` ·
+Version history: `.agents/changelog/versions-index.md`

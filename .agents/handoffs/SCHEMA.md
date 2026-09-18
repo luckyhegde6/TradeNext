@@ -95,6 +95,47 @@ checkpoint: null             # Checkpoint ID for recovery
 - **Rollback Plan**: How to undo if needed
 ```
 
+#### 8. Subagent Status (v1.1 — required when the orchestrator dispatched anything)
+
+Bounded: **one row per dispatch, no prose, no transcripts.**
+
+```markdown
+## Subagent Status
+
+| Dispatch | Agent | Tier | Budget | Outcome | Notes |
+|----------|-------|------|--------|---------|-------|
+| facts A1–A4 | explore | A | 60 s | provider-blocked | free tier — no retry (deterministic) |
+| fallback fact-gathering | — | B | — | completed | .context/out/facts-digest.txt |
+```
+
+- **Outcome vocabulary is a closed set** — `provider-blocked` · `timeout` · `stalled` · `error` · `completed`
+  (see `.agents/agents/orchestrator-health.md` §4). Anything else is a bug.
+- `Tier` is `A` (parallel subagents) or `B` (chunked sequential inline).
+- If nothing was dispatched, write the section once with a single row: `| none | — | B | — | completed | no dispatch needed |`
+
+#### 9. Handoff Summary (v1.1 — required, bounded)
+
+A resumable summary that fits on a screen. **≤ 15 lines. Never a transcript.**
+
+```markdown
+## Handoff Summary
+- **Tier used**: B (subagents provider-blocked)
+- **State**: W1–W4 committed (1f73d3c, 40181c4, db08255, f758e67, ac91571); W5+ in progress
+- **Verified**: tsc 46 (= baseline) · budget 73.0 KB/100 KB · quickbuild 0 warnings, 185/185
+- **Blocked**: nothing
+- **Next**: W5+W6 handoff schema → W7 harness → tests → docs → verify
+```
+
+Purpose: a fresh agent resumes from **files alone** without reading the previous conversation.
+
+## Backwards Compatibility
+
+- **`handoff_version: "1.0"`** — original schema (sections 1–7). **Still fully valid.**
+- **`handoff_version: "1.1"`** — adds sections 8 (`Subagent Status`) + 9 (`Handoff Summary`).
+  Both are **optional** for a 1.0-style handoff, but **required** when the orchestrator dispatched
+  subagents or when the handoff must be resumable without the conversation.
+- Never delete sections 1–7 to "upgrade" — 1.1 is strictly additive, so old files keep working.
+
 ## Complete Example
 
 ```yaml

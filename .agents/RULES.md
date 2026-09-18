@@ -6,6 +6,7 @@
 
 1. **Read state** — @HANDOFF.md → `.agents/handoffs/active/latest.md` → @Primer.md → @Lessons.md → `.agents/session-todos.md` (see `.agents/rules/session-memory-rules.md`)
 2. **Plan** — convert task into verifiable goals (tests pass, tsc clean, docs updated)
+   - **≥ 2 independent workstreams → prefer parallel dispatch via the orchestrator** (`.agents/agents/orchestrator.md`, `/orchestrate`), else a chunked-sequential **Tier B** plan. **Always declare the tier used**; never block on subagent availability.
 3. **Implement** — minimal code, one todo at a time, update session-todos in real time
 4. **Verify** — `npm run test` (alone, never chained), `npx tsc --noEmit`, `npm run lint`, `npm run quickbuild` (**local production build MUST pass before ANY commit** — Netlify runs the same command, so a broken build blocks deploys)
 5. **Document** — @AGENTS.md version entry + @TODO.md + @Lessons.md (mandatory)

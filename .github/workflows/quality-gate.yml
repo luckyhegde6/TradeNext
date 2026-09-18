@@ -8,6 +8,36 @@ permissions:
   contents: read
 
 jobs:
+  context-budget:
+    # Deliberately has no `npm ci` — the guard uses Node built-ins only, so it runs in seconds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Injected context budget gate
+        run: node scripts/dev-checks/check-doc-sizes.mjs
+
+  tsc-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript baseline gate
+        run: node scripts/dev-checks/check-tsc-baseline.mjs
+
   quality-gate:
     runs-on: ubuntu-latest
 
@@ -27,8 +57,22 @@ jobs:
         env:
           CI: true
 
-      - name: Typecheck
-        run: npm run quickbuild
+      - name: Build + Turbopack warning gate
+        # v3.39.4 removed 33 Turbopack tracing warnings (turbopackIgnore markers). Measured
+        # baseline for a clean build is 0 warning lines. npm's own notices (npm warn ...) are
+        # excluded; any Next/Turbopack warning fails the gate.
+        run: |
+          set -o pipefail
+          npm run quickbuild 2>&1 | tee /tmp/build.log
+          # awk (not `grep | wc -l`): `grep` exits 1 on zero matches, which under `bash -e`
+          # aborts the step before the count is printed — a clean build must PASS.
+          WARN=$(awk 'tolower($0) ~ /warn/ && $0 !~ /^npm warn/ {c++} END {print c+0}' /tmp/build.log)
+          echo "build warnings: $WARN (expected 0)"
+          if [ "$WARN" -ne 0 ]; then
+            echo "FAIL: build produced $WARN warning(s):"
+            grep -i "warn" /tmp/build.log | grep -v "^npm warn" | head -10 || true
+            exit 1
+          fi
 
       - name: Forbidden patterns check
         run: |
