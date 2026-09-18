@@ -132,3 +132,44 @@ After all checks went green on `8e0009e`, git merged the v3.39.4/v3.40 branches 
 The next CodeQL run then flagged **`scripts/dev-checks/chunk-output.mjs:59` — `js/incomplete-sanitization`**: `escapeCell` escaped `|` but not `\`, so a data backslash could chain onto the escaped pipe (`\|`) and defeat the table-cell escaping.
 
 **Fix**: escape backslashes **before** pipes — `value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")` (both already `/g`), with the ordering rationale in a comment. Regression test added to `lib/__tests__/chunk-output.test.ts` (three fixtures, one per case: `x|y` → `x\|y`, `c\d` → `c\\d`, `a\|b` → `a\\\|b`). First attempt at the fixture was wrong: `renderIndex` only renders **line 1** of each chunk, so the `x|y`/`c\d` lines on rows 2–3 never reached the table (Lesson 126). Full suite re-run alone: **92/92 suites, 1270 passed / 4 skipped**.
+
+## Post-merge follow-up — PR #127 merged + Netlify production deploy failure fixed (2026-09-18)
+
+PR #127 was **merged** (merge commit `48df4d4`; main tip `898a3f6` "docs: update changelog [skip ci]", commit-ref of the live deploy). The first production deploy of the merge **failed**: `Bundling of function "emails" failed` — `/.netlify/functions-internal/emails/index.js` is a CommonJS module but the closest `package.json` is the repo root (`"type": "module"`) → "Either use ESM syntax, rename to .cjs, or remove type:module". The build itself was green (185/185; the `P6003 planLimitReached` messages during static generation are non-fatal plan-hold noise — the SQLite fallback keeps pages generating).
+
+**Root cause**: the UI-installed legacy plugin **`@netlify/plugin-emails@1.1.1` ("from Netlify app")** generates the emails function at build time — it is NOT in `package.json`/`netlify.toml`/the repo. Earlier in-repo attempts failed for the same underlying reason: `dbeba23` (`netlify/functions/package.json` commonjs) and `112b281` (build-command tweak) both errored (deploys 19:46/19:56 on 09-17); the `11d6947` guard — the build command pre-creating `.netlify/functions-internal/emails/package.json` with `{"type":"commonjs"}` — still lost because the plugin's **onBuild hook runs AFTER `build.command`** and regenerates its own directory, wiping the guard.
+
+**Fix**: the Emails extension was **disabled in the Netlify UI** by the user. Verified via `netlify api getSite` → site `plugins` = `@netlify/plugin-nextjs` + `@netlify/plugin-lighthouse` only (plugin-emails gone). The `get-extensions` catalog does NOT include plugin-emails (legacy plugin, not a managed extension), so the extensions MCP could not remove it — the UI disable was the correct lever (Lesson 127). Retried deployment `6aacebd948646f5a24068933` (`context: production`, `commit_ref: 898a3f6`, `deploy_time` 106s): **`state: ready`**, `published_at` 07:46:13Z, `available_functions` = only `___netlify-server-handler` + `__csp-violations` (no emails), secrets scan **900 files / 0 matches**. **v3.40.0 is now live on tradenext6.netlify.app.**
+
+Post-merge housekeeping: `git fetch --prune` dropped the stale `origin/feat/agentic-context-orchestration` ref (GitHub auto-deletes PR head branches on merge); the local `feat/agentic-context-orchestration` (was `8cc839a`) was deleted — its "keep till merged" condition was met.
+
+---
+
+## v3.40.1 — Production recovery serving fix: SQLite-mirror deferred Blobs restore + Netlify runtime detection + health telemetry (2026-09-18)
+
+Branch `fix/production-analytics-rec-serve` (on `main` = v3.40.0 merge `898a3f6`). **Commit/push/PR/deploy PENDING USER.**
+
+**User finding**: a production cold start (2026-09-18) served empty analytics — recommendations/screener/corp-actions/swing hot routes all fell back to an empty SQLite mirror all day, while Prisma was on the P6003 plan-limit hold (until 2026-10-02).
+
+**Root cause**: `getMirrorBlobsStore()` (memoized on `globalThis`, v3.39.0) THREW during boot — the Netlify Blobs region context resolves **one-shot** — and the failure was **memoized as `null` forever**. Every later `downloadMirrorSnapshotFromBlobs()` hit the memoized `null` and bailed, so the v3.39.0 boot restore chain (disk → Blobs → fresh) never reached Blobs on cold instances. The boot `syncFromPrisma()` is breaker-gated (plan hold), so no Prisma data flowed either — the mirror stayed empty.
+
+**Fixes** (`lib/sqlite.ts` +179/−9, NEW `lib/netlify.ts`, `app/api/health/route.ts` +5/−1):
+
+1. **Negative-TTL failure cache** — `getMirrorBlobsStore()` on throw records `__sqliteMirrorBlobsStoreFailedAt = Date.now()` and re-attempts after `MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS = 60_000` (success = permanent positive memo + clears failedAt). Memoize SUCCESS forever, memoize FAILURE only briefly.
+2. **One-shot deferred restore (30s)** — NEW `scheduleDeferredMirrorRestore()`/`cancelDeferredMirrorRestore()`/`retryDeferredMirrorRestore()` (+ `runMirrorBlobsRetryForTests()` test hook): boot with NO disk snapshot (`initSqliteBackup` right after `logger.info("SQLite backup initialized")` when `fromSnapshot === false`) schedules a `.unref()`'d `setTimeout(MIRROR_DEFERRED_RESTORE_DELAY_MS = 30_000)`. **Order matters**: `retryDeferredMirrorRestore()` sets `__sqliteMirrorBlobsStoreFailedAt = 0` BEFORE the download — otherwise the 60s negative TTL self-blocks the 30s retry (Lesson 128b). `resetMirrorBlobsOverrides()` also cancels the timer + clears failedAt.
+3. **Swap guard** — `mirrorHasLiveData()` (counts `market_cache`/`corporate_action`/`daily_recommendation_run`; empty/throw → false); only when the live mirror has NO meaningful rows: close old db → `state.db = parsed.db`, `state.ready = true`, `_instance = createFallback(parsed.db)` → re-run `ensureControlColumns`/`ensureNseColumns`/`ensureRecommendationColumns` → `persistMirrorSnapshot()` + `void uploadMirrorSnapshotToBlobs(mirrorSnapshotBytes)`.
+4. **Netlify runtime detection** — NEW `lib/netlify.ts`: `isNetlifyRuntime()` is true when ANY of `NETLIFY==="true"`, `NETLIFY_BLOBS_REGION`, `NETLIFY_BLOBS_CONTEXT`, `NETLIFY_SITE_ID`, `NETLIFY_DEPLOY_ID`, `NETLIFY_AUTH_TOKEN`, `ENVIRONMENT==="production" && AWS_REGION`, `globalThis.netlifyBlobsContext` — prod Netlify has NO `NETLIFY` var (observed: only `AWS_REGION=us-east-2` + `ENVIRONMENT=production`). `netlifyBlobsContextAvailable()` exported.
+5. **Health route** — `/api/health` gains `isNetlify` + `blobsContextAvailable`; `NETLIFY_BLOBS_REGION` added to `SAFE_VARS` (deliberately NOT `NETLIFY_BLOBS_CONTEXT` — may carry tokens).
+
+**Correction vs earlier design**: deploy-trace analysis showed region-context resolution is one-shot (no built-in `retry(3)`), so the deferred restore is **one-shot 30s** (not 2-shot); `MIRROR_DEFERRED_RESTORE_DELAY_MS` fires on the FIRST Blobs attempt at 30s — after the boot failure, before the 60s negative-TTL re-attempt from a plain read path.
+
+**Tests**:
+- NEW `lib/__tests__/netlify.test.ts` **11/11** — 8 `isNetlifyRuntime` matrix cases (incl. the real prod shape `AWS_REGION` + `ENVIRONMENT=production` only, and the explicit `NETLIFY=true`) + 3 `netlifyBlobsContextAvailable` (globalThis set / module present / absent).
+- `lib/__tests__/sqliteMirror.test.ts` **8/8** — 2 NEW golden v3.40.1 tests (REAL sql.js WASM): deferred retry recovers into the empty mirror; skips when live data exists. **Assertion trap (Lesson 128d)**: the skip test asserts `blobs.getCalls.length === getsBeforeRetry` (get-count delta around the retry) NOT `.some(arrayBuffer)` — boot 1's `restoreMirrorSnapshot()` already probes Blobs, so byte-presence passes trivially.
+- `sqlite.test.ts` + `dbOpTiering.test.ts` **97/97** (incl. `sqlite.test.ts:2461` "continues disk-only without a Blobs store").
+- Full suite **93/93 suites / 1283 pass / 4 skip / 0 fail exit 0** (4 skips = intentional client-cache IndexedDB); `npx tsc --noEmit` **46 = exact baseline (prod 0)**; `npm run quickbuild` clean **185/185 pages**.
+- **Pre-existing finding proven**: the isolated `backtestDataService.test.ts` run (16/16 PASS in 1.6 s) still shows "Cannot log after tests are done" / "ReferenceError: You are trying to `import` a file after the Jest environment has been torn down" — fire-and-forget boot calls (`syncFromPrisma`, `void uploadMirrorSnapshotToBlobs`) race Jest teardown in real-integration files; NOT caused by the new unref'd one-shot deferred timer (cancelled/unref'd in tests).
+
+**Seed/verify**: Blobs store `tradenext-sqlite-mirror`, key `sqlite-mirror.sqlite` (= `MIRROR_SNAPSHOT_FILENAME`/`MIRROR_SNAPSHOT_BLOBS_KEY`), 14,716,928 B, ETag `4bc5a64f…`, sha256 round-trip byte-identical from `logs/sqlite-mirror.sqlite` (project id `78401e5d-b137-4b6d-94bb-ad1ec8de6b05`).
+
+No migration; no new packages (Node built-ins only).

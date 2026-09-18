@@ -905,34 +905,68 @@ interface MirrorBlobsStoreLike {
   get(key: string, options: { type: "arrayBuffer" }): Promise<ArrayBuffer | null>;
 }
 
+// v3.40.1: a failed getStore (e.g. boot-time Netlify Blobs context missing —
+// the adapter only injects it per-request) must NOT be memoized as null
+// forever, or a cold start can never recover the mirror snapshot even once the
+// context exists (the P6003-hold / analytics-empty regression). Success is
+// memoized permanently; failure is negative-cached with a short TTL so a later
+// request (which carries the context) retries.
+const MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS = 60_000;
+
 /**
  * Resolve the @netlify/blobs store for mirror snapshots, memoized on
  * globalThis (cross-module-graph stable, mirrors __sqliteBackup). Returns null
  * when unavailable (non-Netlify runtime / missing env / transient init error)
  * — callers fail open to disk-only mirroring.
+ *
+ * v3.40.1: SUCCESS is memoized permanently; FAILURE is negative-cached for
+ * MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS then retried. This is the core fix for
+ * cold starts: `instrumentation.ts` boot runs BEFORE any request, so on Netlify
+ * `NETLIFY_BLOBS_CONTEXT`/`globalThis.netlifyBlobsContext` are not yet injected
+ * and getStore() throws MissingBlobsEnvironmentError. With the old
+ * memoize-null-forever behavior the mirror was permanently disk-only on every
+ * fresh instance — empty SQLite + P6003 = empty analytics/recs/corp-actions.
  */
 async function getMirrorBlobsStore(): Promise<MirrorBlobsStoreLike | null> {
   const g = globalThis as Record<string, unknown>;
-  if (g.__sqliteMirrorBlobsStore !== undefined) {
-    return (g.__sqliteMirrorBlobsStore as MirrorBlobsStoreLike) ?? null;
-  }
+  // Positive memo hit — a resolved store is process-stable.
+  const cached = g.__sqliteMirrorBlobsStore;
+  if (cached !== undefined && cached !== null) return cached as MirrorBlobsStoreLike;
+
+  // Negative memo with TTL: if the last attempt failed recently, fail fast but
+  // allow a retry once the TTL lapses (next request has the Blobs context).
+  const failedAt = (g.__sqliteMirrorBlobsStoreFailedAt as number | undefined) ?? 0;
+  if (Date.now() - failedAt < MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS) return null;
+
   try {
     // Lazy dynamic import keeps @netlify/blobs off the critical server path.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mod: any = await import("@netlify/blobs");
     const store = mod.getStore?.({ name: MIRROR_SNAPSHOT_BLOBS_STORE }) as MirrorBlobsStoreLike | undefined;
-    g.__sqliteMirrorBlobsStore = store ?? null;
+    if (store) {
+      g.__sqliteMirrorBlobsStore = store;
+      g.__sqliteMirrorBlobsStoreFailedAt = 0;
+      return store;
+    }
+    // getStore resolved but returned nothing usable — negative memo.
+    g.__sqliteMirrorBlobsStoreFailedAt = Date.now();
+    return null;
   } catch (err) {
-    logger.warn({ msg: "SQLite: Netlify Blobs unavailable (disk-only mirror)", error: err instanceof Error ? err.message : String(err) });
-    g.__sqliteMirrorBlobsStore = null;
+    logger.warn({ msg: "SQLite: Netlify Blobs unavailable (disk-only mirror, retry in 60s)", error: err instanceof Error ? err.message : String(err) });
+    g.__sqliteMirrorBlobsStoreFailedAt = Date.now();
+    return null;
   }
-  return (g.__sqliteMirrorBlobsStore as MirrorBlobsStoreLike) ?? null;
 }
 
-/** Test hook — clear the memoized Blobs store + upload digest. */
+/** Test hook — clear the memoized Blobs store (+ negative-cache timestamp) and upload digest. */
 export function resetMirrorBlobsOverrides(): void {
   (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = undefined;
+  (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStoreFailedAt = 0;
   mirrorBlobsLastDigest = null;
+  // v3.40.1: cancel any pending deferred Blobs restore so tests (and the next
+  // real init) start from a clean slate — the 30s timer must not fire across
+  // test cases or late-restore a DB from a previous test scenario.
+  cancelDeferredMirrorRestore();
 }
 
 /**
@@ -971,6 +1005,123 @@ export async function downloadMirrorSnapshotFromBlobs(): Promise<Uint8Array | nu
     logger.warn({ msg: "SQLite: mirror Blobs download failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Deferred Blobs restore (v3.40.1, Netlify cold-start fix)
+// ---------------------------------------------------------------------------
+// Boot-time `restoreMirrorSnapshot()` runs from instrumentation.ts register()
+// BEFORE any request, so on Netlify the Blobs context (injected per-request by
+// the adapter via connectLambda) is missing and the store resolves to the
+// negative memo. If boot then had to create a FRESH schema (no disk snapshot,
+// no Blobs snapshot) the mirror is empty — and with Prisma on a plan-limit
+// hold (P6003) the boot sync pulls nothing, so every DB-backed endpoint
+// (analytics, corporate actions, recommendations) stays empty on the instance.
+//
+// Fix: one-shot deferred retry ~30s after boot. By then the first request has
+// arrived and the adapter has injected the Blobs context, so the snapshot
+// downloads and is swapped in. Only swapped when the live mirror actually has
+// NO meaningful data (a healthy boot sync leaves the live DB authoritative).
+
+let mirrorDeferredTimer: ReturnType<typeof setTimeout> | null = null;
+let mirrorDeferredScheduled = false;
+const MIRROR_DEFERRED_RESTORE_DELAY_MS = 30_000;
+
+/** True when the live mirror holds meaningful rows (market/recs/corp data). */
+function mirrorHasLiveData(db: Database): boolean {
+  for (const table of ["market_cache", "corporate_action", "daily_recommendation_run"]) {
+    try {
+      const rows = db.exec(`SELECT COUNT(*) FROM ${table}`);
+      if (rows.length && rows[0].values.length) {
+        const n = Number(rows[0].values[0][0] ?? 0);
+        if (n > 0) return true;
+      }
+    } catch {
+      // table missing (older snapshot / mocked env) — not meaningful here
+    }
+  }
+  return false;
+}
+
+/** One-shot deferred Blobs restore scheduled from initSqliteBackup. */
+function scheduleDeferredMirrorRestore(): void {
+  if (mirrorDeferredScheduled) return;
+  mirrorDeferredScheduled = true;
+  mirrorDeferredTimer = setTimeout(() => {
+    mirrorDeferredTimer = null;
+    void retryDeferredMirrorRestore();
+  }, MIRROR_DEFERRED_RESTORE_DELAY_MS);
+  mirrorDeferredTimer.unref?.();
+}
+
+/** Cancels a pending deferred restore (test hook / shutdown). */
+export function cancelDeferredMirrorRestore(): void {
+  if (mirrorDeferredTimer) {
+    clearTimeout(mirrorDeferredTimer);
+    mirrorDeferredTimer = null;
+  }
+  mirrorDeferredScheduled = false;
+}
+
+/**
+ * Retry the Blobs snapshot download + swap-in once the per-request Netlify
+ * Blobs context exists (post-boot). Swap only when the live mirror has no
+ * meaningful data — otherwise the live DB (fresh boot sync) is authoritative.
+ * Fail-open, never throws.
+ */
+async function retryDeferredMirrorRestore(): Promise<void> {
+  try {
+    if (!state.db || !state.ready) return;
+    // Healthy boot (sync pulled rows) → keep the live mirror, skip the swap.
+    if (mirrorHasLiveData(state.db)) {
+      logger.info({ msg: "SQLite: deferred Blobs restore skipped — live mirror has data" });
+      return;
+    }
+    // The boot-time getStore failure left a negative memo (~60s TTL) behind —
+    // the retry may fire as early as 30s, so clear it BEFORE downloading or
+    // the negative cache would block this exact retry.
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStoreFailedAt = 0;
+    const bytes = await downloadMirrorSnapshotFromBlobs();
+    if (!bytes) return; // still unavailable — nothing more to do this boot
+    const parsed = await parseValidatedMirror(bytes);
+    if (!parsed) return;
+    // Re-apply column guards older snapshots may be missing (same as boot).
+    ensureControlColumns(parsed.db);
+    ensureNseColumns(parsed.db);
+    ensureRecommendationColumns(parsed.db);
+    try {
+      state.db?.close();
+    } catch {
+      // ignore close errors on the old DB
+    }
+    state.db = parsed.db;
+    state.ready = true;
+    _instance = createFallback(parsed.db);
+    mirrorSnapshotBytes = bytes;
+    persistMirrorSnapshot();
+    void uploadMirrorSnapshotToBlobs(mirrorSnapshotBytes);
+    logger.info({
+      msg: "SQLite: deferred mirror restored from Blobs after boot",
+      bytes: bytes.byteLength,
+      tables: parsed.tableNames.length,
+    });
+  } catch (err) {
+    logger.warn({ msg: "SQLite: deferred mirror Blobs restore failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Test hook — run the deferred Blobs restore retry immediately (no 30s wait).
+ * Golden tests use this to simulate the first post-boot request carrying the
+ * Netlify Blobs context.
+ */
+export async function runMirrorBlobsRetryForTests(): Promise<void> {
+  mirrorDeferredScheduled = true; // stand-in for the scheduled timer
+  if (mirrorDeferredTimer) {
+    clearTimeout(mirrorDeferredTimer);
+    mirrorDeferredTimer = null;
+  }
+  await retryDeferredMirrorRestore();
 }
 
 // ---------------------------------------------------------------------------
@@ -1726,6 +1877,18 @@ export async function initSqliteBackup(): Promise<void> {
     // ready (v3.22.0 write-behind).
     drainWriteBehindBuffer();
     logger.info({ msg: "SQLite backup initialized", fromSnapshot });
+
+    // v3.40.1 Netlify cold-start fix: if we booted WITHOUT a snapshot (disk +
+    // Blobs both missed — e.g. boot runs before the first request, and the
+    // per-request Netlify Blobs context doesn't exist yet at boot), schedule a
+    // deferred Blobs retry for ~30s in. By then a request has arrived and the
+    // adapter has injected the context, so the mirror snapshot can be swapped
+    // in — serving cached market data even while Prisma is on a plan-limit
+    // hold (P6003). Skipped when the boot sync already pulled live rows
+    // (mirrorHasLiveData guard inside retryDeferredMirrorRestore).
+    if (!fromSnapshot) {
+      scheduleDeferredMirrorRestore();
+    }
 
     // Sync from Prisma on startup (non-blocking); persist a fresh ops snapshot
     // after the sync completes so the dashboard reflects the latest state.

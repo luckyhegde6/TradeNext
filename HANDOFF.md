@@ -8,12 +8,12 @@
 ## Current State
 
 ```yaml
-status: "in_progress"             # ready | in_progress | handoff_required | recovery
+status: "in_progress"            # ready | in_progress | handoff_required | recovery
 current_agent: "system"          # Current agent type
 next_agent: null                 # Next agent to process (if handoff_required)
 handoff_version: "1.0"
-last_updated: "2026-09-13T18:30:00Z"
-feature: "v3.38.2 Dependabot vulnerability-fix batch - next/third-parties/nodemailer/morgan/csv-parse bumps + mysql2 override + @netlify/blobs removal - package.json + package-lock.json on fix/db-health-ops-count-manual-sync on top of pushed v3.38.1 36f2c9b; committed + pushed; PR #121 OPEN. Netlify deploy fix RESOLVED: @netlify/blobs RE-ADDED ^11.0.3 (PR #123 merged 9166601, deploy GREEN, live-verified 0 console errors); docs committed on branch docs-blobs-lessons"
+last_updated: "2026-09-18T16:30:00Z"
+feature: "v3.40.1 IN PROGRESS on fix/production-analytics-rec-serve (on main 898a3f6 = v3.40.0 MERGED via PR #127 + LIVE, deploy 6aacebd948646f5a24068933): production recovery serving fix — SQLite-mirror deferred Blobs restore + Netlify runtime detection + health telemetry. User finding 2026-09-18: cold start served EMPTY analytics all day (P6003 plan-limit hold until 2026-10-02). Root cause: boot getMirrorBlobsStore() throw memoized as null FOREVER (one-shot Blobs region-context resolution) — v3.39.0 boot restore (disk→Blobs→fresh) never reached Blobs on cold instances. Fixes: negative-TTL failure cache (60s, __sqliteMirrorBlobsStoreFailedAt), one-shot .unref()'d 30s deferred restore (schedule/cancel/retryDeferredMirrorRestore + runMirrorBlobsRetryForTests; retry clears failedAt BEFORE download), mirrorHasLiveData() swap guard, NEW lib/netlify.ts isNetlifyRuntime() (prod observed: AWS_REGION=us-east-2 + ENVIRONMENT=production only, no NETLIFY var), /api/health isNetlify+blobsContextAvailable + NETLIFY_BLOBS_REGION in SAFE_VARS. CODE+TESTS DONE & VERIFIED (93/93 / 1283 pass / 4 skip / 0 fail; tsc 46 exact; quickbuild 185/185; netlify.test 11/11; sqliteMirror.test 8/8). Docs 7/9 applied (agent-memory, Lessons #128, CHANGELOG row, versions-v3.40.md, Primer, HANDOFF, versions-index). Remaining: session-todos, TODO Quick Reference, doc-budget check, hygiene. COMMIT/PUSH/PR/DEPLOY PENDING USER."
 ```
 
 ## Handoff Required?

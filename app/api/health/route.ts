@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isNetlifyRuntime, netlifyBlobsContextAvailable } from "@/lib/netlify";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,7 @@ const SAFE_VARS = [
   "VERCEL",
   "VERCEL_URL",
   "AWS_REGION",
+  "NETLIFY_BLOBS_REGION",
   "LOG_LEVEL",
 ];
 
@@ -90,7 +92,8 @@ export async function GET() {
       environment: process.env.ENVIRONMENT || "production",
       useRemoteDb: process.env.USE_REMOTE_DB === "true",
       nodeEnv: process.env.NODE_ENV || "production",
-      isNetlify: !!process.env.NETLIFY,
+      isNetlify: isNetlifyRuntime(),
+      blobsContextAvailable: netlifyBlobsContextAvailable(),
       isVercel: !!process.env.VERCEL,
       appUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
     },
