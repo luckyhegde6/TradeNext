@@ -15,6 +15,17 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-18 | CodeQL js/incomplete-sanitization fixed in chunk-output.mjs + branch housekeeping (v3.40.0 pre-merge)
+- **Action**: CodeQL flagged `scripts/dev-checks/chunk-output.mjs:59` — `escapeCell` escaped `|` but not `\` (`js/incomplete-sanitization`), so a data backslash before a pipe in tool output defeats the table-cell escape. Fix = backslash-first ordering: `value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")` (both `/g`) with the rationale in a comment. Regression test added — 3 fixtures, one per case, each special char on the chunk's **first** line (`renderIndex` only renders `chunk.lines[0]`; the first fixture attempt put `x|y`/`c\d` on lines 2–3 and never exercised the escaping). Suite re-run alone: **92/92 suites, 1270 passed / 4 skipped** (baseline was 1269). Lesson 126 added.
+- **Branch cleanup (user-directed: keep PR #127 + its branch until merged)**:
+  - Verified `fix/turbopack-tracing-harness` is an ancestor of `feat/agentic-context-orchestration` (v3.39.4 commits carried by PR #127) → deleted local + remote.
+  - `feat/sqlite-durable-mirror`: `git log origin/main..branch` empty → fully merged → deleted local + remote.
+  - `fix/sqlite-upsert-worker-undefined-bind`: unique commit `85c18d9` not an ancestor, but `git diff origin/main 85c18d9 -- …` empty (content = main's `797e449`) → deleted remote; **local kept** (branch tip has extra unmerged commits → LOST class).
+  - **54 local branches fully contained in `origin/main`** deleted (verified per-branch with `git merge-base --is-ancestor` via `branch-delete.sh`).
+  - **Kept**: `main`, `feat/agentic-context-orchestration` (until PR #127 merges), 2 dependabot remotes, and the LOST set (`buildfix`, `docs`, `feat8`, `fix/cleanup-todos-bugs`, `fix1`, `fix2`, `ph9`–`ph18` lineage, `` ph`7 ``) — deleting LOST would orphan unmerged commits.
+  - Remotes now: `main`, `feat/agentic-context-orchestration` `37fa87c`, 2 dependabot.
+- **Pending**: commit + push the CodeQL fix + docs (then re-poll CI — CodeQL Analyze should report the alert cleared on the new head).
+
 ### 2026-09-18 | Lint gate restored — `next lint` removal + FlatCompat crash fixed, 7 real hook/link/alias findings fixed, legacy debt triaged to warnings (v3.40.0 pre-merge)
 - **Action**: `npm run lint` had been broken repo-wide for the whole Next 16 era (`"lint": "next lint"` → Next 16 removed the command → `Invalid project directory provided, no such directory: …\lint`); `eslint .` then crashed in the legacy `FlatCompat` bridge (`@eslint/eslintrc` `config-validator` → `TypeError: Converting circular structure to JSON`, ESLint 9.39.3 + `eslint-config-next` 16.3.5).
 - **Fix**: `package.json` `"lint"` → `"eslint ."`; `eslint.config.mjs` rewritten to native flat configs (`eslint-config-next/core-web-vitals` + `/typescript`, no `FlatCompat`) with the override object registering its own plugins (`react`, `react-hooks`, `@typescript-eslint` — flat config scopes plugins per object) + `ignores` for `.next/.context/coverage/e2e-screenshots/logs/playwright-report/test-results/worker_logs`.

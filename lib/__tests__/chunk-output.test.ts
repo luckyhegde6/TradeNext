@@ -180,6 +180,28 @@ describe("chunk-output.mjs", () => {
     expect(index).toContain("chunks: 2");
   });
 
+  it("escapes markdown table cells — backslash first, then pipe (CodeQL js/incomplete-sanitization)", () => {
+    const { dir, outDir } = ws();
+
+    // data `x|y` -> pipe escaped -> `x\|y`
+    const pipeInput = path.join(dir, "pipe.txt");
+    writeFileSync(pipeInput, "x|y\nline-2\n", "utf8");
+    run([pipeInput, "--out", outDir], dir);
+    expect(readFileSync(path.join(outDir, "pipe.index.md"), "utf8")).toContain("x\\|y");
+
+    // data `c\d` -> backslash escaped (would previously leave a live backslash) -> `c\\d`
+    const slashInput = path.join(dir, "slash.txt");
+    writeFileSync(slashInput, "c\\d\nline-2\n", "utf8");
+    run([slashInput, "--out", outDir], dir);
+    expect(readFileSync(path.join(outDir, "slash.index.md"), "utf8")).toContain("c\\\\d");
+
+    // data `a\|b` (backslash BEFORE pipe) -> backslash escaped FIRST, then pipe -> `a\\\|b`
+    const bothInput = path.join(dir, "both.txt");
+    writeFileSync(bothInput, "a\\|b\nline-2\n", "utf8");
+    run([bothInput, "--out", outDir], dir);
+    expect(readFileSync(path.join(outDir, "both.index.md"), "utf8")).toContain("a\\\\\\|b");
+  });
+
   it("exits non-zero with usage when no input file is given", () => {
     const { dir } = ws();
     const result = run([], dir);

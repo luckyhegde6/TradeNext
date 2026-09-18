@@ -56,7 +56,9 @@ export function renderChunk(name, chunk, total) {
 }
 
 function escapeCell(value) {
-  const oneLine = value.replace(/\|/g, "\\|").trim();
+  // Escape backslashes BEFORE pipes so a data `\` cannot chain onto the escaped `\|`
+  // and defeat the table-cell escaping (CodeQL js/incomplete-sanitization).
+  const oneLine = value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim();
   return oneLine.length > FIRST_LINE_MAX ? `${oneLine.slice(0, FIRST_LINE_MAX)}…` : oneLine;
 }
 
