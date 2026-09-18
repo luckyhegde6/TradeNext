@@ -116,3 +116,11 @@ The first CI run of PR #127 failed **only** in the `quality-gate` job's Jest ste
 **Fix**: `/.remember/` added to the committed root `.gitignore` next to `/.context/` (with the reasoning in a comment); the inner file is left in place. Re-verified: `git check-ignore -v .remember/now.md` → `.gitignore:66:/.remember/`, `npx jest lib/__tests__/chunk-output.test.ts` → **12/12**. CI: `context-budget`, `tsc-baseline` and both CodeQL `Analyze` jobs pass.
 
 **Push note**: an HTTPS push was rejected — *"refusing to allow an OAuth App to create or update workflow `.github/workflows/quality-gate.yml` without `workflow` scope"* (the `gh` OAuth token lacks the `workflow` scope; this branch changes that workflow). Workaround used: push via the SSH remote URL (SSH key auth works and is not scope-limited). To restore plain `git push` for this branch: `gh auth refresh -h github.com -s workflow`.
+
+## CI run 2 follow-up — Turbopack warning-gate logic bug fixed (2026-09-18)
+
+Run 2 of PR #127: `Run tests` went green (the `.remember/` fix held), and the job then failed on the W7 step *"Build + Turbopack warning gate"* — the step died ~30 s after the page list with `##[error]Process completed with exit code 1` and **never printed** its `build warnings: N` line.
+
+**Root cause**: the gate script counted with `WARN=$(grep -i "warn" … | grep -v "^npm warn" | wc -l | tr -d ' ')`. Under the Actions step shell (`/usr/bin/bash -e` + `set -o pipefail`), `grep` exits 1 when nothing matches, `pipefail` propagates that out of the command substitution, and `bash -e` aborts the step. The gate could never pass: zero warnings abort (the intended PASS case) exactly like warnings do. Reproduced locally with git-bash `-e -o pipefail` against a clean fixture (old logic → exit 1, no output).
+
+**Fix**: `WARN=$(awk 'tolower($0) ~ /warn/ && $0 !~ /^npm warn/ {c++} END {print c+0}' /tmp/build.log)` — awk exits 0 unconditionally; the failure-branch `grep … | head -10` got `|| true` (SIGPIPE tolerance). Verified under `bash -e -o pipefail`: clean fixture → **exit 0, "build warnings: 0"**, npm-warn line excluded; dirty fixture (2 warning lines) → **exit 1** with both listed. Same symptom signature — a step failing with no diagnostics — is a signal the step logic is broken, not a pass (Lesson 125).

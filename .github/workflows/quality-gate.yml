@@ -64,11 +64,13 @@ jobs:
         run: |
           set -o pipefail
           npm run quickbuild 2>&1 | tee /tmp/build.log
-          WARN=$(grep -i "warn" /tmp/build.log | grep -v "^npm warn" | wc -l | tr -d ' ')
+          # awk (not `grep | wc -l`): `grep` exits 1 on zero matches, which under `bash -e`
+          # aborts the step before the count is printed — a clean build must PASS.
+          WARN=$(awk 'tolower($0) ~ /warn/ && $0 !~ /^npm warn/ {c++} END {print c+0}' /tmp/build.log)
           echo "build warnings: $WARN (expected 0)"
           if [ "$WARN" -ne 0 ]; then
             echo "FAIL: build produced $WARN warning(s):"
-            grep -i "warn" /tmp/build.log | grep -v "^npm warn" | head -10
+            grep -i "warn" /tmp/build.log | grep -v "^npm warn" | head -10 || true
             exit 1
           fi
 
