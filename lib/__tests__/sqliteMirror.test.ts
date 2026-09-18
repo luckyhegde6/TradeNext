@@ -68,8 +68,10 @@ import path from "path";
 import {
   ensureSqliteBackup,
   getLivenessHeartbeats,
+  getSqliteFallback,
   persistMirrorSnapshot,
   resetSqliteStateForTests,
+  runMirrorBlobsRetryForTests,
   setMirrorSnapshotPathForTests,
   uploadMirrorSnapshotToBlobs,
   writeLivenessHeartbeat,
@@ -233,5 +235,93 @@ describe("durable mirror snapshot (golden, real sql.js)", () => {
     await boot();
     expect(fs.existsSync(mirrorFile)).toBe(true);
     expect(hasMagic(fs.readFileSync(mirrorFile))).toBe(true);
+  });
+
+  it("deferred Blobs retry recovers the mirror on a snapshot-less hold boot (v3.40.1)", async () => {
+    // Boot 1 (healthy instance): real snapshot with live data → Blobs store.
+    await boot();
+    await writeLivenessHeartbeat("worker", { role: "worker" });
+    expect(persistMirrorSnapshot()).toBe(true);
+    await uploadMirrorSnapshotToBlobs(new Uint8Array(fs.readFileSync(mirrorFile)));
+    const snapshotSets = blobs.setCalls.length;
+    expect(snapshotSets).toBeGreaterThan(0);
+
+    // Simulate a cold start: durable disk is gone AND at boot the Netlify Blobs
+    // context does not exist yet (boot runs before the first request). The
+    // getStore() attempt fails → negative memo (v3.40.1: failedAt, not null).
+    resetSqliteStateForTests();
+    setMirrorSnapshotPathForTests(mirrorFile);
+    fs.rmSync(mirrorFile, { force: true });
+    expect(fs.existsSync(mirrorFile)).toBe(false);
+    delete (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore;
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStoreFailedAt = 0;
+
+    await boot(); // fresh schema — the disk+Blobs snapshot is unreachable at boot
+    expect(getLivenessHeartbeats().some((h) => (h as Record<string, unknown>).key === "liveness_heartbeat:worker")).toBe(false);
+
+    // First request arrives → Netlify adapter injects the Blobs context → the
+    // close-in-time retry (30s post-boot) can now reach the snapshot.
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = blobs;
+    await runMirrorBlobsRetryForTests();
+
+    expect(
+      blobs.getCalls.some(
+        (c) => c.key === MIRROR_BLOBS_KEY && (c.opts as { type?: string } | undefined)?.type === "arrayBuffer",
+      ),
+    ).toBe(true);
+    // The live mirror now holds the snapshot's data (worker heartbeat came back).
+    expect(
+      getLivenessHeartbeats().some((h) => (h as Record<string, unknown>).key === "liveness_heartbeat:worker"),
+    ).toBe(true);
+    // The swapped-in mirror is persisted and re-uploaded (digest differs from
+    // the fresh empty schema boot upload).
+    expect(fs.existsSync(mirrorFile)).toBe(true);
+    expect(hasMagic(fs.readFileSync(mirrorFile))).toBe(true);
+    expect(blobs.setCalls.length).toBeGreaterThan(snapshotSets);
+  });
+
+  it("deferred Blobs retry skips when the live mirror already has data (v3.40.1)", async () => {
+    // Boot 1 (healthy instance): snapshot with data → Blobs store.
+    await boot();
+    await writeLivenessHeartbeat("worker", { role: "worker" });
+    expect(persistMirrorSnapshot()).toBe(true);
+    await uploadMirrorSnapshotToBlobs(new Uint8Array(fs.readFileSync(mirrorFile)));
+
+    // Cold start: no durable disk, no Blobs context at boot → fresh schema.
+    resetSqliteStateForTests();
+    setMirrorSnapshotPathForTests(mirrorFile);
+    fs.rmSync(mirrorFile, { force: true });
+    delete (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore;
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStoreFailedAt = 0;
+
+    await boot();
+
+    // A HEALTHY boot sync from Prisma would have pulled rows into the live
+    // mirror by the time the deferred retry fires — simulate that (market cache
+    // row written to the live DB before the retry).
+    getSqliteFallback()?.upsertMarketCache({
+      cacheKey: "deferred-skip-probe",
+      dataType: "gridData",
+      data: { symbol: "RELIANCE", price: 100 },
+      recordCount: 1,
+    });
+
+    // First request arrives → context injected → retry fires. Record the get
+    // count first: boot 1 already probed Blobs (restore on a missing disk), so
+    // the skip must add NO new download attempt.
+    const getsBeforeRetry = blobs.getCalls.length;
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = blobs;
+    await runMirrorBlobsRetryForTests();
+
+    // Live mirror kept its own (newer) data — the snapshot must NOT have been
+    // swapped in, and no download should have been attempted.
+    expect(blobs.getCalls.length).toBe(getsBeforeRetry);
+    expect(
+      getSqliteFallback()?.getMarketCache("deferred-skip-probe") ?? null,
+    ).not.toBeNull();
+    // The snapshot's heartbeat was never merged in.
+    expect(
+      getLivenessHeartbeats().some((h) => (h as Record<string, unknown>).key === "liveness_heartbeat:worker"),
+    ).toBe(false);
   });
 });
