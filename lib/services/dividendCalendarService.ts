@@ -7,6 +7,9 @@
 
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
+import { mapMirrorCorporateAction } from "@/lib/services/corpActionMirror";
 
 /* ─── Types ─── */
 
@@ -246,9 +249,65 @@ async function fetchDividends(
       isin: r.isin,
     }));
   } catch (error) {
+    // During a plan-limit hold (P6003) Prisma is unavailable — serve dividends
+    // from the SQLite mirror instead of reporting an empty calendar (BUGS 17).
+    if (isDbUnavailableError(error)) {
+      const mirrored = fetchMirrorDividends(startDate, endDate, limit);
+      if (mirrored.length) {
+        logger.warn({
+          msg: "Dividends: DB unavailable — serving SQLite mirror",
+          count: mirrored.length,
+        });
+        return mirrored;
+      }
+    }
     logger.error({ msg: "Failed to fetch dividends", error: error instanceof Error ? error.message : String(error) });
     return [];
   }
+}
+
+/**
+ * Mirror fallback for `fetchDividends`: reads DIVIDEND rows from the SQLite
+ * `corporate_action` mirror (raw snake_case) and maps them to `DividendEvent`.
+ * Never throws; returns `[]` when the mirror is unavailable.
+ */
+function fetchMirrorDividends(
+  startDate: Date,
+  endDate: Date,
+  limit?: number
+): DividendEvent[] {
+  const sqlite = getSqliteFallback();
+  if (!sqlite?.isReady()) return [];
+
+  const startMs = startDate.getTime();
+  const endMs = endDate.getTime();
+  const out: DividendEvent[] = [];
+
+  for (const raw of sqlite.getCorporateActions(500)) {
+    const action = mapMirrorCorporateAction(raw);
+    if (action.actionType !== "DIVIDEND" || !action.exDate) continue;
+    const ms = new Date(action.exDate).getTime();
+    if (Number.isNaN(ms) || ms < startMs || ms > endMs) continue;
+
+    out.push({
+      id: Number(action.id),
+      symbol: action.symbol,
+      companyName: action.companyName ?? action.symbol,
+      exDate: action.exDate,
+      recordDate: action.recordDate,
+      dividendPerShare: action.dividendPerShare,
+      dividendYield: action.dividendYield,
+      currentPrice: null,
+      faceValue: action.faceValue,
+      ratio: action.ratio,
+      actionType: action.actionType,
+      source: action.source,
+      isin: action.isin,
+    });
+    if (limit !== undefined && out.length >= limit) break;
+  }
+
+  return out.sort((a, b) => (a.exDate ?? "").localeCompare(b.exDate ?? ""));
 }
 
 async function enrichWithPrices(dividends: DividendEvent[]): Promise<DividendEvent[]> {

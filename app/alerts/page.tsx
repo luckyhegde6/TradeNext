@@ -69,6 +69,7 @@ function SimpleAlertsTab() {
   const { data: session } = useSession();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingAlert, setEditingAlert] = useState<Alert | null>(null);
   const [formData, setFormData] = useState({
@@ -108,11 +109,17 @@ function SimpleAlertsTab() {
     try {
       const res = await fetch("/api/alerts");
       const data = await res.json();
-      setAlerts(data);
-      const symbols = [...new Set(data.filter((a: Alert) => a.symbol).map((a: Alert) => a.symbol))] as string[];
+      // A non-array body (e.g. `{ error }`) would crash on `.filter` below and
+      // blank the page via the Error Boundary (BUGS 15 / Lesson 130).
+      const list: Alert[] = Array.isArray(data) ? data : [];
+      setFetchError(!Array.isArray(data));
+      setAlerts(list);
+      const symbols = [...new Set(list.filter((a) => a.symbol).map((a) => a.symbol))] as string[];
       fetchAlertPrices(symbols);
     } catch (error) {
       console.error("Failed to fetch alerts:", error);
+      setAlerts([]);
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -509,6 +516,13 @@ function SimpleAlertsTab() {
 
       {loading ? (
         <div className="text-center py-8">Loading alerts...</div>
+      ) : fetchError ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <p>Could not load alerts right now.</p>
+          <button onClick={fetchAlerts} className="mt-2 underline hover:text-foreground">
+            Retry
+          </button>
+        </div>
       ) : alerts.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
           <p>No alerts configured</p>

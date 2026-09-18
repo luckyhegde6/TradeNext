@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 
@@ -88,22 +88,37 @@ export default function WorkersPage() {
   });
 
   const [engineStatus, setEngineStatus] = useState({ isRunning: false, loading: false });
+  const [pollPaused, setPollPaused] = useState(false);
+  const pollFailureRef = useRef(0);
 
   useEffect(() => {
-    if (status === "authenticated") {
-      fetchData();
-      checkEngineStatus();
-      if (activeTab === "logs") {
-        fetchLogs();
-      }
-      const interval = setInterval(() => {
-        fetchData();
-        if (activeTab === "logs") {
-          fetchLogs();
-        }
-      }, 10000); // Refresh every 10 seconds
-      return () => clearInterval(interval);
-    }
+    if (status !== "authenticated") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    // Self-scheduling poll with backoff: 10s when healthy, then 20s → 40s → 60s
+    // (cap) while requests keep failing. Prevents the ~2s 500-loop / console-error
+    // storm seen when the admin APIs were Prisma-only under the P6003 hold (BUGS 17).
+    const tick = async () => {
+      const ok = await fetchData();
+      if (activeTab === "logs") await fetchLogs();
+      if (cancelled) return;
+
+      pollFailureRef.current = ok ? 0 : pollFailureRef.current + 1;
+      const failures = pollFailureRef.current;
+      setPollPaused(failures >= 3);
+      const delay =
+        failures === 0 ? 10000 : Math.min(10000 * 2 ** Math.min(failures - 1, 3), 60000);
+      timer = setTimeout(tick, delay);
+    };
+
+    checkEngineStatus();
+    void tick();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [status, filter, activeTab]);
 
   const checkEngineStatus = async () => {
@@ -178,7 +193,7 @@ export default function WorkersPage() {
     }
   };
 
-  const fetchData = async () => {
+  const fetchData = async (): Promise<boolean> => {
     try {
       const statusParam = filter === "all" ? "" : filter;
       const categoryParam = categoryFilter === "all" ? "" : categoryFilter;
@@ -196,8 +211,12 @@ export default function WorkersPage() {
         const workersData = await workersRes.json();
         setWorkers(workersData);
       }
+
+      // "Reachable" if either endpoint answered — used only to drive poll backoff.
+      return tasksRes.ok || workersRes.ok;
     } catch (error) {
       console.error("Failed to fetch data:", error);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -362,6 +381,12 @@ export default function WorkersPage() {
           <Link href="/admin/utils/tasks" className="px-3 py-1.5 text-xs font-bold text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">📋 Tasks</Link>
           <span className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg">⚙️ Workers</span>
         </div>
+
+        {pollPaused && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            Live updates paused after repeated failures — retrying with backoff.
+          </div>
+        )}
 
         <div className="flex justify-between items-center mb-6">
           <div>

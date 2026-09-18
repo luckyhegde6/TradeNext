@@ -1,125 +1,135 @@
 ---
-handoff: v3.40.0-agentic-context-orchestration
+handoff: v3.40.2-mirror-contract-fixes
 handoff_version: "1.1"
-session_id: 2026-09-18-v340ctx
+session_id: 2026-09-18-v3402-mirror
 date: 2026-09-18
-branch: feat/agentic-context-orchestration (stacked on ca56a74; parent fix/turbopack-tracing-harness)
-last_commits: ac91571 (W4 orchestrator), f758e67 (W3 compaction), db08255 (W2 fix), 40181c4 (W2), 1f73d3c (W1), b6552ca (spec+plan)
-dev: local :3000 (do not kill); MCP/OpenCode 4096 do not kill; pg docker 5432 do not kill
-status: in_progress
+branch: fix/mirror-contract-fixes (from main @ e183a3a)
+last_commits: e183a3a (changelog), 15fa0a3 (PR #128 merge), 5a8f3af (v3.40.1 fix), 32c18a1 (v3.40.1 docs)
+dev: local :3000 up (PID 19896); do not kill MCP/OpenCode 4096 or pg docker 5432
+status: in-progress (CODE + TESTS + DOCS DONE; commit/push/PR/deploy PENDING USER)
 tier: B
 ---
 
-# Handoff — v3.40.0 Agentic Context, Orchestration & Harness (W1–W4 DONE, W5+ in flight)
+# Handoff — v3.40.2 Mirror-contract fixes for BUGS 15/16/17
 
-> Superseded: previous handoff content (v3.39.4 slim + Turbopack fix, v3.35.0 flaky
-> `intelligence.test.ts`, v3.34.x, v3.33.x) is recoverable from git history of this file.
+> Superseded: the v3.40.1 live-verification handoff (report-only, 3 bugs found). Prior handoffs are
+> recoverable from git history of this file.
 
 ## Context
 
-- **Task**: make TradeNext agent-friendly — stop the compaction loop, add an orchestrator that
-  prefers parallel dispatch, monitor subagent health, upgrade handoffs, strengthen the harness.
-- **Branch**: `feat/agentic-context-orchestration`
-- **Files Changed**: `.agents/` (rules, agents, commands, handoffs, INDEX, sessions),
-  `scripts/dev-checks/`, `lib/__tests__/`, `.opencode/opencode.json`, `AGENTS.md`, `TODO.md`
-- **Dependencies**: none added. Node built-ins + markdown only.
-- **Spec/Plan**: `.agents/specs|plans/v3.40.0-agentic-context-orchestration.md` (approved Gate 1+2)
+- **Task**: fix the 3 bugs found in the v3.40.1 live-site verification (P6003 plan-limit hold until
+  2026-10-02 + near-empty SQLite mirror). User-approved scope: **"15 + 16 + high-impact 17"** plus
+  **"add auth to POST too"** (the workers/status heartbeat).
+- **Outcome**: CODE + TESTS + DOCS DONE. In scope: bug 16 (shared mirror mapper + IST day key),
+  bug 15 (alerts mirror fallback + client guard), bug 17-high (`/api/admin/workers/status` GET+POST
+  auth + mirror fallback + poll backoff; `/api/dividends/calendar` mirror fallback).
+  **Commit/push/PR/deploy PENDING USER** (never auto-commit).
+- **Files Changed**: code — NEW `lib/services/corpActionMirror.ts`, `app/api/corporate-actions/combined/route.ts`,
+  `app/markets/calendar/page.tsx`, `app/api/alerts/route.ts`, `app/alerts/page.tsx`,
+  `app/api/admin/workers/status/route.ts`, `app/admin/utils/workers/page.tsx`,
+  `lib/services/dividendCalendarService.ts`, `app/api/openapi/route.ts`; tests — 4 NEW suites;
+  docs — `BUGS.md`, `Lessons.md`, `.agents/changelog/versions-v3.40.md`, `.agents/changelog/versions-index.md`,
+  `Primer.md`, `agent-memory.md`, `.agents/session-todos.md`, this file + session files.
+  **No migration, no new packages.**
+- **Spec/Plan**: `.agents/specs/13-mirror-contract-fixes.md` + `.agents/plans/13-mirror-contract-fixes.md`.
 
 ## Progress
 
-- [x] **Phase 0** baseline — tsc **46**, budget **72.8 KB**, quickbuild **0 warnings / 185 pages**
-- [x] **W1** tool-output protocol + `chunk-output.mjs` + **12 tests** (`1f73d3c`)
-- [x] **W2** durable memory (two-tier) + memory-MCP **search-semantics fix** (`40181c4`, `db08255`)
-- [x] **W3** `compaction.reserved` 10000 → 30000 (user-approved) (`f758e67`)
-- [x] **W4** orchestrator agent + `/orchestrate` registered as **primary** (`ac91571`)
-- [x] **W5+W6** health rules + handoff schema v1.1 + tier-downgrade flow (this commit)
-- [ ] **W7** harness — `check-tsc-baseline.mjs`, `check-doc-sizes --json`, hook + CI gates
-- [ ] **Phase 7** tests — `check-context-budget.test.ts`, `check-tsc-baseline.test.ts`
-- [ ] **Phase 8** docs — TODO/Primer/agent-memory/Lessons/CHANGELOG/versions-v3.40
-- [ ] **Phase 9** verification + final handoff
+- [x] Recon — root causes confirmed at source for all 3 bugs
+- [x] Spec + plan written (`13-mirror-contract-fixes`) + scope approved by user
+- [x] Branch `fix/mirror-contract-fixes` created from `main`
+- [x] Bug 16 — NEW `lib/services/corpActionMirror.ts` mapper applied to both mirror branches; calendar `toDayKey()`
+- [x] Bug 15 — `/api/alerts` list + `action=count` mirror fallback; `/alerts` `Array.isArray` + error state
+- [x] Bug 17-high — workers/status GET+POST auth + mirror fallback; Workers poll backoff; dividend calendar mirror
+- [x] Tests — 4 NEW suites / **26/26**
+- [x] Verification — **97/97 suites, 1309 pass / 4 skip / 0 fail**; tsc **46/46 prod 0**; doc budget **76,669/102,400 B**; lint **0 errors**
+- [x] UI verification — `/alerts` renders signed-in (0 console errors); `/markets/calendar` + `/admin/utils/workers` SSR 200
+- [x] Docs — BUGS/lessons/changelog/openapi/Primer/memory/todos/handoff/session files
+- [ ] **Commit/push/PR/deploy — PENDING USER APPROVAL**
 
 ## Decisions
 
-Full reasoning in `.agents/sessions/2026-09-18-v340ctx/decisions.md` (D1–D11). Headlines:
-
-- **D3/D11** — **Subagents are provider-BLOCKED here** (`OpenCode's free tier can only be used from
-  within OpenCode`). Orchestration is capability-detected: **Tier A** (parallel) / **Tier B**
-  (chunked sequential). No workstream may be blocked on Tier A.
-- **D6** — Two-tier memory: `.remember/now.md` (local rolling, gitignored) + memory MCP (durable).
-- **D7** — The remaining compaction loop is the **transcript**, not injected docs.
-- **D8** — `compaction.reserved` 10000 → 30000 (applied; effect is host-side).
-- **D9** — No orchestrator existed (13 profiles, all `subagent`) → created one as **`mode: primary`**,
-  because subagents cannot dispatch subagents.
+- **Scope cut to "high-impact 17"** — `/api/admin/monitoring` (5 types), `/api/admin/users`,
+  `/api/admin/workers`, `/api/admin/cron`, `/api/screener/saved` are recorded as a `BUGS.md` row-17
+  follow-up rather than fixed here.
+- **`/api/admin/users` cannot get a mirror fallback** — the SQLite mirror has **no `user` table**;
+  recorded honestly instead of faking one.
+- **POST auth added even though the in-repo heartbeat has no caller** — the worker engine writes
+  through direct Prisma; the endpoint was nevertheless publicly writable, so it is now admin-only
+  (user explicitly approved).
+- **Both sides fixed for bug 17** — the endpoint (mirror fallback) AND the client (backoff), because
+  fixing only the client still storms a hard-failing dependency (Lesson 131).
+- **Shared mapper over per-branch patching** — one `mapMirrorCorporateAction()` used by both mirror
+  branches + the dividend fallback, so the fallback cannot drift from the Prisma contract again.
 
 ## Blockers
 
 | Blocker | Impact | Status |
 |---------|--------|--------|
-| Subagents fail (provider tier) | Tier A untestable | **Accepted** — Tier B is the live path (D3/D11) |
-| `@netlify/plugin-emails` still installed | Emails function fails on Netlify | Needs **Netlify UI** action by user |
-| No commit/push/install without permission | — | Standing rule |
+| Prisma P6003 plan-limit hold (until 2026-10-02) | Prisma-only APIs stay hold-degraded in prod | **Environmental** — mirror-first fallbacks are the fix path |
+| Mirror has no `user` table | `/api/admin/users` cannot fall back | **Accepted** — deferred in BUGS.md row 17 |
+| Browser automation hangs on `/markets/calendar` | No full admin workers walkthrough via MCP | **Accepted** — covered by SSR check + unit tests |
+| No commit/push without permission | — | Standing rule |
 
 ## Learnings
 
-1. **`memory/search_nodes` is a literal contiguous substring match of the *entire* query** — not
-   tokenised. A 5-word natural-language query returned 0 hits against a graph that provably
-   contained the answer. Empty result ≠ no memory. (Recorded as a `gotcha` entity + in the rule.)
-2. Shrinking *injected* files does not stop a compaction loop once the *transcript* is the leak.
-   Measure both before optimising either.
-3. Verify a capability before designing around it — 4 planned parallel subagents all failed at the
-   provider tier.
-4. Age-chunk only append-only logs; `Lessons.md` is a live rulebook (old entries are active rules).
-5. `filesystem_edit_file` with an `edits` array made multi-spot edits to `.opencode/opencode.json`
-   safe in one shot (no read-modify-write clobbering).
+1. **A fallback/mirror branch is a second implementation of the contract** — it must reuse the same
+   mapper or it silently drifts (snake_case leak invisible to `tsc`). (Lesson 129)
+2. **Unguarded `.filter`/`.map` on a `{error}` body turns a recoverable 500 into a blank page** via
+   the Error Boundary. (Lesson 130)
+3. **An unbounded client poll amplifies an outage** — a fixed 10 s `setInterval` against failing
+   endpoints produced 186+ console errors per visit; back off and show a paused hint. (Lesson 131)
+4. **`toISOString()` on a local-midnight date is an off-by-one** for IST viewers — use a local Y-M-D key.
+5. **Jest prints guard-suite `FAIL:` lines for negative-path cases** — run the guard script directly
+   to confirm the real exit code before reacting.
 
 ## Next Steps
 
-1. **W7 harness**: `scripts/dev-checks/check-tsc-baseline.mjs` (baseline 46, `--update`) +
-   `check-doc-sizes.mjs --json`; wire advisory gates into `.githooks/pre-commit` (additive only)
-   and `.github/workflows/quality-gate.yml`.
-2. **Phase 7 tests**: `check-context-budget.test.ts`, `check-tsc-baseline.test.ts` (CLI-spawn style,
-   same as `chunk-output.test.ts`). Run `npm run test` **alone**.
-3. **Phase 8 docs**: TODO/Primer/agent-memory/Lessons/CHANGELOG + `versions-v3.40.md`.
-4. **Phase 9**: full gate set (`tsc` ≤ 46, `npm run test`, `npm run lint`, `npm run quickbuild`),
-   then final handoff. Merge/PR only on explicit user request — **never push `main`**.
+1. **Await user approval**, then commit on `fix/mirror-contract-fixes` (code + tests + docs), push, open PR.
+2. After merge/deploy: re-run the v3.40.1 live checks for the 3 fixed surfaces (`/alerts`,
+   `/markets/calendar`, `/admin/utils/workers`) — with a fresh browser (the MCP session hung on the
+   heavy calendar page last time).
+3. **Optional follow-up**: bug-17 remainder (`/api/admin/monitoring`, `/api/admin/workers`,
+   `/api/admin/cron`, `/api/screener/saved`) as a new spec — `/api/admin/users` stays impossible
+   until the mirror has a user table.
 
 ## Subagent Status
 
 | Dispatch | Agent | Tier | Budget | Outcome | Notes |
 |----------|-------|------|--------|---------|-------|
-| 4 × `explore` (facts A1–A4) | explore | A | 60 s | provider-blocked | free tier — no retry (deterministic) |
-| fallback fact-gathering | — | B | — | completed | `.context/out/facts-digest.txt`, `f2.txt` |
-| all v3.40.0 implementation | — | B | — | completed | W1–W4; no dispatch attempted (known block) |
+| none | — | B | — | n/a | subagents remain provider-blocked on this tier (v3.40.0 D3/D11) |
 
 ## Handoff Summary
-- **Tier used**: B — subagents are `provider-blocked` on this provider tier, so no dispatch is attempted
-- **State**: W1–W4 committed (`1f73d3c`, `40181c4`, `db08255`, `f758e67`, `ac91571`); W5+W6 in this commit
-- **Verified**: `tsc` **46** (= baseline) · budget **73.0 KB / 100 KB** · quickbuild **0 warnings, 185/185**
-- **Tests**: `chunk-output.test.ts` **12/12 pass**
-- **Blocked**: nothing on this branch
-- **Next**: W7 harness → Phase 7 tests → Phase 8 docs → Phase 9 verify + handoff
+- **Tier used**: B — no dispatch attempted (known provider block)
+- **State**: code + tests + docs complete on `fix/mirror-contract-fixes`; **uncommitted**
+- **Verified**: jest 97/97 suites / 1309 pass / 4 skip / 0 fail · tsc 46/46 (prod 0) · doc budget
+  76,669/102,400 B · lint 0 errors · live `/alerts` 0 console errors · calendar + workers SSR 200
+- **Blocked**: nothing code-side; Prisma hold is environmental until 2026-10-02
+- **Next**: commit/push/PR on explicit request; then post-deploy re-verify of the 3 fixed surfaces
 
 ## Verification
 
 | Check | Result |
 |-------|--------|
-| `npx tsc --noEmit` | **46** = exact baseline |
-| `npm run quickbuild` | **0 Turbopack warnings**, 185/185 pages |
-| `check-doc-sizes.mjs` | **OK 73.0 KB / 100 KB** (5/5 files ok) |
-| `npx jest lib/__tests__/chunk-output.test.ts` | **12 passed** |
-| `.opencode/opencode.json` | parses; `agents=16 (primary=3, subagents=13)`, `commands=11` |
-| pre-commit hook | passed on every commit |
+| `npm run test` | **97/97 suites, 1309 pass / 4 skip / 0 fail** (baseline 93/1283 + 4 suites/26 tests) |
+| `check-tsc-baseline.mjs` | **46/46, prod 0 → OK (exit 0)** |
+| `check-doc-sizes.mjs --json` | **ok — 76,669 / 102,400 B** |
+| `npm run lint` | **0 errors** (1,139 pre-existing warnings) |
+| `/alerts` (signed-in) | renders tabs + "No alerts configured", **0 console errors** |
+| `/markets/calendar` | SSR 200 (1.97 s) |
+| `/admin/utils/workers` | SSR 200 |
+| IST day key | `2026-09-22T00:00:00+05:30` → old `2026-09-21`, new `2026-09-22` |
+| `git status` | 13 modified + 7 untracked (spec/plan, 4 tests, `corpActionMirror.ts`) — **uncommitted** |
 
 ## Checkpoints
 
 ```bash
-git log --oneline -6
-# ac91571 feat(agents): W4 orchestrator agent + /orchestrate (Tier A/B, health-aware)
-# f758e67 chore(context): W3 compaction headroom - reserved 10000 -> 30000 (user-approved)
-# db08255 fix(context): W2 - document memory-MCP literal search semantics
-# 40181c4 feat(context): W2 durable memory - two-tier protocol
-# 1f73d3c feat(context): W1 tool-output protocol + chunk-output.mjs + 12 tests
-# b6552ca docs(agents): v3.40.0 spec + plan + session artifacts
+git log --oneline -5
+# e183a3a docs: update changelog [skip ci]
+# 15fa0a3 Merge pull request #128 from luckyhegde6/fix/production-analytics-rec-serve
+# 32c18a1 docs: v3.40.1 changelog, lessons 128, primer, handoff, session todos [skip ci]
+# 5a8f3af fix(sqlite): production recovery serving - deferred Blobs restore + Netlify detection + health telemetry (v3.40.1)
+# 898a3f6 docs: update changelog [skip ci]
 ```
 
 ## Session archive

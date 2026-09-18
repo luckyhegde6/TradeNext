@@ -9,6 +9,7 @@ import cache from "@/lib/cache";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { recordRead } from "@/lib/services/readTier";
 import { getSqliteFallback } from "@/lib/sqlite";
+import { mapMirrorCorporateAction } from "@/lib/services/corpActionMirror";
 
 /** Module-level guard: prevent overlapping NSE refreshes. */
 let nseRefreshInFlight: Promise<void> | null = null;
@@ -292,7 +293,10 @@ export async function GET(req: Request) {
     const actions = sqlite?.isReady() ? sqlite.getCorporateActions(500) : [];
     if (actions.length) {
       logger.warn({ msg: "CorporateActions: plan-limit breaker open — serving SQLite mirror" });
-      return NextResponse.json({ data: actions, source: "sqlite_mirror" });
+      return NextResponse.json({
+        data: actions.map(mapMirrorCorporateAction),
+        source: "sqlite_mirror",
+      });
     }
   }
 
@@ -445,7 +449,10 @@ export async function GET(req: Request) {
         const actions = sqlite.getCorporateActions(500);
         if (actions.length) {
           logger.warn({ msg: "CorporateActions: DB unavailable — serving SQLite backup" });
-          return NextResponse.json({ data: actions, source: "sqlite_backup" });
+          return NextResponse.json({
+            data: actions.map(mapMirrorCorporateAction),
+            source: "sqlite_backup",
+          });
         }
       } catch {
         // SQLite fallback itself failed — fall through to memory cache

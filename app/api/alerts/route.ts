@@ -12,6 +12,34 @@ import {
   AlertCondition,
 } from "@/lib/services/alertService";
 import { createAuditLog } from "@/lib/audit";
+import logger from "@/lib/logger";
+import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
+
+/**
+ * Mirror fallback for alert reads during a DB outage (BUGS 15).
+ * The SQLite `alert` mirror returns rows for ALL users — with camelCase aliases
+ * (`userId`, `triggeredAt`, `createdAt`) and `condition` already JSON-parsed —
+ * so scope to the session user and coerce booleans here.
+ */
+function getMirrorAlerts(userId: number): Array<Record<string, unknown>> {
+  const sqlite = getSqliteFallback();
+  if (!sqlite?.isReady()) return [];
+
+  return sqlite
+    .getAlerts({ limit: 500 })
+    .filter((row) => Number(row.userId) === userId)
+    .map((row) => ({
+      id: String(row.id ?? ""),
+      type: String(row.type ?? ""),
+      symbol: row.symbol ?? null,
+      condition: row.condition ?? {},
+      triggered: Boolean(row.triggered),
+      triggeredAt: row.triggeredAt ?? null,
+      seen: Boolean(row.seen),
+      createdAt: row.createdAt ?? null,
+    }));
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -27,8 +55,17 @@ export async function GET(req: NextRequest) {
     const alertId = url.searchParams.get("id");
 
     if (action === "count") {
-      const count = await getAlertCount(userId);
-      return NextResponse.json({ count });
+      try {
+        const count = await getAlertCount(userId);
+        return NextResponse.json({ count });
+      } catch (error) {
+        if (isDbUnavailableError(error)) {
+          const mirrored = getMirrorAlerts(userId);
+          logger.warn({ msg: "Alerts: DB unavailable — count from SQLite mirror", count: mirrored.length });
+          return NextResponse.json({ count: mirrored.length });
+        }
+        throw error;
+      }
     }
 
     if (action === "markSeen" && alertId) {
@@ -54,10 +91,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const alerts = await getUserAlerts(userId);
-    return NextResponse.json(alerts);
+    try {
+      const alerts = await getUserAlerts(userId);
+      return NextResponse.json(alerts);
+    } catch (error) {
+      if (isDbUnavailableError(error)) {
+        const mirrored = getMirrorAlerts(userId);
+        logger.warn({ msg: "Alerts: DB unavailable — serving SQLite mirror", count: mirrored.length });
+        return NextResponse.json(mirrored);
+      }
+      throw error;
+    }
   } catch (error) {
-    console.error("Error fetching alerts:", error);
+    logger.error({ msg: "Error fetching alerts", error });
     return NextResponse.json({ error: "Failed to fetch alerts" }, { status: 500 });
   }
 }
