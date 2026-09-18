@@ -147,7 +147,7 @@ Post-merge housekeeping: `git fetch --prune` dropped the stale `origin/feat/agen
 
 ## v3.40.1 — Production recovery serving fix: SQLite-mirror deferred Blobs restore + Netlify runtime detection + health telemetry (2026-09-18)
 
-Branch `fix/production-analytics-rec-serve` (on `main` = v3.40.0 merge `898a3f6`). **Commit/push/PR/deploy PENDING USER.**
+Branch `fix/production-analytics-rec-serve` (on `main` = v3.40.0 merge `898a3f6`). **MERGED via PR #128 (merge `15fa0a3`); `main` tip `e183a3a`.**
 
 **User finding**: a production cold start (2026-09-18) served empty analytics — recommendations/screener/corp-actions/swing hot routes all fell back to an empty SQLite mirror all day, while Prisma was on the P6003 plan-limit hold (until 2026-10-02).
 
@@ -178,7 +178,7 @@ No migration; no new packages (Node built-ins only).
 
 ## v3.40.2 — Mirror-contract fixes for BUGS 15/16/17: shared snake_case mapper + alerts/workers/dividend mirror fallbacks + IST day key (2026-09-18)
 
-Branch `fix/mirror-contract-fixes` (on `main` @ `e183a3a` = v3.40.0 merge). **Commit/push/PR/deploy PENDING USER.**
+Branch `fix/mirror-contract-fixes` (on `main` @ `e183a3a` = v3.40.0 merge). **MERGED via PR #129 (merge `38ee7da`); `main` tip `27c0770` ("docs: update changelog [skip ci]").**
 
 **Origin**: the three bugs found during the v3.40.1 live-site verification (P6003 plan-limit hold until 2026-10-02 + empty-ish SQLite mirror). User-approved scope: **"15 + 16 + high-impact 17"** and **"add auth to POST too"** (workers/status heartbeat). Spec `.agents/specs/13-mirror-contract-fixes.md` + plan `.agents/plans/13-mirror-contract-fixes.md`. Session `.agents/sessions/2026-09-18-v340ctx/`.
 
@@ -213,3 +213,32 @@ Branch `fix/mirror-contract-fixes` (on `main` @ `e183a3a` = v3.40.0 merge). **Co
 **Docs**: `BUGS.md` rows 15/16 → ✅ Fixed, row 17 → 🟡 Partial + follow-up list; `Lessons.md` **129** (fallback branch = second implementation) / **130** (unguarded `.filter` on an error body) / **131** (unbounded client poll amplifies an outage); `app/api/openapi/route.ts` gained a `/api/admin/workers/status` entry (`securityAdmin`, GET+POST) to match the new auth requirement; Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md`.
 
 No migration; no new packages.
+
+---
+
+## v3.40.3 — Predeploy mirror-preservation guard: Netlify build-time SQLite snapshot + versioned Blobs backup + SQLite→Prisma drain before every production deploy (Spec 14, 2026-09-19)
+
+Branch `feature/predeploy-mirror-preserve` (on `main` tip `27c0770` = v3.40.2 MERGED). **Commit/push/PR/deploy PENDING USER.**
+
+**Origin**: the P6003 plan-limit hold runs until 2026-10-02 — every Netlify deploy rebuilds the instance; nothing in the build preserved the LIVE SQLite mirror (outbox + snapshot + Blobs backups) or drained pending mirror changes to Prisma. A deploy during the hold could cold-start with an empty mirror — the same served-empty class as v3.40.1. Spec `.agents/specs/14-predeploy-mirror-preserve.md` + plan `.agents/plans/14-predeploy-mirror-preserve.md`. Session `.agents/sessions/2026-09-19-predeploy-guard/`.
+
+**Design**: the Netlify `[build] command` now starts with `node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild`. The script is self-gated (`CONTEXT === "production"` OR `--force`; both skip paths warn + **exit 0** — soft-fail), 20s timeout, and calls **the LIVE production instance** (`POST /api/admin/predeploy/preserve`; URL chain `DEPLOY_PRIME_URL` → `URL` → `NEXT_PUBLIC_BASE_URL` → `https://tradenext6.netlify.app`). The token is NEVER logged; the script prints one summary line (`predeploy:preserve — mode=… pending=… pushed=… synced=… failed=… backup=… pruned=…`).
+
+**Ordering contract** (NEW `app/api/admin/predeploy/preserve/route.ts`, `runtime="nodejs"` + `dynamic="force-dynamic"`):
+`getOutboxPending()` → snapshot (`persistMirrorSnapshot()` + `exportSqliteBackup()` + `uploadMirrorSnapshotToBlobs()`) → `createMirrorBackup(bytes)` → `if (!isPlanLimitBreakerOpen())` `pushSqliteToPrisma({ reason: "deploy", leaderGate: false })` → `createAuditLog({ action: "ADMIN_DB_SYNC", resource: "predeploy-preserve" })`. Modes **`"pushed" | "backed_up" | "skipped"`** — on P6003 hold (breaker open) the guard yields **`backed_up`** by design (mirror + versioned backup preserved, no push). Push throw → 500 `{success:false, error:"push_failed", detail, mode:"skipped", snapshotBytes, backupKey, pendingBefore}`. **GET is read-only diagnostics** `{success, breakerOpen, sqliteReady, pending, backups, keep}` — never pushes.
+
+**Auth**: `x-deploy-guard-token` header vs `DEPLOY_GUARD_TOKEN` env (64-hex, upserted via Netlify MCP `manage-env-vars`, production context, scopes `["builds","runtime"]`, site `78401e5d-b137-4b6d-94bb-ad1ec8de6b05`; temp token file deleted — never echoed) — length checked then `crypto.timingSafeEqual`; admin-session fallback via `authorize(req)` (`@/lib/auth`); token env unset + token presented → **503 `guard_token_not_configured`**.
+
+**NEW files**:
+- `lib/services/mirrorBackup.ts` — versioned Blobs backups: key `backups/sqlite-mirror-<YYYY-MM-DDTHH-MM-SS-mmmZ>.sqlite`, `MIRROR_BACKUP_KEEP = 5`, `MIRROR_BACKUP_MAX_BYTES = 200 MiB`, `createMirrorBackup(bytes)` → key|null (**fail-open**; null on empty/throw), `listMirrorBackups()`/`pruneMirrorBackups()` error-tolerant (Blobs `list`/`delete` are optional).
+- `scripts/predeploy/preserve-mirror.mjs` — build-time guard (above).
+- Tests: `lib/__tests__/mirrorBackup.test.ts` **14/14** + `lib/__tests__/predeployPreserveRoute.test.ts` **11/11** = **25 new** (combined). Isolation: mirrorBackup uses a single `jest.mock("@/lib/sqlite")` `getMirrorBlobsStore: jest.fn()` (NO `globalThis` stub — corrected decision); route tests mock `@/lib/sqlite`, `@/lib/services/mirrorBackup`, `@/lib/db-utils`, `@/lib/audit`, `@/lib/auth`, `@/lib/logger`.
+- `lib/sqlite.ts` (Phase 1, 3 edits): `SyncTrigger` + `"deploy"`; `MirrorBlobsStoreLike` exported + widened (`list?`/`delete?`); `getMirrorBlobsStore()` exported.
+
+**Verification**: full `npm run test` **99/99 suites, 1334 pass / 4 skip / 0 fail** (97/1309 v3.40.2 baseline + 2 new suites/25 tests); `npx tsc --noEmit` **46 = exact baseline (prod 0)**; `npm run lint` **0 errors** (1139 pre-existing warnings; 4 new TS files clean); doc budget `check-doc-sizes.mjs` **OK 74.9 / 100 KB**; `npm run quickbuild` **COMPILED OK, 185/185 pages, 0 Turbopack warnings**. OpenAPI: `/api/admin/predeploy/preserve` block (tags `Admin - Deploy`, `securityAdmin`, `x-deploy-guard-token` header param).
+
+**Legacy finding (record-only, NOT changed)**: `.github/workflows/deploy.yml` publishes `./out` via `nwtgck/actions-netlify@v3.0` — NOT the real deploy path (netlify.toml → quickbuild → `.next` publish dir).
+
+**Docs**: `Lessons.md` **132** (JS needs 2-digit ISO days — `new Date("2026-09-1T…")` is Invalid Date → `toISOString()` throws → `createMirrorBackup` silently returns null; use `String(day).padStart(2,"0")` — `dayIso` helper in tests) / **133** (predeploy guard design — build-time self-call order, versioned backups + retention, soft-fail always exit 0); Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md`; corrected stale v3.40.1/v3.40.2 "PENDING USER" rows → MERGED (PRs #128/#129).
+
+No migration; no new packages (Node built-ins + `crypto` only).

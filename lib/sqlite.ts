@@ -125,8 +125,9 @@ const state: {
 /** Plan 09: which store initiated the sync. */
 export type SyncDirection = "prisma_to_sqlite" | "sqlite_to_prisma";
 
-/** What triggered a sync attempt (Phase 2 wires probe/admin call sites). */
-export type SyncTrigger = "boot" | "probe" | "admin";
+/** What triggered a sync attempt (Phase 2 wires probe/admin call sites).
+ *  v3.40.3: "deploy" is the predeploy mirror-preservation guard. */
+export type SyncTrigger = "boot" | "probe" | "admin" | "deploy";
 
 export interface SyncResult {
   at: string;
@@ -899,10 +900,15 @@ function sha256Hex(bytes: Uint8Array): string {
 /**
  * Minimal structural subset of @netlify/blobs `Store` used by the mirror
  * upload/download paths (kept local so the app never depends on those types).
+ * v3.40.3: exported for `lib/services/mirrorBackup.ts` (versioned backups).
  */
-interface MirrorBlobsStoreLike {
+export interface MirrorBlobsStoreLike {
   set(key: string, value: Blob): Promise<void>;
   get(key: string, options: { type: "arrayBuffer" }): Promise<ArrayBuffer | null>;
+  // v3.40.3: used by lib/services/mirrorBackup.ts to list/prune versioned
+  // backups. Optional so narrowed test doubles elsewhere keep compiling.
+  list?(options: { prefix?: string }): Promise<{ blobs: { key: string; etag: string }[] }>;
+  delete?(key: string): Promise<void>;
 }
 
 // v3.40.1: a failed getStore (e.g. boot-time Netlify Blobs context missing —
@@ -927,7 +933,7 @@ const MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS = 60_000;
  * memoize-null-forever behavior the mirror was permanently disk-only on every
  * fresh instance — empty SQLite + P6003 = empty analytics/recs/corp-actions.
  */
-async function getMirrorBlobsStore(): Promise<MirrorBlobsStoreLike | null> {
+export async function getMirrorBlobsStore(): Promise<MirrorBlobsStoreLike | null> {
   const g = globalThis as Record<string, unknown>;
   // Positive memo hit — a resolved store is process-stable.
   const cached = g.__sqliteMirrorBlobsStore;
