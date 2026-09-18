@@ -9,7 +9,7 @@
 > The full compact version history (v1.0.0 → latest) moved to **`.agents/changelog/versions-index.md`**
 > and is no longer auto-injected into every session (context optimisation). Read it on demand.
 >
-> - Latest version detail: `.agents/changelog/versions-v3.39.md`
+> - Latest version detail: `.agents/changelog/versions-v3.40.md`
 > - Full changelog index: `.agents/CHANGELOG.md`
 > - Topic → file manifest: `.agents/INDEX.md`
 

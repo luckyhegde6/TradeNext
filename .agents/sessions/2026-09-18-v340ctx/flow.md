@@ -249,13 +249,63 @@ Verified: `npm run test -- <both suites>` (run **alone**) → **23/23 passing**;
 `total 46 / prod 0`; `check-doc-sizes.mjs` still **73.0 KB / 100 KB**. `git status --short` after the run
 shows only the three intended entries — no stray repo writes.
 
+### Phase 8 (docs) — DONE
+
+All 7 planned items plus the discoverable pointer:
+
+1. **NEW `.agents/changelog/versions-v3.40.md`** — full detail (why / commits / W1–W7 / Phase 7 tests /
+   the baseline-clobber incident / verification table / deviations / files). Structure modelled on
+   `versions-v3.39.md`.
+2. **`.agents/CHANGELOG.md`** — new index row above `versions-v3.39.md` (long-form summary, matching the
+   file's house style).
+3. **`.agents/changelog/versions-index.md`** — compact `**v3.40.0** | Sep 18 2026 | …` row above v3.39.4.
+4. **`AGENTS.md`** — "Latest version detail" pointer `.agents/changelog/versions-v3.39.md` →
+   `versions-v3.40.md` (injected file kept thin; the version table is NOT in AGENTS.md since v3.39.4).
+5. **`TODO.md`** — live status → v3.40.0 (commit list + verified numbers + "Phase 8 docs + Phase 9
+   remaining; merge/PR pending user"); v3.39.4 demoted to a one-line completed note.
+6. **`.agents/session-todos.md`** — Phase 8 marked done; the "Commit 3 — Todo/process updates"
+   carry-over marked done (folded into the v3.40.0 doc commit).
+7. **`Primer.md`** — new `## Last Updated` line (2026-09-18 v3.40.0) + a new `### v3.40.0 … ` Current
+   Project Status section above v3.39.4 (W1–W7, Phase 7, incident, verification, honest limits).
+8. **`agent-memory.md`** — new top activity entry `### 2026-09-18 | Agentic context + orchestration +
+   harness … (v3.40.0)` with Action / W1–W7 / tests / incident / verified / honest-limit bullets.
+9. **`Lessons.md`** — added **#120** (harness tests must never touch the real repo), **#121** (the real
+   context leak is the transcript, not the injected docs + memory-MCP substring semantics + age-chunk
+   only append-only logs), **#122** (verify a capability before designing around it) + an Update Log
+   bullet. Note: the "never age-chunk a rulebook" point was folded into #121(e) as an extension of
+   #119(c) rather than duplicated as its own lesson.
+
+Gate re-checked after the edits: `node scripts/dev-checks/check-doc-sizes.mjs` → **TOTAL 73.8 KB /
+100 KB, all 5 files `ok`** (TODO.md grew 20.9 → 21.7 KB from the refreshed live-status block).
+
 ### Next up
 
-Phase 8 docs → Phase 9 verification.
+Phase 9 verification (then archive + handoff; merge/PR only on explicit user request).
 
-Phase 8: `TODO.md` + `.agents/session-todos.md` + `Primer.md` + `agent-memory.md` + `Lessons.md`
-(3 lessons: free-tier subagents unusable → verify capability before designing around it; large tool
-outputs are the real context leak, not injected docs; age-chunk only append-only logs, never a live
-rulebook) + `.agents/CHANGELOG.md` + `.agents/changelog/versions-index.md` + `versions-v3.40.md`.
-Phase 9: full tsc baseline, `npm run test` alone, doc-size budget, final handoff under SCHEMA v1.1.
+Phase 9: full `npx tsc --noEmit` (≤ 46 / prod 0) · `npm run lint` · `npm run test` (run **alone**) ·
+`npm run quickbuild` (0 Turbopack warnings, 185/185 pages) · `check-doc-sizes.mjs` ·
+`check-tsc-baseline.mjs`; then archive this session and update `.agents/handoffs/active/latest.md`
+(+ `@HANDOFF.md` / `@Primer.md`) under handoff SCHEMA v1.1.
+
+### Phase 9 (verification) — DONE
+
+| Gate | Command | Result |
+|------|---------|--------|
+| tsc baseline | `node scripts/dev-checks/check-tsc-baseline.mjs` | **total 46 / prod 0, delta +0 → OK** (exit 0) |
+| context budget | `node scripts/dev-checks/check-doc-sizes.mjs` | **TOTAL 73.8 KB / 100 KB**, all 5 files `ok` |
+| unit/component | `npm run test` (run **alone**) | **92/92 suites, 1269 passed / 4 skipped / 0 failed**, 33.8 s |
+| production build | `npm run quickbuild` | **Compiled successfully 11.9 s; 185/185 static pages; 0 warning lines** |
+
+**Pre-existing finding (not a regression, not fixed here)**: `npm run lint` is broken on its own —
+it maps to `next lint`, which Next.js 16 has removed (`Invalid project directory provided, no such
+directory: …\lint`). Running `npx eslint .` directly also fails, with `TypeError: Converting
+circular structure to JSON` inside `@eslint/eslintrc`'s config validator (`eslint-config-next`
+flat config + ESLint 9.39.3). Both fail identically at the pre-epic commit and no `.ts`/`.tsx`
+file changed in v3.40.0 (docs + `.mjs` scripts only), so the lint verdict is unaffected by this
+epic. Fixing the ESLint setup is a separate, unrelated change — logged as a deferred item rather
+than folded in (surgical-change rule). Working tree after all gates: only the 11 intended doc
+paths (10 modified + `versions-v3.40.md` new) — no junk, no stray writes.
+
+**Remaining**: commit the Phase 8+9 doc set (needs explicit user approval) → archive this session
+→ refresh `.agents/handoffs/active/latest.md` under SCHEMA v1.1 → `@HANDOFF.md` / `@Primer.md`.
 

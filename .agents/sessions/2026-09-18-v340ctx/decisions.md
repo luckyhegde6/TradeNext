@@ -136,3 +136,32 @@ in the wrong direction.
 **Decision**: no workstream may be *blocked* on subagent availability. Each gets a Tier B
 fallback (D3). **Why**: guarantees the epic is deliverable in the current environment while
 still being correct if the provider tier changes.
+
+## D12. Harness tests take the script path as a parameter; protected real files are byte-guarded
+
+Writing the Phase 7 CLI-spawn tests surfaced a real defect **in the tests**: the helper
+`run(args, cwd, tscCmd)` hardcoded the repo script path, so the "harness" cases executed the
+**real** `check-tsc-baseline.mjs` against the **real** repo — and the `--update` case overwrote
+the committed `scripts/dev-checks/tsc-baseline.json` with `{total:2,prod:1}`, silently poisoning
+the hook + CI gate while the suite stayed green (found only because `baseline.total` read back
+as `2`).
+
+**Decision**: `run(script, args, cwd, tscCmd?)` — the path is an explicit first parameter
+(harness tests pass the tmpdir copy, real-repo tests pass `SCRIPT`) — **and** both suites snapshot
+the protected real file at module scope (`tsc-baseline.json`, `.opencode/opencode.json`) and
+assert it byte-identical in `afterAll`. Recovered the clobbered baseline via `git checkout --`
+and re-verified `46 / 0 / 2026-09-18`. **Why**: a test that can silently write production data
+is a bug even when green; the byte-guard makes the whole class of mistake impossible to repeat
+undetected. Recorded as Lesson 120.
+
+## D13. Phase 8 doc placement follows the existing structure, and `Lessons.md` gets 3 new entries
+
+**Decision**: put the epic detail in a NEW `.agents/changelog/versions-v3.40.md` (mirroring
+`versions-v3.39.md`), add an index row in `.agents/CHANGELOG.md`, a compact row in
+`versions-index.md`, and flip the `AGENTS.md` "Latest version detail" pointer — the version
+table itself stays out of `AGENTS.md` (v3.39.4 made it a thin index). `TODO.md`'s live-status
+block is refreshed in place (injected file, kept terse; grew 20.9 → 21.7 KB, total **73.8 KB /
+100 KB**). `Lessons.md` gains **#120/#121/#122**; the "age-chunk only append-only logs" point is
+folded into #121(e) as an extension of #119(c) instead of being duplicated as its own lesson.
+**Why**: consistent with the repo's doc-standardisation pass and keeps every injected file under
+budget.

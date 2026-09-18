@@ -8,7 +8,9 @@
 > The completed-feature Quick Reference archive moved to
 > **`.agents/changelog/todo-quick-reference-archive.md`** (read on demand; not auto-injected).
 
-**In progress — v3.39.4 context-optimisation** (branch `fix/turbopack-tracing-harness`): injected instruction files slimmed **358 KB → 72.2 KB/session** (`AGENTS.md`, `TODO.md` → `.agents/changelog/`); NEW `.agents/INDEX.md` manifest; NEW `.agents/session-archive/` (`Primer.md` 1159→213, `agent-memory.md` 1092→373 lines); NEW context-budget rule + `scripts/dev-checks/check-doc-sizes.mjs`; 33 Turbopack tracing warnings → **0** (`tsc` 46 baseline, `quickbuild` 185/185 pages). Commit 1/2 `0430f67` (docs/context) done; commit 2/2 (Turbopack + `netlify.toml`) pending.
+**In progress — v3.40.0 agentic context + orchestration + harness** (branch `feat/agentic-context-orchestration`, stacked on `fix/turbopack-tracing-harness @ ca56a74`): PLANNED WORK COMPLETE (commits `b6552ca` spec/plan/session → `1f73d3c` W1 tool-output protocol + `chunk-output.mjs` → `40181c4`+`db08255` W2 durable memory → `f758e67` W3 `compaction.reserved` 30000 → `ac91571` W4 orchestrator agent (`mode: primary`, agents 16 / commands 11) → `ac90b53` W5+W6 orchestrator-health + handoff SCHEMA v1.1 → `973cae5` W7 tsc-baseline + doc-budget `--json` + hook §8 + CI gates → `6a9135a` Phase 7 tests 23/23). Verified: `tsc` **46 = exact baseline**, `quickbuild` **0 Turbopack warnings / 185/185 pages**, doc budget **73.0 KB / 100 KB**. Remaining: Phase 8 docs (this) + Phase 9 final verification; **merge/PR pending user**. Full detail: `.agents/changelog/versions-v3.40.md`.
+>
+> **v3.39.4 context-optimisation DONE** (branch `fix/turbopack-tracing-harness`): injected instruction files slimmed **358 KB → 72.2 KB/session** (`AGENTS.md`, `TODO.md` → `.agents/changelog/`); NEW `.agents/INDEX.md` manifest; NEW `.agents/session-archive/` (`Primer.md` 1159→213, `agent-memory.md` 1092→373 lines); NEW context-budget rule + `scripts/dev-checks/check-doc-sizes.mjs`; 33 Turbopack tracing warnings → **0** (`tsc` 46 baseline, `quickbuild` 185/185 pages). Commits `0430f67` + `ca56a74`.
 
 ---
 
