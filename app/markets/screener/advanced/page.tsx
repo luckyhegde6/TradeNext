@@ -213,9 +213,9 @@ export default function AdvancedScreenerPage() {
     <div className="min-h-screen bg-background">
       {/* Breadcrumb */}
       <nav className="mb-4 text-sm text-muted-foreground max-w-7xl mx-auto px-4 pt-6">
-        <a href="/markets" className="hover:text-foreground transition-colors">Markets</a>
+        <Link href="/markets" className="hover:text-foreground transition-colors">Markets</Link>
         <span className="mx-2">/</span>
-        <a href="/markets/screener" className="hover:text-foreground transition-colors">Screener</a>
+        <Link href="/markets/screener" className="hover:text-foreground transition-colors">Screener</Link>
         <span className="mx-2">/</span>
         <span className="text-foreground font-medium">Advanced Screener</span>
       </nav>

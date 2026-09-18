@@ -112,9 +112,8 @@ function makeSqlJsMock() {
     }
 
     prepare(sql: string) {
-      const self = this;
       return {
-        run(params: any[]) { self.run(sql, params); },
+        run: (params: any[]) => this.run(sql, params),
         free() {},
       };
     }

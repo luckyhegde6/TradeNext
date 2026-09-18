@@ -15,23 +15,18 @@ import { useEffect } from "react";
  */
 export function Analytics() {
   const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_ID;
-  
-  // Don't render if GA ID is not configured
-  if (!GA_MEASUREMENT_ID || GA_MEASUREMENT_ID === "") {
-    return null;
-  }
-  
-  // Validate GA ID format (G-XXXXXXXXXX or G-XXXXXXXX)
   const gaIdPattern = /^G-[A-Z0-9]{8,12}$/;
-  if (!gaIdPattern.test(GA_MEASUREMENT_ID)) {
-    console.warn(
-      "[Analytics] Invalid GA_MEASUREMENT_ID format. Expected G-XXXXXXXXXX"
-    );
-    return null;
-  }
-  
-  // Inject gtag.js script
+  const enabled =
+    typeof GA_MEASUREMENT_ID === "string" &&
+    GA_MEASUREMENT_ID !== "" &&
+    gaIdPattern.test(GA_MEASUREMENT_ID);
+
+  // Inject gtag.js script — hook is called unconditionally (early returns
+  // after hooks would violate react-hooks/rules-of-hooks); gate inside.
   useEffect(() => {
+    if (!enabled || !GA_MEASUREMENT_ID) {
+      return;
+    }
     // Add gtag script
     const gtagScript = document.createElement("script");
     gtagScript.async = true;
@@ -57,8 +52,17 @@ export function Analytics() {
         document.head.removeChild(inlineScript);
       }
     };
-  }, [GA_MEASUREMENT_ID]);
-  
+  }, [enabled, GA_MEASUREMENT_ID]);
+
+  if (!enabled) {
+    if (GA_MEASUREMENT_ID) {
+      console.warn(
+        "[Analytics] Invalid GA_MEASUREMENT_ID format. Expected G-XXXXXXXXXX"
+      );
+    }
+    return null;
+  }
+
   return null;
 }
 
