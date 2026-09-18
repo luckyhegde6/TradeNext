@@ -1211,6 +1211,44 @@ This API is designed for programmatic access. Key endpoints:
             }
         },
 
+        // ==================== ADMIN - WORKERS ====================
+        '/api/admin/workers/status': {
+            get: {
+                summary: 'List worker heartbeats (admin)',
+                tags: ['Admin - Workers'],
+                security: securityAdmin,
+                parameters: [
+                    { name: 'includeOffline', in: 'query', schema: { type: 'boolean', default: false } }
+                ],
+                responses: { '200': { description: 'Worker status rows (workers without a heartbeat in the last 5 min are dropped unless includeOffline=true); falls back to the SQLite mirror during a DB outage' } }
+            },
+            post: {
+                summary: 'Worker heartbeat upsert (admin)',
+                tags: ['Admin - Workers'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    workerId: { type: 'string' },
+                                    workerName: { type: 'string' },
+                                    status: { type: 'string', enum: ['idle', 'busy', 'offline'] },
+                                    currentTaskId: { type: 'string' },
+                                    cpuUsage: { type: 'number' },
+                                    memoryUsage: { type: 'number' }
+                                },
+                                required: ['workerId', 'status']
+                            }
+                        }
+                    }
+                },
+                responses: { '200': { description: 'Upserted worker status' }, '401': { description: 'Unauthorized' } }
+            }
+        },
+
         // ==================== ADMIN - USERS ====================
         '/api/admin/users': {
             get: {

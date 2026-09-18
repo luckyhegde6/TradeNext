@@ -173,3 +173,43 @@ Branch `fix/production-analytics-rec-serve` (on `main` = v3.40.0 merge `898a3f6`
 **Seed/verify**: Blobs store `tradenext-sqlite-mirror`, key `sqlite-mirror.sqlite` (= `MIRROR_SNAPSHOT_FILENAME`/`MIRROR_SNAPSHOT_BLOBS_KEY`), 14,716,928 B, ETag `4bc5a64f…`, sha256 round-trip byte-identical from `logs/sqlite-mirror.sqlite` (project id `78401e5d-b137-4b6d-94bb-ad1ec8de6b05`).
 
 No migration; no new packages (Node built-ins only).
+
+---
+
+## v3.40.2 — Mirror-contract fixes for BUGS 15/16/17: shared snake_case mapper + alerts/workers/dividend mirror fallbacks + IST day key (2026-09-18)
+
+Branch `fix/mirror-contract-fixes` (on `main` @ `e183a3a` = v3.40.0 merge). **Commit/push/PR/deploy PENDING USER.**
+
+**Origin**: the three bugs found during the v3.40.1 live-site verification (P6003 plan-limit hold until 2026-10-02 + empty-ish SQLite mirror). User-approved scope: **"15 + 16 + high-impact 17"** and **"add auth to POST too"** (workers/status heartbeat). Spec `.agents/specs/13-mirror-contract-fixes.md` + plan `.agents/plans/13-mirror-contract-fixes.md`. Session `.agents/sessions/2026-09-18-v340ctx/`.
+
+**Bug 16 — mirror rows were a second contract (blank calendar)**
+
+- NEW `lib/services/corpActionMirror.ts` — `mapMirrorCorporateAction(row)` (+ `MirrorCorporateAction` type): tolerant snake→camel mapping (`company_name`→`companyName`, `action_type`→`actionType`, `ex_date`→`exDate`, `dividend_per_share`→`dividendPerShare`, `old_fv`→`oldFV`, …), idempotent for already-camelCase rows, numeric coercion of strings, `null` for blanks, **never throws**.
+- `app/api/corporate-actions/combined/route.ts` — the mapper is applied to **both** mirror branches (`sqlite_mirror` and `sqlite_backup`), so a fallback branch renders through the same shape as the primary Prisma path (Lesson 129).
+- `app/markets/calendar/page.tsx` — module-level `toDayKey(date)` (local Y-M-D, `""` on invalid) replaces `toISOString().split("T")[0]` at the 3 key sites. A **22-Sep-2026 00:00 IST** ex-date previously keyed as `2026-09-21` (dot one day early); now `2026-09-22`. UTC-midnight dates are unchanged.
+
+**Bug 15 — `/alerts` blank page**
+
+- `app/api/alerts/route.ts` — NEW `getMirrorAlerts(userId)` (mirror `alert` rows are camelCase-aliased + `condition` JSON-parsed, but cover **all** users → filtered to the session user; `triggered`/`seen` coerced to booleans) wired into **both** the list branch and `action=count` behind `isDbUnavailableError`; non-hold errors still re-throw.
+- `app/alerts/page.tsx` — `fetchAlerts` now `Array.isArray`-guards the response, sets a `fetchError` state, and the render gained an error branch with a Retry button before the empty state (Lesson 130).
+
+**Bug 17 (high-impact subset) — Prisma-only admin surfaces**
+
+- `app/api/admin/workers/status/route.ts` — **GET and POST now require an admin session** (401; POST was previously open — the in-repo heartbeat has no caller, but the endpoint was publicly writable). GET falls back to `getSqliteFallback().getWorkerStatuses()` via new `mapMirrorWorkerStatus()` (snake→camel) + `filterWorkers()` (5-minute staleness, accepts `Date | ISO string`, `?includeOffline=true` to bypass) inside an `isDbUnavailableError` catch.
+- `app/admin/utils/workers/page.tsx` — the 10 s `setInterval` poll became a **self-scheduling backoff** (10 s healthy → 20 → 40 → 60 s cap while failing) driven by `fetchData()`'s new `Promise<boolean>` return (`tasksRes.ok || workersRes.ok` = reachable), plus a `pollPaused` amber "Live updates paused after repeated failures — retrying with backoff." hint at ≥3 failures. Kills the ~2 s 500-loop / 186-console-error storm observed live.
+- `lib/services/dividendCalendarService.ts` — `fetchDividends`' catch now falls back to new `fetchMirrorDividends(startDate, endDate, limit)` (DIVIDEND-only, date-windowed, mapped through `mapMirrorCorporateAction`, `currentPrice: null`) instead of reporting `totalDividends: 0`.
+
+**Still open (BUGS.md row 17 follow-up, deliberately out of scope)**: `/api/admin/users` (the mirror has **no `user` table**, so no fallback is possible), `/api/admin/monitoring` (5 types), `/api/admin/workers` list, `/api/admin/cron`, `/api/screener/saved`.
+
+**Tests — 4 NEW suites, 26/26**:
+
+- `lib/__tests__/corpActionMirror.test.ts` (5) — full snake→camel DTO equality, no snake_case leakage, camelCase idempotency, numeric coercion/nulls, sparse-row safety.
+- `lib/__tests__/dividendCalendarMirror.test.ts` (5) — P6003 month-scoped mirror read (DIVIDEND-only + date window + null-date drop), empty mirror, `getUpcomingDividends` mirror path (fake-timer-frozen clock), non-hold error does **not** consult the mirror, healthy Prisma never touches it.
+- `lib/__tests__/alertsMirrorFallback.test.ts` (6) — 401 unauthenticated, session-scoped mirror mapping (other users excluded, `1/0`→`true/false`), empty mirror → `[]` not 500, `action=count` mirror count, non-hold error still 500, healthy path untouched.
+- `lib/__tests__/workersStatusRoute.test.ts` (10) — GET/POST 401 for anonymous and non-admin, Prisma staleness filter + `includeOffline`, snake_case→camelCase on the mirror path, `getSqliteFallback()` null → `[]`, non-hold → 500, POST upsert + zod 400.
+
+**Verification**: full `npm run test` **97/97 suites, 1309 pass / 4 skip / 0 fail** (93/1283 baseline + these 4 suites/26 tests); `node scripts/dev-checks/check-tsc-baseline.mjs` → **total 46 / prod 0, delta +0 → OK (exit 0)**; `node scripts/dev-checks/check-doc-sizes.mjs --json` → **ok, 76,669 / 102,400 B**; `npm run lint` → **0 errors** (1,139 pre-existing warnings, unchanged). Live `:3000`: `/alerts` renders signed-in (tabs + "No alerts configured") with **0 console errors**; `/markets/calendar` SSR 200 in 1.97 s; `/admin/utils/workers` SSR 200. The jest `FAIL: TypeScript regression` / `FAIL: injected context over budget` lines are the guard suites' **negative-path** output (test seam) — running both guards directly exits 0 (confirmed).
+
+**Docs**: `BUGS.md` rows 15/16 → ✅ Fixed, row 17 → 🟡 Partial + follow-up list; `Lessons.md` **129** (fallback branch = second implementation) / **130** (unguarded `.filter` on an error body) / **131** (unbounded client poll amplifies an outage); `app/api/openapi/route.ts` gained a `/api/admin/workers/status` entry (`securityAdmin`, GET+POST) to match the new auth requirement; Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md`.
+
+No migration; no new packages.

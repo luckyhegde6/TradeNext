@@ -49,6 +49,20 @@ const ACTION_ICONS: Record<string, string> = {
   OTHER: "📌",
 };
 
+/**
+ * Local-time `YYYY-MM-DD` key. `date.toISOString()` would shift the day back one
+ * in IST (UTC+5:30) — local midnight is the previous day in UTC — so markers
+ * landed on the wrong cell (or none at all) while the API returned rows.
+ * Returns "" for invalid dates so they never match a cell.
+ */
+function toDayKey(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<"month" | "week">("month");
@@ -95,12 +109,12 @@ export default function CalendarPage() {
     // Add days of month
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month, day);
-      const dateStr = date.toISOString().split("T")[0];
+      const dateStr = toDayKey(date);
 
       // Filter actions for this day
       const dayActions = actions.filter((action) => {
         if (!action.exDate) return false;
-        const actionDate = new Date(action.exDate).toISOString().split("T")[0];
+        const actionDate = toDayKey(new Date(action.exDate));
         const matches = actionDate === dateStr;
         const typeMatch = filterType === "all" || action.actionType === filterType;
         return matches && typeMatch;
@@ -109,7 +123,7 @@ export default function CalendarPage() {
       // Filter events for this day
       const dayEvents = events.filter((event) => {
         if (!event.date) return false;
-        const eventDate = new Date(event.date).toISOString().split("T")[0];
+        const eventDate = toDayKey(new Date(event.date));
         return eventDate === dateStr;
       });
 

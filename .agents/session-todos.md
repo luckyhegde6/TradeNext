@@ -1,6 +1,44 @@
 # Session Todos
 
-## Current (2026-09-18 — v3.40.1 production recovery serving fix; branch `fix/production-analytics-rec-serve` on `main` `898a3f6` = v3.40.0 merged + live)
+## Current (2026-09-18 — BUGS 15/16/17 mirror-contract fixes; branch `fix/mirror-contract-fixes` on `main` @ `e183a3a`)
+
+**Task**: fix the 3 bugs found during the v3.40.1 live-site verification. User-approved scope: **"15 + 16 + high-impact 17"** + **"add auth to POST too"** (workers/status heartbeat). Spec/plan: `.agents/specs/13-mirror-contract-fixes.md` + `.agents/plans/13-mirror-contract-fixes.md`. Session: `.agents/sessions/2026-09-18-v340ctx/`.
+
+**Result**: CODE + TESTS + DOCS DONE (commit/push/PR/deploy **PENDING USER**). In scope: bug 16 (shared mirror mapper + IST day key), bug 15 (alerts mirror fallback + client guard), bug 17-high (`/api/admin/workers/status` GET+POST auth + mirror fallback + poll backoff; `/api/dividends/calendar` mirror fallback). Out of scope → `BUGS.md` row 17 follow-up: `/api/admin/users` (mirror has no user table), `/api/admin/monitoring` (5 types), `/api/admin/workers`, `/api/admin/cron`, `/api/screener/saved`.
+
+- [x] Recon — root causes confirmed at source for all 3 bugs (mirror shape leak / unguarded `.filter` / Prisma-only routes under the P6003 hold) — DONE
+- [x] Spec + plan written (`13-mirror-contract-fixes`) + scope approved by user — DONE
+- [x] Branch `fix/mirror-contract-fixes` created from `main` — DONE
+- [x] Bug 16 — NEW `lib/services/corpActionMirror.ts` (`mapMirrorCorporateAction`) applied to BOTH mirror branches of `/api/corporate-actions/combined`; `app/markets/calendar/page.tsx` local `toDayKey()` (IST off-by-one) — DONE
+- [x] Bug 15 — `/api/alerts` list + `action=count` mirror fallback (`getMirrorAlerts`, session-scoped, booleans coerced); `/alerts` page `Array.isArray` guard + `fetchError` + Retry — DONE
+- [x] Bug 17-high — `/api/admin/workers/status` GET+POST admin auth (401) + GET mirror fallback (`mapMirrorWorkerStatus` + 5-min `filterWorkers`); Workers page self-scheduling poll backoff 10→20→40→60 s + "paused/retrying" hint; `dividendCalendarService.fetchDividends` mirror fallback (`fetchMirrorDividends`) — DONE
+- [x] Tests — NEW `corpActionMirror.test.ts` (5) + `dividendCalendarMirror.test.ts` (5) + `alertsMirrorFallback.test.ts` (6) + `workersStatusRoute.test.ts` (10) = **26/26** — DONE
+- [x] Verification — full `npm run test` **97/97 suites, 1309 pass / 4 skip / 0 fail**; `check-tsc-baseline.mjs` **46/46, prod 0 → OK**; `check-doc-sizes.mjs` **OK 76,669 / 102,400 B**; `npm run lint` **0 errors** (1139 pre-existing warnings) — DONE
+- [x] UI verification (:3000) — `/alerts` renders signed-in (tabs + "No alerts configured"), **0 console errors**; `/markets/calendar` SSR 200 (1.97 s); `/admin/utils/workers` SSR 200; IST day-key semantics proven (22-Sep IST midnight: `toISOString` → `2026-09-21` vs `toDayKey` → `2026-09-22`) — DONE
+- [x] Docs — `BUGS.md` 15/16 ✅ + 17 🟡 Partial; `Lessons.md` 129/130/131; `versions-v3.40.md` §v3.40.2 + `versions-index.md` row; `openapi` `/api/admin/workers/status` entry (`securityAdmin`); Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md` — DONE
+- [ ] **Commit/push/PR/deploy — PENDING USER APPROVAL** (never auto-commit)
+
+---
+
+## Completed earlier (2026-09-18 — v3.40.1 LIVE-SITE VERIFICATION post-merge; `main` @ `e183a3a`)
+
+**Task**: verify all functionalities of the live site `tradenext6.netlify.app` after the v3.40.1 deploy, using the **ADMIN_OTP login flow** (`lib/auth.ts:79-96` runs before any DB query) + public no-auth endpoint checks, then report.
+
+**Result**: verification COMPLETE. The v3.40.1 recovery mechanism is **PROVEN live** (health telemetry + Blobs mirror restore of 258 rows + `/api/corporate-actions/combined` serving mirror rows + analytics rendering the 40 mirror corp-actions). Public surfaces are healthy; **3 new bugs found** — reported only, **no fix applied**.
+
+- [x] Deploy confirmed — PR #128 merged `15fa0a3`, `main` @ `e183a3a`, Netlify deploy ready — DONE
+- [x] ADMIN_OTP login + public no-auth endpoint checks — DONE
+- [x] Admin console sweep (dashboard + db-health verified; workers/users/monitoring/cron/tasks hold-degraded) — DONE
+- [x] Public page sweep (`/markets`, `/markets/analytics` 12/13 sections, `/markets/screener`, `/news`, `/recommendations` Swing live, `/portfolio`, `/watchlist`, `/fo`, `/company/RELIANCE`, `/markets/calendar`) — DONE
+- [x] Responsive spot check (375px dashboard — no overflow, hamburger, live marquee; restored 1440×900) — DONE
+- [x] Local `market_cache` enrichment + re-seed — **CLOSED as blocked** (NSE-side fetch failures on the `market_cache` write path) per the user's chosen option "Verify live pages + report" — DONE (skipped)
+- [x] Findings recorded — `BUGS.md` rows 15/16/17 + `Lessons.md` 129/130 + `agent-memory.md` + `Primer.md` + `.agents/handoffs/active/latest.md` — DONE
+- [x] **Fixes for bugs 15/16/17 — DONE on branch `fix/mirror-contract-fixes`** (scope "15 + 16 + high-impact 17"; see Current above) — DONE (commit/push PENDING USER)
+- [ ] **Commit/push of these verification docs — PENDING USER APPROVAL** (never auto-commit)
+
+---
+
+## Completed (2026-09-18 — v3.40.1 production recovery serving fix; **PR #128 merged** `15fa0a3`, `main` @ `e183a3a` = v3.40.0 merged + live)
 
 **User finding (verbatim, 2026-09-18)**: production cold start served EMPTY analytics all day — P6003 plan-limit hold (until 2026-10-02) + empty SQLite mirror (recommendations/screener/corp-actions/swing fell back to nothing).
 
@@ -8,10 +46,10 @@
 
 **Fix (code + tests DONE, verified)**: (1) negative-TTL failure cache (`__sqliteMirrorBlobsStoreFailedAt` + `MIRROR_BLOBS_STORE_NEGATIVE_TTL_MS = 60_000`); (2) one-shot `.unref()`'d **30s deferred Blobs restore** (`scheduleDeferredMirrorRestore`/`cancelDeferredMirrorRestore`/`retryDeferredMirrorRestore`/`runMirrorBlobsRetryForTests`; `MIRROR_DEFERRED_RESTORE_DELAY_MS = 30_000`; boot hook after "SQLite backup initialized" when `fromSnapshot === false`); (3) `mirrorHasLiveData()` swap guard; (4) NEW `lib/netlify.ts` `isNetlifyRuntime()`/`netlifyBlobsContextAvailable()`; (5) `/api/health` `isNetlify` + `blobsContextAvailable` + `NETLIFY_BLOBS_REGION` in `SAFE_VARS`. **Order matters**: retry clears failedAt BEFORE download (Lesson 128). Tests: NEW `netlify.test.ts` 11/11 + `sqliteMirror.test.ts` 8/8 (2 golden v3.40.1, get-count-delta assertion) + sqlite/dbOpTiering 97/97 → full **93/93 / 1283 pass / 4 skip / 0 fail**; `tsc` 46 exact; `quickbuild` 185/185; Blobs re-seeded (ETag `4bc5a64f…`).
 
-- [ ] Docs — v3.40.1 applied: agent-memory ✓ · Lessons 128 ✓ · `.agents/CHANGELOG.md` row ✓ · `versions-v3.40.md` section ✓ · Primer (Last Updated + Current Status) ✓ · HANDOFF yaml ✓ · versions-index row ✓ · session-todos ✓ · TODO.md Quick Reference ✓ — **REMAINING: doc-budget check + hygiene** — IN PROGRESS
-- [ ] `node scripts/dev-checks/check-doc-sizes.mjs --json` (doc budget ≤ 100 KB) — pending
-- [ ] Hygiene: `git status` review + delete junk artifacts + pre-commit checks — pending
-- [ ] **COMMIT/PUSH/PR/DEPLOY — PENDING USER APPROVAL (never auto-commit)**
+- [x] Docs — v3.40.1 applied: agent-memory ✓ · Lessons 128 ✓ · `.agents/CHANGELOG.md` row ✓ · `versions-v3.40.md` section ✓ · Primer (Last Updated + Current Status) ✓ · HANDOFF yaml ✓ · versions-index row ✓ · session-todos ✓ · TODO.md Quick Reference ✓ — DONE
+- [x] `node scripts/dev-checks/check-doc-sizes.mjs --json` (doc budget ≤ 100 KB) — DONE (gated by the `context-budget` CI job on `main`)
+- [x] Hygiene: `git status` review + delete junk artifacts + pre-commit checks — DONE (working tree clean)
+- [x] **COMMIT/PUSH/PR/DEPLOY — DONE** — PR #128 merged (`15fa0a3`), `main` @ `e183a3a`, Netlify deploy ready (**v3.40.1 LIVE**)
 
 ---
 
