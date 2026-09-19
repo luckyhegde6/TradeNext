@@ -7,9 +7,21 @@ import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { Analytics } from "./components/analytics";
 import { SEOTags, defaultMetadata } from "./components/seo";
 import WebVitals from "./components/analytics/WebVitals";
+import PWARegister from "./components/PWARegister";
 
 // Apply default SEO metadata
-export const metadata = defaultMetadata;
+// PWA (v3.21.0): add theme-color meta, manifest link, and apple web-app
+// capability via Next's metadata system (server-rendered in <head>).
+export const metadata = {
+  ...defaultMetadata,
+  manifest: "/manifest.json",
+  themeColor: "#2563eb",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "TradeNext",
+  },
+};
 
 /**
  * Root Layout
@@ -49,6 +61,9 @@ export default function RootLayout({
 
             {/* Core Web Vitals tracking */}
             <WebVitals />
+
+            {/* PWA service worker registration (progressive enhancement) */}
+            <PWARegister />
           </Providers>
         </ErrorBoundary>
       </body>
