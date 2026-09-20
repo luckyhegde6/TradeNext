@@ -17,6 +17,16 @@ const FAMILY_LABELS: Record<SignalFamily, string> = {
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+/**
+ * AI-target generation must NOT auto-fire on page load — it burns NSE
+ * requests + OpenRouter tokens (34 screeners + 4×AI batches, 30s+). The
+ * plain (mount + poll) fetcher is screener-only (`analyze=0` → instant, no
+ * AI, honest "AI targets off" badge); the manual Refresh button is the ONLY
+ * path that requests AI targets (`analyze=1&force=1` → durable job + bg AI).
+ */
+const AUTO_FEED_URL = "/api/recommendations/swing?analyze=0";
+const REFRESH_FEED_URL = "/api/recommendations/swing?analyze=1&force=1";
+
 const ANALYSIS_STATUS_META: Record<SwingResponse["analysisStatus"], { label: string; classes: string }> = {
   done: { label: "AI targets ready", classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
   skipped: { label: "AI targets off", classes: "bg-gray-700/40 text-gray-400 border-gray-600" },
@@ -28,7 +38,7 @@ export default function SwingTab() {
   const [familyFilter, setFamilyFilter] = useState<SignalFamily | "all">("all");
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<SwingResponse>(
-    "/api/recommendations/swing",
+    AUTO_FEED_URL,
     fetcher,
     {
       // Poll fast while AI targets are generating in the background, then
@@ -41,7 +51,7 @@ export default function SwingTab() {
 
   const refresh = () => {
     mutate(
-      fetch("/api/recommendations/swing?force=1").then((r) => r.json()),
+      fetch(REFRESH_FEED_URL).then((r) => r.json()),
       { revalidate: false },
     );
   };
