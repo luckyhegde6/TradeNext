@@ -2,6 +2,7 @@
 // Breaker-open: serves the screener-only feed and makes no Prisma writes.
 import { NextRequest, NextResponse } from "next/server";
 import { getSwingRecommendations } from "@/lib/services/swingRecommendationService";
+import { autoTriggerOnce } from "@/lib/services/swingAutoSeedService";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -19,6 +20,12 @@ export async function GET(req: NextRequest) {
   try {
     logger.info({ msg: "Fetching swing recommendations", forceRefresh, analyze });
     const data = await getSwingRecommendations({ forceRefresh, analyze });
+    // Plan 15: swing AI auto-generate-once (seed-once). Fire-and-forget —
+    // autoTriggerOnce internally probes stored targets + the process seed-once
+    // guard, so a plain poll with stored targets is an audited NO-OP here and
+    // a first empty-state/watchlist-add trigger runs ONE bounded generate.
+    // Never awaited on the hot path (serve-first preserved).
+    autoTriggerOnce({ trigger: "empty-state" }).catch(() => undefined);
     return NextResponse.json(data);
   } catch (error) {
     logger.error({

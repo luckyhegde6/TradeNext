@@ -67,3 +67,8 @@
 
 See [versions-v2.md](./changelog/versions-v2.md) + [versions-v1.md](./changelog/versions-v1.md) + feature deep-dives above.
 
+
+### Plan 15 — Swing AI auto-generate-once (v3.40.4)
+- Greenfield `lib/services/swingAutoSeedService.ts`: seed-once auto-generate guard. Exports: `PUBLIC_SWING_USER_ID`, `isSwingSeededForUser`, `hasStoredSwingTargetsForUser`, `SwingAutoSeedOptions`, `autoTriggerOnce`, `generateSwingTargetForSymbol`. Process-level seed-once set prevents double AI.
+- `lib/audit.ts`: added `SWING_AUTO_SEED_TRIGGERED` + `SWING_AUTO_SEED_SKIPPED` to `AuditAction` union.
+- `app/api/recommendations/swing/route.ts`: fire-and-forget `autoTriggerOnce` after serve (serve-first preserved).

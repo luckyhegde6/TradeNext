@@ -5,6 +5,7 @@
 > **Agentic operating model:** `.agents/RULES.md` (must-read on first session) + `.agents/SOUL.md` (identity). Full history & legacy docs live in `.agents/CHANGELOG.md`.
 
 ## Version History
+| v3.40.4 | 2026-09-21 | Plan 15: Swing AI auto-generate-once (seed-once) — greenfield lib/services/swingAutoSeedService.ts + SWING_AUTO_SEED_TRIGGERED/SKIPPED audit tags + route autoTriggerOnce wiring |;
 
 > The full compact version history (v1.0.0 → latest) moved to **`.agents/changelog/versions-index.md`**
 > and is no longer auto-injected into every session (context optimisation). Read it on demand.
