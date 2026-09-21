@@ -296,3 +296,5 @@ The app CANNOT work without a valid PostgreSQL database URL.
 - Early logging added: check Netlify Function logs for `>>>` prefix
 
 
+
+| Plan 15 | `feat/pwa-sprint-phase-b-ga4` | Swing AI auto-generate-once (seed-once) — first empty-state/watchlist-add trigger runs ONE bounded AI generate + persists targets; later triggers = audited process-level NO-OP | v3.40.4 | In progress |

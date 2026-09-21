@@ -429,3 +429,5 @@ npm run lint
 npx next build
 ```
 
+
+- [ ] Plan 15: Swing AI auto-generate-once (seed-once) — first empty-state trigger runs ONE bounded AI generate; later = audited NO-OP
