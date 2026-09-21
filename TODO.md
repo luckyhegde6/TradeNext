@@ -269,7 +269,7 @@ Track F&O positions (Futures + Options), compute P&L, show option Greeks, displa
 
 ---
 
-## Sprint 4: Daily Recommendations Engine (v3.3.0)
+$1 (v3.3.0)
 
 **PRD Reference:** See `.agents/PRD.md` — Feature 6
 
