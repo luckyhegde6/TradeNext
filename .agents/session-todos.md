@@ -1,6 +1,23 @@
 # Session Todos
 
-## Current (2026-09-19 — v3.40.3 predeploy mirror-preservation guard; branch `feature/predeploy-mirror-preserve` on `main` @ `27c0770`)
+## Current (2026-09-22 — v3.40.5 Laya / System-One RESEARCH done + Jev docs + ph22 spec/plan on branch `feature/ph22-decision-engine`)
+
+**Task**: research-only (no code): 5 parallel subagents scraped Laya HF card + TypeSafe.JS docs + Medium → **Jev premise CORRECTED** (`github.com/answers-ai/jev` = 404; Jev 1.13.0 = TypeSafe AI's proprietary hosted System One API `POST https://api.typesafe.ai/v1/systemone` via `@typesafe-ai/sdk` v0.6.0) → durable `memory.md` + `docs/laya.md` + `docs/designDoc/ph22-laya-decision-engine-design.md` (proposed provider-agnostic decision engine). **User follow-up**: create a full Jev doc + a Jev-SDK-for-TradeNext integration doc + an HTML visual doc — **DONE** below.
+
+- [x] v3.40.5 research + DURABLE docs — memory.md §2/§3/§4/§5/§6 · NEW `docs/laya.md` · NEW `docs/designDoc/ph22-laya-decision-engine-design.md` — DONE
+- [x] Repo docs — AGENTS.md v3.40.5 row · `versions-v3.40.md` §v3.40.5 · `versions-index.md` row · CHANGELOG index · Lessons **134** (verify vendor/link claims; record primary-source blocks + snippets) · Primer · agent-memory — DONE
+- [x] NEW `docs/jev.md` — full Jev 1.13.0 reference: identity correction, request anatomy + Mermaid, primitives (Choice/Score/Noul + confidence), from-scratch SDK implementation, 4 patterns, production considerations, open questions — DONE
+- [x] NEW `docs/jev-tradenext-integration.md` — how to use the Jev SDK inside TradeNext: provider seam, typesafeProvider code sketch, decision client + failover, confidence gate, POC A (screener rank-fusion) + POC B (Swing gatecheck), audit, tests, rollout/rollback — DONE
+- [x] NEW `docs/jev.html` — visual HTML doc (Mermaid dark theme, styled after `docs/architecture.html`) — DONE
+- [x] Doc-size check after adding 3 docs — PENDING (run `check-doc-sizes.mjs`; confirmed `docs/` NOT in injected set so OK)
+- [x] MD docs agent-optimized per user directive ("html = user readability, .md = agent usage") — `docs/jev.md` (quick-abstract, contract-first, verification ledger, open questions) + `docs/jev-tradenext-integration.md` (ph22 file-layout aligned, permission gates, POC A/B) — DONE
+- [x] **NEW branch `feature/ph22-decision-engine`** created (carries v3.40.5 docs) — spec + plan written: `.agents/specs/16-decision-engine.md` + `.agents/plans/16-decision-engine.md` (engine core, inert default, POC A/B, spike gate, permission gates) — DONE
+- [x] **Wiki**: NEW `Jev-Decision-Model.md` page live (what/why/how + mermaid + SDK toolcalls) + Home.md linked (subsystem table + What's New) — pushed `615ec48` — DONE
+- [ ] **Next (needs human approval)**: review + approve spec `16` + plan `16` before ANY engine code; `npm install @typesafe-ai/sdk` + live `POST /v1/systemone` spike (needs a real key) are sensitive ops requiring explicit user permission
+
+---
+
+## Completed earlier (2026-09-19 — v3.40.3 predeploy mirror-preservation guard; branch `feature/predeploy-mirror-preserve` on `main` @ `27c0770`)
 
 **Task**: guarantee a production deploy during the P6003 plan-limit hold (until 2026-10-02) never cold-starts with an EMPTY SQLite mirror (same served-empty class as v3.40.1). Netlify build-time guard: `node scripts/predeploy/preserve-mirror.mjs` calls the LIVE `POST /api/admin/predeploy/preserve` before the new build serves traffic → snapshot + versioned Blobs backup + SQLite→Prisma drain (breaker-closed only). Spec/plan: `.agents/specs/14-predeploy-mirror-preserve.md` + `.agents/plans/14-predeploy-mirror-preserve.md`. Session: `.agents/sessions/2026-09-19-predeploy-guard/`.
 

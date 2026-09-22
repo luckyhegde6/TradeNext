@@ -15,6 +15,29 @@ tier: B
 > Superseded: the v3.40.2 mirror-contract-fixes handoff (MERGED via PR #129 `38ee7da`, `main` @ `27c0770`).
 > Prior handoffs are recoverable from git history of this file.
 
+## Research addendum (2026-09-22 — v3.40.5, docs-only)
+
+> Topics: Laya / System-One decision-engine RESEARCH (no code). Durable artifacts: `memory.md` +
+> NEW `docs/laya.md` + `docs/designDoc/ph22-laya-decision-engine-design.md`. **Jev premise corrected**:
+> `github.com/answers-ai/jev` = 404 — Jev 1.13.0 is TypeSafe AI's **proprietary hosted** System One API
+> (`POST https://api.typesafe.ai/v1/systemone` + `@typesafe-ai/sdk` v0.6.0). User-requested docs DONE:
+> NEW `docs/jev.md` (full reference + from-scratch impl) · NEW `docs/jev-tradenext-integration.md`
+> (Jev SDK usage for TradeNext + integration) · NEW `docs/jev.html` (visual Mermaid guide). Repo docs
+> updated (AGENTS.md v3.40.5 row, changelogs, Lessons 134, Primer, agent-memory, session-todos).
+> **Next**: ph22 spec + plan + human approval before engine code; `@typesafe-ai/sdk` install and a live
+> `systemOne` spike (real key) are sensitive ops needing explicit permission.
+
+> ## Branch follow-up (2026-09-22 — ph22 spec/plan + wiki, branch `feature/ph22-decision-engine`)
+>
+> Created branch **`feature/ph22-decision-engine`** (carries the uncommitted v3.40.5 docs from `main`).
+> Wrote `.agents/specs/16-decision-engine.md` (full template: scope, routes, functions, files, audit
+> actions, API contract, DoD) + `.agents/plans/16-decision-engine.md` (phased: spikes → core → POC A/B →
+> admin API/UI → tests → docs; permission gates §0; risks; verification). DESIGN ONLY — no code.
+> **Wiki**: NEW `Jev-Decision-Model.md` published (what Jev is, how it works, TradeNext benefit,
+> primitives + confidence-routing + sequence mermaid, SDK toolcalls) + Home.md linked; pushed `615ec48`.
+> **Next**: user review/approval of spec 16 + plan 16; then Phase 0 (Laya spike VERDICT + Jev smoke test
+> with real key — permission-gated).
+
 ## Context
 
 - **Task**: guarantee a production deploy during the **P6003 plan-limit hold (until 2026-10-02)** never

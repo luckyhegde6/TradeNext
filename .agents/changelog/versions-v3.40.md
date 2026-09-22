@@ -258,3 +258,18 @@ No migration; no new packages (Node built-ins + `crypto` only).
 
 **Docs**: this section + `.agents/changelog/versions-index.md` v3.40.4 row; `Primer.md` Last Updated; `agent-memory.md`. No migration, no new packages.
 
+## v3.40.5 - Laya / System-One decision-engine research + durable memory (2026-09-22, docs-only)
+
+**Request**: research Laya (HF convaiinnovations/laya), Jev 1.13.0 (verify "published"), the Medium comparison article, and ALL TypeSafe.AI docs; create a detailed doc + durable `memory.md` (budget-preserving) so future sessions never re-scrape; afterwards build a decision engine from it.
+
+**Execution**: 5 parallel research subagents (foundations, primitives, patterns+demo, JS SDK, Laya/Jev/Medium). Key findings preserved in `memory.md`:
+- **Laya** = Apache-2.0, non-autoregressive "System 1" decision model, RLCD-trained, ~33 ms/pass, 100+ langs, 843 MB safetensors, NEVER generates text.
+- **Jev 1.13.0** premise CORRECTED: `github.com/answers-ai/jev` is a **404** — Jev is TypeSafe's proprietary hosted API (`POST https://api.typesafe.ai/v1/systemone`, model `jev-latest`); NOT an OSS repo.
+- **TypeSafe concepts**: state + atomic questions → typed answers (Choice/Score/Noul) + probabilities + confidence; patterns = speculative fan-out, confidence-gated routing, composite scoring, intent routing; decision logic lives in code.
+- **SDK**: `@typesafe-ai/sdk` v0.6.0 (Breaking: `Score.criteria` = ordered tuple), Node 20+, env `TYPESAFE_API_KEY`/`TYPESAFE_BASE_URL`/`TYPESAFE_DEFAULT_MODEL=jev-latest`.
+- **Medium article** → HTTP 403 (recovered via search snippets only; 403 noted as documented gap).
+
+**New files**: `memory.md` (durable cross-session research reference — NOT an injected instruction file, doc budget unaffected: 75.6/100 KB verified); `docs/laya.md`; `docs/designDoc/ph22-laya-decision-engine-design.md` (research + proposed engine design: provider-agnostic `lib/services/decision/` with Laya local + TypeSafe cloud, confidence-gated routing, POC wiring into screener composite scoring + Swing AI gatecheck; spec→plan required before implementation).
+
+**Verification**: `check-doc-sizes.mjs` OK (75.6/100 KB); no code, no migration, no new packages. Next: spec + plan for the decision-engine build (user-stated intent).
+
