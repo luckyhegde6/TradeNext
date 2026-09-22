@@ -105,6 +105,9 @@ export type AuditAction =
   // Swing Trading Events (v3.11.0 audit wiring)
   | 'SWING_RUN_START'
   | 'SWING_RUN_COMPLETE'
+  // Swing AI auto-seed-once guard (Plan 15)
+  | 'SWING_AUTO_SEED_TRIGGERED'
+  | 'SWING_AUTO_SEED_SKIPPED'
   | 'SWING_RUN_FAILED'
   | 'SWING_ANALYSIS_START'
   | 'SWING_ANALYSIS_COMPLETE'

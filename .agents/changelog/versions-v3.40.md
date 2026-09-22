@@ -242,3 +242,19 @@ Branch `feature/predeploy-mirror-preserve` (on `main` tip `27c0770` = v3.40.2 ME
 **Docs**: `Lessons.md` **132** (JS needs 2-digit ISO days — `new Date("2026-09-1T…")` is Invalid Date → `toISOString()` throws → `createMirrorBackup` silently returns null; use `String(day).padStart(2,"0")` — `dayIso` helper in tests) / **133** (predeploy guard design — build-time self-call order, versioned backups + retention, soft-fail always exit 0); Primer + agent-memory + session-todos + handoff + session `decisions.md`/`flow.md`; corrected stale v3.40.1/v3.40.2 "PENDING USER" rows → MERGED (PRs #128/#129).
 
 No migration; no new packages (Node built-ins + `crypto` only).
+## v3.40.4 - Swing steady-state serve fix (Sep 20 2026)
+
+**Symptom (user-reported)**: On the Swing tab, stored AI targets were served on page load, but AI generation also re-ran on page load instead of only on manual refresh (slow, redundant, cost).
+
+**Root cause**: `SwingTab.tsx` triggered AI target generation on page load rather than serving the stored AI targets; AI should only run on manual refresh.
+
+**Fix**: Serve stored AI targets on page load; AI targets generated ONLY on manual refresh (single-file change: `app/components/recommendations/SwingTab.tsx`).
+
+**Branch**: `feat/pwa-sprint-phase-b-ga4` (1 commit ahead of `origin/main` `d577fb6`; commit `9e7ab89` "fix(swing): serve stored AI targets on page load - AI only on manual refresh").
+
+**Verification**: swing fix committed `9e7ab89`; full test suite + tsc green (prior session, verified). Docs update `docs: update changelog [skip ci]`.
+
+**Files changed**: `app/components/recommendations/SwingTab.tsx` (code); changelog docs (this file + versions-index row).
+
+**Docs**: this section + `.agents/changelog/versions-index.md` v3.40.4 row; `Primer.md` Last Updated; `agent-memory.md`. No migration, no new packages.
+

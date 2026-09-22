@@ -269,7 +269,7 @@ Track F&O positions (Futures + Options), compute P&L, show option Greeks, displa
 
 ---
 
-## Sprint 4: Daily Recommendations Engine (v3.3.0)
+$1 (v3.3.0)
 
 **PRD Reference:** See `.agents/PRD.md` â€” Feature 6
 
@@ -429,3 +429,5 @@ npm run lint
 npx next build
 ```
 
+
+- [ ] Plan 15: Swing AI auto-generate-once (seed-once) — first empty-state trigger runs ONE bounded AI generate; later = audited NO-OP
