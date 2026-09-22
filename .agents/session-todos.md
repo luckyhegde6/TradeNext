@@ -14,6 +14,7 @@
 - [x] **NEW branch `feature/ph22-decision-engine`** created (carries v3.40.5 docs) — spec + plan written: `.agents/specs/16-decision-engine.md` + `.agents/plans/16-decision-engine.md` (engine core, inert default, POC A/B, spike gate, permission gates) — DONE
 - [x] **Wiki**: NEW `Jev-Decision-Model.md` page live (what/why/how + mermaid + SDK toolcalls) + Home.md linked (subsystem table + What's New) — pushed `615ec48` — DONE
 - [ ] **Next (needs human approval)**: review + approve spec `16` + plan `16` before ANY engine code; `npm install @typesafe-ai/sdk` + live `POST /v1/systemone` spike (needs a real key) are sensitive ops requiring explicit user permission
+- [x] **USER DECISION (2026-09-22)**: spec 16 + plan 16 are **POC-scope documentation only — NO implementation** for now. Docs committed (`63bdfac`) on `feature/ph22-decision-engine`; nothing implemented. Engine code stays blocked until user re-opens (approves spec+plan + gives sensitive-op permissions).
 
 ---
 

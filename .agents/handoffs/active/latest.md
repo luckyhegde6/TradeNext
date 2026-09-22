@@ -37,6 +37,11 @@ tier: B
 > primitives + confidence-routing + sequence mermaid, SDK toolcalls) + Home.md linked; pushed `615ec48`.
 > **Next**: user review/approval of spec 16 + plan 16; then Phase 0 (Laya spike VERDICT + Jev smoke test
 > with real key — permission-gated).
+>
+> **USER DECISION (2026-09-22, after review)**: spec 16 + plan 16 = **POC-scope docs only — NO
+> implementation**. Docs committed `63bdfac` on `feature/ph22-decision-engine`; engine code stays BLOCKED
+> until user re-opens it (spec+plan approval + sensitive-op permission for SDK install / API key / smoke
+> test).
 
 ## Context
 
