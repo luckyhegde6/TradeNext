@@ -1,7 +1,8 @@
 # Laya — Local System 1 Decision Model
 
 > **Source of truth**: HuggingFace model card — https://huggingface.co/convaiinnovations/laya
-> **License**: Apache-2.0 · **Status**: actively published (research snapshot 2026-09-22)
+> **Source code**: https://github.com/NandhaKishorM/laya (canonical repo, v0.3.6, main `c7527708` — Python inference runtime; the NN model class lives on HF)
+> **License**: Apache-2.0 · **Status**: actively published (research snapshot 2026-09-22, code-level extraction 2026-09-23)
 
 Laya is a **multilingual, non-autoregressive "System 1 decision model"** — it makes calibrated, machine-native decisions and **never generates text**. It is positioned as the free, local, Apache-2.0 alternative to TypeSafe AI's hosted **Jev** model (see `docs/designDoc/ph22-laya-decision-engine-design.md` for the full TypeSafe/Jev/SDK context).
 
@@ -67,6 +68,27 @@ Candidate integration: a server-side decision layer (`lib/services/decision/…`
 Follows the same pattern vocabulary as TypeSafe (fan-out, confidence-gating, composite scoring) but runs **in-process, free, offline**.
 
 > ⚠️ **Open spike**: local inference path in Node.js (transformers.js / ONNX runtime / Python sidecar) is **unverified** — see open questions in `memory.md` §6 and the design doc §7. This must be prototyped before committing to the integration.
+
+---
+
+## 5b. Code-level extraction (2026-09-23)
+
+The canonical repo (`NandhaKishorM/laya`, v0.3.6) is the **inference/decode layer**, not the model. Concretely:
+
+| Layer | What it is | Python → JS port |
+|---|---|---|
+| `common.py` | prompt construction (`build_sequence`), `DecisionModel` head, decode math (`confidence_from_probs`, `temp_bucket`, `clamp_temperature`, `ece_score`) | **pure TS 1:1** (deterministic parity) |
+| `agent.py` | `system_one()` answer shaping (choice/score/noul), temperature application, load/verify weights | **pure TS 1:1** |
+| `router.py` / `lang.py` / `shortlist.py` / `presets.py` / `email.py` | checkpoint routing, language/script detection, shortlist reduction, question presets | **pure TS 1:1** |
+| `model.safetensors` + `tokenizer/*` + `rl_agent_config.json` | encoder + small decision head; tokenizer; config | ONNX export + `onnxruntime-node`; tokenizer via same `tokenizer.json` on WASM |
+
+**Only two Python-runtime dependencies**: the tokenizer (same `tokenizer.json` on the WASM runtime reproduces identical IDs) and the backbone (`DecisionModel` exported to a single ONNX graph from PyTorch — the same export path `mizorewww/laya-coreml` validated with 189/189 answer parity).
+
+**Fork/impl warnings**:
+- `aayushch/laya` is **NOT a fork** — unrelated "AI notification command center" (Tauri+Svelte+FastAPI+n8n). Ignore for decision-engine purposes.
+- `mizorewww/laya-coreml` / `laya-mlx` are real Apple-only ports of the decision model (~5 ms on M3 Max ANE) — the fidelity methodology to copy, not the runtime.
+
+Full port plan with per-algorithm reproduction specs: **`docs/designDoc/ph22-laya-js-extraction-plan.md`**.
 
 ---
 

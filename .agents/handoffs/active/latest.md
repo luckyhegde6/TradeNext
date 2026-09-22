@@ -43,6 +43,41 @@ tier: B
 > until user re-opens it (spec+plan approval + sensitive-op permission for SDK install / API key / smoke
 > test).
 
+> ## Branch follow-up (2026-09-23 — Laya → JS code-extraction plan, branch `feature/ph22-decision-engine`)
+>
+> User directive: "mainly focus on the https://github.com/NandhaKishorM/laya its code extraction to js."
+> **Fetched the entire canonical repo source** (`NandhaKishorM/laya` v0.3.6, main `c7527708`) — module by
+> module (`common.py`, `agent.py`, `router.py`, `lang.py`, `shortlist.py`, `presets.py`, `__init__.py`,
+> `pyproject.toml`). Finding: the repo is the **inference/decode layer** (no `modeling_laya.py`; the NN lives
+> on HF) → **~84% pure-Python logic ports 1:1 to TS**; only 2 Python-runtime deps: the tokenizer (same
+> `tokenizer.json` via WASM `@huggingface/tokenizers` = exact ID parity) and the `DecisionModel` backbone
+> (whole-model ONNX export → `onnxruntime-node`; path proven by `mizorewww/laya-coreml` 189/189 parity).
+> **Deliverables DONE (docs only)**: NEW `docs/designDoc/ph22-laya-js-extraction-plan.md` (per-algorithm
+> port specs: `build_sequence`, `forward`, `system_one` decode, router precedence, `lang.py` tables,
+> shortlist; P0–P6 phased plan with fidelity gates; risks) + `docs/laya.md` §5b code-level extraction +
+> `memory.md` §1 code-extraction map + sources table + open-question #7 ANSWERED at research level.
+> **Fork caveat recorded**: `aayushch/laya` = unrelated notification app (name collision, NOT a fork).
+> **Next**: user review of the plan; P0 spike (`scripts/laya-spike/`: ONNX export + onnxruntime-node
+> smoke + RSS/latency on target host) is the BLOCKING gate before ANY `lib/services/laya/` code — and
+> remains permission-gated (model downloads + export toolchain = sensitive ops).
+
+> ## Branch follow-up (2026-09-23 — WIKI: Laya-based decision engine pages, pushed `51c0db6`)
+>
+> User directive: "jev is just a doc only, but want the implementation based of the laya and create a
+> whole guide, the porting guide what reference what and how you did it and what all were there everything
+> into wiki and add the reference of the https://github.com/NandhaKishorM/laya on the wiki as well and also
+> add the architecture of the decision engine and how will help in taking decision for the new daily
+> recommendation engine, swing and ipo analysis, stock ai analysis and for watchlist as well."
+> **WIKI DONE + pushed `51c0db6`** (16 pages): NEW `Decision-Engine.md` (Laya-based architecture:
+> client → layaProvider → confidence → ACT/REVIEW/ESCALATE; primitives table; state machine; 5 surfaces —
+> daily recommendation engine (pre-rank + post-validate), Swing auto-generate (Noul validity gate),
+> IPO analysis (subscription/GMP checks + report sanity), stock AI analysis (instant regime/sentiment),
+> watchlist & alerts (Noul anomaly gates)) + NEW `Laya-Porting-Guide.md` (upstream repo reference +
+> module-by-module Python→TS map "what references what", tokenizer WASM + ONNX backbone, 4 parity
+> surfaces, P0–P6 phases, risks, sources) + Home.md table + What's New; Jev page demoted to **docs-only
+> reference** (cross-linked to the new pages). **Implementation now re-opened by user (Laya-based)** — still
+> blocked behind spec 16 + plan 16 approval + P0 spike (sensitive ops: model download + ONNX toolchain).
+
 ## Context
 
 - **Task**: guarantee a production deploy during the **P6003 plan-limit hold (until 2026-10-02)** never
