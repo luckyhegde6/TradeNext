@@ -1,5 +1,9 @@
 # Session Todos
 
+## Current (2026-09-23 — v3.40.8 P0 Laya spike COMPLETE)
+- [x] P0 spike: scaffold scripts/spike-laya/ · npm i onnxruntime-node · ~503MB int8 download · chained smoke — DONE, VERDICT APPROVE (chain 2316ms, RSS 611MB)
+- [ ] NEXT (user approval): engine core P1–P6 (lib/services/laya/) · commit scaffold · push · PR
+
 ## Current (2026-09-22 — v3.40.5 Laya / System-One RESEARCH done + Jev docs + ph22 spec/plan on branch `feature/ph22-decision-engine`)
 
 **Task**: research-only (no code): 5 parallel subagents scraped Laya HF card + TypeSafe.JS docs + Medium → **Jev premise CORRECTED** (`github.com/answers-ai/jev` = 404; Jev 1.13.0 = TypeSafe AI's proprietary hosted System One API `POST https://api.typesafe.ai/v1/systemone` via `@typesafe-ai/sdk` v0.6.0) → durable `memory.md` + `docs/laya.md` + `docs/designDoc/ph22-laya-decision-engine-design.md` (proposed provider-agnostic decision engine). **User follow-up**: create a full Jev doc + a Jev-SDK-for-TradeNext integration doc + an HTML visual doc — **DONE** below.

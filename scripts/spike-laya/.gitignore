@@ -1,0 +1,4 @@
+# Spike Laya — downloads & results (never commit — ~503MB int8 weights)
+weights/
+smoke-results.json
+node_modules/

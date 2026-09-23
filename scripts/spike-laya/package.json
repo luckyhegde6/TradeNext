@@ -1,0 +1,14 @@
+{
+  "name": "spike-laya",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "download": "node download.mjs",
+    "smoke": "node smoke.mjs",
+    "spike": "node download.mjs && node smoke.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-node": "1.30.0"
+  }
+}

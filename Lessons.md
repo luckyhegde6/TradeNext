@@ -1769,3 +1769,5 @@ The `store` variable lives INSIDE the `jest.mock` factory closure (Lesson 72 —
 - 2026-03-16: Added middleware rules (main 502 cause discovered)
 - 2026-03-16: Initial rules added based on Netlify 502 fix
 
+
+- 2026-09-23 — HF ONNX repos: graphs often use EXTERNAL .onnx.data siblings and SPLIT encoder/head graphs — preserve repo layout on download (flattening breaks ORT relative paths) and probe inputMetadata at runtime instead of guessing dtypes (head attention_mask=bool vs encoder int64; qtype is 1-D).

@@ -481,3 +481,5 @@ The pre-commit hook is also installed at `.git/hooks/pre-commit`:
 
 
 `n- 2026-09-20 (v3.40.4 **Swing steady-state serve fix**: serve stored AI targets on page load; AI runs only on manual refresh. Branch feat/pwa-sprint-phase-b-ga4; commit 9e7ab89. Docs: versions-v3.40.md + versions-index.md + Primer Last Updated + this log updated; push pending user).
+
+- 2026-09-23 — **v3.40.8**: P0 Laya spike scaffold + install + download + chained encoder→head smoke PASSED, VERDICT APPROVE onnxruntime-node (SPLIT graphs, chain 2316ms @ seq=128, RSS 611MB). IO contract mapped. Next: engine P1–P6 (user approval).

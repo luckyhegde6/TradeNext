@@ -312,3 +312,5 @@ The app CANNOT work without a valid PostgreSQL database URL.
 
 
 | Plan 15 | `feat/pwa-sprint-phase-b-ga4` | Swing AI auto-generate-once (seed-once) � first empty-state/watchlist-add trigger runs ONE bounded AI generate + persists targets; later triggers = audited process-level NO-OP | v3.40.4 | In progress |
+
+- 2026-09-23 — v3.40.8: P0 spike DONE, VERDICT APPROVE onnxruntime-node; engine P1–P6 next (needs user approval); see `.agents/handoffs/active/latest.md`.

@@ -293,3 +293,7 @@ No migration; no new packages (Node built-ins + `crypto` only).
 
 **Next (PENDING USER)**: (1) approve commit of the repo-side docs on `feature/ph22-decision-engine`; (2) approve spec 16 + plan 16 and the **P0 spike** (`scripts/laya-spike/`: ONNX export + onnxruntime-node smoke + RSS/latency → `VERDICT.md`) — model download (~843MB) + ONNX export toolchain are **sensitive ops needing explicit permission**; P1 pure-TS ports (decode math, router, lang, shortlist, presets) do NOT need weights.
 
+
+### v3.40.8 (2026-09-23) — P0 Laya runtime spike COMPLETE
+- `scripts/spike-laya/`: download.mjs (subdir-preserving, .onnx+.onnx.data+tokenizer), smoke.mjs (chained encoder→head, runtime IO discovery), VERDICT.md APPROVE, smoke-results.json.
+- Findings: prebuilt repo = SPLIT encoder+head (not whole-model); graphs use external .onnx.data; IO contract mapped (2048-dim?, head attention_mask bool, qtype 1-D, K>=2, act_logits conditional); chain 2316ms @ seq=128; RSS 54.5→611MB.
