@@ -15,6 +15,14 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-24 | v3.41.0 — Spec 16 Decision Engine core + POC A/B (Laya-only)
+
+**Request**: user approved spec/plan 16 "Build engine core + POC A/B" (no SDK, no live smoke — P6003 plan-limit hold).
+
+**Execution**: `lib/services/decision/` engine core (types/provider/gate/layaProvider/client/fusion; `DECISION_PROVIDER=none|laya`, unknown→warn+coerce none — D8; confidence-gated ACT/REVIEW via `shapeConfidence`; retry ≤3; inert evaluate → null) · audit `DECISION_EVALUATED` + `DECISION_GATE` only · POC A screener scoring + POC B Swing `gateAutoGenerate` (`DECISION_POC_ENABLED`-gated, off = byte-identical) · `POST /api/decision/evaluate` + `GET /api/admin/decision/ping` + OpenAPI (tag 'Decision Engine', header "v3.41.0, spec 16") + `/admin/decision` panel + nav · `typesafeProvider.ts` deleted (Jev docs-only) · `check-tsc-baseline` harness ENOENT fix (Lesson 135: `makeHarness()` stub tsconfig) · 7 NEW test files + harness test update.
+
+**Verification**: `tsc` **46 = exact baseline** (0 decision-file errors) · lint **0** · `npm run test` **107/107 suites (1401 pass / 4 skip / 0 fail)** · quickbuild **188/188**. Docs pass done (AGENTS.md v3.41.0 row + pointer, CHANGELOG index, versions-index, NEW versions-v3.41.md, TODO.md, session-todos, Primer, Lessons 135 + Update Log, handoff latest.md, session flow/decisions). **Commit as v3.41.0 pending user approval (no push/PR).**
+
 ### 2026-09-22 | v3.40.5 — Laya / System-One decision-engine RESEARCH (docs-only, DONE)
 - **Request**: research Laya (HF `convaiinnovations/laya`), Jev 1.13.0 (verify "published"), the Medium comparison article, and ALL TypeSafe.AI docs; create a detailed doc + durable `memory.md` (budget-preserving) so future sessions never re-scrape; afterwards build a decision engine from it. Session: docs-only (no spec/plan — research phase precedes the build).
 - **Execution**: 5 parallel research subagents (foundations, primitives, patterns+demo, JS SDK, Laya/Jev/Medium). Findings collapsed into **`memory.md`** (durable cross-session reference — NOT an injected instruction file; `check-doc-sizes.mjs` verified 75.6/100 KB injected).

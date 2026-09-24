@@ -1,8 +1,12 @@
 # Session Todos
 
-## Current (2026-09-23 — v3.40.8 P0 Laya spike COMPLETE)
-- [x] P0 spike: scaffold scripts/spike-laya/ · npm i onnxruntime-node · ~503MB int8 download · chained smoke — DONE, VERDICT APPROVE (chain 2316ms, RSS 611MB)
-- [ ] NEXT (user approval): engine core P1–P6 (lib/services/laya/) · commit scaffold · push · PR
+## Current (2026-09-24 — v3.41.0 Decision Engine core + POC A/B DONE)
+- [x] Spec 16 engine core: `lib/services/decision/` Laya-only mock (types/provider/gate/layaProvider/client/fusion), `DECISION_PROVIDER=none|laya` (unknown → coerce none), confidence-gated ACT/REVIEW (`shapeConfidence`), retry ≤3, inert evaluate — DONE
+- [x] Audit tags `DECISION_EVALUATED` + `DECISION_GATE`; POC A screener scoring + POC B Swing `gateAutoGenerate` (`DECISION_POC_ENABLED`-gated, off = byte-identical); `typesafeProvider.ts` DELETED (Jev docs-only) — DONE
+- [x] Routes `POST /api/decision/evaluate` + `GET /api/admin/decision/ping` + OpenAPI + admin panel + nav; `check-tsc-baseline` harness ENOENT fix (Lesson 135) — DONE
+- [x] Verified: `tsc` 46 exact baseline · lint 0 · tests **107/107 (1401 pass / 4 skip / 0 fail)** · quickbuild **188/188** — DONE
+- [x] Docs pass v3.41.0 (AGENTS, CHANGELOG, versions-index, NEW versions-v3.41.md, TODO, Primer, agent-memory, Lessons 135, handoff, session files) — DONE
+- [ ] NEXT (user approval): commit as **v3.41.0** (no push/PR) · then P1–P3 real Laya inference behind parity gate (laya-mock default)
 
 ## Current (2026-09-22 — v3.40.5 Laya / System-One RESEARCH done + Jev docs + ph22 spec/plan on branch `feature/ph22-decision-engine`)
 

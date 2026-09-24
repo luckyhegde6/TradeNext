@@ -123,7 +123,10 @@ export type AuditAction =
   | 'INTELLIGENCE_GENERATED'
   | 'INTELLIGENCE_CACHE_HIT'
   | 'INTELLIGENCE_FAILED'
-  | 'INTELLIGENCE_UNAUTHORIZED';
+  | 'INTELLIGENCE_UNAUTHORIZED'
+  // Decision Engine Events (ph22 — Laya/System-One confidence-gated routing)
+  | 'DECISION_EVALUATED'
+  | 'DECISION_GATE';
 
 interface AuditLogParams {
   userId?: number;

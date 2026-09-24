@@ -5,6 +5,7 @@
 > **Agentic operating model:** `.agents/RULES.md` (must-read on first session) + `.agents/SOUL.md` (identity). Full history & legacy docs live in `.agents/CHANGELOG.md`.
 
 ## Version History
+| v3.41.0 | 2026-09-24 | Spec 16 Decision Engine CORE (user-approved "engine core + POC A/B") — lib/services/decision/ Laya-only mock engine (types/provider/gate/layaProvider/client/fusion; DECISION_PROVIDER=none\|laya, unknown→warn+coerce none; confidence-gated ACT/REVIEW shapeConfidence) + DECISION_EVALUATED/DECISION_GATE audit tags + POC A screener scoring + POC B swing gateAutoGenerate (flag-gated, off = byte-identical) + /api/decision/evaluate + /api/admin/decision/ping + OpenAPI + admin panel + check-tsc-baseline harness ENOENT fix (Lesson 135). typesafeProvider.ts deleted (Jev docs-only). Verified: tsc 46 exact, lint 0, tests 107/107 (1401 pass/4 skip/0 fail), quickbuild 188/188. Commit pending user approval (no push/PR) |
 | v3.40.8 | 2026-09-23 | P0 Laya runtime spike COMPLETE — scripts/spike-laya/ scaffold + onnxruntime-node install + ~503MB int8 weights + chained encoder→head smoke; VERDICT APPROVE (SPLIT graphs, chain median 2316ms, RSS 611MB); engine P1–P6 next (user approval pending) |;
 | v3.40.5 | 2026-09-22 | Laya / System-One decision-engine RESEARCH — 5 parallel subagents scraped Laya HF card + TypeSafe.JS docs + Medium; Jev-1.13.0 premise corrected (not OSS; hosted API) → `memory.md` + `docs/laya.md` + `docs/designDoc/ph22-laya-decision-engine-design.md` (docs-only, no code) |;
 | v3.40.4 | 2026-09-21 | Plan 15: Swing AI auto-generate-once (seed-once) — greenfield lib/services/swingAutoSeedService.ts + SWING_AUTO_SEED_TRIGGERED/SKIPPED audit tags + route autoTriggerOnce wiring |;
@@ -12,7 +13,7 @@
 > The full compact version history (v1.0.0 → latest) moved to **`.agents/changelog/versions-index.md`**
 > and is no longer auto-injected into every session (context optimisation). Read it on demand.
 >
-> - Latest version detail: `.agents/changelog/versions-v3.40.md`
+> - Latest version detail: `.agents/changelog/versions-v3.41.md`
 > - Full changelog index: `.agents/CHANGELOG.md`
 > - Topic → file manifest: `.agents/INDEX.md`
 

@@ -76,6 +76,14 @@ function makeHarness(options: {
   const script = path.join(scriptDir, "check-tsc-baseline.mjs");
   copyFileSync(SCRIPT, script);
 
+  // v3.40.7's `buildGateTsconfig()` reads `<ROOT>/tsconfig.json` — mirror the repo layout by
+  // providing a stub at the throwaway ROOT so the copied script does not crash with ENOENT.
+  writeFileSync(
+    path.join(dir, "tsconfig.json"),
+    JSON.stringify({ include: ["**/*.ts"], exclude: [] }),
+    "utf8"
+  );
+
   const baselinePath = path.join(scriptDir, "tsc-baseline.json");
   if (options.baseline !== null) {
     const baseline = options.baseline ?? { total: 2, prod: 1 };
