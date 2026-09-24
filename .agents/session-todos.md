@@ -1,14 +1,26 @@
 # Session Todos
 
-## Current (2026-09-24 — v3.41.1 Spec 17 Decision Engine monitoring + e2e hardening DONE, commit pending)
+## Current (2026-09-25 — v3.41.2 Spec 01 Recommendations plan-limit fallbacks DONE, commit pending)
+- [x] `v3.41.1` COMMITTED as `a269057` (branch `feature/ph22-decision-engine`, on top of `ab6fd65` v3.41.0 committed); no push/PR yet — v3.41.2 builds on it
+- [x] NEW `lib/sqlite.ts getRecommendationRuns()` — mirror query: camelCase rows, newest-first, `unique_stocks > 0`, status filter, limit clamp 1..2000 default 200 — DONE
+- [x] `app/api/recommendations/top-stocks/route.ts` `topStocksFromSqlite()` fallback (mirror read → serialize → 1 h cache; Prisma `$queryRaw` branch kept, run-status filter) — DONE
+- [x] `lib/services/recommendationPerformanceService.ts` NEW `listItemFromMirrorTracker`/`getPerformanceListFromSqlite` (JS status filter, timerange) + try/catch-wrapped Prisma branch (only `isDbUnavailableError` falls to mirror) — DONE
+- [x] `lib/services/syncedDataService.ts` steps 2+3: breaker/hold-aware `mirrorWriteThrough` + `mirrorReadMarketCache` (`isPlanLimitBreakerOpen()` + `getDbHealthState` + DateTime-safe cache key) — DONE
+- [x] HistoryTab error state (Phase 5): `error` card + Retry rendered BEFORE empty-state list (was masked-500-as-empty-state) — DONE
+- [x] NEW `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` **21/21** + `sqliteMirror.test.ts` 11/11 — DONE
+- [x] Verified (Phase 6): `tsc` **46 exact (0 new)** · lint 0 · **109/109 (1440 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · e2e **recommendations.spec.ts 10/10** (live dev server, user-approved) — DONE
+- [x] Docs pass (Phase 7): AGENTS.md v3.41.2 row · `versions-v3.41.md` §v3.41.2 · CHANGELOG index · TODO · Primer · agent-memory · Lessons 138 · handoff latest.md · session memory decisions/flow — DONE
+- [ ] NEXT (user approval): commit as **v3.41.2** (no push/PR) — then push + PR carries v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2; then P1–P3 real Laya inference behind parity gate (laya-mock default)
+
+## Prior (2026-09-24 — v3.41.1 Spec 17 Decision Engine monitoring + e2e hardening COMMITTED `a269057`, no push/PR)
 - [x] `v3.41.0` COMMITTED as `ab6fd65` (branch `feature/ph22-decision-engine`, on top of `2909b22` v3.40.8 spike); no push/PR yet — v3.41.1 builds on it
 - [x] Spec 17 monitoring core: NEW `lib/services/decision/monitoring.ts` — zero-Prisma in-memory ring buffer max 500 (`DECISION_TRACE_MAX`) + stats aggregation (`buildDecisionStats`: total/successRate/avgLatencyMs/avgAttempts + kind/provider/gate-severity breakdowns) + `clearDecisionTraces`; wired into client `evaluate`/`ping` + POC A screener + POC B swing `gateAutoGenerate` (`DECISION_TRACE_ENABLED`-gated, off = byte-identical) — DONE
 - [x] Route + UI: `GET/DELETE /api/admin/decision/monitoring` (stats|traces; DELETE → `DECISION_MONITORING_CLEARED` audit) + OpenAPI + Decision Engine tab in AI Monitoring (6 stat cards, breakdowns, trace rows, Clear) — DONE
 - [x] e2e hardening: NEW `e2e/decision-monitoring.spec.ts` — **env-only creds** (no literals, test.skip when unset), serial, resilient `loginAsAdmin()` (3 attempts, 12 s URL probe / 45 s last, reload → session re-check → re-submit; **first WebKit login in the suite — Lesson 136**) + `pingAdmin()` inline retry + strict `.last()` on duplicated labels — DONE
 - [x] Verified: `tsc` **46 exact baseline** · lint 0 · tests **108/108 (1416 pass / 4 skip / 0 fail)** · quickbuild ✓ · full e2e — DONE
 - [x] Auth-gate hardening (**Lesson 137**): root-caused interleaved full-suite auth flake = Auth.js **double-submit CSRF race** (2 concurrent no-cookie session GETs mint tokens A+B, jar keeps B, signIn csrf GET returns A → MissingCSRF → "Invalid email or password" on correct creds) via Playwright trace + jar state; config retries can't fix (fresh context re-rolls race) → in-context 2-attempt resubmit loop in `e2e/auth.setup.ts` + `e2e/login.spec.ts`; verified ×3 targeted 4/4 each + full headed (84/1 failed Contact-chromium nav flake/3 flaky/1 did-not-run) + full headless (user-selected) **86 passed / 1 failed (pre-existing News-webkit nav flake) / 2 did-not-run (serial skips)** — **auth gate green in every run** — DONE
-- [x] Docs pass (Lesson 137 + final verification): `Lessons.md` Lesson 137 · AGENTS.md v3.41.1 row · `versions-v3.41.md` Auth-gate hardening section + status · CHANGELOG index · handoff latest.md · this file — DONE
-- [ ] NEXT (user approval): commit as **v3.41.1** (no push/PR) — then push + PR together with v3.41.0; then P1–P3 real Laya inference behind parity gate (laya-mock default)
+- [x] Docs pass (Lesson 137 + final verification): `Lessons.md` Lesson 137 · AGENTS.md v3.41.1 row · `versions-v3.41.md` Auth-gate hardening section + status (COMMITTED `a269057`) · CHANGELOG index · handoff latest.md · this file — DONE
+- [x] COMMITTED as **v3.41.1** `a269057` (no push/PR) — superseded by v3.41.2 (above); push + PR will carry v3.41.0 + v3.41.1 + v3.41.2 together
 
 ## Current (2026-09-22 — v3.40.5 Laya / System-One RESEARCH done + Jev docs + ph22 spec/plan on branch `feature/ph22-decision-engine`)
 

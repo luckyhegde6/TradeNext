@@ -325,3 +325,83 @@ describe("durable mirror snapshot (golden, real sql.js)", () => {
     ).toBe(false);
   });
 });
+
+describe("getRecommendationRuns (Spec 01 — History fallback read)", () => {
+  let tmpRoot: string;
+  let mirrorFile: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tn-sqlite-runs-"));
+    mirrorFile = path.join(tmpRoot, "sqlite-mirror.sqlite");
+    resetSqliteStateForTests();
+    setMirrorSnapshotPathForTests(mirrorFile);
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = new FakeBlobsStore();
+  });
+
+  afterEach(() => {
+    resetSqliteStateForTests();
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  });
+
+  async function boot(): Promise<void> {
+    await ensureSqliteBackup();
+    await nextTick();
+  }
+
+  it("returns runs newest-first with camelCase rehydration, excluding empty + non-listed runs", async () => {
+    await boot();
+    const fb = getSqliteFallback();
+    fb?.upsertDailyRecommendationRun({
+      id: "run-1", runDate: "2026-09-20T04:30:00.000Z", status: "completed",
+      totalStocks: 5, uniqueStocks: 3, aiProcessed: 3, aiFailed: 0,
+    });
+    // Empty run (unique_stocks 0) — must be excluded, mirroring r."uniqueStocks" > 0.
+    fb?.upsertDailyRecommendationRun({
+      id: "run-2", runDate: "2026-09-21T04:30:00.000Z", status: "failed",
+      totalStocks: 5, uniqueStocks: 0,
+    });
+    fb?.upsertDailyRecommendationRun({
+      id: "run-3", runDate: "2026-09-22T04:30:00.000Z", status: "completed",
+      totalStocks: 2, uniqueStocks: 2,
+    });
+    // Live run — excluded when the caller restricts to completed/failed.
+    fb?.upsertDailyRecommendationRun({
+      id: "run-4", runDate: "2026-09-23T04:30:00.000Z", status: "running",
+      totalStocks: 4, uniqueStocks: 4,
+    });
+
+    const runs = fb?.getRecommendationRuns({ status: ["completed", "failed"], limit: 10 }) ?? [];
+    expect(runs.map((r) => (r as Record<string, unknown>).id)).toEqual(["run-3", "run-1"]);
+
+    const r3 = runs[0] as Record<string, unknown>;
+    expect(r3.runDate).toBeInstanceOf(Date);
+    expect((r3.runDate as Date).toISOString()).toBe("2026-09-22T04:30:00.000Z");
+    expect(r3.uniqueStocks).toBe(2);
+    expect(r3.status).toBe("completed");
+  });
+
+  it("respects the limit bound (newest first)", async () => {
+    await boot();
+    const fb = getSqliteFallback();
+    fb?.upsertDailyRecommendationRun({
+      id: "r1", runDate: "2026-09-20T04:30:00.000Z", status: "completed", uniqueStocks: 1,
+    });
+    fb?.upsertDailyRecommendationRun({
+      id: "r2", runDate: "2026-09-21T04:30:00.000Z", status: "completed", uniqueStocks: 1,
+    });
+
+    expect(fb?.getRecommendationRuns({ limit: 1 }).map((r) => (r as Record<string, unknown>).id)).toEqual(["r2"]);
+    expect(fb?.getRecommendationRuns({ limit: 50 }).map((r) => (r as Record<string, unknown>).id)).toEqual(["r2", "r1"]);
+  });
+
+  it("never throws and returns null fallback when the mirror is unavailable", () => {
+    resetSqliteStateForTests();
+    // Uninitialized layer → getSqliteFallback() is null; callers treat null as
+    // "mirror not ready" and rethrow the original upstream failure.
+    expect(getSqliteFallback()).toBeNull();
+  });
+});

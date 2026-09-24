@@ -1,31 +1,36 @@
-# v3.41.1 handoff — Decision Engine monitoring + e2e hardening (Spec 17) DONE, commit pending approval
+# v3.41.2 handoff — Recommendations plan-limit fallbacks (Spec 01) + HistoryTab error state, commit pending approval
 
-> **Branch**: `feature/ph22-decision-engine` (HEAD `ab6fd65` = v3.41.0 COMMITTED — engine core + POC A/B; parent `2909b22` = v3.40.8 spike VERDICT APPROVE). **CODE + TESTS + VERIFICATION + DOCS DONE — NEXT = user approves `git commit` as v3.41.1 (no push, no PR). v3.41.0 is committed but NOT pushed — push/PR after this commit carries both.**
-> **Read next**: `.agents/changelog/versions-v3.41.md` + `.agents/sessions/2026-09-23-decision-engine/{flow.md, decisions.md}` + `scripts/spike-laya/VERDICT.md` + `Lessons.md` 135/136/137
+> **Branch**: `feature/ph22-decision-engine` (HEAD `a269057` = v3.41.1 COMMITTED — monitoring + auth-gate hardening; parent `ab6fd65` = v3.41.0 COMMITTED — engine core + POC A/B; grandparent `2909b22` = v3.40.8 spike VERDICT APPROVE). **CODE + TESTS + VERIFICATION + DOCS DONE — NEXT = user approves `git commit` as v3.41.2 (no push, no PR). v3.41.0 + v3.41.1 are committed but NOT pushed — push/PR after this commit carries all three.**
+> **Read next**: `.agents/changelog/versions-v3.41.md` §v3.41.2 + `.agents/sessions/2026-09-25-recs-plan-limit-fallbacks/{flow.md, decisions.md}` + `Lessons.md` 138 + `Lessons.md` 136/137
 
-## Status (v3.41.1 — spec 17, DECISION_TRACE_ENABLED-gated monitoring; off = byte-identical)
-- NEW `lib/services/decision/monitoring.ts`: **zero-Prisma** in-memory ring buffer max 500 (`DECISION_TRACE_MAX`), globalThis `__decisionTraces`, burst-safe snapshot; `buildDecisionStats()` pure aggregation (total / successRate / avgLatencyMs / avgAttempts / questionsEvaluated / gatesEmitted + kind · provider · gate-severity breakdowns); `clearDecisionTraces()`.
-- Instrumented client `evaluate` + `ping`, POC A `runChartinkUnifiedScreeners()` (chartinkUnifiedScreenerService.ts), POC B Swing `gateAutoGenerate()` (swingAutoSeedService.ts) — all `DECISION_TRACE_ENABLED === "true"` gated, off = byte-identical.
-- Route: `GET/DELETE /api/admin/decision/monitoring` (`?view=stats|traces`, admin-gated, `runtime="nodejs"`); DELETE → `DECISION_MONITORING_CLEARED` audit. OpenAPI tag 'Decision Engine' (header v3.41.1).
-- UI: **Decision Engine tab** in `app/admin/utils/ai-monitoring/page.tsx` — 6 stat cards, breakdowns (kind/provider/gate-severity), 10 trace rows (time/source/provider/status/latency/attempts/details), Clear; loading/error/empty/absent states; dark-mode OK.
-- e2e: NEW `e2e/decision-monitoring.spec.ts` — **env-only creds** (`E2E_ADMIN_EMAIL/PASSWORD || ADMIN_EMAIL/PASSWORD`, `test.skip` when unset — user directive, no literals), serial, resilient `loginAsAdmin()` (**first WebKit login in the suite — LESSON 136**: server-side signIn 302+Set-Cookie never completes client-side under single-threaded dev-server load; dev-server.log still showed `Auth: Login successful userId=1`; fix = 3 attempts + 12 s URL probe / 45 s last + reload → session re-check → re-submit) + `pingAdmin()` one inline retry on ECONNRESET + strict `.last()` on duplicated "Success Rate"/"Avg Latency" labels (AI grid renders the same labels) + mobile `getByText(/\d+ms/)`.
-- Tests: NEW `lib/__tests__/decisionMonitoring.test.ts` **15/15** (ring cap 500, snapshot decoupling, off gating, breakdowns, clear).
+## Status (v3.41.2 — spec 01, P6003 plan-limit-hold fallbacks; zero Prisma ops in fallback branches)
+- NEW `lib/sqlite.ts getRecommendationRuns(opts)` — mirror query: camelCase rows (`id`, `generatedAt` Date, `source`, `status`, `uniqueStocks`), newest-first, `unique_stocks > 0`, status filter, limit clamp 1..2000 (default 200). Zero Prisma.
+- `app/api/recommendations/top-stocks/route.ts` — NEW `topStocksFromSqlite()` fallback: `getSqliteFallback()` → `getRecommendationRuns()` → `getRecommendationStocks()` → serializer (same result shape + `source: "sqlite_mirror_degraded"`), 1 h cache via `getWithCache` (fresh key); Prisma `$queryRaw` branch KEPT (run-status filter); mirror-exhausted/not-ready → RETHROW original 500.
+- `lib/services/recommendationPerformanceService.ts` — NEW `listItemFromMirrorTracker()` + `getPerformanceListFromSqlite()` (JS-side status filter mirroring SQL semantics — the mock mirror's tracker getter returns rows independent of SQL args, Lesson 138), timerange-aware; Prisma branch wrapped → only `isDbUnavailableError` (message/code-based → P6003 "hold on your account") falls to mirror; non-hold errors propagate.
+- `lib/services/syncedDataService.ts` — steps 2+3 rewritten breaker/hold-aware: `mirrorWriteThrough` (write mirror EXCEPT when breaker open/plan-limit hold — mirror-only writes) + `mirrorReadMarketCache` (breaker open/hold → mirror read with DateTime-safe cache key; rethrows original when mirror not ready). Prisma happy path byte-identical.
+- **HistoryTab (Phase 5, `app/components/recommendations/HistoryTab.tsx`)** — NEW `error` state (reset per fetch, set on `data.success === false` OR fetch throw → `"Failed to load recommendations history"`); error card (title + message + Retry) rendered BEFORE the empty-state list even if stale rows exist (same pattern as PerformanceTab). This was the **masked-500-as-empty-state** — a failed fetch previously rendered the silent "no recommendations yet" empty state.
+- No migration, no packages, no env, no OpenAPI change (no new routes).
 
-## Verification (2026-09-24)
-- `npx tsc --noEmit`: **46 = exact baseline** (0 decision-file errors; all 46 = legacy `*.test.ts(x)` matcher noise).
-- `npm run lint`: **0 errors**.
-- `npm run test`: **108/108 suites, 1416 pass, 4 skip, 0 fail**.
-- `npm run quickbuild`: **Compiled successfully** (189/189 page baseline unchanged �?" new work is test-only).
-- `npm run test:e2e` after auth-gate hardening (LESSON 137): full headed run **84 passed / 1 failed (Contact-chromium nav waitForURL flake) / 3 flaky / 1 did-not-run**; full headless run (user-selected, 5 projects) **86 passed / 1 failed (News-webkit, failed both attempts �?" same pre-existing navigation.spec dev-server-starvation flake class) / 2 did-not-run (serial-group skips)**; **auth gate GREEN in every run**. Target runs `auth.setup.ts` + `login.spec.ts` ×3: 4/4 each. `navigation.spec.ts` isolated headed: 21 passed / 1 flaky (Analytics-webkit self-healed) �?" proves remaining failures are load-induced, not regression. The 2 pre-existing flake variants are documented (Lesson 55 class: single-threaded dev server starved under 2-worker parallel load; CI mitigates via `workers:1` + `retries:2`).
-- **Auth-gate hardening (NEW this session, LESSON 137)**: root-caused the interleaved `auth.setup.ts`+`navigation.spec.ts` failure = Auth.js **double-submit CSRF race** — two concurrent no-cookie `GET /api/auth/session` on RTL mount mint csrf tokens A+B; jar keeps last cookie (B); `signIn` csrf GET returns body A; POST sends cookie B vs body A → `MissingCSRF` → "Invalid email or password" rendered on correct creds. Config retries can't fix (fresh context re-rolls the race). Fix = **in-context 2-attempt resubmit loop** in `e2e/auth.setup.ts` + `e2e/login.spec.ts` (banner → resubmit WITHOUT reload, jar has settled token; else reload → re-fill → retry). Evidence: Playwright request/response trace + jar state single-token-after-POST.
-- MCP browser live check of Decision Engine tab: renders, stats correct, persisted trace row, **0 console errors**, dark mode OK.
-- Full unit output: `C:\Users\lucky\.local\share\opencode\tool-output\tool_0cfcfd4290018tTxVGj1rsI5jj`
+## Tests
+- NEW `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` — **21/21** (6 History route + 7 Performance service + 8 syncedDataService). Mocks `@/lib/logger`, `@/lib/prisma`, `@/lib/sqlite`, `@/lib/cache`, `@/lib/audit`; real `@/lib/db-utils` with test hooks `openPlanLimitBreaker`/`closePlanLimitBreaker`/`resetPlanLimitBreaker` (default CLOSED — prod safety: no breaker = pure Prisma path).
+- `lib/__tests__/sqliteMirror.test.ts` — 11/11 (golden sql.js WASM), now exercises the syncedDataService path.
+
+## Verification (2026-09-25)
+- `npx tsc --noEmit`: **46 = exact baseline (0 new)** — all 46 are pre-existing `*.test.ts(x)` matcher noise (some in the new suite file too, verified pre-existing semantics; prod source 0).
+- `npm run lint`: **0 errors** (1153 warnings pre-existing).
+- `npm run test`: **109/109 suites, 1440 pass, 4 skip, 0 fail** (new Spec 01 suite 21/21 included).
+- `npm run quickbuild`: **189/189 pages** Compiled successfully.
+- Live dev server API sanity (user-approved): `/api/recommendations/top-stocks` 200, `/api/recommendations/performance` 200 (items include LODHA), `/api/recommendations/ideas` 200.
+- `npm run test:e2e` — `e2e/recommendations.spec.ts`: **10/10 passed** (Chromium, live dev server, 29.3 s). Cleanup done: dev server killed (PID 35424), port 3000 free, `next-dev.log` + `dev-server.pid` deleted.
+- MCP/Playwright verification of HistoryTab error state: error card + Retry render before empty-state when fetch fails (mocked).
+- Full unit output: `C:\Users\lucky\.local\share\opencode\tool-output\` (Phase 6 jest run).
 
 ## NEXT (awaiting user)
-1. Approve commit as **v3.41.1** (message prepared; working tree = 5 modified + 6 untracked spec-17 files + 2 modified e2e auth files (`e2e/auth.setup.ts`, `e2e/login.spec.ts` — Lesson 137 in-context resubmit loop) — `scripts/spike-laya/weights/` (503MB) and `smoke-results.json` stay untracked/gitignored). Then push + PR (carries v3.41.0 `ab6fd65` + v3.41.1).
+1. Approve commit as **v3.41.2** (working tree = 6 modified + 3 untracked: `.agents/specs/01-recommendations-plan-limit-fallbacks.md`, `.agents/plans/01-recommendations-plan-limit-fallbacks.md`, `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts`; 679 insertions / 154 deletions; no junk — `.next/dev/types/*` noise only). Then push + PR (carries v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2).
 2. After commit: P1–P3 real Laya inference behind a parity gate (laya-mock stays default) — needs user grant (install + key).
 
 ## From prior turn (context)
-- v3.40.8 P0 spike VERDICT **APPROVE** (onnxruntime-node; SPLIT encoder+head graphs; full-decision median 2316 ms @ seq 128; RSS 611 MB; artifacts `scripts/spike-laya/VERDICT.md` + `smoke-results.json`).
-- v3.41.0 base (spec 16): `DECISION_PROVIDER=none|laya` (unknown → coerce none), confidence-gated ACT/REVIEW via `shapeConfidence`, POC A screener scoring + POC B Swing `gateAutoGenerate`, `POST /api/decision/evaluate` + `GET /api/admin/decision/ping`, admin panel `/admin/decision`, `typesafeProvider.ts` deleted (Laya-only; Jev = docs-only hosted API, NOT OSS).
+- v3.41.1 (spec 17): decision-engine monitoring ring + admin surface + e2e hardening; Auth.js double-submit CSRF race fixed via in-context 2-attempt resubmit loop (Lessons 136/137); committed `a269057`.
+- v3.41.0 (spec 16): Laya-only mock decision engine, confidence-gated ACT/REVIEW, POC A screener + POC B swing, evaluate/ping routes, admin panel; committed `ab6fd65`.
+- v3.40.8 P0 spike VERDICT **APPROVE** (onnxruntime-node; SPLIT graphs; chain median 2316 ms; RSS 611 MB).
 - Don't read conversation memory — read the session `flow.md`/`decisions.md` files.

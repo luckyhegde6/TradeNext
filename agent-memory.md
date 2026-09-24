@@ -15,6 +15,14 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-25 | v3.41.2 — Spec 01 Recommendations plan-limit fallbacks (History/Performance/Ideas) + HistoryTab error state
+
+**Request (spec 01, user-approved)**: fix the P6003 plan-limit-hold 500s on the prod `/recommendations` History/Performance/Ideas tabs — the read paths were Prisma-only while the SQLite mirror held the same fresh rows; add breaker/hold-aware mirror fallbacks + a HistoryTab error state (was masked-500-as-empty-state).
+
+**Execution**: NEW `lib/sqlite.ts getRecommendationRuns()` (camelCase mapping, newest-first, unique_stocks>0, status filter, limit clamp 1..2000) → `app/api/recommendations/top-stocks/route.ts` `topStocksFromSqlite()` fallback (mirror read → serialize → 1 h cache; Prisma `$queryRaw` branch kept) → `lib/services/recommendationPerformanceService.ts` NEW `listItemFromMirrorTracker`/`getPerformanceListFromSqlite` (JS status filter, timerange) + try/catch-wrapped Prisma branch → `lib/services/syncedDataService.ts` breaker/hold-aware `mirrorWriteThrough` + `mirrorReadMarketCache` (steps 2+3; `isPlanLimitBreakerOpen()` + `getDbHealthState` + DateTime-safe cache key). Contract: zero Prisma ops in fallback branches; degraded `[]` only when the mirror HAS data — mirror-exhausted/not-ready RETHROWS the ORIGINAL 500 (never mask as empty, Lesson 138); only `isDbUnavailableError` (message/code-based → P6003 "hold on your account") caught; Prisma happy path byte-identical. HistoryTab Phase 5: `error` state + Retry card rendered BEFORE empty-state list (same as PerformanceTab).
+
+**Verification**: NEW `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` **21/21** (6 History route + 7 Performance service + 8 syncedDataService; mocks `@/lib/logger`/`@/lib/prisma`/`@/lib/sqlite`/`@/lib/cache`/`@/lib/audit`; real `@/lib/db-utils` + `openPlanLimitBreaker`/`closePlanLimitBreaker`/`resetPlanLimitBreaker` hooks); sqliteMirror.test.ts 11/11; tsc **46 exact (0 new, all legacy `*.test.ts(x)` matcher noise)**; lint 0; full jest **109/109 suites · 1440 pass / 4 skip / 0 fail**; quickbuild **189/189** ✓; live dev-server API sanity (top-stocks 200, performance 200 LODHA, ideas 200) + e2e **recommendations.spec.ts 10/10** (user-approved run; cleanup done). Docs pass DONE (AGENTS.md v3.41.2 row, versions-v3.41.md §v3.41.2, CHANGELOG index, TODO, Primer, Lessons 138, session-todos, handoff). **Commit as v3.41.2 pending user approval (no push/PR).**
+
 ### 2026-09-24 | v3.41.1 — Spec 17 Decision Engine monitoring + e2e hardening
 
 **Request (spec 17, user-approved spec/plan)**: add decision-engine observability — record every evaluate/ping/gate decision (latency, confidence, questions, gates) + an admin monitoring surface. Follow-up user directive: e2e specs must NOT carry credential string literals (use env only).

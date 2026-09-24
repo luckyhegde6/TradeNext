@@ -1,8 +1,39 @@
+# v3.41.2 — Recommendations plan-limit fallbacks (Spec 01: History/Performance/Ideas) + HistoryTab error state
+
+> **Branch**: `feature/ph22-decision-engine` (on `a269057` = v3.41.1 committed; parent `ab6fd65` = v3.41.0 committed; grandparent `2909b22` = v3.40.8 spike)
+> **Spec**: `.agents/specs/01-recommendations-plan-limit-fallbacks.md` · **Plan**: `.agents/plans/01-recommendations-plan-limit-fallbacks.md`
+> **Status**: CODE + TESTS + VERIFICATION DONE — tsc **46 exact baseline (0 new)** · lint 0 · **109/109 suites (1440 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · e2e **`recommendations.spec.ts` 10/10** (live dev server, user-approved) · **commit as v3.41.2 pending user approval (no push/PR)**
+
+## Why
+
+Under the Prisma P6003 plan-limit hold (2026-09-24 → ~2026-10-02) the prod `/recommendations` page's History / Performance / Ideas tabs returned HTTP 500 `{error: ...}` on every load: the read paths (`$queryRaw` top-stocks, `recommendationPerformanceService`, `syncedDataService`) were Prisma-only, and the breaker rejected the queries immediately. The SQLite mirror held the SAME fresh rows (the write path WAS mirroring via `syncedDataService`) — but nothing READ them, so real product data was invisible until the hold lifted. The History tab's client then turned the 500 into a **masked 500-as-empty-state** (failed fetch → silently render "no recommendations yet" — no error, no retry). Spec 01 adds breaker-aware hot-read fallbacks to the mirror + an explicit HistoryTab error state.
+
+## What changed
+
+- **`lib/sqlite.ts`** — NEW `getRecommendationRuns(opts)` mirror query: camelCase row mapping (`id`, `generatedAt` Date, `source`, `status`, `uniqueStocks`), newest-first, `unique_stocks > 0`, status filter, limit clamped 1..2000 (default 200). Zero Prisma.
+- **`app/api/recommendations/top-stocks/route.ts`** — fallback `topStocksFromSqlite()`: `getSqliteFallback()` → `getRecommendationRuns()` → `getRecommendationStocks()` → serializer (same result shape + `source: "sqlite_mirror_degraded"`), 1 h cache via `getWithCache` with fresh key; Prisma `$queryRaw` branch kept (run-status filter). Mirror-exhausted/not-ready → rethrow ORIGINAL 500.
+- **`lib/services/recommendationPerformanceService.ts`** — NEW `listItemFromMirrorTracker()` + `getPerformanceListFromSqlite()` (JS-side status filter mirroring SQL semantics — the mock mirror's tracker getter returns rows independent of SQL args, Lesson 138), timerange-aware; Prisma branch wrapped so only `isDbUnavailableError` (message/code-based P6003 match) falls to the mirror; non-hold errors propagate.
+- **`lib/services/syncedDataService.ts`** — steps 2 + 3 rewritten breaker/hold-aware: `mirrorWriteThrough` (write mirror EXCEPT when breaker open/plan-limit hold — mirror-only path) + `mirrorReadMarketCache` (breaker open/hold → mirror read with DateTime-safe cache key; rethrows original when mirror not ready). Prisma happy path byte-identical.
+- **HistoryTab (`app/components/recommendations/HistoryTab.tsx`)** — Phase 5: NEW `error` state (reset per fetch, set on `data.success === false` OR fetch throw to `"Failed to load recommendations history"`); error card (title + message + Retry) rendered BEFORE the empty-state list even if stale rows exist (same pattern as PerformanceTab).
+- **No migration, no packages, no env, no OpenAPI change** (no new routes).
+
+## Tests
+
+- NEW `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` — **21/21** (6 History route + 7 Performance service + 8 syncedDataService). Mocks `@/lib/logger`, `@/lib/prisma`, `@/lib/sqlite`, `@/lib/cache`, `@/lib/audit`; real `@/lib/db-utils` with test hooks `openPlanLimitBreaker`/`closePlanLimitBreaker`/`resetPlanLimitBreaker` (default CLOSED — prod safety: no breaker = pure Prisma path).
+- `lib/__tests__/sqliteMirror.test.ts` — 11/11 (golden sql.js WASM), now exercises the syncedDataService path.
+- Verification catch: `npx tsc --noEmit` → 0 new prod errors vs the 46-exact baseline (all 46 pre-existing `*.test.ts(x)` matcher noise — some in the new suite file too, verified pre-existing semantics); `npm run lint` 0 errors (1153 warnings pre-existing); full jest **109/109 suites · 1440 pass / 4 skip / 0 fail**; `npm run quickbuild` **189/189** pages ✓; live dev-server API sanity (top-stocks 200, performance 200 with LODHA, ideas 200) + e2e `e2e/recommendations.spec.ts` **10/10** (Chromium, user-approved).
+
+## HistoryTab error-state shape (approved)
+
+`loadingHistory ? spinner : error ? <ErrorCard .../> : stocks.length === 0 ? <EmptyState/> : <List/>` — the error card renders BEFORE the empty-state check so a 500 (masked as empty before this fix) now surfaces with a Retry that re-invokes `fetchStocks`.
+
+---
+
 # v3.41.1 — Decision Engine monitoring + e2e hardening (Spec 17)
 
 > **Branch**: `feature/ph22-decision-engine` (on `ab6fd65` = v3.41.0 committed; parent `2909b22` = v3.40.8 spike)
 > **Spec**: `.agents/specs/17-decision-engine-monitoring.md` · **Plan**: `.agents/plans/17-decision-engine-monitoring.md`
-> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc 46 exact baseline · lint 0 · 108/108 suites (1416 pass / 4 skip / 0 fail) · quickbuild ✓ · full e2e headless **86 passed / 1 failed (pre-existing nav flake News-webkit) / 2 did-not-run (serial skips)** — auth gate green in every run · **commit as v3.41.1 pending user approval (no push/PR)**
+> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc 46 exact baseline · lint 0 · 108/108 suites (1416 pass / 4 skip / 0 fail) · quickbuild ✓ · full e2e headless **86 passed / 1 failed (pre-existing nav flake News-webkit) / 2 did-not-run (serial skips)** — auth gate green in every run · **COMMITTED `a269057` (no push/PR)**
 
 ## Why
 

@@ -23,6 +23,7 @@ import logger from "@/lib/logger";
 import { recommendationsCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
 import { getSqliteFallback } from "@/lib/sqlite";
+import { isDbUnavailableError } from "@/lib/db-utils";
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -162,6 +163,143 @@ function toListItem(t: {
   };
 }
 
+// ─── SQLite fallback (P6003 hold) ─────────────────────────────────────────
+
+/**
+ * Map a SQLite-mirror recommendation_tracker row (camelCase, rehydrated) to a
+ * PerformanceListItem. Defensive coercion + null-guards: a malformed row is
+ * dropped (returns null) rather than poisoning the table.
+ */
+function listItemFromMirrorTracker(t: Record<string, unknown>): PerformanceListItem | null {
+  const id = String(t.id ?? "");
+  const symbol = String(t.symbol ?? "");
+  if (!id || !symbol) return null;
+
+  const createdAt = t.createdAt instanceof Date ? t.createdAt : new Date(String(t.createdAt ?? ""));
+  if (Number.isNaN(createdAt.getTime())) return null;
+
+  const entryPrice = Number(t.entryPrice ?? 0);
+  const currentPrice = t.currentPrice != null ? Number(t.currentPrice) : null;
+  const targetPrice = t.targetPrice != null ? Number(t.targetPrice) : null;
+  const stopLoss = t.stopLoss != null ? Number(t.stopLoss) : null;
+  const returnPercent =
+    currentPrice != null ? Number((((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2)) : null;
+  const daysTracked = Math.max(
+    1,
+    Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)) + 1,
+  );
+
+  let lastCheckedAt: string | null = null;
+  if (t.lastCheckedAt != null) {
+    const lastChecked = t.lastCheckedAt instanceof Date ? t.lastCheckedAt : new Date(String(t.lastCheckedAt));
+    if (!Number.isNaN(lastChecked.getTime())) lastCheckedAt = lastChecked.toISOString();
+  }
+
+  return {
+    id,
+    symbol,
+    status: String(t.status ?? "active"),
+    category: t.timeHorizon != null ? String(t.timeHorizon) : null,
+    entryPrice,
+    currentPrice,
+    targetPrice,
+    stopLoss,
+    returnPercent,
+    daysTracked,
+    aiRecommendation: t.aiRecommendation != null ? String(t.aiRecommendation) : null,
+    confidence: t.confidence != null ? Number(t.confidence) : null,
+    reasoning: t.reasoning != null ? String(t.reasoning) : null,
+    lastCheckedAt,
+    createdAt: createdAt.toISOString(),
+  };
+}
+
+/**
+ * Performance list straight from the SQLite mirror — NO Prisma ops (this only
+ * runs under the plan-limit hold/breaker). Total is the filtered count (an
+ * approximation of the Prisma COUNT: the mirror holds up to 5000 trackers and
+ * drop-archived ones are deleted via `deleteRecommendationTracker`).
+ *
+ * Returns null when the mirror is unavailable or the read throws — the caller
+ * rethrows the ORIGINAL error in that case (never silent masking).
+ */
+function getPerformanceListFromSqlite(query: PerformanceQuery): PerformanceListResponse | null {
+  const { limit = 50, offset = 0, status, category, recommendation, sort = "createdAt", order = "desc" } = query;
+
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return null;
+
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const trackers = sqlite.getRecommendationTrackers({
+      status: status ? [status] : undefined,
+      limit: 5000,
+    });
+
+    let rows = trackers
+      .map(listItemFromMirrorTracker)
+      .filter((x): x is PerformanceListItem => x !== null)
+      .filter((r) => {
+        const created = new Date(r.createdAt);
+        if (Number.isNaN(created.getTime()) || created.getTime() >= todayStart.getTime()) return false; // next-day promotion
+        if (status && r.status !== status) return false;
+        if (category && r.category !== category) return false;
+        if (recommendation && r.aiRecommendation !== recommendation) return false;
+        return true;
+      });
+
+    const dir = order === "asc" ? 1 : -1;
+    rows = rows.sort((a, b) => {
+      let cmp = 0;
+      switch (sort) {
+        case "returnPercent":
+          cmp = (a.returnPercent ?? -Infinity) - (b.returnPercent ?? -Infinity);
+          break;
+        case "daysTracked":
+          cmp = a.daysTracked - b.daysTracked;
+          break;
+        case "symbol":
+          cmp = a.symbol.localeCompare(b.symbol);
+          break;
+        case "confidence":
+          cmp = (a.confidence ?? -Infinity) - (b.confidence ?? -Infinity);
+          break;
+        case "entryPrice":
+          cmp = a.entryPrice - b.entryPrice;
+          break;
+        case "currentPrice":
+          cmp = (a.currentPrice ?? -Infinity) - (b.currentPrice ?? -Infinity);
+          break;
+        case "targetPrice":
+          cmp = (a.targetPrice ?? -Infinity) - (b.targetPrice ?? -Infinity);
+          break;
+        case "stopLoss":
+          cmp = (a.stopLoss ?? -Infinity) - (b.stopLoss ?? -Infinity);
+          break;
+        case "lastCheckedAt":
+          cmp = String(a.lastCheckedAt ?? "").localeCompare(String(b.lastCheckedAt ?? ""));
+          break;
+        case "createdAt":
+        default:
+          cmp = a.createdAt.localeCompare(b.createdAt);
+          break;
+      }
+      return dir * cmp;
+    });
+
+    const items = rows.slice(offset, offset + Math.min(limit, 200));
+    return { items, total: rows.length, columns: getPerformanceColumns() };
+  } catch (error) {
+    logger.warn({
+      msg: "SQLite performance fallback failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 // ─── Public list (cached 15 min) ─────────────────────────────────────────
 
 /**
@@ -250,47 +388,58 @@ export async function getPerformanceList(query: PerformanceQuery = {}): Promise<
     orderBy[sort] = order;
   }
 
-  const total = await prisma.recommendationTracker.count({ where });
+  let response: PerformanceListResponse;
 
-  if (sort === "returnPercent") {
-    const all = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
-      where,
-      orderBy,
-      take: 5000, // safety bound; cache makes re-fetch cheap
-    }));
-    const bridged = await bridgeMissingCurrentPrices(all);
-    const allItems = bridged.map(toListItem);
-    allItems.sort((a, b) => {
-      const av = a.returnPercent ?? -Infinity;
-      const bv = b.returnPercent ?? -Infinity;
-      return order === "desc" ? bv - av : av - bv;
+  try {
+    const total = await prisma.recommendationTracker.count({ where });
+
+    if (sort === "returnPercent") {
+      const all = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
+        where,
+        orderBy,
+        take: 5000, // safety bound; cache makes re-fetch cheap
+      }));
+      const bridged = await bridgeMissingCurrentPrices(all);
+      const allItems = bridged.map(toListItem);
+      allItems.sort((a, b) => {
+        const av = a.returnPercent ?? -Infinity;
+        const bv = b.returnPercent ?? -Infinity;
+        return order === "desc" ? bv - av : av - bv;
+      });
+      const items = allItems.slice(offset, offset + Math.min(limit, 200));
+
+      response = {
+        items,
+        total,
+        columns: getPerformanceColumns(),
+      };
+    } else {
+      const rows = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
+        where,
+        orderBy,
+        take: Math.min(limit, 200),
+        skip: offset,
+      }));
+
+      const bridged = await bridgeMissingCurrentPrices(rows);
+      const items = bridged.map(toListItem);
+
+      response = {
+        items,
+        total,
+        columns: getPerformanceColumns(),
+      };
+    }
+  } catch (error) {
+    if (!isDbUnavailableError(error)) throw error;
+    logger.warn({
+      msg: "Performance list DB read failed — serving SQLite mirror fallback",
+      error: error instanceof Error ? error.message : String(error),
     });
-    const items = allItems.slice(offset, offset + Math.min(limit, 200));
-
-    const response: PerformanceListResponse = {
-      items,
-      total,
-      columns: getPerformanceColumns(),
-    };
-    recommendationsCache.set(cacheKey, response, PERFORMANCE_CACHE_TTL_SECONDS);
-    return response;
+    const fallback = getPerformanceListFromSqlite(query);
+    if (!fallback) throw error;
+    response = fallback;
   }
-
-  const rows = await prisma.recommendationTracker.findMany(withAccelerateCache({ ttl: 600, swr: 60 })({
-    where,
-    orderBy,
-    take: Math.min(limit, 200),
-    skip: offset,
-  }));
-
-  const bridged = await bridgeMissingCurrentPrices(rows);
-  const items = bridged.map(toListItem);
-
-  const response: PerformanceListResponse = {
-    items,
-    total,
-    columns: getPerformanceColumns(),
-  };
 
   recommendationsCache.set(cacheKey, response, PERFORMANCE_CACHE_TTL_SECONDS);
   return response;
