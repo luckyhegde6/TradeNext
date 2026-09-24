@@ -42,10 +42,29 @@ test.describe('Sign-in page (logged out)', () => {
 
     await page.getByPlaceholder('you@example.com').fill(demoUser);
     await page.getByPlaceholder('••••••••').fill(demoPassword);
-    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
 
-    // Successful login redirects to the callbackUrl (default "/")
-    await expect(page).toHaveURL(/\/$/, { timeout: 45_000 });
+    // CSRF double-submit race (Lesson 137): page-mount session GETs can mint
+    // two csrf cookies under dev-server load, so the POST cookie token may
+    // differ from the body token → "Invalid email or password" (MissingCSRF).
+    // The jar is single-token after the failed submit → one resubmit succeeds.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+      try {
+        // Successful login redirects to the callbackUrl (default "/")
+        await expect(page).toHaveURL(/\/$/, { timeout: attempt === 1 ? 12_000 : 45_000 });
+        break;
+      } catch (e) {
+        if (attempt === 2) throw e;
+        if (await page.getByText('Invalid email or password').isVisible().catch(() => false)) {
+          continue;
+        }
+        // Stalled response — reload redirects if the session cookie landed,
+        // otherwise re-fill and try again.
+        await page.reload();
+        await page.getByPlaceholder('you@example.com').fill(demoUser);
+        await page.getByPlaceholder('••••••••').fill(demoPassword);
+      }
+    }
     await expect(page.locator('header button[title="Sign Out"]')).toBeVisible({ timeout: 15_000 });
   });
 });

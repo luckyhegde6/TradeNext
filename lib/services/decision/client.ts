@@ -14,6 +14,7 @@
 // NOOP → null. Every answer exposes the answering provider + latency.
 import logger from "@/lib/logger";
 import { LayaMockProvider } from "./layaProvider";
+import { trackDecisionTrace } from "./monitoring";
 import type { DecisionProvider } from "./provider";
 import type { EvaluateRequest, EvaluateResponse } from "./types";
 
@@ -31,6 +32,11 @@ interface DecisionClient {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Unique question types in a request, e.g. ["choice","noul"]. */
+function uniqueQuestionTypes(req: EvaluateRequest): string[] {
+  return [...new Set(req.questions.map((q) => q.type))];
+}
 
 function parseMode(raw: string | undefined): DecisionProviderMode {
   switch ((raw ?? "none").toLowerCase().trim()) {
@@ -58,7 +64,7 @@ function buildProviders(mode: DecisionProviderMode): DecisionProvider[] {
 async function evaluateWithRetry(
   provider: DecisionProvider,
   req: EvaluateRequest
-): Promise<{ response: EvaluateResponse; latencyMs: number }> {
+): Promise<{ response: EvaluateResponse; latencyMs: number; attempts: number }> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
     const started = Date.now();
@@ -68,6 +74,7 @@ async function evaluateWithRetry(
       return {
         response: { ...response, latencyMs: response.latencyMs ?? latencyMs },
         latencyMs,
+        attempts: attempt + 1,
       };
     } catch (err) {
       lastError = err;
@@ -109,21 +116,63 @@ function createClientWithProviders(mode: DecisionProviderMode, providers: Decisi
     providers: () => providers.map((p) => p.provider),
 
     async evaluate(req: EvaluateRequest): Promise<EvaluateResponse | null> {
-      if (providers.length === 0) return null; // inert NOOP
+      // Inert NOOP — record a trace so admins can see the engine is off.
+      if (providers.length === 0) {
+        trackDecisionTrace({
+          timestamp: new Date().toISOString(),
+          kind: "evaluate",
+          mode,
+          status: "inert",
+          latencyMs: 0,
+          questionCount: req.questions.length,
+          questionTypes: uniqueQuestionTypes(req),
+        });
+        return null;
+      }
+
+      const started = Date.now();
       let lastError: unknown;
+      let totalAttempts = 0;
       for (let i = 0; i < providers.length; i += 1) {
         const provider = providers[i];
         try {
-          const { response } = await evaluateWithRetry(provider, req);
+          const { response, latencyMs, attempts } = await evaluateWithRetry(provider, req);
+          totalAttempts += attempts;
+          trackDecisionTrace({
+            timestamp: new Date().toISOString(),
+            kind: "evaluate",
+            mode,
+            provider: provider.provider,
+            status: "success",
+            latencyMs,
+            attempts: totalAttempts,
+            questionCount: req.questions.length,
+            questionTypes: uniqueQuestionTypes(req),
+          });
           return response;
         } catch (err) {
           lastError = err;
+          totalAttempts += RETRY_DELAYS_MS.length + 1; // exhausted retries for this provider
         }
       }
+      // All providers exhausted — record the failure, then preserve the throw.
+      trackDecisionTrace({
+        timestamp: new Date().toISOString(),
+        kind: "evaluate",
+        mode,
+        provider: providers.map((p) => p.provider).join(","),
+        status: "error",
+        latencyMs: Date.now() - started,
+        attempts: totalAttempts,
+        questionCount: req.questions.length,
+        questionTypes: uniqueQuestionTypes(req),
+        error: lastError instanceof Error ? lastError.message : String(lastError),
+      });
       throw lastError;
     },
 
     async ping() {
+      const started = Date.now();
       const health: string[] = [];
       for (const p of providers) {
         try {
@@ -133,6 +182,15 @@ function createClientWithProviders(mode: DecisionProviderMode, providers: Decisi
           health.push(`${p.provider}: error ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      trackDecisionTrace({
+        timestamp: new Date().toISOString(),
+        kind: "ping",
+        mode,
+        provider: providers.map((p) => p.provider).join(",") || undefined,
+        status: "success",
+        latencyMs: Date.now() - started,
+        reason: health.join(" · ") || undefined,
+      });
       return {
         mode,
         providers: providers.map((p) => p.provider),

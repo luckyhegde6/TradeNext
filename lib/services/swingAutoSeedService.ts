@@ -15,6 +15,7 @@ import { getSwingRecommendations } from "@/lib/services/swingRecommendationServi
 import { createAuditLog } from "@/lib/audit";
 import logger from "@/lib/logger";
 import { getDecisionClient } from "@/lib/services/decision/client";
+import { trackDecisionTrace } from "@/lib/services/decision/monitoring";
 import type { Gate } from "@/lib/services/decision/types";
 
 /** Public no-auth swing feed user id. */
@@ -100,10 +101,23 @@ export interface AutoGenerateGateResult {
 export async function gateAutoGenerate(
   options: SwingAutoSeedOptions,
 ): Promise<AutoGenerateGateResult> {
+  // Flag OFF is the production default — unconditional allow with NO client
+  // call (zero cost, byte-identical behavior). Trace records the outcome only.
   if (process.env.DECISION_POC_ENABLED !== "true") {
+    trackDecisionTrace({
+      timestamp: new Date().toISOString(),
+      kind: "poc-b-autoseed-gate",
+      mode: "none",
+      status: "success",
+      latencyMs: 0,
+      gate: "act",
+      reason: "engine-off",
+      allowed: true,
+    });
     return { allowed: true, gate: "act", reason: "engine-off" };
   }
 
+  const gateStarted = Date.now();
   const { trigger, symbol: sym } = options;
   let response: Awaited<ReturnType<ReturnType<typeof getDecisionClient>["evaluate"]>>;
   try {
@@ -141,11 +155,31 @@ export async function gateAutoGenerate(
         reason: "engine-unavailable",
       },
     }).catch(() => undefined);
+    trackDecisionTrace({
+      timestamp: new Date().toISOString(),
+      kind: "poc-b-autoseed-gate",
+      mode: getDecisionClient().mode(),
+      status: "success",
+      latencyMs: Date.now() - gateStarted,
+      gate: "act",
+      reason: "engine-unavailable",
+      allowed: true,
+    });
     return { allowed: true, gate: "act", reason: "engine-unavailable" };
   }
 
   // Inert engine (DECISION_PROVIDER=none) → same graceful allow.
   if (!response) {
+    trackDecisionTrace({
+      timestamp: new Date().toISOString(),
+      kind: "poc-b-autoseed-gate",
+      mode: getDecisionClient().mode(),
+      status: "success",
+      latencyMs: Date.now() - gateStarted,
+      gate: "act",
+      reason: "engine-unavailable",
+      allowed: true,
+    });
     await createAuditLog({
       action: "DECISION_GATE",
       resource: "swing",
@@ -200,6 +234,18 @@ export async function gateAutoGenerate(
     allowed: result.allowed,
     gate: result.gate,
     reason: result.reason,
+  });
+  trackDecisionTrace({
+    timestamp: new Date().toISOString(),
+    kind: "poc-b-autoseed-gate",
+    mode: getDecisionClient().mode(),
+    provider: response.provider,
+    status: "success",
+    latencyMs: Date.now() - gateStarted,
+    gate: result.gate,
+    reason: result.reason,
+    allowed: result.allowed,
+    noulAmount: Number.isFinite(noulVal) ? noulVal : undefined,
   });
   return result;
 }

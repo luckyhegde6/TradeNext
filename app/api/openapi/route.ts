@@ -1887,6 +1887,34 @@ This API is designed for programmatic access. Key endpoints:
                     '401': { description: 'Unauthorized' }
                 }
             }
+        },
+        // v3.41.1, spec 17 — decision-engine performance tracing (in-memory ring buffer).
+        '/api/admin/decision/monitoring': {
+            get: {
+                summary: 'Decision Engine observability data (admin)',
+                description: 'type=stats (default): aggregated trace statistics (totals, success/inert/error rate, avg latency, avg retry attempts, questions evaluated, gates emitted, breakdowns by kind/provider/gate, recent errors) over a timeframe window. type=traces: recent decision traces from the in-memory ring buffer (newest first). Traces are process-local by design (zero Prisma); the engine is a Laya-only mock until P1–P6.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                parameters: [
+                    { name: 'type', in: 'query', schema: { type: 'string', enum: ['stats', 'traces'] }, description: 'Default: stats' },
+                    { name: 'timeframe', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 1440 }, description: 'Minutes window for stats (default 60)' },
+                    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500 }, description: 'Max traces to return (default 50)' }
+                ],
+                responses: {
+                    '200': { description: '{ stats } | { traces, total }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            },
+            delete: {
+                summary: 'Clear Decision Engine trace buffer (admin)',
+                description: 'Clears the in-memory decision trace ring buffer.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                responses: {
+                    '200': { description: '{ success, message }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            }
         }
     }
 };

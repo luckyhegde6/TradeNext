@@ -39,6 +39,7 @@ import {
   type ChartinkStock,
 } from "@/lib/services/chartinkService";
 import { scoreScreenerResult } from "@/lib/services/decision/fusion";
+import { trackDecisionTrace } from "@/lib/services/decision/monitoring";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -448,17 +449,31 @@ export async function runChartinkUnifiedScreeners(
   // pass never blocks or degrades when disabled.
   if (process.env.DECISION_POC_ENABLED === "true") {
     try {
+      const pocStarted = Date.now();
       for (const r of results) {
         const outcome = scoreScreenerResult(r);
         r.decisionScore = outcome.composite;
         r.decisionGate = outcome.gate;
       }
+      const act = results.filter((r) => r.decisionGate === "act").length;
+      const review = results.filter((r) => r.decisionGate === "review").length;
+      const escalate = results.filter((r) => r.decisionGate === "escalate").length;
       logger.info({
         msg: "Decision POC A scored unified screeners",
         scored: results.length,
-        act: results.filter((r) => r.decisionGate === "act").length,
-        review: results.filter((r) => r.decisionGate === "review").length,
-        escalate: results.filter((r) => r.decisionGate === "escalate").length,
+        act,
+        review,
+        escalate,
+      });
+      trackDecisionTrace({
+        timestamp: new Date().toISOString(),
+        kind: "poc-a-screener",
+        mode: "laya",
+        provider: "local",
+        status: "success",
+        latencyMs: Date.now() - pocStarted,
+        scoredCount: results.length,
+        gateDistribution: { act, review, escalate },
       });
     } catch (err) {
       logger.warn({
