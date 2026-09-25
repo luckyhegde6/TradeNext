@@ -7,10 +7,10 @@
 | Field | Value |
 |-------|-------|
 | **Task** | v3.41.3 Spec 18 — Laya real inference P1–P3 + real provider path |
-| **Branch** | `feature/ph22-decision-engine` (HEAD = `5b088e3` = v3.41.2 COMMITTED) |
-| **State** | CODE + TESTS + VERIFIED + user-accepted live check; Phase 7 docs pass finishing; **commit pending user** |
+| **Branch** | `feature/ph22-decision-engine` (HEAD = `3c765b9` = v3.41.3 COMMITTED) |
+| **State** | COMMITTED `3c765b9` · pushed (origin in sync) · **PR #132 OPEN** — merge/deploy pending user |
 | **Gate** | `DECISION_LAYA_REAL=1` → real `LayaRealProvider`; default laya-mock byte-identical |
-| **Blocked** | NO — awaiting user commit approval (no push/PR) |
+| **Blocked** | NO — awaiting user merge/deploy decision (PR #132 open) |
 
 ## What's done (v3.41.3)
 
@@ -24,9 +24,8 @@
 
 ## Next steps (for the next agent)
 
-1. Finish Phase 7 docs (remaining tail: session-todos NEXT line, hygiene, final `git status`) — most applied: AGENTS.md row ✓ · `versions-v3.41.md` §v3.41.3 ✓ · CHANGELOG ✓ · TODO ✓ · Primer ✓ · agent-memory ✓ · Lessons 139 ✓ · HANDOFF yaml ✓ · latest.md ✓ · session flow/decisions ✓ · extraction-plan status note ✓.
-2. Hygiene: delete junk `tsc-laya-filter.txt` + `tsc-phase2.txt`; review `git status`/`git diff --stat`.
-3. **STOP → ask user: commit v3.41.3?** (no push/PR). After approval: commit, wiki update, `git push`, open PR carrying v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2 `5b088e3` + v3.41.3.
+1. **Ask user: merge PR #132** (https://github.com/luckyhegde6/TradeNext/pull/132) into `main` → deploy? NO auto-merge/deploy without explicit approval.
+2. On merge: update status rows to MERGED; P4–P6 Laya follow-ups (full `agent.ts` → router/shortlist/presets wiring → docs/e2e sweep) are the next feature batch.
 
 ## Gotchas / lessons (recent)
 

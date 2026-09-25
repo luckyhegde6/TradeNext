@@ -1,6 +1,6 @@
 # Session Todos
 
-## Current (2026-09-25 — v3.41.3 Spec 18 Laya real inference P1–P3 + real provider path — CODE + TESTS + VERIFIED, Phase 7 docs pass finishing, commit pending user approval)
+## Current (2026-09-25 — v3.41.3 Spec 18 Laya real inference P1–P3 + real provider path — CODE + TESTS + VERIFIED + COMMITTED `3c765b9`, PR #132 OPEN — merge/deploy pending user)
 - [x] Spec + plan written + user approved (D1–D6): `.agents/specs/18-laya-real-inference.md` + `.agents/plans/18-laya-real-inference.md` (P1 pure-TS ports → P2 tokenizer WASM → P3 ONNX backbone + minimal `agent.ts` decode + `LayaRealProvider` behind `DECISION_LAYA_REAL=1` parity-gate flag; `DECISION_PROVIDER=laya` stays `laya-mock` default) — DONE
 - [x] Scope locked via user decisions: **P1–P3 + real provider path** · **self-consistency parity gate** (no Python) · **deps granted onnxruntime-node@1.30.0 + @huggingface/tokenizers** (root) — session `2026-09-25-laya-real-inference/{decisions,flow}.md` D1–D6 — DONE
 - [x] Phase 1 (steps 1–4): deps installed (onnxruntime-node@1.30.0 + @huggingface/tokenizers@0.2.0) · `.gitignore` weights · `lib/services/laya/weights/v1/` populated (encoder/head q8 + .data, tokenizer.json/config, rl_agent_config.json) · NEW `scripts/fetch-laya-weights.mjs` — DONE
@@ -10,7 +10,8 @@
 - [x] Phase 5 (steps 16–18): NEW `lib/services/laya/agent.ts` (systemOne decode: _toInternal → buildSequence → collate → forward → temperature apply → max-sub softmax → choice/score/noul shaping + confidence 4dp + usage) + NEW `lib/__tests__/layaAgent.test.ts` (child-process probe like step 15, `@jest-environment node`, skipIf no weights) + NEW `LayaRealProvider` in `lib/services/decision/layaProvider.ts` behind `DECISION_LAYA_REAL=1` (real forward at call time; mock default byte-identical) — DONE
 - [x] Phase 6 (steps 19–21): decisionClient gate (`DECISION_LAYA_REAL=1` → providers `["laya"]` real; default laya-mock byte-identical) · admin ping route + OpenAPI · live verification user-accepted (plan step 21): in-process real ping 503 MB chain `laya: ok` + live HTTP ping 200 mock path — DONE
 - [x] Verified gates: tsc **46 exact (0 new)** · lint **0 (1155 pre-existing warnings; Lesson 139 flat-config disable-directive fix)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget 85.4/100 KB ✓ — DONE
-- [ ] NEXT: **Phase 7 docs finishing** (AGENTS.md ✓ · versions-v3.41.md ✓ · CHANGELOG ✓ · TODO ✓ · Primer ✓ · agent-memory ✓ · Lessons 139 ✓ · session-todos ✓ · HANDOFF ✓ · latest.md ✓ · session flow/decisions ✓ · extraction-plan status note ✓) → hygiene (delete `tsc-laya-filter.txt`/`tsc-phase2.txt`) → ask user to commit **v3.41.3** → Phase 8 **wiki update → push + open PR** (carries v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2 `5b088e3` + v3.41.3)
+- [x] Phase 7 docs finishing + hygiene (junk `tsc-laya-filter.txt`/`tsc-phase2.txt` deleted, `git status` clean, doc budget **89.0/100 KB**) → **COMMITTED v3.41.3 `3c765b9`** (user-approved; 46 files, +4426/−80, hook green) → Phase 8 **wiki update `5cdba9e` + `git push` + PR #132 OPEN** (https://github.com/luckyhegde6/TradeNext/pull/132) — DONE
+- [ ] NEXT: **user decision — merge PR #132 into `main` + deploy** (guarded: never auto-merge/deploy without explicit approval)
 
 ## Prior (2026-09-25 — v3.41.2 Spec 01 Recommendations plan-limit fallbacks COMMITTED `5b088e3`, no push/PR)
 - [x] `v3.41.1` COMMITTED as `a269057` (branch `feature/ph22-decision-engine`, on top of `ab6fd65` v3.41.0 committed); no push/PR yet — v3.41.2 builds on it

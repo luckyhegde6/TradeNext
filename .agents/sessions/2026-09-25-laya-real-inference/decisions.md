@@ -31,4 +31,8 @@ Branch: `feature/ph22-decision-engine` (on `5b088e3` = v3.41.2 COMMITTED). Works
 - All Phase 1–6 scope DONE + VERIFIED + user-accepted plan step 21 (live in-process real ping `laya: ok` through the real 503 MB chained ONNX forward; HTTP ping 200 mock path). Gates: tsc **46 exact (0 new)** · lint **0 (1155 warnings; Lesson 139)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** · doc budget **85.4/100 KB**.
 - Lesson-worthy findings recorded: `act_logits` snake_case graph-name vs camelCase key spike bug (Phase 4) · Jest vm × native-realm `instanceof Float32Array` → child-process probe (Phase 4) · ESLint disable-directive for an unregistered rule in native flat config (Lesson 139).
 - Repo docs pass applied: AGENTS.md row + v3.41.2 tail, `versions-v3.41.md` §v3.41.3, CHANGELOG index, TODO blurb + retitle, Primer, agent-memory, Lessons 139, session-todos, HANDOFF yaml, handoff latest.md, session flow/decisions, extraction-plan status note.
-- NEXT: user commits v3.41.3 (pending approval) → wiki update → push → PR carries v3.41.0 + v3.41.1 + v3.41.2 + v3.41.3.
+- NEXT: user commits v3.41.3 (pending approval) → wiki update → push → PR carries v3.41.0 + v3.41.1 + v3.41.2 + v3.41.3. **EXECUTED 2026-09-25 (Phase 8).**
+
+## D8 — Phase 8 ship executed + PR #132 (2026-09-25)
+- User approved commit v3.41.3 + Phase 8 (wiki update → push → PR). Committed `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · pushed (origin in sync) · **PR #132** https://github.com/luckyhegde6/TradeNext/pull/132 — carries v3.41.0–v3.41.3 (9 commits; merge-base `9f1b2bc` = origin/main tip, no divergence).
+- Merge/deploy deliberately NOT auto-executed — awaiting explicit user approval.

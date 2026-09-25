@@ -2,7 +2,7 @@
 
 > **Branch**: `feature/ph22-decision-engine` (on `5b088e3` = v3.41.2 committed; parent `a269057` = v3.41.1 committed; grandparent `ab6fd65` = v3.41.0 committed)
 > **Spec**: `.agents/specs/18-laya-real-inference.md` · **Plan**: `.agents/plans/18-laya-real-inference.md`
-> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **commit as v3.41.3 pending user approval (no push/PR)**
+> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **COMMITTED `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · PR #132 OPEN — merge/deploy pending user**
 
 ## Why
 
@@ -34,7 +34,7 @@ The laya-mock provider (v3.41.0) proves the decision-engine seam but makes no re
 
 > **Branch**: `feature/ph22-decision-engine` (on `a269057` = v3.41.1 committed; parent `ab6fd65` = v3.41.0 committed; grandparent `2909b22` = v3.40.8 spike)
 > **Spec**: `.agents/specs/01-recommendations-plan-limit-fallbacks.md` · **Plan**: `.agents/plans/01-recommendations-plan-limit-fallbacks.md`
-> **Status**: CODE + TESTS + VERIFICATION DONE — tsc **46 exact baseline (0 new)** · lint 0 · **109/109 suites (1440 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · e2e **`recommendations.spec.ts` 10/10** (live dev server, user-approved) · **commit as v3.41.2 pending user approval (no push/PR)**
+> **Status**: CODE + TESTS + VERIFICATION DONE — tsc **46 exact baseline (0 new)** · lint 0 · **109/109 suites (1440 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · e2e **`recommendations.spec.ts` 10/10** (live dev server, user-approved) · **COMMITTED `5b088e3`; carried by PR #132**
 
 ## Why
 
@@ -65,7 +65,7 @@ Under the Prisma P6003 plan-limit hold (2026-09-24 → ~2026-10-02) the prod `/r
 
 > **Branch**: `feature/ph22-decision-engine` (on `ab6fd65` = v3.41.0 committed; parent `2909b22` = v3.40.8 spike)
 > **Spec**: `.agents/specs/17-decision-engine-monitoring.md` · **Plan**: `.agents/plans/17-decision-engine-monitoring.md`
-> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc 46 exact baseline · lint 0 · 108/108 suites (1416 pass / 4 skip / 0 fail) · quickbuild ✓ · full e2e headless **86 passed / 1 failed (pre-existing nav flake News-webkit) / 2 did-not-run (serial skips)** — auth gate green in every run · **COMMITTED `a269057` (no push/PR)**
+> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc 46 exact baseline · lint 0 · 108/108 suites (1416 pass / 4 skip / 0 fail) · quickbuild ✓ · full e2e headless **86 passed / 1 failed (pre-existing nav flake News-webkit) / 2 did-not-run (serial skips)** — auth gate green in every run · **COMMITTED `a269057`; carried by PR #132**
 
 ## Why
 
@@ -113,7 +113,7 @@ v3.41.0 shipped the decision-engine core; there was NO observability — nothing
 > **Branch**: `feature/ph22-decision-engine` (on `2909b22` = v3.40.8 spike VERDICT APPROVE; parent `5453d91` = v3.40.7)
 > **Spec**: `.agents/specs/16-decision-engine.md` · **Plan**: `.agents/plans/16-decision-engine.md`
 > **Session**: `.agents/sessions/2026-09-23-decision-engine/`
-> **Status**: **COMMITTED `ab6fd65`** (no push/PR) — tsc 46 exact baseline · lint 0 · 107/107 suites (1401 pass / 4 skip / 0 fail) · quickbuild 188/188 · superseded by v3.41.1 above
+> **Status**: **COMMITTED `ab6fd65`** (no push/PR; carried by PR #132) — tsc 46 exact baseline · lint 0 · 107/107 suites (1401 pass / 4 skip / 0 fail) · quickbuild 188/188 · superseded by v3.41.1 above
 
 User-approved option (D1): **"Build engine core + POC A/B"** — no SDK install, no real provider, no live smoke (P6003 plan-limit hold).
 

@@ -42,9 +42,13 @@ Branch: `feature/ph22-decision-engine` on `5b088e3` (v3.41.2 COMMITTED). Workstr
 - Step 21 (user-accepted live verification): in-process real ping (503 MB chain, ~2.3 s forward, RSS ~611 MB) → `laya: ok`; live HTTP ping 200 `{mode:"laya", providers:["laya-mock"], detail:"laya-mock: ok"}`.
 - Gates: tsc **46 exact (0 new)** · lint **0 (1155 pre-existing warnings; Lesson 139 flat-config disable-directive fix — 3 `jest/no-disabled-tests` directives deleted)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** · doc budget **85.4/100 KB**.
 
-## Phase 7 — docs pass (in progress)
+## Phase 7 — docs pass — DONE
 - APPLIED: `AGENTS.md` v3.41.3 row + v3.41.2 tail COMMITTED · `versions-v3.41.md` §v3.41.3 · CHANGELOG index · TODO blurb + v3.41.2 retitle · Primer + agent-memory v3.41.3 entries · Lessons 139 · session-todos header · HANDOFF yaml · latest.md · this file · decisions D7 · extraction-plan status note.
-- NEXT: hygiene (delete `tsc-laya-filter.txt`/`tsc-phase2.txt`) → final `git status` → STOP for user commit approval.
+- Hygiene: junk `tsc-laya-filter.txt` + `tsc-phase2.txt` deleted; `git status` clean; doc budget re-check **89.0/100 KB** (grew with doc rows).
 
-## Phase 8 — commit + ship (PENDING USER)
-- Ask user approval → commit **v3.41.3** (no push/PR) → wiki update → `git push` → open PR carrying v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2 `5b088e3` + v3.41.3.
+## Phase 8 — commit + ship — DONE (user-approved)
+- Committed **v3.41.3** = `3c765b9` (46 files, +4426/−80, hook green) → wiki updated + pushed `5cdba9e` (Home / Decision-Engine / Laya-Porting-Guide) → `git push` (origin/feature/ph22-decision-engine = `3c765b9`, in sync) → **PR #132 OPEN** https://github.com/luckyhegde6/TradeNext/pull/132, carries v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2 `5b088e3` + v3.41.3 `3c765b9` (9 commits off merge-base `9f1b2bc` = origin/main tip).
+
+## Phase 9 — status-doc sweep — DONE
+- Stale "commit pending user approval / no push/PR" wording → COMMITTED + pushed + PR #132 open (TODO, HANDOFF, latest.md, session-todos, Primer, AGENTS, versions-v3.41 statuses, versions-index rows).
+- **STOP → user decision: merge PR #132 + deploy?** (no auto-merge/deploy).
