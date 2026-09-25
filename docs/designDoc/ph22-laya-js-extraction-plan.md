@@ -176,6 +176,8 @@ return {"model":"laya-rl-agent","answers":answers,"usage":{"input_tokens":Σattn
 
 > Every phase ends with a check that can pass/fail independently; P0 result may change P3 strategy (whole-model ONNX vs TS-head fallback vs INT8 quantization).
 
+> **Status (2026-09-25, v3.41.3):** P1–P3 implemented (see `.agents/changelog/versions-v3.41.md` §v3.41.3) — `lib/services/laya/` pure-TS ports (`version`/`qtypes`/`serialize`/`calibration`/`collate`/`presets`/`email`/`buildSequence`/`lang`/`router`) · `tokenizer.ts` WASM (`@huggingface/tokenizers`, `add_special_tokens=false` encode parity) · `decisionModel.ts` chained ONNX encoder_q8→head_q8 (`onnxruntime-node@1.30.0`), weights `lib/services/laya/weights/v1/` (gitignored) via `scripts/fetch-laya-weights.mjs`; real path behind `DECISION_LAYA_REAL=1` → `LayaRealProvider` (mock default byte-identical); live in-process ping `laya: ok` (503 MB chain). P4–P6 (full `agent.ts` → router/shortlist/presets wiring → docs/e2e sweep) NOT started — keep this plan for the remaining phases.
+
 ---
 
 ## 7. Verification & fidelity gates (modeled on laya-coreml)

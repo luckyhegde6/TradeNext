@@ -1,3 +1,35 @@
+# v3.41.3 — Laya real inference P1–P3 + real provider path (Spec 18)
+
+> **Branch**: `feature/ph22-decision-engine` (on `5b088e3` = v3.41.2 committed; parent `a269057` = v3.41.1 committed; grandparent `ab6fd65` = v3.41.0 committed)
+> **Spec**: `.agents/specs/18-laya-real-inference.md` · **Plan**: `.agents/plans/18-laya-real-inference.md`
+> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **commit as v3.41.3 pending user approval (no push/PR)**
+
+## Why
+
+The laya-mock provider (v3.41.0) proves the decision-engine seam but makes no real decisions. The P0 spike VERDICT APPROVE (v3.40.8, onnxruntime-node, SPLIT graphs, chain median 2316 ms, RSS 611 MB) cleared the runtime path; Spec 18 implements the actual Laya inference runtime **in-process** — pure-TS ports of every encode/decode algorithm + a WASM tokenizer + the chained ONNX encoder→head backbone + the `system_one` decode — behind a **parity gate**, so laya-mock stays the default (`DECISION_PROVIDER=laya`) until `DECISION_LAYA_REAL=1` opts the provider into the real runtime.
+
+## What changed
+
+- **`lib/services/laya/`** — P1 pure-TS ports of `common.py`/`lang.py`/`router.py`/`presets.py`/`email.py` utilities (Python 1:1): `version.ts` (v0.3.6 pin), `qtypes.ts`, `serialize.ts`, `calibration.ts` (temperature buckets from rl_agent_config), `collate.ts`, `presets.ts` (question sets incl. email), `email.ts`, `buildSequence.ts` (prompt→ids: `[CLS] <type> ins [SEP] [MASK] opt0 … [SEP] state [SEP]`, 48-token option cap, `opt_budget<16` per-option truncation, `truncate_left` state tailing, `max_len` cut), `lang.ts` (script/lang detection: unicode ranges + stopword sets), `router.ts` (3-checkpoint registry + precedence), `index.ts` barrel.
+- **`tokenizer.ts`** (P2) — WASM-backed lazy-singleton loader wrapping `@huggingface/tokenizers` via dynamic `import()` (barrel stays dependency-free); special ids resolved from `tokenizer_config.json` via `token_to_id` → v1 pins **CLS 50281 / SEP 50282 / PAD 50283 / MASK 50284 / UNK 50280**; `encode(text, {add_special_tokens:false})` parity with `tok(text)["input_ids"]`; `decode` round-trip; `getLayaTokenizer()` lazy singleton with failure self-clear; weights dir honors `DECISION_LAYA_MODEL_DIR`; `tokenizerAvailable()` test gate. NEW `layaTokenizer.test.ts` **5/5** (weights-gated via `cond ? describe : describe.skip` — no Jest skipIf precedent; the 4 prior skips are static).
+- **`decisionModel.ts`** (P3) — two chained `InferenceSession`s (encoder_q8.onnx → head_q8.onnx, onnxruntime-node@1.30.0); int64 (`BigInt64Array`) + bool (`Uint8Array`) tensor casts exactly per spike; `CollatedBatch` in → `logits`/`act_logits` out; **K≥2 clamp** with masked pad slot; **`act_logits` graph-name read** — spike's `smoke-results.json` recorded `actLogitsDims: null` for qtype=0 ONLY because `smoke.mjs:64` read `headOut.actLogits` (camelCase) while the ONNX graph output is snake_case `act_logits` (`logits` matched by coincidence — no underscore); the real runtime DOES emit `act_logits` for choice; decisionModel keeps the defensive `?? null` read + crypto-random probe (hidden 1024, fail-fast) + health/latency stats + lazy singleton (failure self-clears) + dynamic `import("onnxruntime-node")` (type-only static import only).
+- **`agent.ts`** — minimal `system_one` decode: `_toInternal` (decide qtype + option texts) → `buildSequence` → `collate` → forward → temperature apply/clamp → max-sub softmax → choice/score/noul shaping + confidence (4dp) + usage.
+- **`lib/services/decision/layaProvider.ts`** — NEW `LayaRealProvider` behind `DECISION_LAYA_REAL=1`: provider-throws contract (load/run failure throws — client retries, failure traces; NO silent mock fallback); clear-failure → next evaluate retries init. `DECISION_PROVIDER=laya` stays **laya-mock default** (byte-identical to v3.41.0/v3.41.1/v3.41.2 behavior).
+- **Jest × native-realm issue (D6-era, un-fixable in app code)**: ort's `tensor-impl.ts` `instanceof Float32Array` guard rejects every binding output under Jest's vm sandbox — native NAPI arrays live in Node's main realm. → `layaDecisionModel.test.ts` (and `layaAgent.test.ts`) spawn a child Node process `scripts/dev-checks/laya-forward.ts` (`node --import tsx`, spike-proven main realm) and assert on its JSON; `@jest-environment node` mandatory (setImmediate under jsdom).
+- No migration, no env default change (flag-gated), no new routes/OpenAPI change.
+
+## Tests
+
+- 7 NEW laya suites: `layaPorts` · `layaBuildSequence` · `layaLangRouter` · `layaTokenizer` (5/5, weights-gated skip) · `layaDecisionModel` (**7/7**, `@jest-environment node`, child-process probe, skipIf no weights) · `layaAgent` (skipIf no weights) · `layaRealProvider` (parity + real→mock fallback); plus updated `decisionClient.test.ts` + `layaProvider.test.ts` for the real path — all laya suites 81/81.
+- Full **116/116 suites · 1538 pass / 4 skip / 0 fail** (4 skips = pre-existing intentional IndexedDB client-cache + weights-gated); tsc **46 exact (0 new)** — all legacy `*.test.ts(x)` matcher noise; lint **0 errors / 1155 pre-existing warnings** (**Lesson 139**: the 3 NEW errors were `// eslint-disable-next-line jest/no-disabled-tests` directives for a rule absent from the native flat config → comments deleted, `maybeDescribe` weights gate kept); quickbuild **189/189** ✓; doc budget **85.4/100 KB** ✓.
+- **Live verification (2026-09-25, plan step 21 — user-accepted)**: in-process runtime proof `DECISION_LAYA_REAL=1` + weights → `getDecisionClient()` providers `["laya"]`, real-ping `laya: ok` through the real chained 503 MB encoder→head forward; live HTTP ping on the leftover dev server (:3000, user-directed keep-running) → `GET /api/admin/decision/ping` 200 `{mode:"laya", providers:["laya-mock"], detail:"laya-mock: ok"}` (default gate — no env override on server).
+
+## Gate/flag contract
+
+`DECISION_LAYA_REAL=1` + weights present (`lib/services/laya/weights/v1/`, gitignored — `scripts/fetch-laya-weights.mjs` for refresh, pin `nvkudva/laya-web-q8` v1) → `LayaRealProvider`; anything less → laya-mock (byte-identical). `DECISION_LAYA_MODEL_DIR` overrides the weights root. Real inference is async-batch use only (chain ~2.3 s, RSS ~600 MB — informative baseline from the v3.40.8 spike).
+
+---
+
 # v3.41.2 — Recommendations plan-limit fallbacks (Spec 01: History/Performance/Ideas) + HistoryTab error state
 
 > **Branch**: `feature/ph22-decision-engine` (on `a269057` = v3.41.1 committed; parent `ab6fd65` = v3.41.0 committed; grandparent `2909b22` = v3.40.8 spike)

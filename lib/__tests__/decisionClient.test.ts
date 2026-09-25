@@ -13,11 +13,12 @@ import {
   _createDecisionClientWithProviders,
   _resetDecisionClient,
 } from "@/lib/services/decision/client";
+import logger from "@/lib/logger";
 import type { DecisionProvider } from "@/lib/services/decision/provider";
 import type { EvaluateResponse } from "@/lib/services/decision/types";
 
-const ENV = (value?: string): NodeJS.ProcessEnv =>
-  ({ DECISION_PROVIDER: value }) as unknown as NodeJS.ProcessEnv;
+const ENV = (value?: string, layaReal?: string): NodeJS.ProcessEnv =>
+  ({ DECISION_PROVIDER: value, DECISION_LAYA_REAL: layaReal }) as unknown as NodeJS.ProcessEnv;
 
 const req = {
   state: { momentum: 0.8 },
@@ -70,13 +71,45 @@ describe("createDecisionClient — mode coercion + inert default", () => {
 });
 
 describe("factory provider selection", () => {
-  test("laya mode exposes laya-mock provider and evaluates", async () => {
+  test("laya mode exposes laya-mock provider and evaluates (default, byte-identical)", async () => {
     const client = createDecisionClient(ENV("laya"));
     expect(client.providers()).toEqual(["laya-mock"]);
     const res = await client.evaluate(req);
     expect(res?.provider).toBe("laya-mock");
     const bias = res?.answers.bias as { choice: string };
     expect(bias.choice).toBe("trending");
+  });
+});
+
+describe("DECISION_LAYA_REAL gate (laya mode)", () => {
+  test("truthy whitelist selects the real provider — case/whitespace-insensitive", () => {
+    for (const flag of ["1", "true", "yes", " TRUE ", "Yes"]) {
+      const client = createDecisionClient(ENV("laya", flag));
+      expect(client.mode()).toBe("laya");
+      expect(client.providers()).toEqual(["laya"]);
+    }
+  });
+
+  test("absent / empty flag stays mock (production default)", () => {
+    for (const flag of [undefined, ""]) {
+      const client = createDecisionClient(ENV("laya", flag));
+      expect(client.providers()).toEqual(["laya-mock"]);
+    }
+  });
+
+  test("unknown flag value warns once and stays mock (conservative)", () => {
+    const warn = jest.spyOn(logger, "warn");
+    warn.mockClear(); // prior tests may have warned via the shared mocked logger
+    const client = createDecisionClient(ENV("laya", "banana"));
+    expect(client.providers()).toEqual(["laya-mock"]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect((warn.mock.calls[0]?.[0] as { msg?: string }).msg ?? "").toContain("Unknown DECISION_LAYA_REAL");
+    warn.mockRestore();
+  });
+
+  test("flag is ignored when mode is none (still inert)", () => {
+    const client = createDecisionClient(ENV("none", "1"));
+    expect(client.providers()).toEqual([]);
   });
 });
 

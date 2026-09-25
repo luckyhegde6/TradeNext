@@ -78,6 +78,11 @@ logs/
 # regression guard; non-server contexts fall back to os.tmpdir())
 /sqlite-mirror.sqlite
 
+# Laya ONNX weights (runtime home — fetched by scripts/fetch-laya-weights.mjs,
+# ~500 MB; runtime-only, never committed). Spike copy lives under scripts/spike-laya/.
+/lib/services/laya/weights/
+/scripts/spike-laya/weights/
+
 # E2E walkthrough screenshots (generated during testing)
 /e2e-screenshots/
 /screenshots/

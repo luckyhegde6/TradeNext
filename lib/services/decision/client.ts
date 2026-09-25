@@ -4,16 +4,16 @@
 // createDecisionClient() builds the provider chain from `DECISION_PROVIDER`:
 //   none  → inert (NOOP — the production default; every workflow keeps exactly
 //           its current behavior)
-//   laya  → [LayaMockProvider] — the JS-adapted Laya engine (mock until the
-//           P1–P3 semantic-parity gate lands; answers still follow Laya's
-//           decode contract: argmax choice, expected-value score, p[1] noul,
-//           confidence from probability shape)
-// Any unknown value → warn once + inert (treated as `none`).
+//   laya  → [LayaMockProvider] (default) — deterministic, byte-identical to the
+//           pre-engine behavior; [LayaRealProvider] only when the parity flag
+//           DECISION_LAYA_REAL is truthy ("1"|"true"|"yes", case-insensitive) —
+//           any other value warns once + mock (conservative)
+// Any unknown `DECISION_PROVIDER` → warn once + inert (treated as `none`).
 //
 // evaluate() runs the chain with retry ≤3 / exponential backoff (250/500/1000ms).
 // NOOP → null. Every answer exposes the answering provider + latency.
 import logger from "@/lib/logger";
-import { LayaMockProvider } from "./layaProvider";
+import { LayaMockProvider, LayaRealProvider } from "./layaProvider";
 import { trackDecisionTrace } from "./monitoring";
 import type { DecisionProvider } from "./provider";
 import type { EvaluateRequest, EvaluateResponse } from "./types";
@@ -22,10 +22,26 @@ export type DecisionProviderMode = "none" | "laya";
 
 const RETRY_DELAYS_MS = [250, 500, 1000];
 
+/** DECISION_LAYA_REAL whitelist — strict "1"|"true"|"yes" (case-insensitive). */
+const REAL_FLAG_TRUE = new Set(["1", "true", "yes"]);
+
+/**
+ * Real-engine gate (spec 18 §4.D): unknown values are NOT promoted to real —
+ * warn once + keep mock (conservative). Absent/empty → mock (default).
+ */
+function wantRealLaya(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.DECISION_LAYA_REAL;
+  if (raw === undefined || raw.trim() === "") return false;
+  const v = raw.toLowerCase().trim();
+  if (REAL_FLAG_TRUE.has(v)) return true;
+  logger.warn({ msg: "Unknown DECISION_LAYA_REAL — falling back to laya-mock (conservative)", raw });
+  return false;
+}
+
 interface DecisionClient {
   /** Resolved mode (after unknown → none coercion). */
   mode(): DecisionProviderMode;
-  /** `["laya-mock"]` | `[]` for none. */
+  /** `["laya"]` (real) | `["laya-mock"]` | `[]` for none. */
   providers(): string[];
   evaluate(req: EvaluateRequest): Promise<EvaluateResponse | null>;
   ping(): Promise<{ mode: DecisionProviderMode; providers: string[]; detail: string }>;
@@ -52,9 +68,9 @@ function parseMode(raw: string | undefined): DecisionProviderMode {
   }
 }
 
-function buildProviders(mode: DecisionProviderMode): DecisionProvider[] {
+function buildProviders(mode: DecisionProviderMode, env: NodeJS.ProcessEnv): DecisionProvider[] {
   if (mode === "none") return [];
-  return [new LayaMockProvider()];
+  return wantRealLaya(env) ? [new LayaRealProvider()] : [new LayaMockProvider()];
 }
 
 /**
@@ -92,7 +108,7 @@ async function evaluateWithRetry(
 
 export function createDecisionClient(env: NodeJS.ProcessEnv = process.env): DecisionClient {
   const mode = parseMode(env.DECISION_PROVIDER);
-  return createClientWithProviders(mode, buildProviders(mode));
+  return createClientWithProviders(mode, buildProviders(mode, env));
 }
 
 /** Test seam — build a client from an explicit provider list (retry tests). */
@@ -109,6 +125,7 @@ function createClientWithProviders(mode: DecisionProviderMode, providers: Decisi
     mode,
     providers: providers.map((p) => p.provider),
     mock: providers.some((p) => p.provider === "laya-mock"),
+    real: providers.some((p) => p.provider === "laya"),
   });
 
   return {

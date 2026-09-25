@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@huggingface/tokenizers": "^0.2.0",
     "@netlify/blobs": "^11.0.3",
     "@next/third-parties": "^16.3.5",
     "@openrouter/agent": "^0.7.2",
@@ -86,6 +87,7 @@
     "node-cron": "^4.6.0",
     "node-fetch": "^3.3.2",
     "nodemailer": "^9.1.1",
+    "onnxruntime-node": "^1.30.0",
     "pg": "^8.16.3",
     "pino": "^10.1.0",
     "postcss": "^8.5.26",
@@ -122,9 +124,13 @@
     "tsx": "^4.23.0"
   },
   "overrides": {
-    "@eslint/eslintrc": { "js-yaml": "4.3.2" },
+    "@eslint/eslintrc": {
+      "js-yaml": "4.3.2"
+    },
     "@humanfs/node": "0.16.8",
-    "@istanbuljs/load-nyc-config": { "js-yaml": "3.15.2" },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "3.15.2"
+    },
     "fast-uri": "3.1.6",
     "mysql2": "3.24.4"
   },

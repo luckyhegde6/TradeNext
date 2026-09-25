@@ -81,9 +81,10 @@ describe("LayaMockProvider — envelope", () => {
     expect(res.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
-  test("health reports ok with parity note", async () => {
+  test("health reports ok — deterministic mock, real gated behind DECISION_LAYA_REAL=1", async () => {
     const h = await provider.health();
     expect(h.ok).toBe(true);
-    expect(h.detail).toContain("parity");
+    expect(h.detail).toContain("laya-mock");
+    expect(h.detail).toContain("DECISION_LAYA_REAL=1");
   });
 });

@@ -1,36 +1,37 @@
-# v3.41.2 handoff — Recommendations plan-limit fallbacks (Spec 01) + HistoryTab error state, commit pending approval
+# Handoff — Active (latest)
 
-> **Branch**: `feature/ph22-decision-engine` (HEAD `a269057` = v3.41.1 COMMITTED — monitoring + auth-gate hardening; parent `ab6fd65` = v3.41.0 COMMITTED — engine core + POC A/B; grandparent `2909b22` = v3.40.8 spike VERDICT APPROVE). **CODE + TESTS + VERIFICATION + DOCS DONE — NEXT = user approves `git commit` as v3.41.2 (no push, no PR). v3.41.0 + v3.41.1 are committed but NOT pushed — push/PR after this commit carries all three.**
-> **Read next**: `.agents/changelog/versions-v3.41.md` §v3.41.2 + `.agents/sessions/2026-09-25-recs-plan-limit-fallbacks/{flow.md, decisions.md}` + `Lessons.md` 138 + `Lessons.md` 136/137
+> SCHEMA v1.1 · read at session start after `@HANDOFF.md`. Live resume context — update after every session; archive to `.agents/handoffs/` history when superseded.
 
-## Status (v3.41.2 — spec 01, P6003 plan-limit-hold fallbacks; zero Prisma ops in fallback branches)
-- NEW `lib/sqlite.ts getRecommendationRuns(opts)` — mirror query: camelCase rows (`id`, `generatedAt` Date, `source`, `status`, `uniqueStocks`), newest-first, `unique_stocks > 0`, status filter, limit clamp 1..2000 (default 200). Zero Prisma.
-- `app/api/recommendations/top-stocks/route.ts` — NEW `topStocksFromSqlite()` fallback: `getSqliteFallback()` → `getRecommendationRuns()` → `getRecommendationStocks()` → serializer (same result shape + `source: "sqlite_mirror_degraded"`), 1 h cache via `getWithCache` (fresh key); Prisma `$queryRaw` branch KEPT (run-status filter); mirror-exhausted/not-ready → RETHROW original 500.
-- `lib/services/recommendationPerformanceService.ts` — NEW `listItemFromMirrorTracker()` + `getPerformanceListFromSqlite()` (JS-side status filter mirroring SQL semantics — the mock mirror's tracker getter returns rows independent of SQL args, Lesson 138), timerange-aware; Prisma branch wrapped → only `isDbUnavailableError` (message/code-based → P6003 "hold on your account") falls to mirror; non-hold errors propagate.
-- `lib/services/syncedDataService.ts` — steps 2+3 rewritten breaker/hold-aware: `mirrorWriteThrough` (write mirror EXCEPT when breaker open/plan-limit hold — mirror-only writes) + `mirrorReadMarketCache` (breaker open/hold → mirror read with DateTime-safe cache key; rethrows original when mirror not ready). Prisma happy path byte-identical.
-- **HistoryTab (Phase 5, `app/components/recommendations/HistoryTab.tsx`)** — NEW `error` state (reset per fetch, set on `data.success === false` OR fetch throw → `"Failed to load recommendations history"`); error card (title + message + Retry) rendered BEFORE the empty-state list even if stale rows exist (same pattern as PerformanceTab). This was the **masked-500-as-empty-state** — a failed fetch previously rendered the silent "no recommendations yet" empty state.
-- No migration, no packages, no env, no OpenAPI change (no new routes).
+## Status
 
-## Tests
-- NEW `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` — **21/21** (6 History route + 7 Performance service + 8 syncedDataService). Mocks `@/lib/logger`, `@/lib/prisma`, `@/lib/sqlite`, `@/lib/cache`, `@/lib/audit`; real `@/lib/db-utils` with test hooks `openPlanLimitBreaker`/`closePlanLimitBreaker`/`resetPlanLimitBreaker` (default CLOSED — prod safety: no breaker = pure Prisma path).
-- `lib/__tests__/sqliteMirror.test.ts` — 11/11 (golden sql.js WASM), now exercises the syncedDataService path.
+| Field | Value |
+|-------|-------|
+| **Task** | v3.41.3 Spec 18 — Laya real inference P1–P3 + real provider path |
+| **Branch** | `feature/ph22-decision-engine` (HEAD = `5b088e3` = v3.41.2 COMMITTED) |
+| **State** | CODE + TESTS + VERIFIED + user-accepted live check; Phase 7 docs pass finishing; **commit pending user** |
+| **Gate** | `DECISION_LAYA_REAL=1` → real `LayaRealProvider`; default laya-mock byte-identical |
+| **Blocked** | NO — awaiting user commit approval (no push/PR) |
 
-## Verification (2026-09-25)
-- `npx tsc --noEmit`: **46 = exact baseline (0 new)** — all 46 are pre-existing `*.test.ts(x)` matcher noise (some in the new suite file too, verified pre-existing semantics; prod source 0).
-- `npm run lint`: **0 errors** (1153 warnings pre-existing).
-- `npm run test`: **109/109 suites, 1440 pass, 4 skip, 0 fail** (new Spec 01 suite 21/21 included).
-- `npm run quickbuild`: **189/189 pages** Compiled successfully.
-- Live dev server API sanity (user-approved): `/api/recommendations/top-stocks` 200, `/api/recommendations/performance` 200 (items include LODHA), `/api/recommendations/ideas` 200.
-- `npm run test:e2e` — `e2e/recommendations.spec.ts`: **10/10 passed** (Chromium, live dev server, 29.3 s). Cleanup done: dev server killed (PID 35424), port 3000 free, `next-dev.log` + `dev-server.pid` deleted.
-- MCP/Playwright verification of HistoryTab error state: error card + Retry render before empty-state when fetch fails (mocked).
-- Full unit output: `C:\Users\lucky\.local\share\opencode\tool-output\` (Phase 6 jest run).
+## What's done (v3.41.3)
 
-## NEXT (awaiting user)
-1. Approve commit as **v3.41.2** (working tree = 6 modified + 3 untracked: `.agents/specs/01-recommendations-plan-limit-fallbacks.md`, `.agents/plans/01-recommendations-plan-limit-fallbacks.md`, `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts`; 679 insertions / 154 deletions; no junk — `.next/dev/types/*` noise only). Then push + PR (carries v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2).
-2. After commit: P1–P3 real Laya inference behind a parity gate (laya-mock stays default) — needs user grant (install + key).
+- **P1** pure-TS ports `lib/services/laya/`: `version`, `qtypes`, `serialize`, `calibration`, `collate`, `presets`, `email`, `buildSequence`, `lang`, `router`, `index` (Python 1:1).
+- **P2** `tokenizer.ts` WASM lazy-singleton (`@huggingface/tokenizers`, `add_special_tokens=false` encode parity; v1 specials CLS 50281 / SEP 50282 / PAD 50283 / MASK 50284; `DECISION_LAYA_MODEL_DIR` override).
+- **P3** `decisionModel.ts` two chained ONNX sessions encoder_q8→head_q8 (`onnxruntime-node@1.30.0`; int64/bool casts; K≥2 pad clamp; `act_logits` snake_case graph-name read; crypto probe hidden-1024 fail-fast; lazy singleton; dynamic import). Real inference is NOT jest/vm-compatible → child-process probe `scripts/dev-checks/laya-forward.ts`; weights `lib/services/laya/weights/v1/` gitignored, fetched via `scripts/fetch-laya-weights.mjs`.
+- **agent.ts** minimal systemOne decode (buildSequence → collate → forward → temperature → max-sub softmax → choice/score/noul + confidence 4dp + usage).
+- **`LayaRealProvider`** behind `DECISION_LAYA_REAL=1`; decisionClient gate (default mock byte-identical); admin ping route + OpenAPI.
+- NEW 7 laya suites (incl. `layaAgent`, `layaDecisionModel`, `layaTokenizer`) + decisionClient/layaProvider updates.
+- **Verified**: tsc **46 exact (0 new)** · lint **0 (1155 warnings; Lesson 139 flat-config disable-directive fix)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** · doc budget **85.4/100 KB** · live in-process real ping (503 MB chain) `laya: ok` + HTTP ping 200 (plan step 21, user-accepted).
 
-## From prior turn (context)
-- v3.41.1 (spec 17): decision-engine monitoring ring + admin surface + e2e hardening; Auth.js double-submit CSRF race fixed via in-context 2-attempt resubmit loop (Lessons 136/137); committed `a269057`.
-- v3.41.0 (spec 16): Laya-only mock decision engine, confidence-gated ACT/REVIEW, POC A screener + POC B swing, evaluate/ping routes, admin panel; committed `ab6fd65`.
-- v3.40.8 P0 spike VERDICT **APPROVE** (onnxruntime-node; SPLIT graphs; chain median 2316 ms; RSS 611 MB).
-- Don't read conversation memory — read the session `flow.md`/`decisions.md` files.
+## Next steps (for the next agent)
+
+1. Finish Phase 7 docs (remaining tail: session-todos NEXT line, hygiene, final `git status`) — most applied: AGENTS.md row ✓ · `versions-v3.41.md` §v3.41.3 ✓ · CHANGELOG ✓ · TODO ✓ · Primer ✓ · agent-memory ✓ · Lessons 139 ✓ · HANDOFF yaml ✓ · latest.md ✓ · session flow/decisions ✓ · extraction-plan status note ✓.
+2. Hygiene: delete junk `tsc-laya-filter.txt` + `tsc-phase2.txt`; review `git status`/`git diff --stat`.
+3. **STOP → ask user: commit v3.41.3?** (no push/PR). After approval: commit, wiki update, `git push`, open PR carrying v3.41.0 `ab6fd65` + v3.41.1 `a269057` + v3.41.2 `5b088e3` + v3.41.3.
+
+## Gotchas / lessons (recent)
+
+- **Jest vm × native-realm**: ort's `instanceof Float32Array` guard rejects binding outputs in Jest's vm sandbox → real inference only via child `node --import tsx` probe (`scripts/dev-checks/laya-forward.ts`); ONNX suites `@jest-environment node` + `skipIf` no weights (mirrors existing 4-suite skip precedent).
+- **`act_logits` is snake_case** — reading `headOut.actLogits` (camelCase) yields null (spike bug, corrected); model keeps defensive `?? null` read.
+- **ESLint flat config has no jest plugin** → disable-directives for jest rules are config errors (Lesson 139 → deleted 3 `jest/no-disabled-tests` directives; kept `maybeDescribe` weights gates).
+- **Weights never stage** — `lib/services/laya/weights/` is gitignored; keep it that way.
+- Do not kill the leftover dev server on :3000 (PID 19208) — already-running, user-owned.
