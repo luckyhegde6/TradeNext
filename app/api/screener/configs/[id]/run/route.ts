@@ -10,6 +10,7 @@ import { auth } from "@/lib/auth";
 import { getRequiredColumns } from "@/lib/screener/condition-tree";
 import { evaluateFilterGroup, applyFilterGroup } from "@/lib/screener/filter-engine";
 import { advancedScan, DEFAULT_COLUMNS } from "@/lib/services/tradingview-service";
+import { exportCustomScan } from "@/lib/services/googleSheets/exporter";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -72,6 +73,29 @@ export async function POST(
       fetchMs,
       executionMs,
     });
+
+    // Append this run's hits to the Tracker `custom` tab. Gated on the FIRST
+    // page (offset === 0) so paging through results cannot append the same run
+    // twice; `matchCount` carries the run's full total. Fire-and-forget.
+    if (offset === 0) {
+      exportCustomScan(
+        {
+          runAt: new Date().toISOString(),
+          configId: config.id,
+          configName: config.name,
+          userId: String(config.userId),
+          filters: filterGroup,
+          matchCount: total,
+        },
+        stocks
+      ).catch((err) =>
+        logger.error({
+          msg: "Google Sheets custom scan export dispatch failed",
+          configId: id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+    }
 
     return NextResponse.json({
       success: true,

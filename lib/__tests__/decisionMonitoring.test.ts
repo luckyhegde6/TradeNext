@@ -12,6 +12,9 @@ import {
   getDecisionStats,
   getDecisionTraces,
   trackDecisionTrace,
+  registerDecisionTraceSink,
+  _resetDecisionTraceSinks,
+  type DecisionTraceKind,
 } from "@/lib/services/decision/monitoring";
 import {
   createDecisionClient,
@@ -336,5 +339,104 @@ describe("client integration traces (spec 17)", () => {
     expect(p.detail).toContain("ok");
     const traces = getDecisionTraces();
     expect(traces[0].provider).toBe("laya-mock");
+  });
+});
+
+// ─── Spec 19: trace sinks (Google Sheets `decisions` tab) ────────────────
+
+describe("decision trace sinks", () => {
+  const originalFlag = process.env.GOOGLE_SHEETS_TRACKING_ENABLED;
+
+  beforeEach(() => {
+    _resetDecisionTraceSinks();
+  });
+
+  afterAll(() => {
+    if (originalFlag === undefined) {
+      delete process.env.GOOGLE_SHEETS_TRACKING_ENABLED;
+    } else {
+      process.env.GOOGLE_SHEETS_TRACKING_ENABLED = originalFlag;
+    }
+  });
+
+  test("a registered sink receives every trace kind", () => {
+    const sink = jest.fn();
+    registerDecisionTraceSink(sink);
+
+    const kinds: DecisionTraceKind[] = [
+      "evaluate",
+      "ping",
+      "poc-a-screener",
+      "poc-b-autoseed-gate",
+    ];
+    for (const kind of kinds) {
+      trackDecisionTrace({
+        timestamp: ts(0),
+        kind,
+        mode: "laya",
+        status: "success",
+        latencyMs: 1,
+      });
+    }
+
+    expect(sink).toHaveBeenCalledTimes(4);
+    expect(sink.mock.calls.map((c) => c[0].kind)).toEqual(kinds);
+  });
+
+  test("registering the same sink twice delivers once", () => {
+    const sink = jest.fn();
+    registerDecisionTraceSink(sink);
+    registerDecisionTraceSink(sink);
+
+    trackDecisionTrace({ timestamp: ts(0), kind: "ping", mode: "none", status: "success", latencyMs: 1 });
+
+    expect(sink).toHaveBeenCalledTimes(1);
+  });
+
+  test("a throwing sink never breaks trace recording", () => {
+    registerDecisionTraceSink(() => {
+      throw new Error("sink exploded");
+    });
+    const good = jest.fn();
+    registerDecisionTraceSink(good);
+
+    expect(() =>
+      trackDecisionTrace({ timestamp: ts(0), kind: "ping", mode: "none", status: "success", latencyMs: 1 })
+    ).not.toThrow();
+
+    // Buffer still recorded, and the second sink still ran.
+    expect(getDecisionTraces()).toHaveLength(1);
+    expect(good).toHaveBeenCalledTimes(1);
+  });
+
+  test("a rejecting async sink is swallowed", async () => {
+    registerDecisionTraceSink(async () => {
+      throw new Error("async sink exploded");
+    });
+
+    expect(() =>
+      trackDecisionTrace({ timestamp: ts(0), kind: "ping", mode: "none", status: "success", latencyMs: 1 })
+    ).not.toThrow();
+
+    // Let the rejected promise settle — an unhandled rejection would fail the run.
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  test("ring buffer is unaffected by sink count", () => {
+    registerDecisionTraceSink(jest.fn());
+    for (let i = 0; i < 3; i++) {
+      trackDecisionTrace({ timestamp: ts(i), kind: "ping", mode: "none", status: "success", latencyMs: 1 });
+    }
+    expect(getDecisionTraces()).toHaveLength(3);
+  });
+
+  test("tracking OFF never loads the Google Sheets exporter (no sink appears)", async () => {
+    delete process.env.GOOGLE_SHEETS_TRACKING_ENABLED;
+    _resetDecisionTraceSinks();
+
+    trackDecisionTrace({ timestamp: ts(0), kind: "ping", mode: "none", status: "success", latencyMs: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(globalThis._decisionTraceSinks ?? []).toHaveLength(0);
   });
 });

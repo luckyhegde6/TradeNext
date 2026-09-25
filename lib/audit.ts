@@ -126,7 +126,10 @@ export type AuditAction =
   | 'INTELLIGENCE_UNAUTHORIZED'
   // Decision Engine Events (ph22 — Laya/System-One confidence-gated routing)
   | 'DECISION_EVALUATED'
-  | 'DECISION_GATE';
+  | 'DECISION_GATE'
+  // Google Sheets Tracking (spec 19 — append-only Tracker spreadsheet)
+  | 'GOOGLE_SHEETS_APPEND_SUCCESS'
+  | 'GOOGLE_SHEETS_APPEND_FAILED';
 
 interface AuditLogParams {
   userId?: number;

@@ -93,6 +93,83 @@ function getBuffer(): DecisionTraceEntry[] {
   return global._decisionTraces;
 }
 
+// ─── Trace sinks (spec 19) ───────────────────────────────────────────────
+
+/**
+ * A downstream consumer of recorded traces. May be sync or async; a returned
+ * promise is fire-and-forget (rejections are swallowed).
+ */
+export type DecisionTraceSink = (
+  entry: DecisionTraceEntry
+) => void | Promise<void>;
+
+declare global {
+  var _decisionTraceSinks: DecisionTraceSink[] | undefined;
+  var _decisionTraceSheetSinkInit: boolean | undefined;
+}
+
+/**
+ * Register a trace sink. Idempotent per function reference.
+ *
+ * Exists so ONE change to this file covers all four trace kinds (evaluate,
+ * ping, POC A screener, POC B auto-seed gate) with zero edits to the engine
+ * call sites — the Google Sheets `decisions` tab is written from a single sink.
+ */
+export function registerDecisionTraceSink(sink: DecisionTraceSink): void {
+  if (!global._decisionTraceSinks) global._decisionTraceSinks = [];
+  if (!global._decisionTraceSinks.includes(sink)) {
+    global._decisionTraceSinks.push(sink);
+  }
+}
+
+/** Test seam — drop all registered sinks. */
+export function _resetDecisionTraceSinks(): void {
+  global._decisionTraceSinks = [];
+  global._decisionTraceSheetSinkInit = false;
+}
+
+function deliver(entry: DecisionTraceEntry, sinks: DecisionTraceSink[]): void {
+  for (const sink of sinks) {
+    try {
+      const out = sink(entry);
+      if (out && typeof out.catch === "function") out.catch(() => undefined);
+    } catch {
+      // A sink must never affect tracing.
+    }
+  }
+}
+
+/**
+ * Lazily hand the first trace to the Google Sheets sink.
+ *
+ * The flag is checked HERE as well as inside the exporter, so a process with
+ * tracking off never loads `googleSheets/exporter` at all (keeps existing
+ * behaviour and tests byte-identical). The bootstrap trace is delivered once
+ * the sink lands, so the very first evaluation is not lost.
+ */
+function initSheetSink(bootstrapEntry: DecisionTraceEntry): void {
+  if (global._decisionTraceSheetSinkInit) return;
+  global._decisionTraceSheetSinkInit = true;
+  if (process.env.GOOGLE_SHEETS_TRACKING_ENABLED !== "true") return;
+
+  void import("@/lib/services/googleSheets/exporter")
+    .then((m) => m.registerDecisionSheetSink())
+    .catch(() => undefined)
+    .then(() => {
+      const sinks = global._decisionTraceSinks;
+      if (sinks && sinks.length > 0) deliver(bootstrapEntry, sinks);
+    });
+}
+
+function notifyTraceSinks(entry: DecisionTraceEntry): void {
+  const sinks = global._decisionTraceSinks;
+  if (sinks && sinks.length > 0) {
+    deliver(entry, sinks);
+    return;
+  }
+  initSheetSink(entry);
+}
+
 // ─── Track decision trace ────────────────────────────────────────────────
 
 /**
@@ -107,6 +184,7 @@ export function trackDecisionTrace(entry: DecisionTraceEntry): void {
   if (buffer.length > MAX_TRACES) {
     buffer.splice(0, buffer.length - MAX_TRACES);
   }
+  notifyTraceSinks(entry);
 }
 
 // ─── Query functions ────────────────────────────────────────────────────
