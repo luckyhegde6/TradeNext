@@ -37,6 +37,46 @@ interface AiStats {
   timeframeMinutes: number;
 }
 
+// ─── Decision Engine types (spec 17 — in-memory trace ring buffer) ────────
+
+type DecisionTraceKind = "evaluate" | "ping" | "poc-a-screener" | "poc-b-autoseed-gate";
+
+interface DecisionTraceEntry {
+  timestamp: string;
+  kind: DecisionTraceKind;
+  mode: "none" | "laya";
+  provider?: string;
+  status: "success" | "error" | "inert";
+  latencyMs: number;
+  attempts?: number;
+  error?: string;
+  questionCount?: number;
+  questionTypes?: string[];
+  gate?: "act" | "review" | "escalate";
+  reason?: string;
+  scoredCount?: number;
+  gateDistribution?: { act: number; review: number; escalate: number };
+  noulAmount?: number;
+  allowed?: boolean;
+}
+
+interface DecisionStats {
+  totalTraces: number;
+  successCount: number;
+  errorCount: number;
+  inertCount: number;
+  successRate: number;
+  avgLatencyMs: number;
+  avgAttempts: number;
+  totalQuestionsEvaluated: number;
+  totalGatesEmitted: number;
+  tracesByKind: Record<string, number>;
+  tracesByProvider: Record<string, number>;
+  tracesByGate: Record<string, number>;
+  recentErrors: DecisionTraceEntry[];
+  timeframeMinutes: number;
+}
+
 // ─── Stat Card ─────────────────────────────────────────────────────────────
 
 function StatCard({
@@ -182,6 +222,99 @@ function CallRow({ call }: { call: AiCallEntry }) {
   );
 }
 
+// ─── Decision Trace Row (spec 17) ────────────────────────────────────────
+
+function DecisionTraceRow({ trace }: { trace: DecisionTraceEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const time = new Date(trace.timestamp).toLocaleString();
+  const statusColor =
+    trace.status === "success"
+      ? "text-green-600 dark:text-green-400"
+      : trace.status === "error"
+        ? "text-red-600 dark:text-red-400"
+        : "text-amber-600 dark:text-amber-400"; // inert
+
+  const gateColor =
+    trace.gate === "act"
+      ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300"
+      : trace.gate === "review"
+        ? "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+        : trace.gate === "escalate"
+          ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
+          : "bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400";
+
+  return (
+    <div className="border-b border-gray-100 dark:border-slate-800 last:border-0">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/50 flex items-start gap-3"
+      >
+        <span className={`text-xs font-mono whitespace-nowrap mt-0.5 ${statusColor}`}>
+          {trace.status.toUpperCase()}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-900 dark:text-white">{trace.kind}</span>
+            {trace.gate && (
+              <span className={`text-xs px-1.5 py-0.5 rounded ${gateColor}`}>{trace.gate}</span>
+            )}
+            {trace.allowed !== undefined && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400">
+                {trace.allowed ? "allowed" : "blocked"}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-x-2">
+            <span>{time}</span>
+            <span>·</span>
+            <span>{trace.mode}</span>
+            {trace.provider && (
+              <>
+                <span>·</span>
+                <span>{trace.provider}</span>
+              </>
+            )}
+            {trace.reason && (
+              <>
+                <span>·</span>
+                <span>{trace.reason}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="text-right text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          <div>{trace.latencyMs}ms</div>
+          {trace.attempts !== undefined && <div>{trace.attempts} attempt{trace.attempts === 1 ? "" : "s"}</div>}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-3 space-y-2">
+          {trace.error && (
+            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+              Error: {trace.error}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+            {trace.questionCount !== undefined && <span>Questions: {trace.questionCount}</span>}
+            {trace.questionTypes && trace.questionTypes.length > 0 && (
+              <span>Types: {trace.questionTypes.join(", ")}</span>
+            )}
+            {trace.scoredCount !== undefined && <span>Scored: {trace.scoredCount}</span>}
+            {trace.noulAmount !== undefined && <span>Noul: {trace.noulAmount}</span>}
+            {trace.gateDistribution && (
+              <span>
+                Gates: act {trace.gateDistribution.act} · review {trace.gateDistribution.review} · escalate{" "}
+                {trace.gateDistribution.escalate}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────
 
 export default function AiMonitoringPage() {
@@ -194,29 +327,45 @@ export default function AiMonitoringPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(60);
-  const [viewTab, setViewTab] = useState<"stats" | "calls">("stats");
+  const [viewTab, setViewTab] = useState<"stats" | "calls" | "decision">("stats");
   const [actionFilter, setActionFilter] = useState("");
+  const [dStats, setDStats] = useState<DecisionStats | null>(null);
+  const [dTraces, setDTraces] = useState<DecisionTraceEntry[]>([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [statsRes, callsRes] = await Promise.all([
+      const [statsRes, callsRes, dStatsRes, dTracesRes] = await Promise.all([
         fetch(`/api/admin/ai/monitoring?type=stats&timeframe=${timeframe}`),
         fetch(`/api/admin/ai/monitoring?type=calls&limit=100`),
+        fetch(`/api/admin/decision/monitoring?type=stats&timeframe=${timeframe}`),
+        fetch(`/api/admin/decision/monitoring?type=traces&limit=100`),
       ]);
 
-      if (!statsRes.ok || !callsRes.ok) {
-        const e = !statsRes.ok ? await statsRes.text() : await callsRes.text();
+      if (!statsRes.ok || !callsRes.ok || !dStatsRes.ok || !dTracesRes.ok) {
+        const e = !statsRes.ok
+          ? await statsRes.text()
+          : !callsRes.ok
+            ? await callsRes.text()
+            : !dStatsRes.ok
+              ? await dStatsRes.text()
+              : await dTracesRes.text();
         throw new Error(e || "Failed to fetch monitoring data");
       }
 
-      const statsData = await statsRes.json();
-      const callsData = await callsRes.json();
+      const [statsData, callsData, dStatsData, dTracesData] = await Promise.all([
+        statsRes.json(),
+        callsRes.json(),
+        dStatsRes.json(),
+        dTracesRes.json(),
+      ]);
 
       setStats(statsData.stats);
       setCalls(callsData.calls || []);
       setDataSource(statsData.stats?.source ?? callsData.source ?? null);
+      setDStats(dStatsData.stats ?? null);
+      setDTraces(dTracesData.traces || []);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -245,6 +394,20 @@ export default function AiMonitoringPage() {
       }
     } catch (err) {
       console.error("Failed to clear:", err);
+    }
+  };
+
+  const handleClearDecision = async () => {
+    if (!confirm("Clear the in-memory Decision Engine trace buffer?")) return;
+    try {
+      const res = await fetch("/api/admin/decision/monitoring", { method: "DELETE" });
+      if (res.ok) {
+        setDStats(null);
+        setDTraces([]);
+        fetchData();
+      }
+    } catch (err) {
+      console.error("Failed to clear decision traces:", err);
     }
   };
 
@@ -376,6 +539,16 @@ export default function AiMonitoringPage() {
               >
                 Recent Calls ({filteredCalls.length})
               </button>
+              <button
+                onClick={() => setViewTab("decision")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  viewTab === "decision"
+                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                }`}
+              >
+                Decision Engine
+              </button>
             </div>
           </div>
 
@@ -428,6 +601,94 @@ export default function AiMonitoringPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Decision Engine tab (spec 17) — Separate Clear button + cache-note */}
+          {viewTab === "decision" && (
+            <div className="space-y-6">
+              {/* Decision stats header + clear */}
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Decision Engine Traces
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    In-memory ring buffer (max 500, process-local). Engine evaluations, pings, POC A screener
+                    passes and POC B gate decisions.
+                  </p>
+                </div>
+                <button
+                  onClick={handleClearDecision}
+                  className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
+                  Clear Decision Traces
+                </button>
+              </div>
+
+              {/* Decision stats cards */}
+              {dStats && (
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  <StatCard label="Total Traces" value={dStats.totalTraces} color="blue" sub={`Last ${timeframe}m`} />
+                  <StatCard
+                    label="Success Rate"
+                    value={`${dStats.successRate}%`}
+                    color={dStats.successRate >= 80 ? "green" : "amber"}
+                    sub={`${dStats.successCount} ok · ${dStats.errorCount} err · ${dStats.inertCount} inert`}
+                  />
+                  <StatCard
+                    label="Avg Latency"
+                    value={`${dStats.avgLatencyMs}ms`}
+                    color={dStats.avgLatencyMs < 500 ? "green" : dStats.avgLatencyMs < 2500 ? "amber" : "red"}
+                  />
+                  <StatCard label="Avg Attempts" value={dStats.avgAttempts} color="blue" sub="Retries per evaluate" />
+                  <StatCard label="Questions Eval." value={dStats.totalQuestionsEvaluated} color="blue" sub="All evaluate calls" />
+                  <StatCard label="Gates Emitted" value={dStats.totalGatesEmitted} color="blue" sub="POC A + POC B" />
+                </div>
+              )}
+
+              {/* Decision breakdowns */}
+              {dStats && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Traces by Kind</h3>
+                    <BreakdownBar data={dStats.tracesByKind} label="Kind" />
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Traces by Provider</h3>
+                    <BreakdownBar data={dStats.tracesByProvider} label="Provider" />
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Traces by Gate</h3>
+                    <BreakdownBar data={dStats.tracesByGate} label="Gate" />
+                  </div>
+                </div>
+              )}
+
+              {/* Recent decision errors (when any) */}
+              {dStats && dStats.recentErrors.length > 0 && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
+                  <strong>{dStats.recentErrors.length} engine error(s)</strong> in the last {timeframe}m — check the
+                  Decision Engine traces below.
+                </div>
+              )}
+
+              {/* Decision trace list */}
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700">
+                {dTraces.length === 0 ? (
+                  <div className="px-4 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+                    No decision traces yet. Run the decision engine (evaluate) or enable{" "}
+                    <code className="text-xs bg-gray-100 dark:bg-slate-700 px-1 py-0.5 rounded">DECISION_POC_ENABLED=true</code>{" "}
+                    to record screener/gate traces.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 dark:divide-slate-800">
+                    {dTraces.map((trace, i) => (
+                      <DecisionTraceRow key={`${trace.timestamp}-${i}`} trace={trace} />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </>

@@ -44,12 +44,15 @@ fi
 if command -v npx >/dev/null 2>&1; then
     TSC_OUT=$(npx tsc --noEmit -p tsconfig.json 2>/dev/null)
     TSC_ERR_COUNT=$(echo "$TSC_OUT" | grep -c "error TS" 2>/dev/null)
-    # Count only NON-test errors (test files have pre-existing matcher errors)
-    PROD_ERR_COUNT=$(echo "$TSC_OUT" | grep "error TS" 2>/dev/null | grep -v -E "__tests__|__test__" | grep -c "error TS" 2>/dev/null)
+    # Count only NON-test errors (test files have pre-existing matcher errors).
+    # Exclude `.next/` the same way the tsc-baseline GATE does: generated dev-server
+    # route-type bundles are gitignored and can be truncated mid-write (TS1128/TS1185),
+    # which would otherwise show up as a spurious PRODUCTION error at commit time.
+    PROD_ERR_COUNT=$(echo "$TSC_OUT" | grep "error TS" 2>/dev/null | grep -v -E "__tests__|__test__" | grep -v -E "(^|[\\/])\.next[\\/]" | grep -c "error TS" 2>/dev/null)
     test -z "$PROD_ERR_COUNT" && PROD_ERR_COUNT=0
     if [ "$PROD_ERR_COUNT" -gt 0 ] 2>/dev/null; then
-        echo "  WARNING: $PROD_ERR_COUNT TypeScript error(s) in production code (npx tsc --noEmit)."
-        echo "$TSC_OUT" | grep "error TS" | grep -v -E "__tests__|__test__" | head -5 | sed 's/^/    /'
+        echo "  WARNING: $PROD_ERR_COUNT TypeScript error(s) in production code (npx tsc --noEmit -p tsconfig.json)."
+        echo "$TSC_OUT" | grep "error TS" | grep -v -E "__tests__|__test__" | grep -v -E "(^|[\\/])\.next[\\/]" | head -5 | sed 's/^/    /'
     else
         echo "  TypeScript: production files clean"
     fi

@@ -19,18 +19,97 @@
  *
  * Exit: 0 = at or below baseline, 1 = regression, 2 = could not run tsc
  *
- * Test seam: `TSC_BASELINE_CMD` overrides the tsc command. It exists ONLY so the unit tests can
+ * Test seam: `TSC_BASELINE_CMD` overrides the tsc invocation. It exists ONLY so the unit tests can
  * feed deterministic output instead of paying a real ~40 s tsc run per case; it is never set in
  * the pre-commit hook or CI, so the gate always runs the real command there.
+ *
+ * Security: the invocation is NEVER evaluated by a shell. The seam string is tokenized into an
+ * argv array (double-quote aware) and executed via `execFileSync`, and only when `NODE_ENV=test`
+ * (the Jest harness) — outside tests the env var is inert. The default path runs the LOCAL
+ * `node_modules/typescript` shim directly under `process.execPath` — no `npx`, no interpolation
+ * into a shell string (CodeQL js/shell-command-injection-from-environment).
  */
-import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASELINE_PATH = resolve(ROOT, "scripts/dev-checks/tsc-baseline.json");
-const TSC_CMD = process.env.TSC_BASELINE_CMD || "npx tsc --noEmit -p tsconfig.json";
+const TSC_BASELINE_CMD = process.env.TSC_BASELINE_CMD || null;
+
+/**
+ * The gate runs tsc against a program that EXCLUDES `.next/`.
+ *
+ * WHY: `.next` ships generated route-type bundles (`.next/types/**`, `.next/dev/types/**`) that `next dev`
+ * rewrites mid-write. A truncated generated file (TS1128 during an active dev-server write) makes tsc
+ * short-circuit BEFORE scanning real source — the scan would then report far fewer errors than exist,
+ * which would either fail the gate spuriously or (worse) MASK a real source regression as "delta -46".
+ *
+ * Contract: the gate must ALWAYS count the honest, stable 46 baseline errors (all in __tests__/, prod 0),
+ * never the transient state of generated gitignored artifacts.
+ */
+function buildGateTsconfig() {
+  const main = JSON.parse(readFileSync(resolve(ROOT, "tsconfig.json"), "utf8"));
+  const include = (main.include ?? [])
+    .filter((p) => !p.includes(".next"))
+    .concat(["next-env.d.ts"]);
+  const exclude = [...new Set(["node_modules", "tests", ...(main.exclude ?? [])])];
+  const gate = {
+    ...main,
+    include: [...new Set(include)],
+    exclude,
+    files: undefined,
+    references: undefined,
+  };
+  // The disposable gate tsconfig MUST live at the repo ROOT: tsc resolves the root-relative
+  // include/exclude globs (`**/*.ts`, `next-env.d.ts`, …) against the config file's OWN directory.
+  // Written under scripts/dev-checks/ those globs find nothing → TS18003 "No inputs were found",
+  // which the gate would otherwise count as a spurious +1 prod error.
+  const path = resolve(ROOT, "tsconfig.gatecheck.json");
+  writeFileSync(path, JSON.stringify(gate, null, 2), "utf8");
+  return path;
+}
+
+/**
+ * Tokenize a simple command string into an argv array (double-quote aware). Only used for the
+ * `TSC_BASELINE_CMD` test seam; the default path below builds argv directly and needs no parsing.
+ */
+function splitArgs(input) {
+  const argv = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = re.exec(input)) !== null) argv.push(match[1] ?? match[2] ?? match[3]);
+  return argv;
+}
+
+function runTsc() {
+  const gateTsconfig = buildGateTsconfig();
+  // Default: run the LOCAL typescript shim directly under node — the same binary `npx tsc`
+  // resolves, but no `npx` lookup and no shell string, so nothing from the environment is ever
+  // interpolated into a shell command.
+  let bin = process.execPath;
+  let args = [resolve(ROOT, "node_modules/typescript/bin/tsc"), "--noEmit", "-p", gateTsconfig];
+  // Test seam (Jest-only; inert in the pre-commit hook / CI): TSC_BASELINE_CMD feeds
+  // deterministic output instead of a real ~40 s tsc run. Still executed shell-free via argv.
+  if (TSC_BASELINE_CMD && process.env.NODE_ENV === "test") {
+    const [seamBin, ...seamArgs] = splitArgs(TSC_BASELINE_CMD);
+    bin = seamBin;
+    args = seamArgs;
+  }
+  try {
+    return execFileSync(bin, args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 1200000,
+    });
+  } catch (err) {
+    return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+  } finally {
+    rmSync(gateTsconfig, { force: true });
+  }
+}
 const TSC_TIMEOUT_MS = 600_000;
 
 /** Fallback used when the baseline file is absent (documented default). */
@@ -41,16 +120,25 @@ const asJson = args.includes("--json");
 const shouldUpdate = args.includes("--update");
 
 /** tsc exits non-zero when errors exist — that is expected, so capture rather than throw. */
-function runTsc() {
+
+/**
+ * Build a disposable gate tsconfig that excludes `.next` (generated by `next dev`, gitignored) from the
+ * tsc PROGRAM — not just from the output count.
+ *
+ * WHY program-level exclusion (not line-level): a truncated generated route-type file (TS1128 mid-write)
+ * makes tsc SHORT-CIRCUIT: it aborts the program after the syntax error and never scans the rest of the
+ * source tree, reporting e.g. only 2 errors instead of the real 46. Line-level filtering would then
+ * report "0 errors" while 46 REAL source errors existed — masking regressions (the exact trap the
+ * check-tsc-baseline gate exists to prevent). Excluding `.next` up front keeps tsc scanning all real
+ * source, so it ALWAYS reports the honest 46/0 regardless of the dev server's generated-file state.
+ */
+
+function runTscGate() {
+  const gateTsconfig = buildGateTsconfig();
   try {
-    return execSync(TSC_CMD, {
-      cwd: ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: TSC_TIMEOUT_MS,
-    });
-  } catch (err) {
-    return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    return runTsc(TSC_CMD_STATIC, gateTsconfig);
+  } finally {
+    rmSync(gateTsconfig, { force: true });
   }
 }
 
@@ -69,7 +157,11 @@ function readBaseline() {
 }
 
 function countErrors(raw) {
-  const lines = raw.split(/\r?\n/).filter((l) => /error TS\d+/.test(l));
+  let lines = raw.split(/\r?\n/).filter((l) => /error TS\d+/.test(l));
+  // Generated build output (`.next/`, incl. the dev-server's regenerated route types) is gitignored
+  // and never committed — it must NOT count against the committed source baseline (the dev server can
+  // race tsc and emit transient TS1128 truncations mid-write, which are cache flakes, not regressions).
+  lines = lines.filter((l) => !/(^|[\\/])\.next[\\/]/.test(l));
   // "prod" = errors NOT inside __tests__/ — matches the pre-commit hook's classification.
   const prod = lines.filter((l) => !/__tests__|__test__/.test(l)).length;
   return { total: lines.length, prod, errors: lines };

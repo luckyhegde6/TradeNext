@@ -384,6 +384,11 @@ export interface SqliteFallback {
     status?: string[];
     limit?: number;
   }): Array<Record<string, unknown>>;
+  /** Mirror read: recommendation runs (camelCase, dates rehydrated), newest first. */
+  getRecommendationRuns(opts?: {
+    status?: string[];
+    limit?: number;
+  }): Array<Record<string, unknown>>;
   /** Mirror read: one swing analysis job by id, or null. */
   getSwingAnalysisJob(id: string): Record<string, unknown> | null;
   /** Mirror read: swing analysis jobs — one status or a status-list (default "running"). */
@@ -5743,6 +5748,68 @@ function createFallback(db: Database): SqliteFallback {
           error: err instanceof Error ? err.message : String(err),
         });
         recordSqliteRead("getRecommendationTrackers", _start, 0, false);
+        return [];
+      }
+    },
+
+    getRecommendationRuns(opts?: {
+      status?: string[];
+      limit?: number;
+    }): Array<Record<string, unknown>> {
+      const _start = performance.now();
+      if (!db) {
+        recordSqliteRead("getRecommendationRuns", _start, 0, false);
+        return [];
+      }
+      try {
+        const conds: string[] = ["unique_stocks > 0"];
+        const params: (string | number)[] = [];
+        if (opts?.status?.length) {
+          conds.push(`status IN (${opts.status.map(() => "?").join(", ")})`);
+          params.push(...opts.status);
+        }
+        // LIMIT is inline (already clamped) so sql.js never binds a number
+        // on the same statement as the IN placeholders.
+        const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 2000);
+        const rows = db.exec(
+          `SELECT * FROM daily_recommendation_run WHERE ${conds.join(
+            " AND ",
+          )} ORDER BY run_date DESC LIMIT ${limit}`,
+          params,
+        );
+        if (!rows.length || !rows[0].values.length) {
+          recordSqliteRead("getRecommendationRuns", _start, 0, false);
+          return [];
+        }
+        const cols = rows[0].columns;
+        const out = rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["run_date", "created_at", "completed_at"],
+            jsonKeys: ["metadata"],
+            alias: {
+              run_date: "runDate",
+              total_screeners: "totalScreeners",
+              successful_screeners: "successfulScreeners",
+              total_stocks: "totalStocks",
+              unique_stocks: "uniqueStocks",
+              ai_processed: "aiProcessed",
+              ai_failed: "aiFailed",
+              execution_time_ms: "executionTimeMs",
+              error_message: "errorMessage",
+              triggered_by: "triggeredBy",
+              created_at: "createdAt",
+              completed_at: "completedAt",
+            },
+          }),
+        );
+        recordSqliteRead("getRecommendationRuns", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getRecommendationRuns failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getRecommendationRuns", _start, 0, false);
         return [];
       }
     },

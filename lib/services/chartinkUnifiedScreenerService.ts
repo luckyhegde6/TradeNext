@@ -38,6 +38,8 @@ import {
   type ScreenerResult,
   type ChartinkStock,
 } from "@/lib/services/chartinkService";
+import { scoreScreenerResult } from "@/lib/services/decision/fusion";
+import { trackDecisionTrace } from "@/lib/services/decision/monitoring";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +53,10 @@ export interface UnifiedScreenerResult extends ScreenerResult {
   source: ScreenerSource;
   /** Chartink template ids that flagged this stock (registry ids). */
   templateIds: string[];
+  /** POC A decision score (0..1) — only present when DECISION_POC_ENABLED=true. */
+  decisionScore?: number;
+  /** POC A conservative gate — only present when DECISION_POC_ENABLED=true. */
+  decisionGate?: "act" | "review" | "escalate";
 }
 
 /** Options for the unified run. */
@@ -436,6 +442,46 @@ export async function runChartinkUnifiedScreeners(
     };
     return { ...r, source: attribution.source, templateIds: attribution.templateIds };
   });
+
+  // ── POC A: decision-engine composite scoring (spec 16 §4.F) ─────────────
+  // Opt-in via DECISION_POC_ENABLED=true — default OFF is a byte-identical no-op.
+  // Deterministic + synchronous (local fusion, no engine call) so the screener
+  // pass never blocks or degrades when disabled.
+  if (process.env.DECISION_POC_ENABLED === "true") {
+    try {
+      const pocStarted = Date.now();
+      for (const r of results) {
+        const outcome = scoreScreenerResult(r);
+        r.decisionScore = outcome.composite;
+        r.decisionGate = outcome.gate;
+      }
+      const act = results.filter((r) => r.decisionGate === "act").length;
+      const review = results.filter((r) => r.decisionGate === "review").length;
+      const escalate = results.filter((r) => r.decisionGate === "escalate").length;
+      logger.info({
+        msg: "Decision POC A scored unified screeners",
+        scored: results.length,
+        act,
+        review,
+        escalate,
+      });
+      trackDecisionTrace({
+        timestamp: new Date().toISOString(),
+        kind: "poc-a-screener",
+        mode: "laya",
+        provider: "local",
+        status: "success",
+        latencyMs: Date.now() - pocStarted,
+        scoredCount: results.length,
+        gateDistribution: { act, review, escalate },
+      });
+    } catch (err) {
+      logger.warn({
+        msg: "Decision POC A scoring failed (non-fatal)",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   staticCache.set(unifiedCacheKey(options), results, CACHE_TTL);
 

@@ -12,7 +12,7 @@
  * pre-commit hook and the CI `tsc-baseline` job, not here.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -75,6 +75,14 @@ function makeHarness(options: {
   mkdirSync(scriptDir, { recursive: true });
   const script = path.join(scriptDir, "check-tsc-baseline.mjs");
   copyFileSync(SCRIPT, script);
+
+  // v3.40.7's `buildGateTsconfig()` reads `<ROOT>/tsconfig.json` — mirror the repo layout by
+  // providing a stub at the throwaway ROOT so the copied script does not crash with ENOENT.
+  writeFileSync(
+    path.join(dir, "tsconfig.json"),
+    JSON.stringify({ include: ["**/*.ts"], exclude: [] }),
+    "utf8"
+  );
 
   const baselinePath = path.join(scriptDir, "tsc-baseline.json");
   if (options.baseline !== null) {
@@ -218,5 +226,13 @@ describe("committed tsc baseline", () => {
     // Update these together via `--update` if the baseline is ever intentionally re-recorded.
     expect(baseline.total).toBe(46);
     expect(baseline.prod).toBe(0);
+  });
+
+  it("resolves the real tsc shim used by the default (non-seam) invocation", () => {
+    // The default path runs `node node_modules/typescript/bin/tsc --noEmit -p <gate>` directly
+    // (no `npx`, no shell string) — this pins the shim the gate depends on.
+    expect(
+      existsSync(path.resolve(__dirname, "../../node_modules/typescript/bin/tsc"))
+    ).toBe(true);
   });
 });

@@ -258,3 +258,42 @@ No migration; no new packages (Node built-ins + `crypto` only).
 
 **Docs**: this section + `.agents/changelog/versions-index.md` v3.40.4 row; `Primer.md` Last Updated; `agent-memory.md`. No migration, no new packages.
 
+## v3.40.5 - Laya / System-One decision-engine research + durable memory (2026-09-22, docs-only)
+
+**Request**: research Laya (HF convaiinnovations/laya), Jev 1.13.0 (verify "published"), the Medium comparison article, and ALL TypeSafe.AI docs; create a detailed doc + durable `memory.md` (budget-preserving) so future sessions never re-scrape; afterwards build a decision engine from it.
+
+**Execution**: 5 parallel research subagents (foundations, primitives, patterns+demo, JS SDK, Laya/Jev/Medium). Key findings preserved in `memory.md`:
+- **Laya** = Apache-2.0, non-autoregressive "System 1" decision model, RLCD-trained, ~33 ms/pass, 100+ langs, 843 MB safetensors, NEVER generates text.
+- **Jev 1.13.0** premise CORRECTED: `github.com/answers-ai/jev` is a **404** — Jev is TypeSafe's proprietary hosted API (`POST https://api.typesafe.ai/v1/systemone`, model `jev-latest`); NOT an OSS repo.
+- **TypeSafe concepts**: state + atomic questions → typed answers (Choice/Score/Noul) + probabilities + confidence; patterns = speculative fan-out, confidence-gated routing, composite scoring, intent routing; decision logic lives in code.
+- **SDK**: `@typesafe-ai/sdk` v0.6.0 (Breaking: `Score.criteria` = ordered tuple), Node 20+, env `TYPESAFE_API_KEY`/`TYPESAFE_BASE_URL`/`TYPESAFE_DEFAULT_MODEL=jev-latest`.
+- **Medium article** → HTTP 403 (recovered via search snippets only; 403 noted as documented gap).
+
+**New files**: `memory.md` (durable cross-session research reference — NOT an injected instruction file, doc budget unaffected: 75.6/100 KB verified); `docs/laya.md`; `docs/designDoc/ph22-laya-decision-engine-design.md` (research + proposed engine design: provider-agnostic `lib/services/decision/` with Laya local + TypeSafe cloud, confidence-gated routing, POC wiring into screener composite scoring + Swing AI gatecheck; spec→plan required before implementation).
+
+**Verification**: `check-doc-sizes.mjs` OK (75.6/100 KB); no code, no migration, no new packages. Next: spec + plan for the decision-engine build (user-stated intent).
+
+---
+
+## v3.40.6 - Laya JS code-extraction plan + wiki decision-engine pages (2026-09-23, docs + wiki, no code)
+
+**Request (1)**: "mainly focus on the https://github.com/NandhaKishorM/laya its code extraction to js."
+**Request (2)**: "jev is just a doc only, but want the implementation based of the laya and create a whole guide, the porting guide what reference what and how you did it and what all were there everything into wiki and add the reference of the https://github.com/NandhaKishorM/laya on the wiki as well and also add the architecture of the decision engine and how will help in taking decision for the new daily recommendation engine, swing and ipo analysis, stock ai analysis and for watchlist as well."
+
+**Execution (1) — code extraction plan**: fetched the ENTIRE canonical repo source (`NandhaKishorM/laya` v0.3.6, main `c7527708`, 16.3 k★) module-by-module (`common.py`, `agent.py`, `router.py`, `lang.py`, `shortlist.py`, `presets.py`, `__init__.py`, `pyproject.toml`). Key finding: the repo is the **inference/decode layer only** (no `modeling_laya.py` — the neural net lives on HF) → **~84% pure-Python logic ports 1:1 to TS**; only 2 Python-runtime deps: the **tokenizer** (same `tokenizer.json` via WASM `@huggingface/tokenizers` = exact ID parity) and the `DecisionModel` **backbone** (whole-model ONNX export → `onnxruntime-node`; path proven by `mizorewww/laya-coreml` 189/189 parity). Footprints: english/typed 421M, multilingual 322M (FP32 ≈1.6GB, FP16 ≈843MB, INT8 ≈420MB). Router precedence + `typed-decisions` never auto-routed. Fork caveat: `aayushch/laya` is an unrelated notification app (name collision, NOT a fork).
+**New file**: `docs/designDoc/ph22-laya-js-extraction-plan.md` (per-algorithm port specs: `build_sequence` → `buildSequence.ts`, `forward`, `system_one` decode, router precedence, langs tables, shortlist; P0–P6 phased plan with fidelity gates; risks/tradeoffs). `docs/laya.md` §5b code-level extraction + `memory.md` §1 code-extraction map appended.
+
+**Execution (2) — wiki**: pushed commit `51c0db6` on the wiki repo (16 pages):
+- **NEW `Decision-Engine.md`** — Laya-based architecture (callers → `lib/services/decision/client.ts` → layaProvider → confidence → ACT/REVIEW/ESCALATE; lifecycle state machine; primitives table) + concrete per-feature questions for the **5 surfaces**: daily recommendation engine (pre-rank + post-validate), Swing auto-generate (Noul validity gate), IPO analysis (subscription/GMP checks + report sanity), stock AI analysis (instant regime/sentiment), watchlist & alerts (Noul anomaly gates).
+- **NEW `Laya-Porting-Guide.md`** — upstream repo reference + module-by-module Python→TS map ("what references what"), the 2 runtime deps (tokenizer WASM + ONNX backbone), 4 parity surfaces (build_sequence/forward/temperature-softmax/answer shaping), P0–P6 phases, risks, sources.
+- **`Home.md`** — 2 new Subsystem Deep-Dive rows + What's New (Sep 23 2026); **`Jev-Decision-Model.md`** demoted to **docs-only reference** (implementation basis = Laya), cross-linked to the new pages.
+- Verified live via webfetch: `.../wiki/Decision-Engine` + `.../wiki/Home` render (mermaid blocks OK).
+
+**Session files**: `.agents/session-todos.md`, `.agents/handoffs/active/latest.md` addendum, `agent-memory.md` entry, `memory.md` header.
+
+**Next (PENDING USER)**: (1) approve commit of the repo-side docs on `feature/ph22-decision-engine`; (2) approve spec 16 + plan 16 and the **P0 spike** (`scripts/laya-spike/`: ONNX export + onnxruntime-node smoke + RSS/latency → `VERDICT.md`) — model download (~843MB) + ONNX export toolchain are **sensitive ops needing explicit permission**; P1 pure-TS ports (decode math, router, lang, shortlist, presets) do NOT need weights.
+
+
+### v3.40.8 (2026-09-23) — P0 Laya runtime spike COMPLETE
+- `scripts/spike-laya/`: download.mjs (subdir-preserving, .onnx+.onnx.data+tokenizer), smoke.mjs (chained encoder→head, runtime IO discovery), VERDICT.md APPROVE, smoke-results.json.
+- Findings: prebuilt repo = SPLIT encoder+head (not whole-model); graphs use external .onnx.data; IO contract mapped (2048-dim?, head attention_mask bool, qtype 1-D, K>=2, act_logits conditional); chain 2316ms @ seq=128; RSS 54.5→611MB.

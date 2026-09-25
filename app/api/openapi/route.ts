@@ -1826,6 +1826,95 @@ This API is designed for programmatic access. Key endpoints:
                     }
                 }
             }
+        },
+
+        // ==================== DECISION ENGINE (ph22) ====================
+        // v3.41.0, spec 16 — System One decision engine. Admin-only; the engine
+        // is a local deterministic mock (Laya decode contract) by default, with
+        // DECISION_PROVIDER=none as the production default (fully inert).
+        '/api/decision/evaluate': {
+            post: {
+                summary: 'Run atomic decision questions (choice/score/noul) over a state (admin)',
+                description: 'Evaluates 1–10 atomic questions (choice/score/noul) against a JSON state with the configured decision provider. Returns typed per-question answers with probabilities/confidence. 503 when the engine is failed or inert (DECISION_PROVIDER=none). State must serialize ≤ 16KB.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    state: { type: 'object' },
+                                    questions: {
+                                        type: 'array',
+                                        maxItems: 10,
+                                        items: {
+                                            oneOf: [
+                                                { type: 'object', properties: { type: { const: 'choice' }, name: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 8 }, instruction: { type: 'string' }, statePath: { type: 'string' } }, required: ['type', 'name', 'options'] },
+                                                { type: 'object', properties: { type: { const: 'score' }, name: { type: 'string' }, criteria: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 12 }, instruction: { type: 'string' }, statePath: { type: 'string' } }, required: ['type', 'name', 'criteria'] },
+                                                { type: 'object', properties: { type: { const: 'noul' }, name: { type: 'string' }, instruction: { type: 'string' }, statePath: { type: 'string' } }, required: ['type', 'name'] }
+                                            ]
+                                        }
+                                    },
+                                    model: { type: 'string' }
+                                },
+                                required: ['state', 'questions'],
+                                example: {
+                                    state: { symbol: 'RELIANCE', changePercent: 2.4 },
+                                    questions: [{ type: 'choice', name: 'regime', options: ['trending', 'ranging'] }]
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: '{ success, response: { answers, provider, model, latencyMs } }' },
+                    '400': { description: 'Invalid body (bad primitive, >10 questions, state > 16KB)' },
+                    '401': { description: 'Unauthorized' },
+                    '503': { description: 'Decision engine failed or inert (DECISION_PROVIDER=none)' }
+                }
+            }
+        },
+        '/api/admin/decision/ping': {
+            get: {
+                summary: 'Decision engine liveness/config probe (admin)',
+                description: 'Returns the resolved provider mode, provider list + health detail, and the DECISION_PROVIDER / DECISION_POC_ENABLED flags.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                responses: {
+                    '200': { description: '{ success, ping: { mode, providers, detail }, flags: { DECISION_PROVIDER, DECISION_POC_ENABLED } }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            }
+        },
+        // v3.41.1, spec 17 — decision-engine performance tracing (in-memory ring buffer).
+        '/api/admin/decision/monitoring': {
+            get: {
+                summary: 'Decision Engine observability data (admin)',
+                description: 'type=stats (default): aggregated trace statistics (totals, success/inert/error rate, avg latency, avg retry attempts, questions evaluated, gates emitted, breakdowns by kind/provider/gate, recent errors) over a timeframe window. type=traces: recent decision traces from the in-memory ring buffer (newest first). Traces are process-local by design (zero Prisma); the engine is a Laya-only mock until P1–P6.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                parameters: [
+                    { name: 'type', in: 'query', schema: { type: 'string', enum: ['stats', 'traces'] }, description: 'Default: stats' },
+                    { name: 'timeframe', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 1440 }, description: 'Minutes window for stats (default 60)' },
+                    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500 }, description: 'Max traces to return (default 50)' }
+                ],
+                responses: {
+                    '200': { description: '{ stats } | { traces, total }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            },
+            delete: {
+                summary: 'Clear Decision Engine trace buffer (admin)',
+                description: 'Clears the in-memory decision trace ring buffer.',
+                tags: ['Decision Engine'],
+                security: securityAdmin,
+                responses: {
+                    '200': { description: '{ success, message }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            }
         }
     }
 };

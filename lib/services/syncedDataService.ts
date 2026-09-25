@@ -17,6 +17,8 @@
 import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import cache from "@/lib/cache";
+import { getSqliteFallback } from "@/lib/sqlite";
+import { isPlanLimitBreakerOpen, isDbUnavailableError } from "@/lib/db-utils";
 
 /** Default sync window — 24 hours. Upstream data (IPO calendar, ideas) changes
  *  at most daily, so we refetch no more often than this. */
@@ -26,6 +28,62 @@ export const DEFAULT_SYNC_TTL_SECONDS = 24 * 60 * 60;
  *  the next read retries the upstream API instead of serving stale data for
  *  the full 24h window. */
 const FALLBACK_MEM_TTL_SECONDS = 5 * 60;
+
+/**
+ * Best-effort mirror write-through (non-fatal). Keeps the SQLite `market_cache`
+ * mirror fresh when the Prisma write is skipped under the plan-limit hold, so
+ * SQLite-first reads never serve an empty marketplace. Mirrors the Prisma
+ * upsert shape exactly (camelCase keys accepted by upsertMarketCache).
+ */
+function mirrorWriteThrough(
+  cacheKey: string,
+  dataType: string,
+  indexName: string | undefined,
+  data: unknown,
+  syncedAt: Date,
+  ttlSeconds: number
+): void {
+  try {
+    const sqlite = getSqliteFallback();
+    if (!sqlite) return;
+    const existing = sqlite.getMarketCache(cacheKey);
+    const unchanged = existing !== null && stableStringify(existing.data) === stableStringify(data);
+    if (unchanged) return; // mirror already in sync — avoid churn
+    sqlite.upsertMarketCache({
+      cacheKey,
+      dataType,
+      indexName: indexName || null,
+      data: data as object,
+      recordCount: Array.isArray(data) ? data.length : 1,
+      lastSyncedAt: syncedAt,
+      nextSyncAt: new Date(syncedAt.getTime() + ttlSeconds * 1000),
+      marketStatus: "closed",
+      syncStatus: "idle",
+      syncError: null,
+    });
+  } catch (error) {
+    logger.warn({
+      msg: "SyncedData: mirror write-through failed",
+      cacheKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Mirror read helper for the step-3 fallback: returns { data, lastSyncedAt }
+ * or null when the SQLite mirror has no row for this cacheKey.
+ */
+function mirrorReadMarketCache(
+  cacheKey: string
+): { data: unknown; lastSyncedAt: Date | null } | null {
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return null;
+  const row = sqlite.getMarketCache(cacheKey);
+  if (row === null || row.data == null) return null;
+  const lastSyncedAt = row.last_synced_at ? new Date(String(row.last_synced_at)) : null;
+  return { data: row.data, lastSyncedAt };
+}
 
 /**
  * Stable JSON serialization — recursively sorts object keys so semantically
@@ -113,49 +171,76 @@ export async function getOrFetchSyncedData<T>(
     const data = await fetchFromApi();
     const syncedAt = new Date();
 
-    const existing = await prisma.marketCache.findUnique({ where: { cacheKey } });
-    const unchanged =
-      existing !== null && stableStringify(existing.data) === stableStringify(data);
-
-    if (!unchanged) {
-      await prisma.marketCache.upsert({
-        where: { cacheKey },
-        create: {
-          cacheKey,
-          dataType,
-          indexName: indexName || null,
-          data: data as object,
-          recordCount: Array.isArray(data) ? data.length : 1,
-          nseLastModified: null,
-          lastSyncedAt: syncedAt,
-          nextSyncAt: new Date(syncedAt.getTime() + ttlSeconds * 1000),
-          marketStatus: "closed",
-          syncStatus: "idle",
-          syncError: null,
-        },
-        update: {
-          data: data as object,
-          recordCount: Array.isArray(data) ? data.length : 1,
-          lastSyncedAt: syncedAt,
-          nextSyncAt: new Date(syncedAt.getTime() + ttlSeconds * 1000),
-          syncStatus: "idle",
-          syncError: null,
-        },
-      });
-      logger.info({
-        msg: "SyncedData: DB synced (payload changed)",
-        cacheKey,
-        recordCount: Array.isArray(data) ? data.length : 1,
-      });
-    } else {
-      logger.info({
-        msg: "SyncedData: payload unchanged after TTL — DB write skipped",
+    if (isPlanLimitBreakerOpen()) {
+      // Hold-proof: skip the Prisma change-check/write entirely (zero ops) and
+      // mirror-write only. The fresh API payload is served as-is.
+      logger.warn({
+        msg: "SyncedData: DB sync skipped (plan hold) — serving API payload",
         cacheKey,
       });
+      mirrorWriteThrough(cacheKey, dataType, indexName, data, syncedAt, ttlSeconds);
+      cache.set(memKey, { data, syncedAt }, ttlSeconds);
+      return { data, source: "api", syncedAt, changed: false };
     }
 
-    cache.set(memKey, { data, syncedAt }, ttlSeconds);
-    return { data, source: "api", syncedAt, changed: !unchanged };
+    try {
+      const existing = await prisma.marketCache.findUnique({ where: { cacheKey } });
+      const unchanged =
+        existing !== null && stableStringify(existing.data) === stableStringify(data);
+
+      if (!unchanged) {
+        await prisma.marketCache.upsert({
+          where: { cacheKey },
+          create: {
+            cacheKey,
+            dataType,
+            indexName: indexName || null,
+            data: data as object,
+            recordCount: Array.isArray(data) ? data.length : 1,
+            nseLastModified: null,
+            lastSyncedAt: syncedAt,
+            nextSyncAt: new Date(syncedAt.getTime() + ttlSeconds * 1000),
+            marketStatus: "closed",
+            syncStatus: "idle",
+            syncError: null,
+          },
+          update: {
+            data: data as object,
+            recordCount: Array.isArray(data) ? data.length : 1,
+            lastSyncedAt: syncedAt,
+            nextSyncAt: new Date(syncedAt.getTime() + ttlSeconds * 1000),
+            syncStatus: "idle",
+            syncError: null,
+          },
+        });
+        logger.info({
+          msg: "SyncedData: DB synced (payload changed)",
+          cacheKey,
+          recordCount: Array.isArray(data) ? data.length : 1,
+        });
+      } else {
+        logger.info({
+          msg: "SyncedData: payload unchanged after TTL — DB write skipped",
+          cacheKey,
+        });
+      }
+
+      cache.set(memKey, { data, syncedAt }, ttlSeconds);
+      return { data, source: "api", syncedAt, changed: !unchanged };
+    } catch (dbError) {
+      // Plan hold on the write path (breaker raced to open after the fetch):
+      // the API call SUCCEEDED, so never fail — serve the fresh payload and
+      // best-effort the mirror write-through.
+      if (!isDbUnavailableError(dbError)) throw dbError;
+      logger.warn({
+        msg: "SyncedData: DB read/write blocked (plan hold) — serving API payload",
+        cacheKey,
+        error: dbError instanceof Error ? dbError.message : String(dbError),
+      });
+      mirrorWriteThrough(cacheKey, dataType, indexName, data, syncedAt, ttlSeconds);
+      cache.set(memKey, { data, syncedAt }, ttlSeconds);
+      return { data, source: "api", syncedAt, changed: false };
+    }
   } catch (error) {
     logger.error({
       msg: "SyncedData: upstream fetch failed — falling back to DB",
@@ -164,7 +249,26 @@ export async function getOrFetchSyncedData<T>(
     });
 
     // 3) DB fallback — only reached because memory was empty AND the API threw.
-    const row = await prisma.marketCache.findUnique({ where: { cacheKey } });
+    let row: { data: unknown; lastSyncedAt: Date | null } | null = null;
+
+    if (isPlanLimitBreakerOpen()) {
+      // Hold-proof: zero Prisma ops — probe the SQLite mirror first (it was
+      // backfilled before the hold or kept fresh by mirrorWriteThrough).
+      row = mirrorReadMarketCache(cacheKey);
+    } else {
+      try {
+        row = await prisma.marketCache.findUnique({ where: { cacheKey } });
+      } catch (dbError) {
+        if (!isDbUnavailableError(dbError)) throw dbError;
+        logger.warn({
+          msg: "SyncedData: DB fallback read blocked (plan hold) — trying SQLite mirror",
+          cacheKey,
+          error: dbError instanceof Error ? dbError.message : String(dbError),
+        });
+        row = mirrorReadMarketCache(cacheKey);
+      }
+    }
+
     if (row !== null && row.data != null) {
       const data = row.data as T;
       cache.set(memKey, { data, syncedAt: row.lastSyncedAt }, FALLBACK_MEM_TTL_SECONDS);

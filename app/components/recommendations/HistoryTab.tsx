@@ -45,6 +45,7 @@ const recConfig: Record<string, { bg: string; text: string; icon: string }> = {
 export default function HistoryTab({ loading }: HistoryTabProps) {
   const [stocks, setStocks] = useState<TopStock[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [sortBy, setSortBy] = useState<"confidence" | "screenerCount" | "date" | "price">("date");
   const [page, setPage] = useState(0);
@@ -57,6 +58,7 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
 
   const fetchStocks = async () => {
     setLoadingHistory(true);
+    setError(null);
     try {
       const params = new URLSearchParams({
         limit: String(pageSize),
@@ -68,8 +70,11 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
       if (data.success) {
         setStocks(data.stocks);
         setTotal(data.total);
+      } else {
+        setError("Failed to load recommendations history");
       }
     } catch {
+      setError("Failed to load recommendations history");
       console.error("Failed to fetch top stocks");
     } finally {
       setLoadingHistory(false);
@@ -103,6 +108,22 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
             <div className="h-4 bg-gray-700 rounded w-1/2" />
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-4xl mb-3">⚠️</div>
+        <h3 className="text-lg font-medium text-gray-300">Could not load recommendations history</h3>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
+        <button
+          onClick={fetchStocks}
+          className="mt-4 px-4 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded text-xs text-blue-300 transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }

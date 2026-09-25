@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jev 1.13.0 — TypeSafe System One Model · TradeNext Visual Guide</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --violet: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+  }
+  header {
+    background: linear-gradient(135deg, #0c4a6e, #1e293b);
+    padding: 40px 24px 32px;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+  header h1 { margin: 0 0 8px; font-size: 1.9rem; }
+  header p { margin: 0; color: var(--muted); max-width: 760px; margin-inline: auto; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 28px;
+  }
+  h2 {
+    margin: 0 0 16px;
+    font-size: 1.35rem;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+  h3 { color: var(--violet); margin: 20px 0 8px; font-size: 1.05rem; }
+  code {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  pre {
+    background: #0b1220;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  .mermaid { background: var(--panel); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  th { background: var(--panel-2); color: var(--accent); }
+  tr:nth-child(even) td { background: rgba(51,65,85,.35); }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  .b-green { background: rgba(74,222,128,.15); color: var(--green); }
+  .b-amber { background: rgba(251,191,36,.15); color: var(--amber); }
+  .b-red { background: rgba(248,113,113,.15); color: var(--red); }
+  .b-blue { background: rgba(56,189,248,.15); color: var(--accent); }
+  .b-violet { background: rgba(167,139,250,.15); color: var(--violet); }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 4px 0; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: .85rem;
+    padding: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .notice {
+    border-left: 4px solid var(--amber);
+    background: rgba(251,191,36,.08);
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    margin: 12px 0;
+  }
+  .warn {
+    border-left: 4px solid var(--red);
+    background: rgba(248,113,113,.08);
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    margin: 12px 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Jev 1.13.0 — TypeSafe System One Model</h1>
+  <p>Visual guide: the hosted System One decision model, the <code>@typesafe-ai/sdk</code>, and how TradeNext integrates it behind a provider-agnostic decision engine.</p>
+</header>
+
+<main>
+
+<section id="identity">
+  <h2>1. Identity — what Jev actually is</h2>
+  <div class="warn"><strong>Premise correction:</strong> <code>github.com/answers-ai/jev</code> is a <strong>404</strong> — Jev is <strong>NOT</strong> open-source. It is TypeSafe AI's <strong>proprietary hosted API</strong>, the "first public System One model".</div>
+  <table>
+    <tr><th>Property</th><th>Value</th></tr>
+    <tr><td>Vendor</td><td>TypeSafe AI (cofounder co-invented RLHF; RLCD training)</td></tr>
+    <tr><td>Model</td><td><code>jev-1.13.0</code> <span class="badge b-blue">published</span> · <code>jev-latest</code> <span class="badge b-blue">SDK default</span></td></tr>
+    <tr><td>Endpoint</td><td><code>POST https://api.typesafe.ai/v1/systemone</code></td></tr>
+    <tr><td>Console</td><td><a href="https://console.typesafe.ai/" style="color:var(--accent)">console.typesafe.ai</a> — playground + shared decode links</td></tr>
+    <tr><td>SDK</td><td><code>@typesafe-ai/sdk</code> — v0.6.0 (Node 20+, ESM + CJS + TS)</td></tr>
+    <tr><td>Access mode</td><td><strong>Hosted only</strong> — no weights, no self-host (Laya is the local counterpart)</td></tr>
+  </table>
+  <p><strong>Core principle:</strong> Jev makes <em>judgments, not prose</em>. It never generates text and never picks its own next step — all decision logic lives in your code.</p>
+</section>
+
+<section id="anatomy">
+  <h2>2. Request anatomy — one state, many atomic questions</h2>
+  <div class="mermaid">
+flowchart LR
+    subgraph YOU["YOUR CODE (decision logic)"]
+        S["Build state<br/>string | JSON | array"]
+        Q["Build questions[]<br/>Choice · Score · Noul"]
+    end
+    S --> REQ["POST /v1/systemone<br/>{ state, questions }"]
+    Q --> REQ
+    REQ --> JEV["Jev jev-latest<br/>parallel isolated evaluation"]
+    JEV --> ANS["Typed answers<br/>+ probabilities + confidence"]
+    ANS --> G["gate.decide(conf, risk)"]
+    G -->|"high"| ACT["ACT — auto-apply"]
+    G -->|"medium"| REV["REVIEW — UI/queue"]
+    G -->|"low"| ESC["ESCALATE — agent / human"]
+  </div>
+  <ol>
+    <li><strong>One <code>state</code> per request</strong>, shared by all questions. No multi-turn memory — workflows re-issue requests in code.</li>
+    <li><strong>Atomic questions</strong> — each targets a single decision; ask more by adding questions, not complexity (speculative fan-out).</li>
+    <li><strong>Atomicy paths</strong> — a backticked path (e.g. <code>`support.tickets[0].message`</code>) points a question at a nested state slice; questions evaluate isolated values, so no "context-rot".</li>
+    <li><strong>Confidence-gated routing</strong> — thresholds per action, scaled by risk.</li>
+  </ol>
+</section>
+
+<section id="primitives">
+  <h2>3. Primitives — the typed answers</h2>
+  <div class="mermaid">
+flowchart TB
+    subgraph Qs["REQUEST — question builders"]
+        QC["choice(name, options)"]
+        QS["score(name, criteria)<br/>⚠ ordered tuple in SDK v0.6.0"]
+        QN["noul(name)"]
+    end
+    subgraph As["RESPONSE — typed answers"]
+        AC["{ choice, probabilities[], confidence }"]
+        AS["{ score(1.4 non-int OK), probabilities[], confidence }"]
+        AN["{ noul: 0–1 } — no confidence"]
+    end
+    QC --> AC
+    QS --> AS
+    QN --> AN
+  </div>
+  <table>
+    <tr><th>Primitive</th><th>Answer shape</th><th>Confidence?</th><th>Use for</th></tr>
+    <tr><td><code>choice</code></td><td><code>{ choice, probabilities[], confidence }</code></td><td><span class="badge b-green">yes</span></td><td>Pick one of N options (bias, intent, regime)</td></tr>
+    <tr><td><code>score</code></td><td><code>{ score, probabilities[], confidence }</code></td><td><span class="badge b-green">yes</span></td><td>Position on an ordered rubric — non-integer allowed (e.g. 2.3)</td></tr>
+    <tr><td><code>noul</code></td><td><code>{ noul: 0–1 }</code></td><td><span class="badge b-amber">no field</span></td><td>Truth value ("is X true?")</td></tr>
+  </table>
+  <div class="notice"><strong>Confidence</strong> = f(probability shape): peaked → confident, flat → uncertain. Docs illustrate the <code>(count·peak−1)/(count−1)</code> family (flat→0, one-hot→1). <strong>Calibration</strong>: conf 0.2 → right ~20% of the time; 1.0 → ~100%.</div>
+</section>
+
+<section id="patterns">
+  <h2>4. Patterns — the four building blocks</h2>
+  <div class="mermaid">
+flowchart TD
+    P1["1 · Speculative fan-out<br/>many atomic questions, ONE parallel request<br/>≈ no extra latency"]
+    P2["2 · Confidence-gated routing<br/>high→act · med→review · low→escalate<br/>risk-scaled thresholds"]
+    P3["3 · Composite scoring<br/>fuse Score answers: Σ wᵢ·scoreᵢ"]
+    P4["4 · Intent routing<br/>Choice classifies → switch code path"]
+    P1 --> C["Combine in code"]
+    P2 --> C
+    P3 --> C
+    P4 --> C
+    C --> A["One auditable decision"]
+  </div>
+  <ul>
+    <li><strong>Fan-out</strong> — unlike chat LLMs, adding questions to a System One request barely increases latency. Ask everything up front.</li>
+    <li><strong>Confidence routing</strong> — read-only rank: act ≥ 0.55; emitting alerts: act ≥ 0.8; destructive: always human.</li>
+    <li><strong>Composite scoring</strong> — multiple <code>score</code> answers → weighted sum → single rank/decision.</li>
+    <li><strong>Intent routing</strong> — a <code>choice</code> over intents → branch in code.</li>
+  </ul>
+</section>
+
+<section id="sdk">
+  <h2>5. SDK quickstart — from scratch</h2>
+  <pre><code>// 1. npm install @typesafe-ai/sdk      (v0.6.0 — Score.criteria = ordered tuple)
+// 2. export TYPESAFE_API_KEY=sk-...      (TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL optional)
+
+import { TypeSafeClient, choice, score, noul } from "@typesafe-ai/sdk";
+
+const client = new TypeSafeClient(); // reads TYPESAFE_* env
+
+const res = await client.systemOne({
+  state: { symbol: "RELIANCE", price: 2950.4, prevClose: 2870.1, changePct: 2.8 },
+  questions: [
+    choice({ name: "bias", options: ["bullish", "neutral", "bearish"] }),
+    score({ name: "setup_quality", criteria: ["poor", "average", "good", "excellent"] }),
+    noul({ name: "above_ma20", instruction: "Is the price above MA20?" }),
+  ],
+});
+
+const bias      = res.answers["bias"];          // { choice, probabilities[], confidence }
+const quality   = res.answers["setup_quality"]; // { score, probabilities[], confidence }
+const gate      = res.answers["above_ma20"];    // { noul }
+
+// discover models: await client.models.list();</code></pre>
+</section>
+
+<section id="tradenext">
+  <h2>6. How TradeNext integrates it</h2>
+  <div class="mermaid">
+flowchart LR
+    subgraph TRADE["TradeNext services"]
+        SCR["screenerEngine<br/>rank fusion (POC A)"]
+        SWG["swingAutoSeedService<br/>gatecheck (POC B)"]
+        ALR["alerts / guardrails"]
+        REC["recommendations"]
+    end
+    SCR --> DEC["lib/services/decision/client.ts<br/>DECISION_PROVIDER = none | typesafe | laya | auto"]
+    SWG --> DEC
+    ALR --> DEC
+    REC --> DEC
+    DEC -->|"typesafe"| TSP["typesafeProvider.ts<br/>@typesafe-ai/sdk → Jev"]
+    DEC -->|"laya"| LAYA["layaProvider.ts<br/>local · spike-gated"]
+    TSP --> FAIL["failover + audit<br/>DECISION_EVALUATED<br/>DECISION_PROVIDER_FALLBACK"]
+    LAYA --> FAIL
+    FAIL --> G2["gate.decide(conf, risk)"]
+    G2 -->|"act"| ON["auto-apply (rank / seed / emit)"]
+    G2 -->|"review"| RV["review queue"]
+    G2 -->|"escalate"| ES["OpenRouter agent / human"]
+  </div>
+  <h3>Env (server-only)</h3>
+  <pre><code>TYPESAFE_API_KEY=            # from console.typesafe.ai — never committed
+TYPESAFE_BASE_URL=https://api.typesafe.ai   # optional
+TYPESAFE_DEFAULT_MODEL=jev-latest           # optional
+DECISION_PROVIDER=none      # shipped default → engine INERT (rollback safety)
+DECISION_POC_ENABLED=false</code></pre>
+  <h3>POC wiring</h3>
+  <table>
+    <tr><th>POC</th><th>Decision</th><th>Primitive</th><th>Risk</th><th>Gate</th></tr>
+    <tr><td>A — screener rank fusion</td><td>"Score setup/trend/momentum/risk vs rubric"</td><td><code>score</code> ×4 + weighted sum</td><td>read-only</td><td>act ≥ 0.55</td></tr>
+    <tr><td>B — Swing AI gatecheck (Plan 15)</td><td>"Valid to auto-generate targets now?" + regime</td><td><code>noul</code> + <code>choice</code></td><td>moderate</td><td>act ≥ 0.75</td></tr>
+    <tr><td>Alerts guardrails</td><td>"Real anomaly or noise?"</td><td><code>noul</code></td><td>moderate</td><td>act ≥ 0.75</td></tr>
+    <tr><td>Reco confidence</td><td>"Is this pick still active?"</td><td><code>noul</code></td><td>read-only</td><td>act ≥ 0.55</td></tr>
+  </table>
+</section>
+
+<section id="rollout">
+  <h2>7. Rollout &amp; rollback</h2>
+  <div class="mermaid">
+flowchart LR
+    R1["Merge engine core<br/>DECISION_PROVIDER=none<br/><span class='badge b-violet'>inert</span>"] --> R2["Enable POC flag<br/>admin decision panel"]
+    R2 --> R3["Flip to typesafe|auto<br/>after live smoke test"]
+    R3 -->|"bad / costly / slow"| RB["Rollback: DECISION_PROVIDER=none<br/>→ rules-only paths, zero data dependence"]
+  </div>
+  <ul>
+    <li>No new Prisma migration in POC — audit-tag metadata JSON first (P6003 plan-limit discipline).</li>
+    <li>All providers mocked in tests — <code>TYPESAFE_API_KEY</code> never needed locally.</li>
+    <li>Packages &amp; env are <strong>sensitive ops</strong> → explicit user permission before install/key.</li>
+  </ul>
+</section>
+
+<section id="limits">
+  <h2>8. Open questions (research — 2026-09-22)</h2>
+  <ul>
+    <li><span class="badge b-amber">Open</span> Jev underlying architecture — "new architecture/sampler/algorithm" but ML primer implies pretrained-LM base (unresolved).</li>
+    <li><span class="badge b-amber">Open</span> Noul semantics — 2-atom distribution backing? etymology?</li>
+    <li><span class="badge b-amber">Open</span> Score — point estimate vs expectation over level distribution.</li>
+    <li><span class="badge b-amber">Open</span> Confidence formula — demo-illustrated, not formal (cookbook "planned").</li>
+    <li><span class="badge b-amber">Open</span> Canonical latency — ~100 ms vs 150 ms vs 0.114 s (docs disagree).</li>
+    <li><span class="badge b-amber">Open</span> Hosted cost/limits — undocumented on fetched pages.</li>
+    <li><span class="badge b-red">Blocked</span> <code>POST /v1/systemone</code> referenced but <strong>not hit</strong> during research (no key) — first live smoke test required before engine build.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  TradeNext — Jev 1.13.0 / TypeSafe System One visual guide · 2026-09-22 ·
+  Sources: <code>docs/jev.md</code> · <code>docs/jev-tradenext-integration.md</code> · <code>docs/designDoc/ph22-laya-decision-engine-design.md</code> · <code>memory.md</code> · docs.typesafe.ai
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1e293b",
+      primaryColor: "#0c4a6e",
+      primaryTextColor: "#e2e8f0",
+      primaryBorderColor: "#475569",
+      lineColor: "#38bdf8",
+      secondaryColor: "#334155",
+      tertiaryColor: "#0f172a",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { mirrorActors: false }
+  });
+</script>
+
+</body>
+</html>
