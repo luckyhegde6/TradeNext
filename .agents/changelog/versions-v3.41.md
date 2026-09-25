@@ -2,7 +2,7 @@
 
 > **Branch**: `feature/ph22-decision-engine` (on `5b088e3` = v3.41.2 committed; parent `a269057` = v3.41.1 committed; grandparent `ab6fd65` = v3.41.0 committed)
 > **Spec**: `.agents/specs/18-laya-real-inference.md` · **Plan**: `.agents/plans/18-laya-real-inference.md`
-> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **COMMITTED `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · PR #132 OPEN — merge/deploy pending user**
+> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **COMMITTED `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · docs sweep `2ac5e1f` · PR #132 OPEN — merge/deploy pending user** (PR-fix commit pending: CodeQL `js/shell-command-injection-from-environment` cleared in `scripts/dev-checks/check-tsc-baseline.mjs` via shell-free `execFileSync` + `NODE_ENV=test`-gated seam — Lesson 140; suite **1539 pass**)
 
 ## Why
 
