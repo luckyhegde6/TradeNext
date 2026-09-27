@@ -1,6 +1,6 @@
 # v3.43.0 — Spec 20 Google Sheets Admin Console
 
-> **Status:** CODE + TESTS + BUILD + DOCS DONE. **UNCOMMITTED** — no push / PR / deploy.
+> **Status:** CODE + TESTS + BUILD + DOCS DONE. **COMMITTED** as `645cf85` (51 files, +7,574/−114) — no push / PR / deploy.
 > **Branch:** `feature/google-sheets-tracking` (parent `2fbf0c7`; v3.42.0 = `a6e4e6e`)
 > **Spec / plan:** `.agents/specs/20-google-sheets-admin-console.md` · `.agents/plans/20-google-sheets-admin-console-phase1.md`
 
@@ -152,19 +152,44 @@ to lint clean, not to pass.
    `toHaveLength(TABS.length)`, so adding a tab can never silently rot it again. **Lesson 144.**
 2. **Pre-existing, NOT this work — Laya suites are load-sensitive (and an earlier report of them
    failing was itself wrong).** `layaDecisionModel.test.ts` and `layaAgent.test.ts` spawn a child
-   process (`node --import tsx scripts/dev-checks/laya-forward.ts`) to load the 503 MB ONNX chain under
-   a hard `timeout: 120_000`. One full-suite run with `workers: 2` exceeded that and reported 16 failing
-   tests, which this version initially recorded as a real failure — a mistake: **re-running the entire
-   suite came back green**, `126/126` suites and `1813` pass / `4` skip / `0` fail, with
-   `layaAgent.test.ts` 69.2 s and `layaDecisionModel.test.ts` 8.8 s, weights present (7 files,
-   527,680,766 bytes). So the `ETIMEDOUT` is CPU/memory contention against the fixed 120 s cap, **not** a
-   missing-model gap and **not** a defect. Not fixed here: it belongs to v3.41.3's subsystem, and the
-   evidence now points at flake-headroom rather than breakage — the one-line timeout raise *hardens a
-   flake, it fixes no current failure*, so it is **deferred, needs a decision.** **Lesson 145.**
+   process (`node --import tsx scripts/dev-checks/laya-forward.ts`) to load the 503 MB ONNX chain. One
+   full-suite run with `workers: 2` reported 16 failing tests, which this version initially recorded as
+   a real failure — a mistake: **re-running the entire suite came back green**, `126/126` suites and
+   `1813` pass / `4` skip / `0` fail, with `layaAgent.test.ts` 69.2 s and `layaDecisionModel.test.ts`
+   8.8 s, weights present (7 files, 527,680,766 bytes). So the `ETIMEDOUT` is CPU/memory contention,
+   **not** a missing-model gap and **not** a defect. It was first deferred as a one-line timeout raise
+   belonging to v3.41.3's subsystem (**Lesson 145**); the user then approved it, and executing the
+   deferral showed the **documented cap was never the binding one** (**Lesson 147** — see below).
+
 3. **Pre-existing — the OpenAPI document omits `401` on 112 operations** across unrelated paths.
    All six new Sheets routes *do* declare 401. Not touched.
 4. **The one-off `openapi` structural check initially failed** with `FAIL: openapi not exported`.
    Cause was the check script's assumption, not the route: only `GET` is exported.
+5. **The pre-commit hook blocked the commit on a fake value.** `.githooks/pre-commit` assembles the
+   join-password literal at runtime and matched a digit run inside the OpenAPI example `sheetId`
+   (a 26-character fake ID). It is an example, not a credential, and no test asserts it; the example
+   value was changed to a different 10-digit tail rather than reaching for `--no-verify`. Note the
+   corollary: the offending run is deliberately **not** quoted in these docs, because doing so re-arms
+   the same check for the next commit.
+
+## Follow-up (committed separately)
+
+The v3.43.0 commit `645cf85` was kept to a single subsystem, so the approved Laya timeout fix landed as
+its own commit. Deriving it re-derived the finding: the binding clocks were the **Jest hook** caps, not
+the child-process cap the deferral named.
+
+| Suite | `execFileSync` cap | Jest hook cap (binding) |
+|---|---|---|
+| `layaAgent.test.ts` | `120_000` → `300_000` | `60_000` (explicit) → `300_000` |
+| `layaDecisionModel.test.ts` | `120_000` → `300_000` | **none** ⇒ Jest `5_000` default → `300_000` |
+
+The repo sets **no `testTimeout`** anywhere, so `layaDecisionModel`'s untimed `beforeAll` was running a
+503 MB cold load against a **5 s** cap and passing only on a warm page cache (that suite completes in
+6.4 s). Raising the documented `120_000` would have changed nothing. **Lesson 147** — enumerate every
+clock in the chain and fix the minimum; an untimed hook inherits your framework's default; and
+re-derive a deferred finding when you execute it instead of transcribing it. Verified in isolation:
+`layaAgent` 37.7 s, `layaDecisionModel` 6.4 s, **19/19 pass**; tsc baseline **46 exact / prod 0 / +0**;
+scoped ESLint clean; 2 test files, 4 values, no production code.
 
 ## Blocked
 
@@ -181,4 +206,5 @@ to lint clean, not to pass.
 - No migration was run; the two `20260926000000_*` migrations are committed-but-unapplied.
 - No browser/UI verification (blocked).
 - No live-sheet verification (blocked).
-- The pre-existing Laya timeout was **not** changed.
+- The pre-existing Laya child-process timeout was **not** changed by this commit — it was hardened in a
+  separate follow-up commit (above, Lesson 147).

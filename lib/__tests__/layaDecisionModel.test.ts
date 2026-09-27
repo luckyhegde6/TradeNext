@@ -56,13 +56,16 @@ maybeDescribe("laya decision model (weights, child-process forward)", () => {
     const script = join(process.cwd(), "scripts", "dev-checks", "laya-forward.ts");
     const raw = execFileSync(process.execPath, ["--import", "tsx", script], {
       encoding: "utf8",
-      timeout: 120_000,
+      // 300s: same 503 MB ONNX cold load as laya-agent. This beforeAll had NO
+      // explicit hook timeout, so it inherited Jest's 5 s default and only
+      // passed because the child was already warm in the page cache.
+      timeout: 300_000,
     });
     probe = JSON.parse(raw) as ProbeOut;
     if (!probe || probe.available !== true) {
       throw new Error(`laya-forward probe did not run: ${raw.slice(0, 200)}`);
     }
-  });
+  }, 300_000);
 
   it("runs the chained forward with spike-matching IO dims", () => {
     const c = probe.contract;
