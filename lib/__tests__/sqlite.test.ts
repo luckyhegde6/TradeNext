@@ -2304,6 +2304,423 @@ describe("SQLite backup fallback", () => {
 
       db.close();
     });
+
+    // Regression: the Spec 20 drain query was shipped with three `?`
+    // placeholders and NO bind array. sql.js `exec()` takes no implicit binds,
+    // so the query THREW, the catch swallowed it, and
+    // `getGoogleSheetsLedgerBacklog` returned [] on EVERY call — the manual
+    // "Sync now" drain was a silent no-op that reported every tab as "empty".
+    // It shipped because all 21 googleSheetsSync tests mock @/lib/sqlite, so the
+    // broken string was never executed by a real engine. This guard runs the
+    // PRODUCTION SQL against real SQLite and asserts the binds actually filter.
+    //
+    // v3.43.0: the table is built from the production SCHEMA_SQL rather than a
+    // hand-copied DDL — a copied DDL silently rots the moment a column is added
+    // (the `delivered` marker), which is exactly the drift this guard exists to
+    // catch. `createLedgerSchema()` replays SCHEMA_SQL the same way init does.
+    it("Spec 20 ledger SQL (backlog/queued/retained) binds and filters on real SQLite (v3.43.0 regression)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: unknown[]): void;
+          exec(sql: string, params?: unknown[]): Array<{
+            columns: string[];
+            values: unknown[][];
+          }>;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+
+      const { SCHEMA_SQL, GS_LEDGER_BACKLOG_SQL, GS_LEDGER_COUNTS_SQL } = require("../sqlite") as {
+        SCHEMA_SQL: string;
+        GS_LEDGER_BACKLOG_SQL: string;
+        GS_LEDGER_COUNTS_SQL: string;
+      };
+
+      // Replay the real schema (same split(";") loop as initSqliteBackup).
+      for (const raw of SCHEMA_SQL.split(";").map((s: string) => s.trim()).filter(Boolean)) {
+        const stripped = raw
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) db.run(stripped);
+      }
+
+      // The delivered marker must exist in the shipped schema, or every
+      // every-export row is indistinguishable from a pending one.
+      const cols = (db.exec("PRAGMA table_info(google_sheets_ledger)")[0].columns as string[]).indexOf(
+        "name",
+      );
+      const names = db
+        .exec("PRAGMA table_info(google_sheets_ledger)")[0]
+        .values.map((r: unknown[]) => String(r[cols]));
+      expect(names).toEqual(expect.arrayContaining(["seq", "tab", "row_json", "run_id", "delivered"]));
+
+      // 5 swing rows (seq 1-5) then 2 custom rows (seq 6-7). swing #1-2 already
+      // delivered (live append landed), the rest still owed to the sheet.
+      const insert = (
+        tab: string,
+        i: number,
+        delivered: number,
+      ) =>
+        db.run(
+          "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, delivered) VALUES (?, ?, ?, ?, ?)",
+          [tab, JSON.stringify(["r", String(i)]), "run-1", "failed", delivered],
+        );
+      for (let i = 0; i < 5; i++) insert("swing", i, i < 2 ? 1 : 0);
+      for (let i = 0; i < 2; i++) insert("custom", i, 0);
+
+      const seqs = (params: unknown[]) =>
+        db.exec(GS_LEDGER_BACKLOG_SQL, params).flatMap((r) => r.values.map((v) => Number(v[0])));
+      const counts = () => {
+        const out: Record<string, { queued: number; retained: number }> = {};
+        for (const v of db.exec(GS_LEDGER_COUNTS_SQL)[0].values) {
+          out[String(v[0])] = { queued: Number(v[1]) || 0, retained: Number(v[2]) || 0 };
+        }
+        return out;
+      };
+
+      // The bug's exact symptom: with the binds omitted the statement THROWS
+      // ("Wrong number of parameters"), and production's catch turned that into
+      // an empty backlog => every tab reported "empty" and drained nothing.
+      expect(() => db.exec(GS_LEDGER_BACKLOG_SQL)).toThrow();
+
+      // Bound: tab filter + strict `seq >` cursor + LIMIT, oldest-first.
+      // Asserted on `custom` because all its rows are undelivered, so the cursor
+      // and LIMIT semantics are isolated from the delivered filter.
+      expect(seqs(["swing", 0, 100])).toEqual([3, 4, 5]);
+      expect(seqs(["custom", 0, 100])).toEqual([6, 7]);
+      expect(seqs(["custom", 0, 1])).toEqual([6]);
+      expect(seqs(["custom", 6, 100])).toEqual([7]);
+      expect(seqs(["swing", 3, 100])).toEqual([4, 5]);
+      expect(seqs(["swing", 5, 100])).toEqual([]);
+      expect(seqs(["nope", 0, 100])).toEqual([]);
+
+      // v3.43.0: a delivered row is recorded but must NEVER be replayed onto the
+      // sheet. This is the "record every export" guarantee doing its job.
+      expect(seqs(["swing", 0, 100])).not.toContain(1);
+      expect(seqs(["swing", 0, 100])).not.toContain(2);
+      // ...and a cursor below a delivered row still returns only what is owed.
+      expect(seqs(["swing", 0, 100]).length + 2).toBe(5);
+
+      // queued vs retained: a tab keeps drained rows for the retention window,
+      // so a single COUNT(*) would mislabel retention as pending work.
+      expect(counts()).toEqual({
+        swing: { queued: 3, retained: 5 },
+        custom: { queued: 2, retained: 2 },
+      });
+
+      db.close();
+    });
+
+    // v3.43.0: the operator path for an unreadable ledger row. The drain reports
+    // the offending seqs; the console removes them; the tab then re-syncs clean.
+    // Scoped by tab so a guessed seq cannot delete another tab's row.
+    it("Spec 20 ledger delete removes only the named tab's rows on real SQLite (v3.43.0)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: unknown[]): void;
+          exec(sql: string, params?: unknown[]): Array<{
+            columns: string[];
+            values: unknown[][];
+          }>;
+          prepare(sql: string): {
+            run(params?: unknown[]): void;
+            get(params?: unknown[]): { values: unknown[][] } | undefined;
+            free(): void;
+          };
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+      const { SCHEMA_SQL } = require("../sqlite") as { SCHEMA_SQL: string };
+      for (const raw of SCHEMA_SQL.split(";").map((s: string) => s.trim()).filter(Boolean)) {
+        const stripped = raw
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) db.run(stripped);
+      }
+      for (const [tab, n] of [
+        ["swing", 3],
+        ["custom", 2],
+      ] as Array<[string, number]>) {
+        for (let i = 0; i < n; i++) {
+          db.run(
+            "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, delivered) VALUES (?, ?, ?, ?, 0)",
+            [tab, JSON.stringify(["r", String(i)]), null, "corrupt"],
+          );
+        }
+      }
+
+      // The exact statements the production helper issues.
+      const del = db.prepare("DELETE FROM google_sheets_ledger WHERE tab = ? AND seq = ?");
+      const exists = (tab: string, seq: number) =>
+        Number(db.exec("SELECT COUNT(*) FROM google_sheets_ledger WHERE tab = ? AND seq = ?", [tab, seq])[0]
+          .values[0][0]);
+
+      // seq 2 exists, but it belongs to `swing`; asking to delete it as `custom`
+      // must be a no-op — the tab is a guard, not just a filter.
+      expect(exists("swing", 2)).toBe(1);
+      del.run(["custom", 2]);
+      expect(exists("swing", 2)).toBe(1);
+
+      del.run(["swing", 2]);
+      del.run(["swing", 1]);
+      expect(exists("swing", 1)).toBe(0);
+      expect(exists("swing", 2)).toBe(0);
+      expect(exists("swing", 3)).toBe(1);
+      // `custom` holds seq 4-5 (swing took 1-3): the swing deletes must not have
+      // touched another tab's rows.
+      expect(exists("custom", 4)).toBe(1);
+      expect(exists("custom", 5)).toBe(1);
+
+      db.close();
+    });
+
+    // The DELETE endpoint's FIRST guard is a read-back: it names seqs and asks
+    // the mirror for those rows so it can refuse a delivered / still-syncable /
+    // foreign-tab row before deleting anything. That read-back is the safety
+    // interlock, and it is the one piece of the destructive path that every
+    // mocked suite stubs out — so a broken bind here would not fail any existing
+    // test, it would just make production delete a row it never inspected.
+    // Runs the PRODUCTION SQL against real SQLite, same as the backlog guard.
+    it("Spec 20 read-by-seq SQL returns the named rows for inspection (v3.43.0)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: unknown[]): void;
+          exec(sql: string, params?: unknown[]): Array<{
+            columns: string[];
+            values: unknown[][];
+          }>;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+
+      const { SCHEMA_SQL, GS_LEDGER_ROWS_BY_SEQ_SQL } = require("../sqlite") as {
+        SCHEMA_SQL: string;
+        GS_LEDGER_ROWS_BY_SEQ_SQL: string;
+      };
+
+      for (const raw of SCHEMA_SQL.split(";").map((s: string) => s.trim()).filter(Boolean)) {
+        const stripped = raw
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) db.run(stripped);
+      }
+
+      const insert = (tab: string, i: number, delivered: number) =>
+        db.run(
+          "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, delivered) VALUES (?, ?, ?, ?, ?)",
+          [tab, JSON.stringify(["r", String(i)]), "run-1", "failed", delivered],
+        );
+      // swing 1-3 (1 delivered), custom 4-5 (both undelivered). The `delivered`
+      // flag must come back on the read-back, because that is what the endpoint
+      // checks before refusing to destroy the append audit trail.
+      insert("swing", 1, 1);
+      insert("swing", 2, 0);
+      insert("swing", 3, 0);
+      insert("custom", 4, 0);
+      insert("custom", 5, 0);
+
+      const read = (seqs: number[]) => {
+        // Mirror production's expansion: `{{SEQS}}` becomes one `?` per seq, and
+        // the values are bound. Getting the placeholder/bind count wrong is the
+        // exact regression this guard exists for.
+        const sql = GS_LEDGER_ROWS_BY_SEQ_SQL.replace("{{SEQS}}", seqs.map(() => "?").join(","));
+        return db
+          .exec(sql, seqs)
+          .flatMap((r) =>
+            r.values.map((v) => ({
+              seq: Number(v[0]),
+              tab: String(v[1]),
+              rowJson: String(v[2]),
+              delivered: Number(v[3]),
+            })),
+          );
+      };
+
+      // An unexpanded statement is not valid SQL at all — production always
+      // expands it, so the raw form is asserted only to prove the placeholder is
+      // really there and has not been "simplified" away into a broken constant.
+      expect(() => db.exec(GS_LEDGER_ROWS_BY_SEQ_SQL, [1])).toThrow();
+
+      const all = read([1, 2, 3, 4, 5]);
+      expect(all).toHaveLength(5);
+      // SQL returns rowid order. The production function re-sorts into REQUEST
+      // order after this, so only the set is meaningful here.
+      expect(all.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5]);
+
+      // A subset read returns only that subset (no full-table leak that would
+      // make every "unknown seq" check pass).
+      expect(read([4, 5]).map((r) => r.seq)).toEqual([4, 5]);
+      // Order-independent, so a caller passing them backwards still gets both.
+      expect(read([5, 4]).map((r) => r.seq).sort((a, b) => a - b)).toEqual([4, 5]);
+
+      // The guard fields the DELETE endpoint actually branches on.
+      expect(read([1])[0]).toMatchObject({ tab: "swing", delivered: 1 });
+      expect(read([2])[0]).toMatchObject({ tab: "swing", delivered: 0 });
+      expect(read([4])[0]).toMatchObject({ tab: "custom", delivered: 0 });
+      // row_json must round-trip intact, or the "is this row actually
+      // unappendable?" check would be deciding on corrupt data.
+      expect(JSON.parse(read([2])[0].rowJson)).toEqual(["r", "2"]);
+
+      // Unknown seqs are simply absent — that is what produces the 404.
+      expect(read([99])).toEqual([]);
+      expect(read([1, 99])).toHaveLength(1);
+
+      db.close();
+    });
+
+    // v3.43.0: the DELETE endpoint reports how many rows it ACTUALLY removed.
+    // Counting "absent afterwards" would also credit seqs that never existed, so
+    // the API could claim it cleared a corrupt row that was never there and the
+    // operator would think the tab was clean.
+    it("Spec 20 ledger delete/mark report only real row counts (v3.43.0)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new () => {
+          run(sql: string, params?: unknown[]): void;
+          prepare(sql: string): {
+            run(params: unknown[]): void;
+            free(): void;
+          };
+          exec(
+            sql: string,
+            params?: unknown[],
+          ): Array<{ columns: string[]; values: unknown[][] }>;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+      const { SCHEMA_SQL } = require("../sqlite") as { SCHEMA_SQL: string };
+      for (const raw of SCHEMA_SQL.split(";")
+        .map((s: string) => s.trim())
+        .filter(Boolean)) {
+        const stripped = raw
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) db.run(stripped);
+      }
+      // swing 1-2 undelivered, 3 delivered; custom 4 undelivered.
+      for (const [tab, delivered] of [
+        ["swing", 0],
+        ["swing", 0],
+        ["swing", 1],
+        ["custom", 0],
+      ] as Array<[string, number]>) {
+        db.run(
+          "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, delivered) VALUES (?, ?, ?, ?, ?)",
+          [tab, JSON.stringify(["r"]), null, "x", delivered],
+        );
+      }
+
+      // Mirror of the helper's counting logic: matches-before minus matches-after.
+      const deleteRows = (tab: string, seqs: number[]): number => {
+        const count = (): number =>
+          Number(
+            db.exec(
+              `SELECT COUNT(*) FROM google_sheets_ledger WHERE tab = ? AND seq IN (${seqs
+                .map(() => "?")
+                .join(",")})`,
+              [tab, ...seqs],
+            )[0].values[0][0],
+          );
+        const before = count();
+        if (before === 0) return 0;
+        const stmt = db.prepare("DELETE FROM google_sheets_ledger WHERE tab = ? AND seq = ?");
+        for (const seq of seqs) stmt.run([tab, seq]);
+        stmt.free();
+        return before - count();
+      };
+      const markDelivered = (seqs: number[]): number => {
+        const count = (): number =>
+          Number(
+            db.exec(
+              `SELECT COUNT(*) FROM google_sheets_ledger WHERE delivered = 0 AND seq IN (${seqs
+                .map(() => "?")
+                .join(",")})`,
+              [...seqs],
+            )[0].values[0][0],
+          );
+        const before = count();
+        if (before === 0) return 0;
+        const stmt = db.prepare(
+          "UPDATE google_sheets_ledger SET delivered = 1, updated_at = ? WHERE seq = ? AND delivered = 0",
+        );
+        const now = new Date().toISOString();
+        for (const seq of seqs) stmt.run([now, seq]);
+        stmt.free();
+        return before - count();
+      };
+
+      // Real removals are counted.
+      expect(deleteRows("swing", [1, 2])).toBe(2);
+      // A seq that does not exist removes nothing and must NOT be reported.
+      expect(deleteRows("swing", [1, 2])).toBe(0);
+      expect(deleteRows("swing", [999])).toBe(0);
+      // The tab guard: seq 4 is real, but it is `custom`, not `swing`.
+      expect(deleteRows("swing", [4])).toBe(0);
+      expect(deleteRows("custom", [4])).toBe(1);
+      // A delivered row IS deletable (retention prune / operator cleanup), and
+      // counted honestly.
+      expect(deleteRows("swing", [3])).toBe(1);
+
+      // markDelivered counts rows actually flipped, not the size of the request.
+      db.run(
+        "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, delivered) VALUES (?, ?, ?, ?, 0)",
+        ["daily-rec", JSON.stringify(["r"]), null, "x"],
+      );
+      // seq is the table's own rowid, so read it back rather than assuming.
+      const fresh = Number(
+        db.exec(
+          "SELECT seq FROM google_sheets_ledger WHERE tab = ? ORDER BY seq DESC LIMIT 1",
+          ["daily-rec"],
+        )[0].values[0][0],
+      );
+      expect(markDelivered([fresh])).toBe(1);
+      // Already delivered: 0, so syncTab's partial-mark warning can actually fire.
+      expect(markDelivered([fresh])).toBe(0);
+      expect(markDelivered([999])).toBe(0);
+      // A mixed batch counts only the row that was still owed.
+      expect(markDelivered([fresh, 999])).toBe(0);
+
+      db.close();
+    });
   });
 
     // ──────────────────────────────────────────────────────────────────────

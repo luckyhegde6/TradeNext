@@ -191,7 +191,113 @@ export interface WriteBehindStats {
   lastFlushCounts: Record<string, number>;
 }
 
+/** Spec 20 — the mirrored Google Sheets Tracker config singleton.
+ *  `tabMarks` is the per-tab high-water mark map: `{ "swing": "2026-09-25T…Z" }`.
+ *  It stays `null` until a tab has synced, which is what lets the console
+ *  distinguish "never synced" from "synced, nothing marked" and lets the first
+ *  manual sync backfill from the beginning of history. */
+export interface GoogleSheetsConfigRow {
+  id: string;
+  sheetId: string | null;
+  displayName: string | null;
+  enabled: boolean;
+  lastSyncAt: string | null;
+  tabMarks: Record<string, string> | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** One queued export row awaiting a successful append. */
+export interface GoogleSheetsLedgerRow {
+  seq: number;
+  tab: string;
+  /** Positional cell values, exactly as the sheet was meant to receive them. */
+  rowJson: string[];
+  runId: string | null;
+  /** "disabled" | "failed" — why the live append did not land. */
+  reason: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** One row to queue. `rowJson` is the already-encoded string[]. */
+export interface LedgerInsert {
+  tab: string;
+  rowJson: string;
+  runId?: string | null;
+  reason?: string | null;
+  /** v3.43.0 — true when the live append already landed. Default false (owed). */
+  delivered?: boolean;
+}
+
+/** v3.43.0 — the console shows both numbers per tab: `queued` is the real
+ *  backlog a drain would replay, `retained` is the whole on-disk ledger. */
+export interface GoogleSheetsLedgerCounts {
+  queued: number;
+  retained: number;
+}
+
+/** Spec 20 — the per-tab drain query. Exported so the real-sql.js guard in
+ *  `lib/__tests__/sqlite.test.ts` can execute the PRODUCTION string against a
+ *  real SQLite engine. Every `?` MUST be bound by the caller: sql.js `exec()`
+ *  throws for an unbound placeholder, and that throw is swallowed into an empty
+ *  backlog — a silent no-op drain. Keep the three binds in argument order
+ *  [tab, afterSeq, limit].
+ *  v3.43.0: `delivered = 0` — a row whose live append already landed is recorded
+ *  for the audit trail but must never be replayed onto the sheet. */
+export const GS_LEDGER_BACKLOG_SQL =
+  "SELECT seq, tab, row_json, run_id, reason, created_at, updated_at FROM google_sheets_ledger WHERE tab = ? AND seq > ? AND delivered = 0 ORDER BY seq ASC LIMIT ?";
+
+/** Spec 20 / v3.43.0 — per-tab `queued` (undelivered, i.e. what a drain would
+ *  actually replay) and `retained` (every row still on disk) for the console.
+ *  Two numbers, not one: pruning deliberately keeps a window of already-drained
+ *  rows, so a single COUNT(*) mislabels retention as pending work. */
+export const GS_LEDGER_COUNTS_SQL =
+  "SELECT tab, SUM(CASE WHEN delivered = 0 THEN 1 ELSE 0 END), COUNT(*) FROM google_sheets_ledger GROUP BY tab";
+
+/** v3.43.0 — read specific ledger rows by seq, for the admin DELETE guard. The
+ *  ledger DELETE endpoint is the ONLY path that destroys rows, so it must be able
+ *  to confirm what a seq actually holds before removing it. A request can name a
+ *  seq that is perfectly valid and merely undelivered; deleting that would drop a
+ *  row that was never sent to the sheet, i.e. permanent silent data loss — the one
+ *  outcome the ledger exists to prevent. The endpoint therefore reads each named
+ *  row and only removes it if the stored `row_json` is genuinely unappendable.
+ *  Returns `row_json` verbatim (no parsing) so the caller applies the ONE shared
+ *  readability predicate in `googleSheets/rows.ts` rather than re-deriving it.
+ *  `tab` is returned so the endpoint can also reject cross-tab seqs explicitly.
+ *  Binds: the seq list, in the caller's order. `delivered` comes back as 0/1. */
+export const GS_LEDGER_ROWS_BY_SEQ_SQL =
+  "SELECT seq, tab, row_json, delivered FROM google_sheets_ledger WHERE seq IN ({{SEQS}})";
+
 export interface SqliteFallback {
+  /** Spec 20 — record encoded rows in the export ledger. `delivered` is true when
+   *  the live append already landed (audit trail, never replayed) and false when
+   *  it still owes the sheet. Returns the number inserted (0 on failure). */
+  insertGoogleSheetsLedgerRows(rows: LedgerInsert[]): number;
+  /** Spec 20 — backlog for one tab: undelivered rows only, oldest-first, strictly
+   *  after the drain cursor. */
+  getGoogleSheetsLedgerBacklog(tab: string, afterSeq: number, limit: number): GoogleSheetsLedgerRow[];
+  /** Spec 20 — per-tab `queued` (undelivered) and `retained` (all rows) for the
+   *  console. Never throws. */
+  getGoogleSheetsLedgerCounts(): Record<string, GoogleSheetsLedgerCounts>;
+  /** v3.43.0 — read specific rows by seq for the DELETE guard. `rowJson` is the
+   *  raw stored text (NOT parsed) so the caller applies the shared readability
+   *  predicate. Rows are returned in the order of the requested seqs. Never throws. */
+  getGoogleSheetsLedgerRowsBySeq(seqs: number[]): Array<{
+    seq: number;
+    tab: string;
+    rowJson: string;
+    delivered: boolean;
+  }>;
+  /** Spec 20 — mark drained rows as delivered so they are never replayed.
+   *  Returns the number updated (0 on failure); never throws. */
+  markGoogleSheetsLedgerDelivered(seqs: number[]): number;
+  /** Spec 20 — delete specific rows by seq (operator removal of unreadable rows).
+   *  Scoped to `tab` so a caller cannot delete another tab's row by guessing a seq.
+   *  Returns the number deleted (0 on failure); never throws. */
+  deleteGoogleSheetsLedgerRows(tab: string, seqs: number[]): number;
+  /** Spec 20 — drop drained rows beyond the retention window. Never throws. */
+  pruneGoogleSheetsLedger(beforeSeq: number, keep: number): number;
   /** Whether the SQLite backup has data and is ready to serve queries. */
   isReady(): boolean;
   /** Get latest recommendations run + stocks. */
@@ -360,6 +466,12 @@ export interface SqliteFallback {
   ): void;
   /** Get captured Chartink result rows for a screener (fresh, non-expired). */
   getChartinkResults(templateId: string): Array<Record<string, unknown>>;
+  // Spec 20 — Google Sheets admin config. ADMIN-WRITTEN singleton, so the admin
+  // console writes SQLite-first and reads back from SQLite (not Prisma).
+  /** Read the mirrored Google Sheets config singleton, or null if never written. */
+  getGoogleSheetsConfig(): GoogleSheetsConfigRow | null;
+  /** Write-through: upsert the Google Sheets config singleton + enqueue outbox. */
+  upsertGoogleSheetsConfig(row: Record<string, unknown>): void;
   // Plan 09 Phase 6 — jobs write SQLite-first: recommendation / swing / perf
   // job rows land in the mirror via write-through, the 6h push promotes them.
   /** Write-through: upsert one daily-recommendation run row. */
@@ -1100,6 +1212,7 @@ async function retryDeferredMirrorRestore(): Promise<void> {
     ensureControlColumns(parsed.db);
     ensureNseColumns(parsed.db);
     ensureRecommendationColumns(parsed.db);
+    ensureGoogleSheetsLedgerColumns(parsed.db);
     try {
       state.db?.close();
     } catch {
@@ -1678,6 +1791,46 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_market_cache_data_type ON market_cache (data_type);
   CREATE INDEX IF NOT EXISTS idx_market_cache_index_name ON market_cache (index_name);
   CREATE INDEX IF NOT EXISTS idx_market_cache_last_synced ON market_cache (last_synced_at);
+
+  -- Google Sheets Tracker config (Spec 20). SINGLETON — the row id is always the
+  -- literal 'singleton', so it is a single id-keyed outbox upsert. snake_case
+  -- columns mirror the Prisma camelCase fields (the push sink quotes them back).
+  -- NOT masked: a spreadsheet id is a resource identifier, not a credential, and
+  -- the OAuth refresh token lives in the masked "secrets" mirror (Phase 2).
+  CREATE TABLE IF NOT EXISTS google_sheets_config (
+    id           TEXT PRIMARY KEY,
+    sheet_id     TEXT,
+    display_name TEXT,
+    enabled      INTEGER DEFAULT 0,
+    last_sync_at TEXT,
+    tab_marks    TEXT,
+    created_at   TEXT,
+    updated_at   TEXT
+  );
+
+  -- Per-row export ledger (spec 20 §5.B) — the catch-up queue behind "Sync now".
+  --
+  -- WHY THIS EXISTS: the four producer tabs (swing / daily-rec / screener / custom)
+  -- stream live scan results straight to the sheet and keep NOTHING queryable, so
+  -- there is no history to re-read. Recording the ENCODED row (positional string[],
+  -- exactly what the sheet received) at capture time gives "Sync now" byte-identical
+  -- rows instead of a re-derivation that could drift.
+  --
+  -- Only rows whose live append did NOT land are recorded (see exportRows), so this
+  -- is a backlog, not a copy — draining it can never duplicate a row already in the
+  -- sheet. The seq column is the monotonic drain cursor (tab_marks stores the last
+  -- drained value) — a timestamp would tie on same-second writes and lose rows.
+  CREATE TABLE IF NOT EXISTS google_sheets_ledger (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tab         TEXT NOT NULL,
+    row_json    TEXT NOT NULL,
+    run_id      TEXT,
+    reason      TEXT,
+    created_at  TEXT,
+    updated_at  TEXT,
+    delivered   INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_gs_ledger_tab_seq ON google_sheets_ledger (tab, seq);
 `;
 
 // ---------------------------------------------------------------------------
@@ -1838,6 +1991,37 @@ function ensureRecommendationColumns(db: any): void {
 }
 
 /**
+ * Spec 20 / v3.43.0: add `delivered` to a `google_sheets_ledger` created before
+ * the every-export capture. Pre-delivery ledgers only ever held rows that had
+ * NOT landed, so backfilling 0 (undelivered) is correct for every existing row:
+ * each one is still owed to the sheet. Idempotent and `PRAGMA table_info`-guarded
+ * like the other ensure*Columns helpers, so repeated init (and restored
+ * snapshots) never fail. SQLite-only.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureGoogleSheetsLedgerColumns(db: any): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res: any = db.exec("PRAGMA table_info(google_sheets_ledger)");
+    if (!res || !res.length) return; // table not created in this DB
+    const cols = res[0].columns as string[];
+    const nameIdx = cols.indexOf("name");
+    const existing = new Set<string>();
+    res[0].values.forEach((row: unknown[]) => {
+      if (nameIdx >= 0) existing.add(String((row as string[])[nameIdx]));
+    });
+    if (!existing.has("delivered")) {
+      db.run("ALTER TABLE google_sheets_ledger ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0");
+    }
+  } catch (err) {
+    logger.warn({
+      msg: "SQLite: ensureGoogleSheetsLedgerColumns failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize the SQLite backup database. Called once from instrumentation.ts
  * or on first request. Non-blocking -- sync happens in background.
  */
@@ -1874,6 +2058,9 @@ export async function initSqliteBackup(): Promise<void> {
     ensureControlColumns(candidate);
     ensureNseColumns(candidate);
     ensureRecommendationColumns(candidate);
+    // Spec 20 / v3.43.0: add the `delivered` marker to ledgers created before the
+    // every-export capture (idempotent, SQLite-only).
+    ensureGoogleSheetsLedgerColumns(candidate);
 
     state.db = candidate;
     state.ready = true;
@@ -3900,6 +4087,39 @@ export async function syncFromPrisma(opts?: {
       };
     });
 
+    // --- Sync google_sheets_config (Spec 20 — Google Sheets admin console) ---
+    // Admin-WRITTEN config, so unlike ai_config (a masked READ-ONLY copy) this is
+    // a real plaintext mirror: the admin console reads the sheet link from SQLite
+    // so the config survives a Prisma plan-limit hold. The write path is
+    // SQLite-first via the outbox (see OUTBOX_TABLES), so this Prisma->SQLite
+    // pull is only a reconciliation, never the source of a read.
+    // SINGLETON: no row yet is a legitimate state (env-only Spec 19 deployment),
+    // and the row is created lazily on the admin's first write -> return null to
+    // skip the table rather than materialising a fake row.
+    totalRows += await syncTable(db, "google_sheets_config", async () => {
+      const row = await prisma.googleSheetsConfig.findFirst({ orderBy: { id: "asc" } });
+      if (!row) return null;
+      return {
+        columns: "id, sheet_id, display_name, enabled, last_sync_at, tab_marks, created_at, updated_at",
+        placeholders: "?,?,?,?,?,?,?,?",
+        rows: [
+          [
+            row.id,
+            row.sheetId ?? null,
+            row.displayName ?? null,
+            row.enabled ? 1 : 0,
+            row.lastSyncAt?.toISOString() ?? null,
+            // tabMarks is Prisma Json -> the mirror stores the JSON as TEXT. A
+            // null stays null so a never-synced config is distinguishable from
+            // one synced with no tabs marked.
+            row.tabMarks == null ? null : JSON.stringify(row.tabMarks),
+            row.createdAt?.toISOString() ?? null,
+            row.updatedAt?.toISOString() ?? null,
+          ],
+        ],
+      };
+    });
+
     // Update sync metadata
     const now = new Date().toISOString();
     db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES ('last_synced_at', ?)", [now]);
@@ -4168,6 +4388,11 @@ const DERIVED_COUNT_TABLES = [
   "admin_announcement",
   "alert",
   "transaction",
+  // Spec 20 — at most 1 row, so the count is constant-cheap.
+  "google_sheets_config",
+  // Spec 20 — unbounded append-only ledger; counted, but NOT part of any
+  // per-request health budget (pruned after a successful drain).
+  "google_sheets_ledger",
 ] as const;
 
 /** True when the durable `sync_history` ledger table exists in the mirror.
@@ -4343,6 +4568,15 @@ const OUTBOX_TABLES = [
   "admin_announcement",
   "alert",
   "transaction",
+  // Spec 20 — Google Sheets tracker config. Admin-WRITTEN, so it takes the
+  // SQLite-first outbox pattern (NOT the read-only masked-copy pattern used by
+  // ai_config/secrets). The admin's write therefore costs zero Prisma ops and
+  // drains on the next push — the desired posture under the P6003 plan-limit
+  // hold. Singleton: id is always 'singleton', so one id-keyed upsert row.
+  // NOTE: this list and the pushTable() switch in lib/sqlitePushSinks.ts must be
+  // extended TOGETHER — pushTable() throws for an unregistered table, which would
+  // break the push for every mirrored table, not just this one.
+  "google_sheets_config",
 ] as const;
 
 type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
@@ -5352,6 +5586,314 @@ function createFallback(db: Database): SqliteFallback {
     // Every row is upserted into the mirror and enqueued to `_sync_outbox` so the
     // 6h push (pushTable → lib/sqlitePushSinks.ts) promotes it to Prisma.
     // Column names mirror the Prisma models (camelCase input; snake_case DDL).
+
+    // ---- Spec 20: Google Sheets export ledger (catch-up queue) ----------------
+    // Every producer export is recorded, so the ledger is a full audit trail.
+    // `delivered` separates the two kinds: 1 = the live append already landed
+    // (never replayed), 0 = the row still owes the sheet (drain target).
+    // `rowJson` is the exact string[] the sheet was meant to receive, so a retry
+    // is byte-identical instead of a re-derivation. Never throws: an export must
+    // not fail because the catch-up queue could not be written.
+    insertGoogleSheetsLedgerRows(rows: LedgerInsert[]): number {
+      if (!db || !rows.length) return 0;
+      try {
+        const now = new Date().toISOString();
+        const stmt = db.prepare(
+          "INSERT INTO google_sheets_ledger (tab, row_json, run_id, reason, created_at, updated_at, delivered) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        );
+        for (const r of rows) {
+          stmt.run([
+            r.tab,
+            r.rowJson,
+            r.runId ?? null,
+            r.reason ?? null,
+            now,
+            now,
+            r.delivered ? 1 : 0,
+          ]);
+        }
+        stmt.free();
+        // Spec 20 — deliberately NOT mirrored to Prisma: `seq` is the drain cursor,
+        // so an id-keyed upsert would collide on that SERIAL column and a diverged
+        // seq after a restore would silently skip or re-drain rows. No outbox row is
+        // recorded, so the ledger never enters the push path at all. The Prisma
+        // GoogleSheetsLedger model exists for the deferred mirror, not for this path.
+        return rows.length;
+      } catch (err) {
+        logger.warn({ msg: "SQLite: insertGoogleSheetsLedgerRows failed", error: err });
+        return 0;
+      }
+    },
+
+    // Backlog for one tab, oldest-first, strictly after the drain cursor.
+    getGoogleSheetsLedgerBacklog(tab: string, afterSeq: number, limit: number): GoogleSheetsLedgerRow[] {
+      if (!db) return [];
+      try {
+        const res = db.exec(GS_LEDGER_BACKLOG_SQL, [tab, afterSeq, limit]);
+        if (!res.length) return [];
+        const out: GoogleSheetsLedgerRow[] = [];
+        for (const v of res[0].values) {
+          let parsed: string[] = [];
+          try {
+            const j = JSON.parse(String(v[2])) as unknown;
+            if (Array.isArray(j)) parsed = j.map((c) => String(c));
+          } catch {
+            parsed = []; // corrupt row -> empty row, surfaced as skipped by the caller
+          }
+          out.push({
+            seq: Number(v[0]),
+            tab: String(v[1]),
+            rowJson: parsed,
+            runId: v[3] != null ? String(v[3]) : null,
+            reason: v[4] != null ? String(v[4]) : null,
+            createdAt: v[5] != null ? String(v[5]) : null,
+            updatedAt: v[6] != null ? String(v[6]) : null,
+          });
+        }
+        return out;
+      } catch (err) {
+        logger.warn({ msg: "SQLite: getGoogleSheetsLedgerBacklog failed", tab, error: err });
+        return [];
+      }
+    },
+
+    // Per-tab `queued` (undelivered) and `retained` (all rows) for the console.
+    // Cheap grouped aggregate, never throws.
+    getGoogleSheetsLedgerCounts(): Record<string, GoogleSheetsLedgerCounts> {
+      if (!db) return {};
+      try {
+        const res = db.exec(GS_LEDGER_COUNTS_SQL);
+        if (!res.length) return {};
+        const out: Record<string, GoogleSheetsLedgerCounts> = {};
+        for (const v of res[0].values) {
+          // SUM(CASE...) over a non-empty group is never NULL, but a hand-edited
+          // or restored DB could produce one — Number(null) is 0, so no NaN escapes.
+          out[String(v[0])] = { queued: Number(v[1]) || 0, retained: Number(v[2]) || 0 };
+        }
+        return out;
+      } catch (err) {
+        logger.debug({ msg: "SQLite: getGoogleSheetsLedgerCounts failed", error: err });
+        return {};
+      }
+    },
+
+    // v3.43.0: read-by-seq for the admin ledger DELETE guard. `rowJson` is handed
+    // back as raw text so the caller decides readability with the shared predicate
+    // instead of this layer inventing a second definition of "corrupt".
+    getGoogleSheetsLedgerRowsBySeq(seqs: number[]) {
+      if (!db || !seqs.length) return [];
+      try {
+        const placeholders = seqs.map(() => "?").join(",");
+        const sql = GS_LEDGER_ROWS_BY_SEQ_SQL.replace("{{SEQS}}", placeholders);
+        const res = db.exec(sql, [...seqs]);
+        if (!res.length) return [];
+        const out: Array<{ seq: number; tab: string; rowJson: string; delivered: boolean }> = [];
+        for (const v of res[0].values) {
+          out.push({
+            seq: Number(v[0]),
+            tab: String(v[1]),
+            rowJson: String(v[2] ?? ""),
+            delivered: Number(v[3]) === 1,
+          });
+        }
+        // Return in REQUEST order, not rowid order, so the endpoint's diff
+        // (which seqs were named vs found) is stable and easy to reason about.
+        const bySeq = new Map(out.map((r) => [r.seq, r]));
+        return seqs
+          .map((s) => bySeq.get(s))
+          .filter((r): r is (typeof out)[number] => r !== undefined);
+      } catch (err) {
+        logger.warn({ msg: "SQLite: getGoogleSheetsLedgerRowsBySeq failed", error: err });
+        return [];
+      }
+    },
+
+    // Marks drained rows delivered so a later drain cannot replay them onto the
+    // sheet. Called only after the append succeeded.
+    markGoogleSheetsLedgerDelivered(seqs: number[]): number {
+      if (!db || !seqs.length) return 0;
+      try {
+        // Returns how many rows this call actually flipped from undelivered to
+        // delivered, NOT the length of the request. `syncTab` compares this
+        // against the batch size to warn about a partial mark, so echoing the
+        // input would make that check permanently blind: a seq that never
+        // existed, or was already marked, would still count as success.
+        const placeholders = seqs.map(() => "?").join(",");
+        const countUndelivered = (): number => {
+          const res = db.exec(
+            `SELECT COUNT(*) FROM google_sheets_ledger WHERE delivered = 0 AND seq IN (${placeholders})`,
+            [...seqs],
+          );
+          return Number(res[0]?.values?.[0]?.[0] ?? 0);
+        };
+        const before = countUndelivered();
+        if (before === 0) return 0;
+
+        const stmt = db.prepare(
+          "UPDATE google_sheets_ledger SET delivered = 1, updated_at = ? WHERE seq = ? AND delivered = 0",
+        );
+        const now = new Date().toISOString();
+        for (const seq of seqs) stmt.run([now, seq]);
+        stmt.free();
+        return before - countUndelivered();
+      } catch (err) {
+        logger.warn({ msg: "SQLite: markGoogleSheetsLedgerDelivered failed", error: err });
+        return 0;
+      }
+    },
+
+    // Operator removal of unreadable rows. `tab` is a guard, not a filter on a
+    // global PK: a caller that guessed another tab's seq must not delete it.
+    deleteGoogleSheetsLedgerRows(tab: string, seqs: number[]): number {
+      if (!db || !seqs.length || !tab) return 0;
+      try {
+        // sql.js does not expose rowsAffected, so the count is derived from the
+        // table itself: matching rows BEFORE minus matching rows AFTER. A single
+        // IN-list query per side (placeholders only, values still bound) instead
+        // of two binds per seq.
+        const countMatching = (): number => {
+          const placeholders = seqs.map(() => "?").join(",");
+          const res = db.exec(
+            `SELECT COUNT(*) FROM google_sheets_ledger WHERE tab = ? AND seq IN (${placeholders})`,
+            [tab, ...seqs],
+          );
+          return Number(res[0]?.values?.[0]?.[0] ?? 0);
+        };
+
+        // Counting what is absent AFTER the delete would also credit seqs that
+        // never existed, so the API could report a deletion that removed nothing
+        // and the operator would think the corrupt row was cleared.
+        const before = countMatching();
+        if (before === 0) return 0;
+
+        for (const seq of seqs) {
+          db.exec("DELETE FROM google_sheets_ledger WHERE tab = ? AND seq = ?", [tab, seq]);
+        }
+        return before - countMatching();
+      } catch (err) {
+        logger.warn({ msg: "SQLite: deleteGoogleSheetsLedgerRows failed", tab, error: err });
+        return 0;
+      }
+    },
+
+    // Drops drained rows older than the retention window. Called after a
+    // successful drain so the queue cannot grow without bound.
+    pruneGoogleSheetsLedger(beforeSeq: number, keep: number): number {
+      if (!db || beforeSeq <= 0 || keep <= 0) return 0;
+      try {
+        db.exec(
+          "DELETE FROM google_sheets_ledger WHERE seq <= ? AND seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM google_sheets_ledger)",
+          [beforeSeq, keep],
+        );
+        // Deleted-row count is deliberately not returned: sql.js QueryExecResult
+        // does not expose rowsAffected, and a wrong count here would only affect a
+        // log line. The SELECT below is the real post-condition.
+        const res = db.exec("SELECT COUNT(*) FROM google_sheets_ledger WHERE seq <= ?", [
+          beforeSeq,
+        ]);
+        return Number(res[0]?.values?.[0]?.[0] ?? 0);
+      } catch (err) {
+        logger.debug({ msg: "SQLite: pruneGoogleSheetsLedger failed", error: err });
+        return 0;
+      }
+    },
+
+    // ---- Spec 20: Google Sheets admin config (ADMIN-WRITTEN singleton) -------
+    // Read side. Returns null when no row exists yet — that is the NORMAL state
+    // for an env-only Spec 19 deployment, not an error; the caller then falls
+    // back to GOOGLE_SHEET_ID and the exact env gate. A malformed tab_marks blob
+    // degrades to null (=> the first sync backfills) rather than throwing.
+    getGoogleSheetsConfig(): GoogleSheetsConfigRow | null {
+      if (!db) return null;
+      try {
+        const res = db.exec(
+          "SELECT id, sheet_id, display_name, enabled, last_sync_at, tab_marks, created_at, updated_at FROM google_sheets_config WHERE id = 'singleton'",
+        );
+        if (!res.length || !res[0].values.length) return null;
+        const v = res[0].values[0];
+        let marks: Record<string, string> | null = null;
+        if (v[5] != null && v[5] !== "") {
+          try {
+            const parsed = JSON.parse(String(v[5])) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              const out: Record<string, string> = {};
+              for (const [k, val] of Object.entries(parsed as Record<string, unknown>)) {
+                if (typeof val === "string") out[k] = val;
+              }
+              marks = out;
+            }
+          } catch {
+            marks = null; // corrupt blob -> treat as unmarked so we re-backfill
+          }
+        }
+        return {
+          id: String(v[0] ?? "singleton"),
+          sheetId: v[1] != null && String(v[1]) !== "" ? String(v[1]) : null,
+          displayName: v[2] != null && String(v[2]) !== "" ? String(v[2]) : null,
+          enabled: v[3] === 1 || v[3] === "1" || Number(v[3]) === 1,
+          lastSyncAt: v[4] != null && String(v[4]) !== "" ? String(v[4]) : null,
+          tabMarks: marks,
+          createdAt: v[6] != null ? String(v[6]) : null,
+          updatedAt: v[7] != null ? String(v[7]) : null,
+        };
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getGoogleSheetsConfig failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+
+    // ---- Spec 20: Google Sheets admin config: WRITE side ---------------------
+    // The admin console writes here FIRST (zero Prisma ops), so the config
+    // survives a Prisma plan-limit hold; the outbox promotes it later. This is
+    // deliberately NOT the masked read-only copy pattern used by ai_config —
+    // a spreadsheet id is a resource identifier, not a credential.
+    //
+    // The row id is always the literal 'singleton' regardless of what the caller
+    // passes, which is what makes this a 1-row table and a 1-op push.
+    upsertGoogleSheetsConfig(row: Record<string, unknown>): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        const id = "singleton";
+        // INSERT OR REPLACE is delete+reinsert, so created_at would be lost on
+        // every write. Read it back to keep the row's real creation time (the
+        // admin console shows it) instead of drifting it forward to `now`.
+        let createdAt = now;
+        try {
+          const prev = db.exec("SELECT created_at FROM google_sheets_config WHERE id = 'singleton'");
+          const existing = prev.length && prev[0].values.length ? prev[0].values[0][0] : null;
+          if (existing) createdAt = String(existing);
+        } catch {
+          // no row yet (or table missing on an old mirror) -> createdAt stays now
+        }
+        db.run(
+          `INSERT OR REPLACE INTO google_sheets_config (
+             id, sheet_id, display_name, enabled, last_sync_at, tab_marks, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?)`,
+          [
+            id,
+            row.sheetId != null && String(row.sheetId).trim() !== "" ? String(row.sheetId).trim() : null,
+            row.displayName != null && String(row.displayName).trim() !== "" ? String(row.displayName).trim() : null,
+            row.enabled ? 1 : 0,
+            toIsoVal(row.lastSyncAt ?? row.last_sync_at),
+            toJsonVal(row.tabMarks ?? row.tab_marks),
+            createdAt,
+            toIsoVal(row.updatedAt ?? row.updated_at) || now,
+          ],
+        );
+        recordSyncOutbox(db, "google_sheets_config", id, "upsert");
+      } catch (err) {
+        // Mirror write is best-effort: a failure here must never fail the admin
+        // request, so the caller falls back to the env-only (Spec 19) behaviour.
+        logger.debug({
+          msg: "SQLite: upsertGoogleSheetsConfig failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
 
     upsertDailyRecommendationRun(row: Record<string, unknown>): void {
       if (!db) return;
@@ -6655,6 +7197,10 @@ upsertTransaction(row: Record<string, unknown>): void {
         "cron_job",
         "cron_run",
         "worker_task",
+        // Spec 20 — cheap singleton count, surfaced in health so the admin
+        // console can tell "config mirrored" from "config absent" (which for a
+        // lazily-created singleton is the normal env-only Spec 19 state).
+        "google_sheets_config",
       ];
       for (const t of tableNames) {
         try {

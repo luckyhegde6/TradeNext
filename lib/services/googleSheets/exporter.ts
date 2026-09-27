@@ -16,20 +16,29 @@
  * per engine evaluation — auditing that would be one Prisma write per trace and
  * would blow the plan-limit write budget that the rest of the repo works hard to
  * protect (v3.19+ write-behind discipline). Success is still logged via pino.
+ *
+ * Ledger capture (spec 20 §5.B) is NOT subject to that asymmetry in the same way,
+ * because the SQLite ledger is the write-behind mirror, not Prisma: one local
+ * insert per export attempt, no Prisma op. `decisions` is still excluded because
+ * the spec excludes it from syncing and its ring buffer is already bounded.
  */
 import logger from "@/lib/logger";
-import { isTrackingEnabled, trackerSheetId, getSheetsClient } from "./auth";
+import { getSqliteFallback } from "@/lib/sqlite";
+import { getSheetsClient } from "./auth";
+import { isTrackingActive, resolveSheetId } from "./configService";
 import { ensureHeaders, isTrackerTab, type TrackerTab } from "./tabs";
 import {
   cell,
   customScanRow,
   dailyRecRow,
   decisionRow,
+  metricsRow,
   screenerRow,
   swingRow,
   type CustomScanRowContext,
   type DailyRecRunContext,
   type DailyRecStockInput,
+  type MetricsRowInput,
   type ScreenerRowContext,
   type ScreenerRowInput,
 } from "./rows";
@@ -92,9 +101,73 @@ async function audit(
  * Append `rows` to `tab`, header-ensuring first. One batched request, one
  * retry on a transient error. Never throws.
  */
-export async function exportRows(tab: TrackerTab, rows: string[][]): Promise<ExportResult> {
-  if (!isTrackingEnabled()) {
+/**
+ * Records the encoded rows in the SQLite ledger (spec 20 §5.B) — on EVERY export
+ * outcome, not just failures.
+ *
+ * The `delivered` flag is the whole point: a successful append is recorded with
+ * `delivered: true` (a durable audit row that the drain can never replay), while
+ * `disabled` / `no-spreadsheet` / `failed` are recorded with `delivered: false`
+ * so "Sync now" drains them later. `exportRowsInternal` is the single writer, so
+ * a row can never be recorded twice for one attempt.
+ *
+ * `fromSync` rows are NOT recorded: the drain owns the existing ledger rows and
+ * marks them delivered itself. Re-recording on a drain failure would grow the
+ * backlog without bound on every retry of a permanently-broken sheet.
+ *
+ * Best-effort and NEVER throws: a failure to write the ledger must not turn a
+ * non-fatal export into a producer-visible error. Deliberately silent on the
+ * `decisions` tab, which the spec excludes from syncing and which is already a
+ * bounded in-memory ring buffer.
+ */
+function recordLedger(
+  tab: TrackerTab,
+  rows: string[][],
+  reason: string,
+  delivered: boolean,
+  runId: string | null,
+  fromSync: boolean,
+): void {
+  if (fromSync || tab === "decisions" || !rows.length) return;
+  try {
+    const sqlite = getSqliteFallback();
+    if (!sqlite) return; // mirror not ready — nothing to do, and no throw
+    sqlite.insertGoogleSheetsLedgerRows(
+      rows.map((r) => ({ tab, rowJson: JSON.stringify(r), runId, reason, delivered })),
+    );
+  } catch (err) {
+    logger.debug({ msg: "Google Sheets ledger record failed (non-fatal)", tab, reason, error: err });
+  }
+}
+
+/** Spec 20 sync drain entry point. Identical append semantics, but the drain
+ *  owns retry accounting and the delivered-marking, so nothing is re-recorded. */
+export async function exportRowsFromSync(
+  tab: TrackerTab,
+  rows: string[][],
+): Promise<ExportResult> {
+  return exportRowsInternal(tab, rows, true, null);
+}
+
+export async function exportRows(
+  tab: TrackerTab,
+  rows: string[][],
+  runId: string | null = null,
+): Promise<ExportResult> {
+  return exportRowsInternal(tab, rows, false, runId);
+}
+
+async function exportRowsInternal(
+  tab: TrackerTab,
+  rows: string[][],
+  fromSync: boolean,
+  runId: string | null,
+): Promise<ExportResult> {
+  if (!isTrackingActive()) {
     logger.debug({ msg: "Google Sheets export skipped (disabled)", tab, rows: rows.length });
+    // The gate is off, so the whole feature is off: the drain is gated by the
+    // same flag and would refuse to run, so queueing would only accumulate rows
+    // nobody can ever drain. Correctly dropped instead of recorded.
     return "disabled";
   }
   if (rows.length === 0) {
@@ -107,10 +180,13 @@ export async function exportRows(tab: TrackerTab, rows: string[][]): Promise<Exp
   }
 
   try {
-    const spreadsheetId = trackerSheetId();
+    // DB-first with env fallback (Spec 20) so the admin console can relink the
+    // sheet without a redeploy; env-only deployments resolve exactly as before.
+    const spreadsheetId = resolveSheetId();
     if (!spreadsheetId) {
-      logger.error({ msg: "Google Sheets export failed — GOOGLE_SHEET_ID unset", tab });
-      await audit("GOOGLE_SHEETS_APPEND_FAILED", tab, rows.length, "GOOGLE_SHEET_ID unset");
+      logger.error({ msg: "Google Sheets export failed - GOOGLE_SHEET_ID unset", tab });
+      await audit("GOOGLE_SHEETS_APPEND_FAILED", tab, rows.length, "spreadsheet id unset");
+      recordLedger(tab, rows, "no-spreadsheet", false, runId, fromSync);
       return "failed";
     }
 
@@ -144,11 +220,17 @@ export async function exportRows(tab: TrackerTab, rows: string[][]): Promise<Exp
     if (tab !== "decisions") {
       await audit("GOOGLE_SHEETS_APPEND_SUCCESS", tab, rows.length);
     }
+    // Recorded as DELIVERED: the rows are on the sheet, so this is an audit row
+    // only. The drain's `delivered = 0` filter can never replay it.
+    recordLedger(tab, rows, "appended", true, runId, fromSync);
     return "enabled";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error({ msg: "Google Sheets append failed (non-fatal)", tab, error: message });
     await audit("GOOGLE_SHEETS_APPEND_FAILED", tab, rows.length, message);
+    // A transient-but-exhausted append stays undelivered so the next "Sync now"
+    // re-appends the identical row.
+    recordLedger(tab, rows, "failed", false, runId, fromSync);
     return "failed";
   }
 }
@@ -156,13 +238,20 @@ export async function exportRows(tab: TrackerTab, rows: string[][]): Promise<Exp
 // ─── Producer wrappers ───────────────────────────────────────────────────
 
 /** Swing picks (with AI analysis) → `swing`. */
-export async function exportSwing(stocks: SwingStock[]): Promise<ExportResult> {
-  if (!isTrackingEnabled() || stocks.length === 0) {
-    return isTrackingEnabled() ? "enabled" : "disabled";
+export async function exportSwing(
+  stocks: SwingStock[],
+  runId: string | null = null,
+): Promise<ExportResult> {
+  if (!isTrackingActive() || stocks.length === 0) {
+    return isTrackingActive() ? "enabled" : "disabled";
   }
   try {
     const postedAt = new Date().toISOString();
-    return await exportRows("swing", stocks.map((s) => swingRow(s, postedAt)));
+    return await exportRows(
+      "swing",
+      stocks.map((s) => swingRow(s, postedAt)),
+      runId,
+    );
   } catch (err) {
     logger.error({
       msg: "Google Sheets swing export failed (non-fatal)",
@@ -177,11 +266,15 @@ export async function exportDailyRecs(
   run: DailyRecRunContext,
   stocks: DailyRecStockInput[]
 ): Promise<ExportResult> {
-  if (!isTrackingEnabled() || stocks.length === 0) {
-    return isTrackingEnabled() ? "enabled" : "disabled";
+  if (!isTrackingActive() || stocks.length === 0) {
+    return isTrackingActive() ? "enabled" : "disabled";
   }
   try {
-    return await exportRows("daily-rec", stocks.map((s) => dailyRecRow(s, run)));
+    return await exportRows(
+      "daily-rec",
+      stocks.map((s) => dailyRecRow(s, run)),
+      run.runId,
+    );
   } catch (err) {
     logger.error({
       msg: "Google Sheets daily-recs export failed (non-fatal)",
@@ -196,14 +289,15 @@ export async function exportScreeners(
   results: ScreenerRowInput[],
   ctx: ScreenerRowContext = {}
 ): Promise<ExportResult> {
-  if (!isTrackingEnabled() || results.length === 0) {
-    return isTrackingEnabled() ? "enabled" : "disabled";
+  if (!isTrackingActive() || results.length === 0) {
+    return isTrackingActive() ? "enabled" : "disabled";
   }
   try {
     const capturedAt = ctx.capturedAt ?? new Date().toISOString();
     return await exportRows(
       "screener",
-      results.map((r) => screenerRow(r, { ...ctx, capturedAt }))
+      results.map((r) => screenerRow(r, { ...ctx, capturedAt })),
+      ctx.runId ?? null,
     );
   } catch (err) {
     logger.error({
@@ -214,16 +308,27 @@ export async function exportScreeners(
   }
 }
 
-/** Saved-config scan hits → `custom`. */
+/**
+ * Saved-config scan hits → `custom`.
+ *
+ * `runId` is passed separately (not via `CustomScanRowContext`) because the
+ * context is the ROW contract, whose 13 columns are positional and must not
+ * grow; the run id is ledger provenance only.
+ */
 export async function exportCustomScan(
   ctx: CustomScanRowContext,
-  items: Record<string, unknown>[]
+  items: Record<string, unknown>[],
+  runId: string | null = null,
 ): Promise<ExportResult> {
-  if (!isTrackingEnabled() || items.length === 0) {
-    return isTrackingEnabled() ? "enabled" : "disabled";
+  if (!isTrackingActive() || items.length === 0) {
+    return isTrackingActive() ? "enabled" : "disabled";
   }
   try {
-    return await exportRows("custom", items.map((i) => customScanRow(i, ctx)));
+    return await exportRows(
+      "custom",
+      items.map((i) => customScanRow(i, ctx)),
+      runId,
+    );
   } catch (err) {
     logger.error({
       msg: "Google Sheets custom scan export failed (non-fatal)",
@@ -241,12 +346,37 @@ export async function exportCustomScan(
  * poc-b-autoseed-gate) export from this single function.
  */
 export async function exportDecision(entry: DecisionTraceEntry): Promise<ExportResult> {
-  if (!isTrackingEnabled()) return "disabled";
+  if (!isTrackingActive()) return "disabled";
   try {
     return await exportRows("decisions", [[...decisionRow(entry)]]);
   } catch (err) {
     logger.error({
       msg: "Google Sheets decision export failed (non-fatal)",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "failed";
+  }
+}
+
+/**
+ * One KPI snapshot → `metrics`.
+ *
+ * Unlike the other wrappers this is NOT producer-driven: no background job
+ * appends a snapshot, because "how should the win rate be measured" is a
+ * judgement the user owns, and a silently scheduled snapshot would bake one
+ * answer into their sheet forever. It is called only from the admin console's
+ * explicit "Append KPI snapshot" action.
+ *
+ * `runId` is null by design — a snapshot is not part of a scan run, and faking
+ * provenance would corrupt the run-filtered ledger view.
+ */
+export async function exportMetricsSnapshot(snapshot: MetricsRowInput): Promise<ExportResult> {
+  if (!isTrackingActive()) return "disabled";
+  try {
+    return await exportRows("metrics", [[...metricsRow(snapshot)]]);
+  } catch (err) {
+    logger.error({
+      msg: "Google Sheets metrics export failed (non-fatal)",
       error: err instanceof Error ? err.message : String(err),
     });
     return "failed";

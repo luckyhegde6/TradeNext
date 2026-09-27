@@ -24,6 +24,7 @@
    |------|--------|----------|---------|
    | 1142+ | `SCHEMA_SQL` | **Yes** | `CREATE TABLE IF NOT EXISTS google_sheets_config` |
    | 4326 | `OUTBOX_TABLES` | **Yes** | SQLite-first writes drained to Prisma by the 6 h push |
+   | 608 | `lib/sqlitePushSinks.ts` `pushTable()` switch | **Yes** | ⚠️ **throws** for an unregistered table — omitting this breaks the push for *every* table, not just this one |
    | ~3885 | `syncFromPrisma` `syncTable()` block | **Yes** | Prisma→mirror sync so a cold start populates the row |
    | 4160 | `DERIVED_COUNT_TABLES` | No | per-table row counts for the db-health dashboard |
    | 6642 | `getHealthStatus().tableNames` | No | health row counts |
@@ -31,7 +32,10 @@
    Reference symbols: `pushSqliteToPrisma` at `lib/sqlite.ts:4420`, `syncFromPrisma` at `lib/sqlite.ts:3378`. (An earlier `findstr` miss on `pushSqlite*` was a cmd-escaping artifact, not a missing API — **Lesson 143**: on Windows `cmd`, `findstr` under `/s` with `2>nul` and `|` alternation inside `(...)` can silently return *empty* output. A negative `findstr` is therefore **not** evidence of absence — re-verify with the `grep` tool or by reading the file before concluding a symbol does not exist. Note `rg` is **not** installed on this machine.)
 
    **Precedent decision — outbox pattern, not masked-copy.** `ai_config` is **absent** from `OUTBOX_TABLES` because it is a *read-only degradation copy* (Prisma→mirror; see the "MASKED mirrors — value/token never stored" comment at `lib/sqlite.ts:1564`). `google_sheets_config` is **admin-written**, so it takes the opposite pattern: **outbox / SQLite-first**. Consequences: the admin's write costs **zero Prisma ops** and drains on the next push (the desired posture under the P6003 hold); and unlike `ai_config` it needs **no masking**, since a spreadsheet ID is not a credential. The singleton is outbox-compatible — `id` is the fixed literal `"singleton"`, so it is a single id-keyed upsert row like every other outbox table.
-3. **Read the mirror write-through helper** used by outbox tables (not `ai_config`, which is read-only) → verify: the exact exported helper + the id-keyed sink registration in `lib/sqlitePushSinks.ts` are noted in `flow.md`; **do not hand-roll a second mechanism**
+3. **✅ RESOLVED 2026-09-26 — the outbox write path.** The sink registry is the hard switch `pushTable()` at `lib/sqlitePushSinks.ts:606`, whose `default:` arm **throws** `no sink for table "${tableName}"`. So `OUTBOX_TABLES` and `pushTable()` must be extended **together** — adding only the former converts a silent no-op into a push-breaking throw that fails every mirrored table, not just this one.
+
+   The reusable helper is `pushByIdUpsert(db, mirrorTable, prismaTable, cols, rows)` at `lib/sqlitePushSinks.ts:304`, driven by a `GenCol[]` (`{ sql, val, json?, arr?, bool? }`; type flags emit `CAST($N AS jsonb/text[]/boolean)`). Reference callers: `pushAdminAnnouncements` (`:555`), `pushAlerts` (`:573`). `google_sheets_config` needs `bool: true` on `enabled` and `json: true` on `tabMarks`; quoted-identifier columns are used for camelCase Prisma fields (`'"lastSyncAt"'`). **Do not hand-roll a second mechanism.**
+
 
 ---
 

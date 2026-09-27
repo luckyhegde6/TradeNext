@@ -13,10 +13,38 @@
  *                            would shift columns under data the user owns)
  */
 import logger from "@/lib/logger";
-import { getSheetsClient, trackerSheetId } from "./auth";
+import { getSheetsClient } from "./auth";
+import { resolveSheetId } from "./configService";
 
-/** The 5 tabs of the TradeNext Tracker spreadsheet. */
-export type TrackerTab = "swing" | "daily-rec" | "screener" | "custom" | "decisions";
+/**
+ * The TradeNext Tracker spreadsheet tabs.
+ *
+ * Spec 19 shipped 5 tabs (swing / daily-rec / screener / custom / decisions).
+ * Spec 20 appends `metrics` as the 5th SYNCABLE tab — it sits after `decisions`
+ * in the union only because the union is append-only, and `decisions` is
+ * excluded from sync, so `metrics` is the 5th tab a drain can actually reach.
+ *
+ * The 5 spec-19 contracts are frozen at 24/16/12/13/16 columns and MUST NOT
+ * change: the sheets are append-only, so a column inserted anywhere but the end
+ * silently shifts every historical row under the wrong header (Lesson 141).
+ */
+export type TrackerTab =
+  | "swing"
+  | "daily-rec"
+  | "screener"
+  | "custom"
+  | "decisions"
+  | "metrics";
+
+/** Every valid tab, for "sync all" iteration. */
+export const TRACKER_TAB_KEYS = [
+  "swing",
+  "daily-rec",
+  "screener",
+  "custom",
+  "decisions",
+  "metrics",
+] as const;
 
 /**
  * Column contract per tab. The ORDER is the contract — encoders in `rows.ts`
@@ -50,6 +78,15 @@ export const TRACKER_TABS: Record<TrackerTab, readonly string[]> = {
     "attempts", "error", "questionCount", "questionTypes", "gate", "reason",
     "scoredCount", "gateDistribution", "noulAmount", "allowed",
   ],
+  // Spec 20 — 11 columns. A KPI SNAPSHOT, not a per-stock row: one row per
+  // "Append KPI snapshot" click, so the sheet becomes a time series of portfolio
+  // health the user can chart. Derived entirely from data TradeNext already
+  // holds; it is a projection, never a new source of truth.
+  metrics: [
+    "snapshotAt", "totalTracked", "active", "targetAchieved", "stopLossHit",
+    "expired", "winRate", "netPnlAbs", "netPnlPct", "avgReturnPct",
+    "grossPnlAbs",
+  ],
 } as const;
 
 declare global {
@@ -67,6 +104,62 @@ function ensuredTabs(): Set<string> {
 /** Test seam — forget which tabs have been header-ensured. */
 export function _resetHeaderGuard(): void {
   global._googleSheetsEnsuredTabs = undefined;
+}
+
+/**
+ * How a tab's live header compares to its expected contract.
+ *
+ * `unknown` is reserved for "could not tell" (no spreadsheet configured, OAuth
+ * failure, network error) — it is deliberately distinct from `absent` so the
+ * admin console never shows a false "no data" for an unreadable tab.
+ */
+export type HeaderState = "matched" | "drifted" | "absent" | "unknown";
+
+/**
+ * Classify a fetched first row against a tab's expected header. Pure.
+ *
+ * A row of blanks is `absent` (the API omits empty cells, so a stray blank row
+ * is the realistic form of "nothing here yet"). Any other non-matching row is
+ * `drifted` — the user owns the tab, so we append by position and never rewrite.
+ */
+export function classifyHeader(
+  firstRow: unknown[] | undefined,
+  expected: readonly string[]
+): HeaderState {
+  if (!firstRow || firstRow.every((c) => String(c ?? "").trim() === "")) return "absent";
+  const actual = firstRow.map((c) => String(c ?? ""));
+  const matched =
+    actual.length === expected.length && actual.every((c, i) => c === expected[i]);
+  return matched ? "matched" : "drifted";
+}
+
+/**
+ * READ-ONLY probe of a tab's header, for the admin console (spec 20 §5.C).
+ *
+ * Never throws and never writes — a status read must not be able to mutate the
+ * user's sheet. Returns `unknown` rather than throwing so one unreadable tab
+ * cannot break the whole status payload.
+ */
+export async function readHeaderState(tab: TrackerTab): Promise<HeaderState> {
+  try {
+    const spreadsheetId = await resolveSheetId();
+    if (!spreadsheetId) return "unknown";
+
+    const sheets = await getSheetsClient();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      majorDimension: "ROWS",
+    });
+    return classifyHeader(res.data?.values?.[0], TRACKER_TABS[tab]);
+  } catch (err) {
+    logger.debug({
+      msg: "Google Sheets header state read failed",
+      tab,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "unknown";
+  }
 }
 
 /** True when `tab` is a known tab (guards against a typo reaching the API). */
@@ -89,9 +182,12 @@ export async function ensureHeaders(tab: TrackerTab): Promise<boolean> {
   done.add(tab);
 
   try {
-    const spreadsheetId = trackerSheetId();
+    // DB-first, env fallback (spec 20 §5.A) — a sheet id set through the admin
+    // console must be honoured here too, or the header is never written and
+    // every row lands under a blank first line.
+    const spreadsheetId = await resolveSheetId();
     if (!spreadsheetId) {
-      logger.error({ msg: "Google Sheets header ensure skipped — GOOGLE_SHEET_ID unset", tab });
+      logger.error({ msg: "Google Sheets header ensure skipped — spreadsheet id unset", tab });
       return false;
     }
 
@@ -102,12 +198,10 @@ export async function ensureHeaders(tab: TrackerTab): Promise<boolean> {
       range: `${tab}!A1`,
       majorDimension: "ROWS",
     });
-    const firstRow = res.data?.values?.[0];
-    // A row of blanks is an empty tab (the API omits empty cells, so a stray
-    // blank row is the realistic form of "nothing here yet").
-    const isBlank = !firstRow || firstRow.every((c) => String(c ?? "").trim() === "");
 
-    if (isBlank) {
+    const state = classifyHeader(res.data?.values?.[0], expected);
+
+    if (state === "absent") {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `${tab}!A1`,
@@ -118,17 +212,14 @@ export async function ensureHeaders(tab: TrackerTab): Promise<boolean> {
       return true;
     }
 
-    const actual = firstRow.map((c) => String(c ?? ""));
-    if (actual.length === expected.length && actual.every((c, i) => c === expected[i])) {
-      return true;
-    }
+    if (state === "matched") return true;
 
-    // Non-empty but different — the user owns this tab now. Append by position.
+    // `drifted` — the user owns this tab now. Append by position.
     logger.warn({
       msg: "Google Sheets header mismatch — leaving tab untouched, appending by column position",
       tab,
       expected: expected.length,
-      actual: actual.length,
+      actual: (res.data?.values?.[0] ?? []).length,
     });
     return true;
   } catch (err) {

@@ -737,7 +737,9 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
     // Append every pick (analyzed OR analysisError) to the Tracker `swing` tab.
     // Fire-and-forget per the ingestion rule: a Google outage must never affect
     // the job, and `exportSwing` never throws.
-    exportSwing(stocks).catch((err) =>
+    // `jobId` is the run identifier recorded in the ledger, so an undelivered
+    // swing row can be traced back to the job that produced it.
+    exportSwing(stocks, jobId).catch((err) =>
       logger.error({
         msg: "Google Sheets swing export dispatch failed",
         jobId,

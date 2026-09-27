@@ -41,6 +41,34 @@ export function cell(value: unknown): string {
   return String(value);
 }
 
+/**
+ * v3.43.0 — can this stored ledger row be appended to a sheet at all?
+ *
+ * THE single definition of "unreadable", shared by the drain (`syncService`) and
+ * the admin DELETE guard, so the two can never disagree about which rows are
+ * corrupt — a disagreement would let the endpoint remove a VALID pending row,
+ * silently dropping data that was never sent to the sheet.
+ *
+ * A row is unappendable when `row_json` is not a non-empty array: a truncated or
+ * hand-edited value, a `null`, or an empty array (an append of nothing, which
+ * would also silently advance the cursor past work never delivered). Accepts the
+ * raw stored text OR an already-parsed value, because the two callers hold
+ * different things: the drain has the parsed array, the DELETE guard has the raw
+ * `row_json` column.
+ */
+export function ledgerRowIsUnreadable(rowJson: unknown): boolean {
+  let value = rowJson;
+  if (typeof value === "string") {
+    // Stored text. An unparsable string is itself the corruption we are after.
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return true;
+    }
+  }
+  return !Array.isArray(value) || value.length === 0;
+}
+
 // ─── swing ───────────────────────────────────────────────────────────────
 
 /** One analyzed swing pick → `swing` row (24 columns). */
@@ -246,5 +274,54 @@ export function decisionRow(entry: DecisionTraceEntry): string[] {
     cell(entry.gateDistribution),
     cell(entry.noulAmount),
     cell(entry.allowed),
+  ];
+}
+
+// ─── metrics ─────────────────────────────────────────────────────────────
+
+/** The KPI snapshot a `metrics` row encodes (11 columns).
+ *
+ *  Declared STRUCTURALLY, like every other input in this file: the aggregation
+ *  lives in `metricsService` and owns the real recommendation types, and this
+ *  encoder only needs the eleven numbers it lays out positionally. */
+export interface MetricsRowInput {
+  snapshotAt: string;
+  totalTracked: number;
+  active: number;
+  targetAchieved: number;
+  stopLossHit: number;
+  expired: number;
+  /** Percentage 0..100 (NOT a 0..1 fraction), or null when nothing is decided
+   *  yet. Matches the existing `portfolioRiskMetricsService.winRate` unit. */
+  winRate: number | null;
+  netPnlAbs: number;
+  netPnlPct: number | null;
+  avgReturnPct: number | null;
+  grossPnlAbs: number;
+}
+
+/**
+ * One KPI snapshot -> `metrics` row (11 columns).
+ *
+ * A snapshot, NOT a per-stock row: one row per "Append KPI snapshot" action, so
+ * the sheet becomes a time series the user can chart. The four ratio columns
+ * (winRate / netPnlPct / avgReturnPct) are `number | null` rather than `number`
+ * because "no closed picks yet" is a real, common state and `0` would assert a
+ * measured 0% win rate. `cell(null)` renders `""`, which Sheets shows blank —
+ * the honest encoding of "not computable".
+ */
+export function metricsRow(m: MetricsRowInput): string[] {
+  return [
+    cell(m.snapshotAt),
+    cell(m.totalTracked),
+    cell(m.active),
+    cell(m.targetAchieved),
+    cell(m.stopLossHit),
+    cell(m.expired),
+    cell(m.winRate),
+    cell(m.netPnlAbs),
+    cell(m.netPnlPct),
+    cell(m.avgReturnPct),
+    cell(m.grossPnlAbs),
   ];
 }
