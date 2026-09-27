@@ -50,10 +50,35 @@ test.skip(
 /** A status payload with the six-tab registry and a real-looking cursor. */
 const TABS = ['swing', 'daily-rec', 'screener', 'custom', 'decisions', 'metrics'] as const;
 
+/**
+ * Mirrors `SheetsStatus` in lib/services/googleSheets/statusService.ts exactly.
+ *
+ * This payload is the whole point of the route mock, so it has to track the real
+ * contract field-for-field. An earlier revision still spoke the pre-console
+ * (v3.42) dialect — `configured` / `enabled` / `perTab[].detail` — so the page's
+ * `status.oauthConfigured.clientId` threw on undefined and every test in this
+ * spec failed inside the global ErrorBoundary. The self-skip on missing admin
+ * creds is what kept that invisible; a spec that always skips cannot go red.
+ */
 function statusBody(overrides: Record<string, unknown> = {}) {
   return {
     success: true,
-    status: { configured: true, enabled: false, perTab: TABS.map((tab) => ({ tab, detail: '' })) },
+    status: {
+      // Env master is on and a config row exists, but the DB switch is off (see
+      // the config mock below), so a row still could not be written: that is the
+      // exact "why" the console is required to explain, and it keeps Append
+      // disabled in every test that does not say otherwise.
+      envEnabled: true,
+      dbConfigured: true,
+      sheetIdMasked: '1AbCd…wXyZ',
+      oauthConfigured: { clientId: true, clientSecret: true, refreshToken: true },
+      trackingEnabled: false,
+      perTab: TABS.map((tab) => ({
+        tab,
+        headerState: 'matched',
+        lastMark: tab === 'swing' ? '2026-09-26T04:30:00.000Z' : null,
+      })),
+    },
     sync: {
       confirmThreshold: 100,
       unreadableCap: 200,
@@ -130,6 +155,19 @@ async function openConsole(page: import('@playwright/test').Page) {
 /** The table row for one tab, so actions can be scoped without index maths. */
 function tabRow(page: import('@playwright/test').Page, tab: string) {
   return page.getByRole('row').filter({ has: page.getByRole('cell').filter({ hasText: new RegExp(`^${tab}$`) }) });
+}
+
+/**
+ * The console's own error banner.
+ *
+ * `getByRole('alert')` alone is ambiguous here: Next.js keeps a live region at
+ * `#__next-route-announcer__` with `role="alert"`, so a strict locator resolves
+ * to two nodes and the assertion dies on a strict-mode violation instead of
+ * reading the message. Everything the console says about a refusal goes through
+ * this one element, so exclude the announcer by id.
+ */
+function errorBanner(page: import('@playwright/test').Page) {
+  return page.locator('div[role="alert"]:not(#__next-route-announcer__)');
 }
 
 test('console renders the six-tab queue and the metrics contract', async ({ page }) => {
@@ -215,7 +253,7 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
   });
 
   await tabRow(page, 'custom').getByRole('button', { name: 'Rescan' }).click();
-  await expect(page.getByRole('alert')).toContainText('Enter the saved config id');
+  await expect(errorBanner(page)).toContainText('Enter the saved config id');
   expect(customCalls).toBe(0); // guarded client-side, so nothing was sent
 
   await page.getByLabel('Saved config id to re-scan into the custom tab').fill('cfg_abc123');
@@ -279,7 +317,7 @@ test('a refused delete surfaces the server error instead of claiming success', a
   page.once('dialog', (d) => void d.accept());
   await tabRow(page, 'swing').getByRole('button', { name: 'Remove unreadable' }).click();
 
-  await expect(page.getByRole('alert')).toContainText('row 412 is no longer unreadable');
+  await expect(errorBanner(page)).toContainText('row 412 is no longer unreadable');
   await expect(page.getByRole('status')).toHaveCount(0);
 });
 
@@ -314,7 +352,11 @@ test('metrics preview renders null KPIs as a dash, not zero', async ({ page }) =
 
   await page.getByRole('button', { name: 'Preview' }).click();
 
-  const row = page.getByRole('row').filter({ hasText: '2026-09-27' });
+  // Anchor the row on a rendered KPI, never on `snapshotAt`: the console
+  // formats the timestamp with `toLocaleString()`, so the ISO value is not in
+  // the DOM and matching on it (or on a specific date string) would make this
+  // assertion depend on the machine's locale.
+  const row = page.getByRole('row').filter({ hasText: '75.00%' });
   await expect(row).toBeVisible();
   await expect(row).toContainText('12'); // tracked
   await expect(row).toContainText('75.00%'); // win rate

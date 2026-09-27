@@ -122,12 +122,12 @@ interface LedgerDeleteResponse {
 }
 
 const HEADER_BADGE: Record<HeaderState, { label: string; cls: string }> = {
-  match: { label: "header ok", cls: "bg-green-100 text-green-800" },
-  mismatch: { label: "header mismatch", cls: "bg-amber-100 text-amber-800" },
-  empty: { label: "header written", cls: "bg-blue-100 text-blue-800" },
-  unreadable: { label: "unreadable", cls: "bg-amber-100 text-amber-800" },
-  absent: { label: "tab missing", cls: "bg-red-100 text-red-800" },
-  unknown: { label: "unknown", cls: "bg-gray-100 text-gray-700" },
+  match: { label: "header ok", cls: "bg-green-100 dark:bg-emerald-500/15 text-green-800 dark:text-emerald-300" },
+  mismatch: { label: "header mismatch", cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300" },
+  empty: { label: "header written", cls: "bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300" },
+  unreadable: { label: "unreadable", cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300" },
+  absent: { label: "tab missing", cls: "bg-red-100 dark:bg-red-500/15 text-red-800 dark:text-red-300" },
+  unknown: { label: "unknown", cls: "bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200" },
 };
 
 export default function AdminGoogleSheetsPage() {
@@ -339,8 +339,14 @@ export default function AdminGoogleSheetsPage() {
         setNotice(`Removed ${body.deleted} unreadable row(s) from ${tab}.`);
         await load();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        // Reload FIRST, then surface the reason. `load()` clears `error` on
+        // entry, so setting it before the await wipes the server's explanation —
+        // and this is the one destructive action in the subsystem, where losing
+        // the reason (which seq tripped the mid-flight re-check) is the worst
+        // possible outcome. The refresh itself is still required: a 409 means
+        // the seq list is stale.
         await load();
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusyTab(null);
       }
@@ -383,7 +389,7 @@ export default function AdminGoogleSheetsPage() {
   }, [load, loadMetrics]);
 
   if (loading) {
-    return <div className="p-6 text-gray-600">Loading Google Sheets status…</div>;
+    return <div className="p-6 text-gray-600 dark:text-slate-300">Loading Google Sheets status…</div>;
   }
 
   return (
@@ -391,59 +397,59 @@ export default function AdminGoogleSheetsPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Google Sheets Tracking</h1>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-gray-600 dark:text-slate-300">
             Append-only export of recommendations, screeners and decisions to a spreadsheet you own.
           </p>
         </div>
         <button
           onClick={load}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+          className="rounded border border-gray-300 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-gray-50 dark:bg-slate-900"
         >
           Refresh
         </button>
       </header>
 
       {error && (
-        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800" role="alert">
+        <div className="rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-800 dark:text-red-300" role="alert">
           {error}
         </div>
       )}
       {notice && (
-        <div className="rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-800" role="status">
+        <div className="rounded border border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-800 dark:text-blue-300" role="status">
           {notice}
         </div>
       )}
 
       {status && (
-        <section className="rounded border border-gray-200 p-4">
+        <section className="rounded border border-gray-200 dark:border-slate-800 p-4">
           <h2 className="mb-3 text-lg font-semibold">Status</h2>
           <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <div>
-              <dt className="text-gray-500">Tracking</dt>
+              <dt className="text-gray-500 dark:text-slate-400">Tracking</dt>
               <dd className="font-mono font-semibold">
                 {status.status.trackingEnabled ? "ON" : "OFF"}
               </dd>
             </div>
             <div>
-              <dt className="text-gray-500">Env master</dt>
+              <dt className="text-gray-500 dark:text-slate-400">Env master</dt>
               <dd className="font-mono">{status.status.envEnabled ? "true" : "false"}</dd>
             </div>
             <div>
-              <dt className="text-gray-500">Configured</dt>
+              <dt className="text-gray-500 dark:text-slate-400">Configured</dt>
               <dd className="font-mono">{status.status.dbConfigured ? "yes" : "no"}</dd>
             </div>
             <div>
-              <dt className="text-gray-500">Spreadsheet</dt>
+              <dt className="text-gray-500 dark:text-slate-400">Spreadsheet</dt>
               <dd className="font-mono">{status.status.sheetIdMasked ?? "—"}</dd>
             </div>
           </dl>
-          <div className="mt-3 text-sm text-gray-600">
+          <div className="mt-3 text-sm text-gray-600 dark:text-slate-300">
             OAuth: client id {status.status.oauthConfigured.clientId ? "✓" : "✗"} · client secret{" "}
             {status.status.oauthConfigured.clientSecret ? "✓" : "✗"} · refresh token{" "}
             {status.status.oauthConfigured.refreshToken ? "✓" : "✗"}
           </div>
           {!status.status.trackingEnabled && (
-            <p className="mt-3 text-sm text-amber-700">
+            <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
               Tracking cannot write yet. It needs the env master flag, a configured spreadsheet id, and
               valid OAuth credentials.
             </p>
@@ -452,25 +458,25 @@ export default function AdminGoogleSheetsPage() {
       )}
 
       {config && (
-        <section className="rounded border border-gray-200 p-4">
+        <section className="rounded border border-gray-200 dark:border-slate-800 p-4">
           <h2 className="mb-3 text-lg font-semibold">Configuration</h2>
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
-              <span className="block text-gray-500">Spreadsheet id</span>
+              <span className="block text-gray-500 dark:text-slate-400">Spreadsheet id</span>
               <input
                 value={sheetId}
                 onChange={(e) => setSheetId(e.target.value)}
                 placeholder={config.sheetIdMasked ?? "1AbCd…"}
-                className="w-72 rounded border border-gray-300 px-2 py-1.5 font-mono text-sm"
+                className="w-72 rounded border border-gray-300 dark:border-slate-700 px-2 py-1.5 font-mono text-sm"
               />
             </label>
             <label className="text-sm">
-              <span className="block text-gray-500">Display name</span>
+              <span className="block text-gray-500 dark:text-slate-400">Display name</span>
               <input
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="Tracker"
-                className="w-56 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                className="w-56 rounded border border-gray-300 dark:border-slate-700 px-2 py-1.5 text-sm"
               />
             </label>
             <button
@@ -488,25 +494,25 @@ export default function AdminGoogleSheetsPage() {
                   ? undefined
                   : "The GOOGLE_SHEETS_TRACKING_ENABLED env master is off; the switch cannot be turned on here."
               }
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-50"
+              className="rounded border border-gray-300 dark:border-slate-700 px-3 py-1.5 text-sm disabled:opacity-50"
             >
               {config.enabled ? "Turn off" : "Turn on"}
             </button>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-gray-500 dark:text-slate-400">
             Last sync: {config.lastSyncAt ? new Date(config.lastSyncAt).toLocaleString() : "never"}
           </p>
         </section>
       )}
 
-      <section className="rounded border border-gray-200 p-4">
+      <section className="rounded border border-gray-200 dark:border-slate-800 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Tabs &amp; queue</h2>
           <div className="flex gap-2">
             <button
               onClick={() => sync(false)}
               disabled={busy}
-              className="rounded bg-green-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+              className="rounded bg-green-600 dark:bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             >
               Sync now
             </button>
@@ -514,7 +520,7 @@ export default function AdminGoogleSheetsPage() {
               onClick={() => sync(true)}
               disabled={busy}
               title="Appends a backlog larger than the confirmation threshold."
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-50"
+              className="rounded border border-gray-300 dark:border-slate-700 px-3 py-1.5 text-sm disabled:opacity-50"
             >
               Sync all (confirm)
             </button>
@@ -524,7 +530,7 @@ export default function AdminGoogleSheetsPage() {
         {status ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-gray-500">
+              <thead className="text-left text-gray-500 dark:text-slate-400">
                 <tr>
                   <th className="py-2 pr-3">Tab</th>
                   <th className="py-2 pr-3">Header</th>
@@ -544,33 +550,33 @@ export default function AdminGoogleSheetsPage() {
                   const rescanable = t.tab === "screener" || t.tab === "custom";
                   const rowBusy = busyTab === t.tab;
                   return (
-                    <tr key={t.tab} className="border-t border-gray-100 align-top">
+                    <tr key={t.tab} className="border-t border-gray-100 dark:border-slate-800 align-top">
                       <td className="py-2 pr-3 font-mono">{t.tab}</td>
                       <td className="py-2 pr-3">
                         <span className={`rounded px-2 py-0.5 text-xs ${badge.cls}`}>{badge.label}</span>
-                        {t.detail && <span className="ml-2 text-xs text-gray-500">{t.detail}</span>}
+                        {t.detail && <span className="ml-2 text-xs text-gray-500 dark:text-slate-400">{t.detail}</span>}
                       </td>
                       {/* Retained is shown separately from queued on purpose: the
                           two differ by the drained-but-kept audit window, and
                           collapsing them into one number mislabels old rows as
                           pending work. */}
                       <td className="py-2 pr-3 font-semibold">{queued}</td>
-                      <td className="py-2 pr-3 text-gray-500">{row?.retained ?? 0}</td>
+                      <td className="py-2 pr-3 text-gray-500 dark:text-slate-400">{row?.retained ?? 0}</td>
                       <td className="py-2 pr-3">
                         {unreadableSeqs.length > 0 ? (
                           <details>
-                            <summary className="cursor-pointer text-amber-700">
+                            <summary className="cursor-pointer text-amber-700 dark:text-amber-400">
                               {unreadableSeqs.length} row(s)
                             </summary>
-                            <div className="mt-1 max-w-xs break-all font-mono text-xs text-gray-600">
+                            <div className="mt-1 max-w-xs break-all font-mono text-xs text-gray-600 dark:text-slate-300">
                               {unreadableSeqs.join(", ")}
                             </div>
                           </details>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-slate-500">—</span>
                         )}
                       </td>
-                      <td className="py-2 pr-3 font-mono text-gray-600">{row?.cursor ?? "—"}</td>
+                      <td className="py-2 pr-3 font-mono text-gray-600 dark:text-slate-300">{row?.cursor ?? "—"}</td>
                       <td className="py-2 pr-3">
                         <div className="flex flex-wrap items-center gap-2">
                           {rescanable && (
@@ -583,7 +589,7 @@ export default function AdminGoogleSheetsPage() {
                                   }
                                   placeholder="config id"
                                   aria-label={`Saved config id to re-scan into the ${t.tab} tab`}
-                                  className="w-32 rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+                                  className="w-32 rounded border border-gray-300 dark:border-slate-700 px-2 py-1 font-mono text-xs"
                                 />
                               )}
                               <button
@@ -594,7 +600,7 @@ export default function AdminGoogleSheetsPage() {
                                     ? "Re-runs this saved config and queues the results."
                                     : "Forces a fresh unified-screener pass and queues the results."
                                 }
-                                className="rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-50"
+                                className="rounded border border-gray-300 dark:border-slate-700 px-2 py-1 text-xs disabled:opacity-50"
                               >
                                 {rowBusy ? "…" : "Rescan"}
                               </button>
@@ -605,7 +611,7 @@ export default function AdminGoogleSheetsPage() {
                               onClick={() => removeUnreadable(t.tab)}
                               disabled={rowBusy}
                               title="Delete rows that can never be appended. This is the only destructive action here."
-                              className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 disabled:opacity-50"
+                              className="rounded border border-red-300 dark:border-red-500/40 px-2 py-1 text-xs text-red-700 dark:text-red-400 disabled:opacity-50"
                             >
                               Remove unreadable
                             </button>
@@ -619,16 +625,16 @@ export default function AdminGoogleSheetsPage() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-gray-600">No status available.</p>
+          <p className="text-sm text-gray-600 dark:text-slate-300">No status available.</p>
         )}
 
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-gray-500 dark:text-slate-400">
           <strong>Queued</strong> is every row still marked undelivered; <strong>retained</strong> is
           everything on disk, including rows already appended and kept for the audit window. The two
           differ by the drained-but-kept audit window, so collapsing them would mislabel old rows as
           pending work.
         </p>
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-gray-500 dark:text-slate-400">
           Most queued rows are sent by the next drain, but not all — so a non-zero queue is not
           necessarily a stuck queue. A row can be counted yet never replayed when the append already
           reached the sheet and only the delivered-marker write failed. Re-sending it would duplicate
@@ -640,13 +646,13 @@ export default function AdminGoogleSheetsPage() {
         </p>
       </section>
 
-      <section className="rounded border border-gray-200 p-4">
+      <section className="rounded border border-gray-200 dark:border-slate-800 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Metrics</h2>
           <div className="flex gap-2">
             <button
               onClick={loadMetrics}
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+              className="rounded border border-gray-300 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-gray-50 dark:bg-slate-900"
             >
               Preview
             </button>
@@ -668,9 +674,9 @@ export default function AdminGoogleSheetsPage() {
         </div>
 
         {metrics === null ? (
-          <p className="text-sm text-gray-600">Preview to compute the current projection.</p>
+          <p className="text-sm text-gray-600 dark:text-slate-300">Preview to compute the current projection.</p>
         ) : !metrics.ok ? (
-          <p className="text-sm text-amber-700">
+          <p className="text-sm text-amber-700 dark:text-amber-400">
             {metrics.reason === "db_unavailable"
               ? "The database is held (plan limit), so the projection cannot be computed. No row is queued."
               : `Could not compute the projection${metrics.reason ? `: ${metrics.reason}` : ""}.`}
@@ -679,7 +685,7 @@ export default function AdminGoogleSheetsPage() {
           <MetricsTable snapshot={metrics.snapshot!} />
         )}
 
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-gray-500 dark:text-slate-400">
           A snapshot is appended as a single row so the sheet keeps a history of how the tracker
           performs over time. Appends are queued like any other run — Sync writes them.
         </p>
@@ -696,7 +702,7 @@ function MetricsTable({ snapshot }: { snapshot: MetricsSnapshot }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead className="text-left text-gray-500">
+        <thead className="text-left text-gray-500 dark:text-slate-400">
           <tr>
             <th className="py-2 pr-3">Snapshot</th>
             <th className="py-2 pr-3">Tracked</th>
@@ -712,7 +718,7 @@ function MetricsTable({ snapshot }: { snapshot: MetricsSnapshot }) {
           </tr>
         </thead>
         <tbody>
-          <tr className="border-t border-gray-100">
+          <tr className="border-t border-gray-100 dark:border-slate-800">
             <td className="py-2 pr-3 font-mono text-xs">
               {new Date(snapshot.snapshotAt).toLocaleString()}
             </td>
