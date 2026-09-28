@@ -1,9 +1,9 @@
 # TradeNext v3.44.0 — Spec 02 Public legal pages (Privacy + Terms)
 
-> **Status:** CODE + TESTS + BUILDS + E2E + DOCS **DONE** · **UNCOMMITTED** — commit pending user approval · no push / PR / merge / deploy.
-> **Branch:** `feature/legal-pages` (off `aba7fa6` = v3.43.0 live-verification wrap-up commit on the `645cf85` chain).
+> **Status:** CODE + TESTS + BUILDS + E2E + DOCS **DONE** · **COMMITTED** `fb29b16` + `66db159` (now on `feature/google-sheets-tracking`, PR #133) — push pending user approval · merge/deploy not yet.
+> **Branch:** `feature/google-sheets-tracking` (legal commits fast-forwarded off `aba7fa6` = v3.43.0 live-verification wrap-up on the `645cf85` chain; the temporary `feature/legal-pages` branch was deleted after the move).
 > **Spec / plan:** `.agents/specs/02-public-legal-pages.md` + `.agents/plans/02-public-legal-pages.md` — user-approved 2026-09-28 with all three decisions: **(1)** no date/"Last updated" line on either page, **(2)** links in the contact footer + Header nav (desktop + mobile), **(3)** AGENTS.md v3.44.0 row **deferred** (per-file cap).
-> **Supersedes:** nothing — independent of the v3.43.0 Google Sheets console (committed `645cf85`, push/PR/deploy still pending user).
+> **Supersedes:** nothing — independent of the v3.43.0 Google Sheets console (committed `645cf85`; PR #133 now open from this branch — push/merge pending user).
 
 ## What it does
 

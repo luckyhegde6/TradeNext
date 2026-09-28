@@ -8,7 +8,7 @@
 - [x] E2E: NEW `e2e/privacy-terms.spec.ts` **4/4 chromium** (1.2 min — /privacy public, /terms public, contact legal-links strip) — DONE
 - [x] Gates: tsc **46 exact (0 new; prod 0)** · lint **0 errors** (0 in new files) · quickbuild **198/198** (+2 static: `/privacy` + `/terms` both `○`, 2.6 min — dev server killed first, Lesson 150) · doc budget **94.3/100 KB** — DONE
 - [x] Docs (Phase 5): `versions-v3.44.md` + CHANGELOG + versions-index + TODO quick-ref + Primer + agent-memory + HANDOFF + latest.md + Lesson 150 + session archive `2026-09-28-legal-pages/`; **AGENTS.md NOT edited** (cap deferral) — DONE
-- [ ] **NEXT: user decision — commit as v3.44.0** (2 commits: `feat(legal): public privacy + terms pages` then `docs: legal-pages wrap-up`; no push/PR/merge/deploy without explicit approval)
+- [x] **Committed as v3.44.0** (`fb29b16` + `66db159`, on user request) — moved to `feature/google-sheets-tracking` (PR #133), `feature/legal-pages` deleted — **open: user decision on push** (3 v3.43.0 wrap-up commits `9de434e`/`b8ef109`/`aba7fa6` ride along)
 
 ## Prior (2026-09-26 — v3.43.0 Spec 20 Google Sheets admin console — CODE + TESTS + BUILD + DOCS DONE — **COMMITTED `645cf85`**, no push/PR/deploy)
 - [x] Spec + plan written + user approved: `.agents/specs/20-google-sheets-admin-console.md` + `.agents/plans/20-google-sheets-admin-console-phase1.md`; branch `feature/google-sheets-tracking` off `2fbf0c7` (v3.42.0 `a6e4e6e`) — DONE

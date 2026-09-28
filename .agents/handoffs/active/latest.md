@@ -7,11 +7,11 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Public legal pages — Privacy Policy + Terms of Service (Spec 02) |
-| **Branch** | `feature/legal-pages` (off `aba7fa6` = v3.43.0 live-verification wrap-up) |
-| **State** | CODE + TESTS + BUILDS + E2E + DOCS **DONE** · **UNCOMMITTED** — commit pending user approval |
-| **In-flight** | None — Phase 5 docs are complete |
-| **Blocked** | Commit: awaiting explicit user approval (no auto-push/PR/merge/deploy). P6003 production hold until 2026-10-02 (no prod migrations/deploy/Netlify). |
-| **Side note** | v3.43.0 Google Sheets console is COMMITTED `645cf85` (+ live wrap-up `aba7fa6`) — push/PR/deploy still pending user. PR #132 (v3.41.3 Laya) remains OPEN and unrelated. |
+| **Branch** | `feature/google-sheets-tracking` (legal commits fast-forwarded + `feature/legal-pages` deleted; **PR #133 open** head→main) |
+| **State** | CODE + TESTS + BUILDS + E2E + DOCS **DONE** · **COMMITTED** `fb29b16` + `66db159` — push pending user approval |
+| **In-flight** | None — Phase 5 docs complete + status refreshed after branch move |
+| **Blocked** | Push: awaiting explicit user approval (branch is 5 commits ahead of remote: 3 v3.43.0 wrap-up `9de434e`/`b8ef109`/`aba7fa6` + 2 legal) — no auto-push/PR/merge/deploy. P6003 production hold until 2026-10-02 (no prod migrations/deploy/Netlify). |
+| **Side note** | v3.43.0 Google Sheets console COMMITTED `645cf85` (+ live wrap-up `aba7fa6`) — PR #133 open on this branch, push/merge pending user. PR #132 (v3.41.3 Laya) remains OPEN and unrelated. |
 
 ## What's done (v3.44.0)
 
@@ -25,7 +25,7 @@
 ## Not done (deliberately)
 
 - Full Jest suite + full cross-browser e2e (targeted scope only) → PR gate.
-- No push/PR/merge/deploy — needs explicit user approval (commit plan: `feat(legal): public privacy + terms pages` then `docs: legal-pages wrap-up`).
+- Push/merge/deploy — needs explicit user approval. Commits landed `fb29b16` (feat) + `66db159` (docs); branch is `feature/google-sheets-tracking` (PR #133).
 - No migrations (no schema change), no new packages, no OpenAPI change.
 
 ## Next steps
