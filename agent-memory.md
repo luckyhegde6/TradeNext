@@ -15,6 +15,18 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-28 | v3.44.0 — Spec 02 Public legal pages (Privacy + Terms)
+
+**Request (spec 02, user-approved 2026-09-28)**: public `/privacy` + `/terms` static pages (no auth, **no date/effective line** — user decision), truthful to the product, links in contact footer + Header (desktop + mobile).
+
+**Execution**: `app/privacy/page.tsx` + `app/terms/page.tsx` (server components, metadata, dark-mode) · contact-footer links + Header `NavLink`/`MobileNavLink` · `app/sitemap.ts` priority 0.3/monthly · `app/llms.txt` +2 entries · unit tests 6/6 · NEW `e2e/privacy-terms.spec.ts`.
+
+**Verification**: tsc **46 exact (0 new; prod 0)** · lint **0 errors** (0 in new files) · quickbuild **198/198** (+2 static, 2.6 min, killed dev server first — Lesson 150) · Jest **6/6** targeted · e2e privacy-terms.spec.ts **4/4 chromium** (1.2 min) · doc budget **94.3/100 KB**.
+
+**Docs**: `versions-v3.44.md` + index rows + TODO/Primer/agent-memory/session-todos/HANDOFF/latest + Lesson 150 + session archive `2026-09-28-legal-pages/`. **AGENTS.md row DEFERRED** (32,719/32,768 B cap — Lesson 142; no edit this version).
+
+**Commit**: pending explicit user approval (2 commits: `feat(legal): public privacy + terms pages` then `docs: legal-pages wrap-up`) — no push/PR/deploy.
+
 ### 2026-09-25 | v3.42.0 — Spec 19 Google Sheets tracking (append-only, flag-gated, fire-and-forget)
 
 **Request (spec 19, user-approved)**: export the product's event streams to a durable, human-readable, shareable log OUTSIDE the app — one user-owned Google Sheet — with no UI. Explicit constraints: optional, flag-gated, fire-and-forget, **append-only**.

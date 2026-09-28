@@ -1,69 +1,47 @@
-# Handoff — Active (latest)
+# Live Resume — v3.44.0 Spec 02 Public legal pages (Privacy + Terms)
 
-> SCHEMA v1.1 · read at session start after `@HANDOFF.md`. Live resume context — update after every session; archive to `.agents/handoffs/` history when superseded.
+> Updated: 2026-09-28 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | v3.43.0 Spec 20 — Google Sheets **admin console** (makes the v3.42.0 export operable) |
-| **Branch** | `feature/google-sheets-tracking` (parent `2fbf0c7` = v3.42.0 `a6e4e6e`) — **work UNCOMMITTED** |
-| **State** | CODE + TESTS + BUILD + DOCS **DONE** · **UNCOMMITTED** — no push, no PR, no merge, no deploy |
-| **Invariants** | append-only · positional (user header never rewritten) · producers never throw — all three **preserved** |
-| **Blocked** | **Yes, externally** — the P6003 plan-limit hold (until `2026-10-02`) rejects the Prisma session **write** that admin login needs, so the console is **unverified in a real browser**. See "Not done". |
-| **Side note** | PR #132 (v3.41.3 Laya) still OPEN — merge/deploy pending user. Unrelated branch. |
+| **Task** | Public legal pages — Privacy Policy + Terms of Service (Spec 02) |
+| **Branch** | `feature/legal-pages` (off `aba7fa6` = v3.43.0 live-verification wrap-up) |
+| **State** | CODE + TESTS + BUILDS + E2E + DOCS **DONE** · **UNCOMMITTED** — commit pending user approval |
+| **In-flight** | None — Phase 5 docs are complete |
+| **Blocked** | Commit: awaiting explicit user approval (no auto-push/PR/merge/deploy). P6003 production hold until 2026-10-02 (no prod migrations/deploy/Netlify). |
+| **Side note** | v3.43.0 Google Sheets console is COMMITTED `645cf85` (+ live wrap-up `aba7fa6`) — push/PR/deploy still pending user. PR #132 (v3.41.3 Laya) remains OPEN and unrelated. |
 
-## What's done (v3.43.0)
+## What's done (v3.44.0)
 
-- **NEW admin console** `app/admin/google-sheets/page.tsx` (wired into `app/admin/layout.tsx`) — per-tab queue visibility, manual **drain** (confirm above `SYNC_CONFIRM_THRESHOLD=100`), **poisoned-row recovery**, tracker-performance **metrics history**, guarded **ledger delete**, and **scan re-run**.
-- **NEW services** `lib/services/googleSheets/{statusService,syncService,metricsService,rescanService,configService}.ts` — caps `SYNC_ROW_CAP=200`, `UNREADABLE_REPORT_CAP=200`, `RESCAN_ROW_LIMIT=200`; sequential drain; per-tab cursors.
-- **NEW 6 admin routes** `app/api/admin/google-sheets/{status,config,sync,ledger,metrics,rescan}/route.ts` — every one server-side `auth()` + `role === "admin"` (a client redirect is UX only), all `securityAdmin` + 2xx + 401 in OpenAPI. Full spreadsheet IDs and credentials are never returned.
-- **Guarded ledger `DELETE`** — the subsystem's **only** destructive action, and every guard is re-validated server-side on each call: `isPlanLimitBreakerOpen()`→503, config/sheet existence→503, unknown tab→400, `decisions`→400 (no tab by design), **shared `ledgerRowIsUnreadable()` re-validation** (a seq may have become readable since it was listed), **all-or-nothing** (a partial delete →409 naming the offending seq), 200 cap, audit + a **real** deleted count.
-- **`metrics` = 5th syncable tab** — 11 cols from `RecommendationTracker`; `target_achieved`→`targetPrice`, `stop_loss_hit`→`stopLoss`, `expired`→last `currentPrice`; active picks excluded from P&L; `winRate = targetAchieved/(targetAchieved+stopLossHit)*100`; **non-computable stays `null`** and the console renders `—` (never a fabricated `0` — "no closed picks" ≠ "zero return"). P6003 → `ok:false, reason:"db_unavailable"` and **no row is queued**.
-- **Re-scan ≠ Sync** — Sync drains *captured* rows; Re-scan *produces fresh* ones. Merging them would make a drain click fire network scans. `screener` → `runChartinkUnifiedScreeners({forceRefresh:true})`, whose fresh path already appends internally, so the route deliberately does **not** double-export (UI says "queued … Sync to append"); `custom` → `runCustomScan()` + awaited `exportCustomScan()` with a **fresh `randomUUID()`** so the count is *appended*, not queued. `RESCAN_ROW_LIMIT=200`.
-- **NEW `lib/screener/customScanRunner.ts`** — full-universe scan, required-column extraction, filter/sort/paginate/totals/timing, extracted so the config route and Re-scan **cannot drift**. The route's auth, ownership, response shape, fire-and-forget export, and `offset === 0` export gating are unchanged.
-- **Unreadable discovery is cursor-independent** — `getUnreadableSeqs()` scans from `seq=0` **ignoring the tab cursor**, because a poisoned row is exactly what a cursor skips; capped 200 with one over-fetch. Resolved `queued`/`remaining` = **all** undelivered rows, including marker-write residue and rows parked behind an unreadable row ("replayable" would under-report a queue the operator must reason about).
-- **DB** — 2 Prisma models + `prisma/migrations/20260926000000_add_google_sheets_{config,ledger}/` — **written, NOT applied**. `prisma validate` ✓, client v7.9.1 generated.
-- **Audits** — `GOOGLE_SHEETS_LEDGER_DELETED` + `GOOGLE_SHEETS_RESCAN`.
-- **Tests — 142/142 targeted Sheets** (status 15, sync 35, sqlite 92) including a **real-sql.js read-by-seq guard**: a fully mocked SQLite cannot catch a `{{SEQS}}` placeholder/bind-count bug, and that is the failure mode this SQL is most exposed to (Lesson 143). Other new suites individually green: admin-routes 54, rescan 34, metrics 26, ledger-capture 21, custom-runner + config-route 23. NEW `e2e/admin-google-sheets.spec.ts` = 7 tests × 3 browsers, `--list`-collected.
-- **E2E routes are deliberately MOCKED** — OAuth consent is a one-shot manual step; a real append is irreversible by design, so a test run would **permanently pollute the user's sheet**; the ledger is durable state a test must not depend on. The spec therefore asserts the console's **own contract** (which request it sends, what it tells the operator) while server behaviour stays covered by Jest. Credentials come only from `E2E_ADMIN_*`/`ADMIN_*` with self-skip — no literals, so **no `SECRETS_SCAN_OMIT_PATHS` entry is needed**.
-- **Verified** — tsc **46 exact (0 new; prod 0)** · lint **0 errors** (0 in new files) · quickbuild **196/196** ✓ (+7 vs 189) · OpenAPI all six routes via the exported `GET()` · `eslint e2e/admin-google-sheets.spec.ts` clean.
-- **Full Jest 126/126 suites · 1813 passed / 4 skipped / 0 failed** (124.9 s) — **Lesson 145 confirmed, and the earlier "2 pre-existing Laya failures" recorded across the v3.43.0 docs was WRONG.** Re-running the whole suite green disproved it: `layaAgent.test.ts` 69.2 s, `layaDecisionModel.test.ts` 8.8 s, weights present (7 files, 527,680,766 B), zero `FAIL` lines. The `ETIMEDOUT` was contention against a hard cap on the 503 MB ONNX cold load — **not** a missing-model gap and **not** a real failure. **The documented cap was wrong, though** (Lesson 147): the binding clocks were the **Jest hook** caps, `layaAgent.test.ts` `beforeAll(fn, 60_000)` and `layaDecisionModel.test.ts`'s untimed `beforeAll` which inherited Jest's **5 s default** (the repo sets no `testTimeout` anywhere) — not the `execFileSync` `timeout:120_000` the docs named. **Both now `300_000`** (4.3× the observed 69.2 s), verified **19/19 in isolation** (37.7 s / 6.4 s) with tsc 46 exact — applied on user approval.
-- **Docs DONE** — `AGENTS.md` v3.43.0 row + latest pointer · NEW `.agents/changelog/versions-v3.43.md` · `.agents/CHANGELOG.md` index · `.agents/changelog/versions-index.md` · `TODO.md` quick-ref · `Primer.md` · `agent-memory.md` · **Lessons 144 + 145 + 146** + update log · `.agents/session-todos.md` · this handoff.
-- **Doc-budget gate green — 94.3/100 KB, no warning** — the v3.43.0 rows pushed **both** `AGENTS.md` and `TODO.md` to 34.2 KB, **over the 32 KB per-file cap**: the Lesson 142 trap, recurring one version later. Fixed with the repo's own escape hatch — the superseded **v3.42.0** rows collapsed to one-line pointers in both files, and the fully-superseded, already-committed **v3.41.3** TODO row moved into `.agents/changelog/todo-quick-reference-archive.md` (**appended there first, so nothing was lost**). Result: AGENTS 31.9 KB / TODO 30.1 KB. ⚠️ **`AGENTS.md` is now 32,719 B against the 32,768 B cap — 49 bytes of headroom**, so the next edit to that file will very likely breach the per-file budget.
-- **Git hygiene + ALL WORK STAGED, NOT COMMITTED** — every `git status` entry reviewed (26 modified + 22 untracked, **all intended**); no root `*.yaml`, no screenshots, no `dev-server.log`/`next-dev.log`; `.context/` is gitignored and never committed. **51 files staged** (7,555 insertions / 111 deletions) including `lib/services/googleSheets/syncService.ts` (390 lines), as requested. Staged-additions **secrets scan CLEAN** (0 hits across 7 patterns). `git check-ignore` + `git ls-files` both confirmed `.context/out/envvars.json` was ignored **and** untracked, so it was never in a commit or a diff.
-- **`.context/out` retention RESOLVED (user chose "delete logs + `envvars.json` only")** — the dir held 66 files / 11.87 MB, all stale (2026-09-17 → 2026-09-24). Deleted the 5 `.log` files (9.08 MB) **and `envvars.json`, a plaintext dump of 23 production env vars** (`AUTH_SECRET`, `ADMIN_PASSWORD`, `CRON_SECRET`, `OPENROUTERKEY`, `TELEGRAM_SECRET`, `API_KEY`, `DEFAULT_PASSWORD`, `DATABASE_URL`, `ACCELERATE_URL`) → **8.89 MB freed**, 60 files / **2.98 MB** left, now under the 5 MB threshold so the retention **WARN is gone**. Kept per that choice: 6 scratch scripts (`branch-scan.sh`, `branch-delete.sh`, `dbprobe{,2,3}.mjs`, `enrich.mjs`), 2 `.md`, 34 `.json`, 18 `.txt`, `envvars.err`. **Caveat for the next session: the 3 `dbprobe*.mjs` scripts each `readFileSync("envvars.json")` and now throw — re-dump the env before re-running them** (Lesson 146).
+- **Pages**: `app/privacy/page.tsx` + `app/terms/page.tsx` — public static server components, no auth, **no date/"Last updated" line** (user decision). Content truthful to the product (account/sessions, portfolio/watchlist/alerts/Telegram chat ID, contact form, audit + server logs SQLite 14-day mirror, AI-analysis inputs via OpenRouter, optional admin Google Sheets export = anonymous rows only — no credentials).
+- **Terms flavour**: "tool, not an adviser" · NSE disclaimers · 18+ · acceptable use · "laws of India" · liability limits · contact `mailto:luckyhegdedev+tradenext@gmail.com`.
+- **Wiring**: contact footer links + Header desktop (`NavLink`) + mobile (`MobileNavLink`); `app/sitemap.ts` priority 0.3 / monthly; `app/llms.txt` +2 entries.
+- **Tests**: unit **6/6** (`app/privacy/__tests__/page.test.tsx` 3 + `app/terms/__tests__/page.test.tsx` 3) · NEW `e2e/privacy-terms.spec.ts` **4/4 chromium** (1.2 min, 2 workers incl. auth.setup).
+- **Gates**: tsc **46 exact (0 new; prod 0)** · lint **0 errors** (0 in new files) · quickbuild **198/198** (+2 static: `/privacy` + `/terms` both `○`, 2.6 min — dev server killed first, Lesson 150) · doc budget **94.3/100 KB**.
+- **Docs**: `.agents/changelog/versions-v3.44.md` + index rows + TODO/Primer/agent-memory/session-todos/HANDOFF/latest + Lessons 150 + session archive. **AGENTS.md row DEFERRED** (32,719/32,768 B cap — 49 B headroom, Lesson 142 trap); recorded in the changelog, to be filled when AGENTS.md is next slimmed.
 
 ## Not done (deliberately)
 
-- **Browser + live-sheet verification NOT PERFORMED.** There was no dev server, no `E2E_ADMIN_*` credentials, and — decisively — **admin login requires a Prisma session *write*, which the P6003 hold rejects.** The P6003 hold (until `2026-10-02`) also blocks `ScanConfig` reads (custom Re-scan) and the metrics projection. So the console is verified by unit tests and by the mocked e2e contract, **not** against a real sheet or a real browser.
-- **Migrations are unapplied.** No `migrate reset` was run (guarded). Applying to a remote DB needs a post-`2026-10-02` window.
-- **Live OAuth consent was never performed** — no refresh token, nothing appended to the live Tracker sheet (`1mRDK40yv2_RAgRitEZZutF1UmMJEBy9ccrjxeDYDXzQ`). `scripts/dev-checks/google-oauth-consent.mjs` is **retained** (uncommitted) on purpose, so the consent step stays reproducible.
-- **Not pushed / PR'd / merged / deployed** — **committed locally as `645cf85`** (51 files, +7,574/−114) on user approval; the branch is one push ahead of nothing and unpublished.
-- **Laya child-process timeouts** — applied as a **separate follow-up commit**, not folded into the v3.43.0 bundle: the v3.43.0 diff is deliberately one-subsystem, and the timeout fix needed its own derivation and its own Lesson 147 rather than a drive-by edit.
+- Full Jest suite + full cross-browser e2e (targeted scope only) → PR gate.
+- No push/PR/merge/deploy — needs explicit user approval (commit plan: `feat(legal): public privacy + terms pages` then `docs: legal-pages wrap-up`).
+- No migrations (no schema change), no new packages, no OpenAPI change.
 
-## Next steps (for the next agent)
+## Next steps
 
-1. **Do NOT auto-push, PR, merge, or deploy.** Ask the user first. The commit is done (`645cf85`), so only publication is left.
-2. If the user wants live validation (needs the P6003 window closed, i.e. after `2026-10-02`): start the dev server, log in as admin, open `/admin/google-sheets`, then run `node scripts/dev-checks/google-oauth-consent.mjs` once, paste the refresh token into `.env` as `GOOGLE_SHEETS_REFRESH_TOKEN`, set `GOOGLE_SHEETS_TRACKING_ENABLED=true`, and delete the helper. A single run appends to the live sheet; re-running is safe (append-only). Expect a 401 storm after ~7 days → re-consent, not a bug.
-3. If the user wants the branch published: `git push -u origin feature/google-sheets-tracking`, then open a PR against `main`. Do **not** commit any credentials, `.env`, or `lib/services/laya/weights/`.
-4. Optional cleanup, not done to avoid scope creep: `.agents/changelog/versions-index.md` has **no v3.42.0 row** (a pre-existing gap, unrelated to this work — reported rather than silently filled).
+1. **User decision: approve commit** of the two-commit plan above (on explicit request only).
+2. After commit: remind user to rotate the Testing-mode token (~minted Sep 28 ⇒ expires ~Oct 5) before any public share/arm; never print the OAuth refresh token.
+3. When the P6003 hold lifts (2026-10-02+): deploy path = push → PR → merge → Netlify; include full Jest + cross-browser e2e at the PR gate.
 
-## Gotchas / lessons (recent)
+## Gotchas / lessons for this handoff
 
-- **Raise the clock that actually fires** — the deferred "raise `execFileSync timeout:120_000`" fix would have been a no-op: the binding caps were the Jest hook caps (60s explicit, and 5s inherited default). Fixing it surfaced that `layaDecisionModel`'s untimed `beforeAll` was passing a cold ONNX load against a 5s cap on a warm page cache (Lesson 147).
-- **A blocklist matches substrings, so a fake ID can trip it** — the pre-commit hook assembles the join-password literal at runtime and blocked the v3.43.0 commit on the old OpenAPI `sheetId` example, because the value contained an 8-digit run matching a digit-sequence pattern. It is a *substring* match on an example string, not a real credential; change the example value rather than reaching for `--no-verify` — and do not quote the offending run in your own notes, because that re-arms the very check you just satisfied.
-- **Never hand-write a count a registry already owns** — `expect(s.perTab).toHaveLength(5)` sat one line below an assertion against the real `TABS` registry; adding the `metrics` tab made the test contradict itself. Use `TABS.length` (Lesson 144).
-- **`.gitignore` means "never committed", not "safe"** — `.context/out/envvars.json` was ignored **and** untracked, which is exactly why 23 plaintext production env vars sat on disk untouched: no tool would ever flag an ignored file. Scratch must not hold credential dumps at all (Lesson 146).
-- **A deletion that strands a script must be recorded** — the 3 retained `dbprobe*.mjs` scripts each `readFileSync("envvars.json")` and now throw. Re-dump the env before re-running; the failure is loud by design (Lesson 146).
-- **Isolate before you attribute a full-suite failure** — 3 failed suites in the full run, 1 mine, 2 pre-existing Laya timeouts. Run the suspect suite alone **and record the isolation result in the version docs**, or the next session re-investigates it (Lesson 145).
-- **`TODO.md` is a per-file-budgeted index, not a log** — the 32 KB per-file cap binds before the 100 KB total, and a version row is ~2.3 KB. It bit twice in consecutive versions: archive superseded blocks instead of appending forever (Lesson 142).
-- **Docs are CRLF** — a scripted `split("\n")`/`join("\n")` rewrite silently injects bare LF; prefer the editor tools, or detect the EOL and re-emit it (Lesson 142).
-- **Never rewrite data you do not own** — header drift → `warn` + append by position (Lesson 141).
-- **Batch once per run** — Sheets allows ~60 writes/min/user (Lesson 141).
-- **Never throw from the exporter into business logic** — return a value and log (Lesson 141).
-- **A `?` is not a bind** — any SQL that only ever runs against a mock is unverified; run the *production string* on a real engine (Lesson 143).
-- **Audit on the right cadence** — run-level success audits for low-frequency tabs, log-only for the per-evaluation `decisions` tab (Lesson 99 write-behind budget).
-- **Exact-string flag gate** — a typo must only ever mean "no export", never "unexpected writes into the user's sheet".
-- **Testing-mode OAuth expiry** — Google Cloud `External` + `Testing` apps issue refresh tokens that expire after **7 days**; treat a 401 storm as "re-consent".
-- LSP module-resolution diagnostics in decision-engine files are pre-existing sandbox noise; the baseline TypeScript gate is authoritative.
+- **Lesson 150**: a live `next dev` holds `.next` — `next build` on top of it hangs with zero output until timeout. Diagnose first (`netstat -ano | findstr :3000`), kill the PID **you** started (`taskkill /PID <pid> /F`), never kill port 4096 (OpenCode UI) or DB ports. Only kill processes you started.
+- **AGENTS.md is at cap** — do NOT edit it (49 B headroom; version row deferred by user decision).
+- Windows cmd: no `tail` (use findstr/find). LSP errors in `lib/services/decision/*` are editor noise. Admin login `admin@tradenext6.app` / `admin123`.
+
+## Remaining-merge state of PREVIOUS workstreams
+
+- v3.43.0 (Spec 20 Google Sheets console): committed `645cf85` + `aba7fa6` — push/PR/deploy pending user.
+- v3.41.3 (Spec 18 Laya real inference): pushed, PR #132 OPEN — merge/deploy pending user.
+- P6003 plan-limit hold: until 2026-10-02 — transient: read fallbacks (SQLite mirror) active; write paths blocked. Full detail: `.agents/changelog/versions-index.md`.
