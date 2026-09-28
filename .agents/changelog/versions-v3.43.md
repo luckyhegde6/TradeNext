@@ -191,20 +191,56 @@ re-derive a deferred finding when you execute it instead of transcribing it. Ver
 `layaAgent` 37.7 s, `layaDecisionModel` 6.4 s, **19/19 pass**; tsc baseline **46 exact / prod 0 / +0**;
 scoped ESLint clean; 2 test files, 4 values, no production code.
 
+## Live verification (2026-09-28) — full chain executed against the real spreadsheet
+
+OAuth consent **performed** (Testing-mode token, sheet owner); the complete flow ran live against the real
+"TradeNext Tracker" sheet via in-memory session probes + a pure-OAuth read-back script:
+
+1. **A1 header-probe bug found + fixed (Lesson 149)** — `readHeaderState` probed `${tab}!A1` (a 1×1 cell),
+   so ANY populated multi-column header misclassified as `drifted` (the console would never write a header
+   on a genuinely empty tab either). Unit mocks injected full rows **regardless of the requested range** and
+   the e2e mock hardcoded `matched`, so every automated gate was green. Fix = probe `${tab}!1:1` (whole
+   first row); write target stays `A1`; range pins added in `googleSheetsStatus.test.ts` and
+   `googleSheetsTracking.test.ts`. **Uncommitted** (`lib/services/googleSheets/tabs.ts` + 2 test files).
+2. **Chain, live**: csrf 200 → login 302 → session 200 (`admin@tradenext6.app`, role admin) → status 200
+   (`tracking=true`, `metrics` = `matched` post-fix, other 5 tabs `absent`) → GET metrics 200
+   (`ok:true, totalTracked=121, active=121`) → POST metrics 200 (`success=true, outcome=enabled, tab=metrics`)
+   → POST sync `{tabs:["metrics"]}` 200 (`status=empty, rows=0, remaining=0` — nothing owed, the direct
+   append already recorded `delivered=1`) → status after: `lastMark:null`, all queues 0.
+3. **Sheet read-back**: row 2 at `A2` = `[2026-09-28T15:43:36.687Z, 121, 121, 0, 0, 0, "", 0, "", "", 0]` —
+   11 positional columns, ratios `null`, P&L sums 0 — exactly the pinned contract. Two test rows total in
+   the sheet (14:24:45.344Z pre-heal + 15:43:36.687Z; the first is kept as an audit record).
+4. **Idempotence + exclusion**: a second sync of `metrics` returned `empty` (delivered marker holds, no
+   duplicate re-drain); sync of `decisions` → `skipped` ("excluded by spec (in-memory only, not syncable)");
+   status shows `metrics queued=0/1` (0 owed, 1 retained audit row). Earlier 400s in a probe were **probe-side**
+   (a helper that dropped the caller's `headers`, sending the form body with `content-type: application/json`
+   → Auth.js `JSON.parse` SyntaxError; Lesson 149), not an app bug — and retroactively explains the original
+   `curl -c cookies.txt` 401s (jar serialization; only in-memory cookie probes ever worked).
+5. **The documented "P6003 blocks the metrics projection" assumption was WRONG** — the projection ran live
+   (`totalTracked=121, active=121`). Only session (admin login) and `ScanConfig` **writes** are held. The
+   assumption was corrected in this changelog, the PR body, and `docs/google-sheets-setup.md`.
+6. **Architecture confirmed live**: producers append DIRECTLY (awaited) + ledger `delivered=1`; Sync drains
+   only UNDELIVERED rows; `lastMark` is the *drain* cursor, so `null` after a successful direct append is
+   by-design, not a defect.
+7. The P0 SQLite snapshot-restore fix (`lib/sqlite.ts` + `sqliteMirror.test.ts`) was verified live earlier
+   (34 tables healed, persisted) and remains **uncommitted** alongside the A1 fix.
+8. Jest 58/58 targeted; tsc **46 exact / prod 0 / +0 new** (0 hits on touched files); ESLint clean.
+   Dev server booted once (PID 56228, 15:13:55 `Ready in 4.4s`); repeated "Auth route: Server starting"
+   lines are lazy per-route Turbopack re-inits, not restarts.
+
 ## Blocked
 
-- **P6003 plan-limit hold until 2026-10-02** blocks all Prisma reads/writes. Consequences: admin
-  login cannot create a session, `ScanConfig` reads for custom Re-scan fail, and the metrics
-  projection degrades by design.
-- **OAuth consent not performed** → no refresh token → no live append, no live re-scan, no
-  `values.append` against a real sheet.
-- `migrate reset` must not be run; `scripts/dev-checks/google-oauth-consent.mjs` is retained until
-  consent is complete.
+- **P6003 plan-limit hold until 2026-10-02** still blocks the Prisma **session write** admin login needs on
+  the remote DB and `ScanConfig` **reads** for custom Re-scan. The metrics projection runs fine (verified
+  live above); the earlier "holds the metrics projection" assumption is corrected.
+- `migrate reset` must not be run; `scripts/dev-checks/google-oauth-consent.mjs` is retained.
+- Commits of the two uncommitted fix sets (P0 SQLite restore + A1 header-probe) are **pending user approval**.
 
 ## Not done (deliberate)
 
 - No migration was run; the two `20260926000000_*` migrations are committed-but-unapplied.
-- No browser/UI verification (blocked).
-- No live-sheet verification (blocked).
+- **Poisoned-row / guarded-delete recovery was NOT exercised live** — it is destructive on the user's real
+  sheet and irreversible; it stays covered by 21 Jest tests + the e2e mocks. Live verification otherwise
+  complete (consent, append, sync/drain semantics, idempotence, metrics projection — above).
 - The pre-existing Laya child-process timeout was **not** changed by this commit — it was hardened in a
   separate follow-up commit (above, Lesson 147).
