@@ -15,6 +15,16 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-09-28 | PR #133 quality-gate fix — `applySchema` strict/failOpen split (b8ef109 regression)
+
+**Request (merge-readiness continuity)**: PR #133 pushed head (`ac24ede`) failed the quality-gate — one Jest test red; verify/fix so the merge gate goes green.
+
+**Root cause**: `b8ef109` made sqlite schema replay fail-open on the fresh-init path too → the v3.28.1 regression test's injected `db.run` throw was swallowed → `initSqliteBackup()` completed `ready=true` with missing tables → `getSqliteFallback()` returned the API instead of null (`sqlite.test.ts:964`). Deterministic (pre-b8ef109 `6c2b054` was all-green).
+
+**Execution**: `applySchema(db, opts?: { failOpen?: boolean })` — strict by default; `{ failOpen: true }` only at the two restored-snapshot call sites (`retryDeferredMirrorRestore` Blobs swap-in + `initSqliteBackup` restored branch); fresh init stays strict.
+
+**Verification**: `sqlite.test.ts` **92/92** · `sqliteMirror.test.ts` **12/12** · full Jest **128/128 suites · 1820 pass / 4 skip / 0 fail** · tsc **46 baseline (prod 0)** · Playwright Tests on head `ac24ede` ✅ success (run 36461016961).
+
 ### 2026-09-28 | v3.44.0 — Spec 02 Public legal pages (Privacy + Terms)
 
 **Request (spec 02, user-approved 2026-09-28)**: public `/privacy` + `/terms` static pages (no auth, **no date/effective line** — user decision), truthful to the product, links in contact footer + Header (desktop + mobile).

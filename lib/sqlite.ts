@@ -1216,7 +1216,8 @@ async function retryDeferredMirrorRestore(): Promise<void> {
     // v3.43.0 defect fix: the guards above only add COLUMNS to existing tables,
     // so a snapshot older than a new table (market_cache v3.39.x, the Google
     // Sheets config/ledger v3.43.0) booted without it. Replay the schema too.
-    applySchema(parsed.db);
+    // failOpen: a restored snapshot may predate newer schema — never abort.
+    applySchema(parsed.db, { failOpen: true });
     try {
       state.db?.close();
     } catch {
@@ -1858,18 +1859,26 @@ export const SCHEMA_SQL = `
  * Production impact: prod's Blobs snapshot predates any unreleased table, so
  * the first deploy that adds one boots a mirror that can never see it.
  *
- * Safe to replay unconditionally: every SCHEMA_SQL statement is
- * `CREATE TABLE/INDEX IF NOT EXISTS`, so a no-op against a current DB. Fail-open
- * per statement so one bad future statement cannot abort the rest of the
- * schema (and cannot fail a cold start).
+ * Two modes:
+ * - strict (default): used by the FRESH-init path. A failing statement
+ *   propagates so the v3.28.1 partial-init repair (catch → state.db=null →
+ *   next retry rebuilds) runs instead of completing ready=true with missing
+ *   tables.
+ * - failOpen: used when replaying onto a RESTORED snapshot (boot swap-in +
+ *   deferred Blobs restore). A snapshot may predate newer tables/columns, so
+ *   one bad statement must not abort replay of the rest of the schema (and
+ *   cannot fail a cold start) — warn + skip. Every SCHEMA_SQL statement is
+ *   `CREATE TABLE/INDEX IF NOT EXISTS`, so replay is a no-op against a current
+ *   DB in both modes.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applySchema(db: any): void {
+function applySchema(db: any, opts?: { failOpen?: boolean }): void {
   const stmts = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
   for (const stmt of stmts) {
     try {
       db.run(stmt);
     } catch (err) {
+      if (!opts?.failOpen) throw err;
       logger.warn({
         msg: "SQLite: schema replay statement failed (skipped)",
         error: err instanceof Error ? err.message : String(err),
@@ -2082,12 +2091,16 @@ export async function initSqliteBackup(): Promise<void> {
       // v3.43.0 defect fix: a restored snapshot predates any table added to
       // SCHEMA_SQL after it was written, and the ensure*Columns guards below
       // only back-fill columns. Replay the schema so new tables exist.
-      applySchema(candidate);
+      // failOpen: a restored snapshot may predate newer schema — never abort.
+      applySchema(candidate, { failOpen: true });
     } else {
       const SQL = await getSqlJs();
       candidate = new SQL.Database();
 
-      // Create all tables (multi-statement split on ;)
+      // Create all tables (multi-statement split on ;). STRICT: a schema
+      // failure must propagate so the v3.28.1 partial-init repair
+      // (catch → state.db=null → next retry rebuilds) runs — never complete
+      // ready=true with missing tables.
       applySchema(candidate);
     }
     // v3.25.x: add the control-plane columns the daemons need (idempotent,

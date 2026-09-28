@@ -8,8 +8,8 @@
 > The completed-feature Quick Reference archive moved to
 > **`.agents/changelog/todo-quick-reference-archive.md`** (read on demand; not auto-injected).
 
-**In progress — v3.44.0 Spec 02 Public legal pages (Privacy + Terms) — CODE + TESTS + BUILDS + E2E + DOCS DONE — **UNCOMMITTED** (commit pending user, no push/PR/deploy)** (2026-09-28):
-> branch `feature/legal-pages` off `aba7fa6` (= v3.43.0 live-verification wrap-up). NEW public static pages `/privacy` + `/terms` (no auth, **no date/effective line** per user decision):
+**In progress — v3.44.0 Spec 02 Public legal pages (Privacy + Terms) — CODE + TESTS + BUILDS + E2E + DOCS **COMMITTED** + pushed (`fb29b16` → `66db159` → `ac24ede`, PR #133). Follow-up **sqlite quality-gate fix** (PR #133 was RED): `b8ef109`'s fail-open `applySchema` dissolved the v3.28.1 partial-init repair → fixed via strict/failOpen split (`applySchema(db, opts?)`), full Jest **1820 pass / 4 skip / 0 fail**, commit pending go-ahead** (2026-09-28):
+> branch `feature/google-sheets-tracking` (legal commits fast-forwarded off `aba7fa6` = v3.43.0 live-verification wrap-up). NEW public static pages `/privacy` + `/terms` (no auth, **no date/effective line** per user decision):
 > truthful disclosures for account/sessions, portfolio/watchlist/alerts/Telegram chat ID, contact form, audit + server logs (SQLite 14-day mirror), AI-analysis inputs (OpenRouter),
 > optional admin Google Sheets export (anonymous rows only — no credentials/emails); Terms = "tool, not adviser" + NSE disclaimers + 18+ + acceptable use + "laws of India" + liability limits;
 > contact `mailto:luckyhegdedev+tradenext@gmail.com`. Wiring: contact-footer + Header (desktop + mobile) links; `app/sitemap.ts` priority 0.3/monthly; `app/llms.txt` +2 entries.

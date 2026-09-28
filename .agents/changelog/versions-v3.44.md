@@ -33,3 +33,14 @@ NEW public static pages `/privacy` (Privacy Policy) and `/terms` (Terms of Servi
 - No schema change → no migration; no new packages; no API/route change; no OpenAPI change.
 - Not done (deliberately): full Jest + full cross-browser e2e deferred to the PR gate; no push/PR/merge/deploy.
 - Commit plan (on explicit user approval, 2 commits): `feat(legal): public privacy + terms pages` then `docs: legal-pages wrap-up`.
+
+---
+
+## Addendum — v3.43.0 wrap-up: `applySchema` strict/failOpen split (quality-gate fix, 2026-09-28)
+
+**PR #133 quality-gate went RED on the pushed head → root-caused → fixed.**
+- **Cause**: `b8ef109` ("fix(sqlite): replay SCHEMA_SQL onto restored mirror snapshots") made schema replay fail-open on **every** path, including fresh init. That dissolved the v3.28.1 partial-init repair contract — the regression test (`v3.28.1 — repairs a partial init ... on the next retry`) injects a one-time `db.run` throw; the swallow let `initSqliteBackup()` complete with `ready=true` and missing tables → `getSqliteFallback()` returned the API → `sqlite.test.ts:964` failed. Deterministic (commit-chain analysis: only pre-b8ef109 `6c2b054` was all-green; **not** flakiness).
+- **Fix**: `applySchema(db, opts?: { failOpen?: boolean })` — **strict by default** (fresh-init: throw → catch → `state.db=null` → next retry rebuilds, never complete `ready=true` broken); `{ failOpen: true }` only at the two **restored-snapshot** call sites (`retryDeferredMirrorRestore` Blobs swap-in + `initSqliteBackup` restored branch) where a snapshot may legitimately predate newer schema — b8ef109's actual defect scope.
+- **Verified**: `sqlite.test.ts` **92/92** · `sqliteMirror.test.ts` **12/12** · full Jest **128/128 suites · 1820 pass / 4 skip / 0 fail** (the exact 1824-test universe quality-gate runs) · tsc **46 baseline (prod 0)** · diff **21 insertions / 8 deletions, one file** (`lib/sqlite.ts`).
+- **PR #133 gate status**: Playwright Tests on head `ac24ede` ✅ **success** (run 36461016961). quality-gate ❌ was red → fix is the next commit → external auto-sync pushes → CI re-runs. Merge ready once quality-gate re-runs green. P6003 prod hold (until 2026-10-02) still applies: GSheets migrations `20260926000000_*` remain unapplied; static privacy/terms pages deploy immediately.
+- Lesson **151**.
