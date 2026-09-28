@@ -49,6 +49,7 @@ import type {
   SwingResponse,
   SwingStock,
 } from "@/lib/services/swing-types";
+import { exportSwing } from "@/lib/services/googleSheets/exporter";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -732,6 +733,19 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
     }
     analysisStatus = analysisStatusAfterBatch(stocks) as "done" | "failed";
     const succeeded = stocks.filter((s) => s.analysis).length;
+
+    // Append every pick (analyzed OR analysisError) to the Tracker `swing` tab.
+    // Fire-and-forget per the ingestion rule: a Google outage must never affect
+    // the job, and `exportSwing` never throws.
+    // `jobId` is the run identifier recorded in the ledger, so an undelivered
+    // swing row can be traced back to the job that produced it.
+    exportSwing(stocks, jobId).catch((err) =>
+      logger.error({
+        msg: "Google Sheets swing export dispatch failed",
+        jobId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
 
     if (analysisStatus === "failed") {
       analysisError =

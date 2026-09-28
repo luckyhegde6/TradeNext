@@ -126,7 +126,22 @@ export type AuditAction =
   | 'INTELLIGENCE_UNAUTHORIZED'
   // Decision Engine Events (ph22 — Laya/System-One confidence-gated routing)
   | 'DECISION_EVALUATED'
-  | 'DECISION_GATE';
+  | 'DECISION_GATE'
+  // Google Sheets Tracking (spec 19 — append-only Tracker spreadsheet)
+  | 'GOOGLE_SHEETS_APPEND_SUCCESS'
+  | 'GOOGLE_SHEETS_APPEND_FAILED'
+  // Google Sheets Admin Console (spec 20 — config + manual sync)
+  | 'GOOGLE_SHEETS_CONFIG_UPDATED'
+  | 'GOOGLE_SHEETS_SYNC_RUN'
+  // v3.43.0 — operator removal of unappendable ledger rows. The ledger DELETE
+  // endpoint is the ONLY destructive path in the tracking subsystem, so every
+  // destruction is audited with the tab + the exact seqs that were removed.
+  | 'GOOGLE_SHEETS_LEDGER_DELETED'
+  // Spec 20 — an operator-initiated re-scan. Distinct from GOOGLE_SHEETS_SYNC_RUN:
+  // a sync only moves already-produced rows to the sheet, whereas a re-scan runs a
+  // real scan and generates NEW rows (and spends a full-universe TV / Chartink
+  // pass), so it is the more expensive and less routine of the two.
+  | 'GOOGLE_SHEETS_RESCAN';
 
 interface AuditLogParams {
   userId?: number;

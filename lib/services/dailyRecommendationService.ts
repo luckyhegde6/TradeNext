@@ -11,6 +11,7 @@
 
 import { runChartinkUnifiedScreeners } from "./chartinkUnifiedScreenerService";
 import type { ScreenerResult } from "./chartinkService";
+import { exportDailyRecs } from "./googleSheets/exporter";
 import {
   analyzeStocks,
   type StockAnalysisInput,
@@ -750,6 +751,20 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         executionTimeMs,
       },
     });
+
+    // Append the picks to the Tracker `daily-rec` tab. Only stocks with a REAL
+    // AI verdict are exported — synthetic fallback HOLDs are deliberately not
+    // persisted (v3.11.1) and must not pollute the sheet either. Fire-and-forget.
+    exportDailyRecs(
+      { runId: run.id, runDate: new Date(startTime).toISOString() },
+      successfulResults
+    ).catch((err) =>
+      logger.error({
+        msg: "Google Sheets daily-recs export dispatch failed",
+        runId: run.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
 
     // Record health metrics
     await recordMetric({

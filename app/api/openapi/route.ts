@@ -1915,6 +1915,220 @@ This API is designed for programmatic access. Key endpoints:
                     '401': { description: 'Unauthorized' }
                 }
             }
+        },
+
+        // ==================== GOOGLE SHEETS TRACKER (spec 20) ====================
+        // v3.43.0, spec 20 — admin console for the append-only Tracker sheet.
+        // All six routes are admin-only. The sheet is APPEND-ONLY and POSITIONAL:
+        // nothing here ever rewrites a header, clears a range, or deletes a sheet
+        // row, and every write is a single batched `values.append` (USER_ENTERED).
+        // The `decisions` tab is deliberately NOT syncable (in-memory trace ring
+        // only), so it is rejected by every write path.
+        '/api/admin/google-sheets/status': {
+            get: {
+                summary: 'Tracker sheet status + per-tab drain state (admin)',
+                description:
+                    'Returns sheet configuration/header state plus, per tab, the drain picture. NOTE on `queued`: it is every row still marked UNDELIVERED, not a replay count. Most are sent by the next drain, but it also counts marker-write residue (the append reached the sheet and only the `delivered` flag write failed) which is deliberately never replayed and ages out with the retention window. `retained` is every row on disk (drained rows kept for the audit window), shown separately so retention is not misread as pending work. `unreadable`/`unreadableSeqs` list the undelivered rows that can never append — a drain stops at the first of them, which is why they are scanned from seq 0 and are individually addressable for removal.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                responses: {
+                    '200': {
+                        description:
+                            '{ success, status, sync: { confirmThreshold, unreadableCap, tabs: [{ tab, queued, retained, unreadable, unreadableSeqs, cursor }] } }',
+                    },
+                    '401': { description: 'Unauthorized' },
+                    '500': { description: 'Failed to read status' }
+                }
+            }
+        },
+        '/api/admin/google-sheets/config': {
+            get: {
+                summary: 'Read the Tracker sheet configuration (admin)',
+                description:
+                    'Returns the configured spreadsheet, display name, enabled flag, last sync stamp, and the per-tab drain cursors. The spreadsheet id is MASKED in the response; it is never echoed in full to the console.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                responses: {
+                    '200': { description: '{ success, config: { sheetIdMasked, displayName, enabled, lastSyncAt, tabMarks } }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            },
+            put: {
+                summary: 'Update the Tracker sheet configuration (admin)',
+                description:
+                    'Sets the target spreadsheet id, display name, and/or the enabled flag. Requires at least one field. `sheetId` is validated as an opaque spreadsheet key (10-200 chars, [A-Za-z0-9-_]). Disabling is the kill switch for every producer export.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    sheetId: { type: 'string', minLength: 10, maxLength: 200, pattern: '^[A-Za-z0-9-_]+$' },
+                                    displayName: { type: 'string', maxLength: 120 },
+                                    enabled: { type: 'boolean' }
+                                },
+                                anyOf: [
+                                    { required: ['sheetId'] },
+                                    { required: ['displayName'] },
+                                    { required: ['enabled'] }
+                                ]
+                            },
+                            example: { sheetId: '1AbCdEfGhIjKlMnOpQrStUvWxYz0918273645', displayName: 'NSE Tracker', enabled: true }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: '{ success, config }' },
+                    '400': { description: 'Invalid JSON body, or failed validation (`details` lists the issues)' },
+                    '401': { description: 'Unauthorized' },
+                    '500': { description: 'Failed to update configuration' }
+                }
+            }
+        },
+        '/api/admin/google-sheets/sync': {
+            post: {
+                summary: 'Drain captured rows to the Tracker sheet (admin)',
+                description:
+                    'Appends already-captured ledger rows to their tab, SEQUENTIALLY (parallel drains would interleave appends across tabs of one spreadsheet and race on the singleton config row). At-least-once by construction: a failed append does NOT advance the cursor, so the retry re-appends rather than losing rows. A corrupt ledger row is parked with its seq instead of being appended as `[]`, and the drain stops at the FIRST corrupt row so ordering is never broken; the rows behind it are sent after the operator removes it. Requires `confirmed: true` when a tab exceeds the confirmation threshold, so an accidental double-click cannot push a large backlog. `decisions` is rejected (not syncable); an empty or gated-off tab appends nothing. Rows are appended to the ledger either way, so every run is auditable.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    tabs: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string', enum: ['swing', 'daily-rec', 'screener', 'custom', 'metrics'] }, description: 'Tabs to drain. `decisions` is not allowed.' },
+                                    confirmed: { type: 'boolean', description: 'Required to append a backlog above the confirmation threshold.' }
+                                },
+                                required: ['tabs']
+                            },
+                            example: { tabs: ['swing', 'custom'], confirmed: true }
+                        }
+                    }
+                },
+                responses: {
+                    '200': {
+                        description:
+                            '{ success, status, results: [{ tab, status, rows, remaining, cursor, unreadableSeqs?, detail? }], startedAt, finishedAt }. Per-tab `status` is one of drained | empty | failed | skipped | needs-confirmation | unreadable. NOTE `remaining` is the undelivered count, so it can stay > 0 after a fully successful drain when marker-write residue is present — that is not a stuck queue.',
+                    },
+                    '400': { description: 'Invalid JSON body, failed validation, or unknown tab(s)' },
+                    '401': { description: 'Unauthorized' },
+                    '500': { description: 'Sync failed' }
+                }
+            }
+        },
+        '/api/admin/google-sheets/ledger': {
+            delete: {
+                summary: 'Remove specific unreadable ledger rows (admin)',
+                description:
+                    'The ONLY path that destroys ledger rows, so it is guarded four ways before deleting anything: the mirror must be ready (503), every named seq must exist (404 — a seq that was never there must not be reported as cleaned), every named row must belong to the named tab (no cross-tab deletion), and every named row must be genuinely UNAPPENDABLE (a row that could still be sent is refused, since deleting it would drop data that never reached the sheet). Any guard failure aborts the whole request with 409 and deletes nothing, and the response reports the real number of rows removed. Capped at the documented max seqs per call.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    tab: { type: 'string', enum: ['swing', 'daily-rec', 'screener', 'custom', 'metrics'], description: 'The tab that must own every named seq.' },
+                                    seqs: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'integer', minimum: 1 }, description: 'Exact ledger seqs to remove (from `unreadableSeqs`).' }
+                                },
+                                required: ['tab', 'seqs']
+                            },
+                            example: { tab: 'swing', seqs: [412, 413] }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: '{ success, tab, requested, deleted } — `deleted` is the number of rows actually removed.' },
+                    '400': { description: 'Invalid JSON body, failed validation, or unknown tab' },
+                    '401': { description: 'Unauthorized' },
+                    '404': { description: 'One or more named seqs do not exist' },
+                    '409': { description: 'A guard failed (row still syncable, cross-tab seq, or partial delete) — nothing was deleted' },
+                    '503': { description: 'SQLite mirror not ready' }
+                }
+            }
+        },
+        '/api/admin/google-sheets/metrics': {
+            get: {
+                summary: 'Preview the recommendation-metrics snapshot (admin)',
+                description:
+                    'Computes the aggregate KPI snapshot from `RecommendationTracker` WITHOUT writing anything, so the console can show the exact row before appending it. KPIs: totalTracked, active, targetAchieved, stopLossHit, expired, winRate (%), netPnlAbs, netPnlPct (%), avgReturnPct (%), grossPnlAbs. Active picks are excluded from P&L; `target_achieved` values at `targetPrice`, `stop_loss_hit` at `stopLoss`, `expired` at the last known `currentPrice`. Values that are not computable stay `null` (rendered blank) rather than being coerced to 0. Returns `ok: false` with a reason when the database cannot be read — e.g. a P6003 plan-limit hold — and never fabricates an all-zero snapshot.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                responses: {
+                    '200': { description: '{ success, ok: true, snapshot } | { success: true, ok: false, reason, snapshot: null }' },
+                    '401': { description: 'Unauthorized' }
+                }
+            },
+            post: {
+                summary: 'Append the metrics snapshot to the metrics tab (admin)',
+                description:
+                    'Computes the same snapshot and appends it as one row to the `metrics` tab. Awaited rather than fire-and-forget, because this is a manual operator action and the console must report whether the row landed. Refuses to append an all-empty snapshot (totalTracked = 0) with 409 — a row of blanks is not a KPI and would quietly distort the series. A database hold returns 503 rather than writing a fabricated row. Success is audited as GOOGLE_SHEETS_APPEND_SUCCESS / _FAILED via the exporter.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    confirmed: { type: 'boolean', description: 'Acknowledges that the drain row cap applies.' }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: '{ success, tab: "metrics", outcome, snapshot } — `outcome` is "enabled" | "disabled" | "failed".' },
+                    '400': { description: 'Invalid JSON body or failed validation' },
+                    '401': { description: 'Unauthorized' },
+                    '409': { description: 'No tracked recommendations to snapshot yet' },
+                    '503': { description: 'Database unavailable (e.g. P6003 plan-limit hold) — nothing was written' }
+                }
+            }
+        },
+        '/api/admin/google-sheets/rescan': {
+            post: {
+                summary: 'Re-run a re-scannable producer to capture fresh rows (admin)',
+                description:
+                    'Re-runs a producer on demand so its rows are captured into the ledger, then reported to the console; it does NOT drain. Re-scan and Sync are deliberately separate: Sync drains already-captured rows, Re-scan creates fresh ones. Only `screener` and `custom` are re-scannable. `screener` re-runs the unified screener with a forced refresh — that fresh path already appends to the ledger, so this route does not call the exporter a second time (`delegatedExport: true`). `custom` re-runs the saved config through the shared full-universe scan and then awaits the export under a fresh run id, reporting `delegatedExport: false`. Both are capped at the row limit; a disabled or failed export reports `appended: 0` rather than claiming success. Success is audited as GOOGLE_SHEETS_RESCAN with the tab, config, and counts.',
+                tags: ['Google Sheets'],
+                security: securityAdmin,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    tab: { type: 'string', enum: ['screener', 'custom'], description: 'Only these two tabs have a re-runnable producer.' },
+                                    configId: { type: 'string', minLength: 1, description: 'Required for `custom` (the saved screener config); ignored for `screener`.' },
+                                    categoryId: { type: 'string', minLength: 1, description: 'Optional screener category filter.' },
+                                    templateIds: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1 }, description: 'Optional screener template filter.' }
+                                },
+                                required: ['tab']
+                            },
+                            example: { tab: 'custom', configId: 'cfg_abc123' }
+                        }
+                    }
+                },
+                responses: {
+                    '200': { description: '{ success, tab, appended, total, delegatedExport, executionMs, elapsedMs, rowLimit }' },
+                    '400': { description: 'Invalid JSON body, failed validation, unknown tab, or missing configId for a custom re-scan' },
+                    '401': { description: 'Unauthorized' },
+                    '404': { description: 'The named custom config does not exist' },
+                    '409': { description: 'The saved config has no valid filter group' },
+                    '500': { description: 'Re-scan failed' },
+                    '503': { description: 'Database unavailable (e.g. P6003 plan-limit hold)' }
+                }
+            }
         }
     }
 };

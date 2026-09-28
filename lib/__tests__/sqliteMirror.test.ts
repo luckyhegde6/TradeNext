@@ -174,6 +174,77 @@ describe("durable mirror snapshot (golden, real sql.js)", () => {
     expect((worker as Record<string, unknown>).trial).toBe("b-post-restore");
   });
 
+  it("replays SCHEMA_SQL onto a stale snapshot so tables added later exist (v3.43.0 regression)", async () => {
+    // THE BUG: the boot path swapped a restored snapshot in AS-IS and only ran
+    // the CREATE TABLE statements on the fresh-DB path. The ensure*Columns
+    // guards re-add COLUMNS, but nothing re-created missing TABLES — so a
+    // snapshot written before a table existed booted without it, and every
+    // read of that table threw `no such table`, which the callers swallow into
+    // an empty result. Live symptom in the Google Sheets admin console:
+    // `dbConfigured: true` (env fallback) with a permanently empty queue.
+    //
+    // This is a real production hazard, not a test artefact: prod's Blobs
+    // snapshot predates any unreleased table, so the first deploy that adds
+    // one would boot a mirror that can never see it.
+    const initSqlJs = jest.requireActual("sql.js") as unknown as (
+      config?: { wasmBinary?: Uint8Array },
+    ) => Promise<{
+      Database: new (data?: Uint8Array) => {
+        run(sql: string, params?: unknown[]): void;
+        exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
+        export(): Uint8Array;
+        close(): void;
+      };
+    }>;
+    const wasmBinary = fs.readFileSync(require.resolve("sql.js/dist/sql-wasm.wasm"));
+    const SQL = await initSqlJs({ wasmBinary });
+
+    // A snapshot from BEFORE market_cache (v3.39.x) and the Google Sheets
+    // config/ledger tables (v3.43.0) existed. Only the two tables
+    // parseValidatedMirror requires, so the restore is accepted.
+    const stale = new SQL.Database();
+    stale.run("CREATE TABLE _backup_meta (key TEXT PRIMARY KEY, value TEXT)");
+    stale.run("CREATE TABLE daily_recommendation_run (id TEXT PRIMARY KEY, status TEXT)");
+    stale.run("INSERT INTO _backup_meta (key, value) VALUES ('marker', 'keepme')");
+    fs.writeFileSync(mirrorFile, Buffer.from(stale.export()));
+    stale.close();
+
+    const tableNames = (data: Buffer): string[] =>
+      new SQL.Database(data).exec("SELECT name FROM sqlite_master WHERE type='table'")[0].values.map(
+        (r) => String(r[0]),
+      );
+
+    // Confirm the fixture really is missing them, so a pass can't be vacuous.
+    const before = tableNames(fs.readFileSync(mirrorFile));
+    expect(before).toEqual(expect.arrayContaining(["_backup_meta", "daily_recommendation_run"]));
+    expect(before).not.toContain("market_cache");
+    expect(before).not.toContain("google_sheets_config");
+    expect(before).not.toContain("google_sheets_ledger");
+
+    await boot(); // restores the stale snapshot from disk
+
+    // Persist the healed mirror and re-open it: this asserts the schema is
+    // present AND that it survives the snapshot round-trip back to disk/Blobs
+    // (which is what a production cold start reads).
+    expect(persistMirrorSnapshot()).toBe(true);
+    const after = tableNames(fs.readFileSync(mirrorFile));
+    expect(after).toEqual(
+      expect.arrayContaining([
+        "market_cache",
+        "google_sheets_config",
+        "google_sheets_ledger",
+        // every table SCHEMA_SQL declares must exist, whatever is added later
+      ]),
+    );
+
+    // The restore must ADD the missing tables, never replace the snapshot:
+    // pre-existing data is the whole point of restoring it.
+    const reopened = new SQL.Database(fs.readFileSync(mirrorFile));
+    const marker = reopened.exec("SELECT value FROM _backup_meta WHERE key = 'marker'")[0].values[0][0];
+    expect(String(marker)).toBe("keepme");
+    reopened.close();
+  });
+
   it("magic-header-but-not-sqlite file boots fail-open and is rewritten", async () => {
     const junk = Buffer.concat([SQLITE_MAGIC, Buffer.from("not-a-real-sqlite-payload-abcdefghij", "utf8")]);
     fs.writeFileSync(mirrorFile, junk);

@@ -40,6 +40,8 @@ import {
 } from "@/lib/services/chartinkService";
 import { scoreScreenerResult } from "@/lib/services/decision/fusion";
 import { trackDecisionTrace } from "@/lib/services/decision/monitoring";
+import { randomUUID } from "crypto";
+import { exportScreeners } from "@/lib/services/googleSheets/exporter";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -484,6 +486,19 @@ export async function runChartinkUnifiedScreeners(
   }
 
   staticCache.set(unifiedCacheKey(options), results, CACHE_TTL);
+
+  // Append this pass's hits to the Tracker `screener` tab. Placed on the FRESH
+  // path (a staticCache hit returns earlier), so one sheet row per real scan
+  // rather than one per page view. Fire-and-forget; `exportScreeners` never throws.
+  exportScreeners(results, {
+    runId: randomUUID(),
+    category: options.categoryId,
+  }).catch((err) =>
+    logger.error({
+      msg: "Google Sheets screener export dispatch failed",
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
 
   logger.info({
     msg: "Chartink unified screeners finished",

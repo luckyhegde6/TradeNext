@@ -1231,6 +1231,62 @@ model Secret {
   @@map("secrets")
 }
 
+// ---------------------------------------------------------------------------
+// Google Sheets Tracker configuration (Spec 19 export → Spec 20 admin console).
+//
+// SINGLETON: exactly one row, pinned to the literal id "singleton" so the row
+// is a natural id-keyed upsert in the SQLite outbox (`pushByIdUpsert`).
+// The operator's sheet link lives here instead of in env, so the admin console
+// can read/write it without a redeploy; `GOOGLE_SHEET_ID` remains the fallback
+// when no row exists (Spec 19's env-only deployment is byte-identical).
+//
+// NOT a secret table: a spreadsheet ID is a resource identifier, not a
+// credential. The OAuth refresh token lives in `Secret` (Phase 2, encrypted
+// via lib/services/crypto/secretBox.ts), NOT here — so this table needs no
+// masking, unlike the `secrets` mirror which is a read-only masked copy.
+// ---------------------------------------------------------------------------
+model GoogleSheetsConfig {
+  id          String    @id @default("singleton")
+  sheetId     String? // Google spreadsheet ID — plaintext (not a credential)
+  displayName String?
+  enabled     Boolean   @default(false) // UI switch; can only be MORE restrictive than the env gate
+  lastSyncAt  DateTime? // coarse "any tab synced at" marker
+  // Per-tab drain cursors: { "swing": "1402", ... } - the ledger `seq` of the
+  // last row appended, NOT a timestamp. Monotonic ledger seq is the only value
+  // that can be compared against the backlog and cannot be skewed by clock skew
+  // or by two drains racing. Advances ONLY on ExportResult "enabled", and never
+  // past an unreadable row, so a corrupt row stays visible until it is removed.
+  tabMarks    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("google_sheets_config")
+}
+
+// Per-row export ledger — the catch-up queue behind the console's "Sync now"
+// (spec 20 §5.B). Holds the ENCODED row exactly as the sheet received it, so a
+// EVERY export attempt is recorded, not only the failures. `delivered` is the
+// replay guard: a successful append is retained as an audit-only row that the
+// drain can never re-send, while `delivered = false` is what still owes a live
+// append. Mirrored to SQLite; Prisma receives it only when the write budget /
+// plan limit allows (dormant until the 2026-10-02 hold clears).
+model GoogleSheetsLedger {
+  seq       Int      @id @default(autoincrement())
+  tab       String
+  rowJson   Json
+  runId     String?
+  reason    String? // "appended" | "disabled" | "failed" | "no-spreadsheet" - the export outcome
+  delivered Boolean  @default(false) // true once the live append landed; the drain reads delivered = false
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tab, seq])
+  // The drain's only query is "what is still owed for this tab", so this is the
+  // index that matters once delivered rows accumulate as audit history.
+  @@index([tab, delivered])
+  @@map("google_sheets_ledger")
+}
+
 // Delivery attempt log for observability
 model DeliveryLog {
   id          String   @id @default(uuid())

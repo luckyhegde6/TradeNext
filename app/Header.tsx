@@ -180,6 +180,12 @@ export default function Header() {
             <NavLink href="/contact" active={isActive("/contact")}>
               Contact
             </NavLink>
+            <NavLink href="/privacy" active={isActive("/privacy")}>
+              Privacy
+            </NavLink>
+            <NavLink href="/terms" active={isActive("/terms")}>
+              Terms
+            </NavLink>
 
             {isAdmin && (
               <div className="ml-1 pl-1 min-[1700px]:ml-4 min-[1700px]:pl-4 border-l border-border flex items-center space-x-1">
@@ -360,6 +366,8 @@ export default function Header() {
             <div className="grid grid-cols-1 gap-1">
               <MobileNavLink href="/posts" active={isActive("/posts")} onClick={() => setIsMobileMenuOpen(false)}>Community</MobileNavLink>
               <MobileNavLink href="/contact" active={isActive("/contact")} onClick={() => setIsMobileMenuOpen(false)}>Contact</MobileNavLink>
+              <MobileNavLink href="/privacy" active={isActive("/privacy")} onClick={() => setIsMobileMenuOpen(false)}>Privacy</MobileNavLink>
+              <MobileNavLink href="/terms" active={isActive("/terms")} onClick={() => setIsMobileMenuOpen(false)}>Terms</MobileNavLink>
               {isLoggedIn && (
                 <MobileNavLink href="/profile" active={isActive("/profile")} onClick={() => setIsMobileMenuOpen(false)}>Profile Settings</MobileNavLink>
               )}

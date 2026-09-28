@@ -1,8 +1,5 @@
 name: Security Scan
 
-permissions:
-  contents: read
-
 on:
   schedule:
     # Run weekly on Mondays at 3 AM UTC
