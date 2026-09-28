@@ -329,6 +329,10 @@ describe("ensureHeaders", () => {
     await expect(ensureHeaders("screener")).resolves.toBe(true);
     expect(valuesUpdate).not.toHaveBeenCalled();
     expect(mockLogger.warn).not.toHaveBeenCalled();
+    // Must read the FULL first row, never a 1x1 `A1` cell — a one-cell probe
+    // can never match a multi-column header and misreports "matched" as
+    // "drifted", spamming a warn on every sync (found live).
+    expect(valuesGet).toHaveBeenCalledWith(expect.objectContaining({ range: "screener!1:1" }));
   });
 
   test("never overwrites a customised header, and still allows the append", async () => {

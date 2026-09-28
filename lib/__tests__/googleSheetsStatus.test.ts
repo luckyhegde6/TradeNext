@@ -80,8 +80,14 @@ describe("classifyHeader (pure)", () => {
 
 describe("readHeaderState", () => {
   it("returns the classified state for a readable tab", async () => {
-    mockSheets([...TRACKER_TABS.swing]);
+    const { get } = mockSheets([...TRACKER_TABS.swing]);
     await expect(readHeaderState("swing")).resolves.toBe("matched");
+    // Probes the FULL first row, never a 1x1 `A1` read: a one-cell probe can
+    // never match a multi-column header and misreports it as "drifted" (the
+    // mocked e2e missed this because the mock injects a full row regardless).
+    expect(get).toHaveBeenCalledWith(
+      expect.objectContaining({ range: "swing!1:1", spreadsheetId: SHEET_ID })
+    );
   });
 
   it("returns unknown — not a throw — when no spreadsheet is configured", async () => {

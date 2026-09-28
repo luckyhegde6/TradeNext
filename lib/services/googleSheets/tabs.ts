@@ -148,7 +148,9 @@ export async function readHeaderState(tab: TrackerTab): Promise<HeaderState> {
     const sheets = await getSheetsClient();
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A1`,
+      // Full first row, not `A1`: a 1x1 probe can never match a multi-column
+      // header and misreports every populated tab as "drifted" (found live).
+      range: `${tab}!1:1`,
       majorDimension: "ROWS",
     });
     return classifyHeader(res.data?.values?.[0], TRACKER_TABS[tab]);
@@ -195,7 +197,10 @@ export async function ensureHeaders(tab: TrackerTab): Promise<boolean> {
     const sheets = await getSheetsClient();
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A1`,
+      // Full first row, not `A1`: a 1x1 probe can never match a multi-column
+      // header and would treat every populated tab as user-drifted, logging a
+      // spurious warn on every sync (found live).
+      range: `${tab}!1:1`,
       majorDimension: "ROWS",
     });
 
