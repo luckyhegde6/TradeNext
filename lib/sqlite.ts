@@ -1213,6 +1213,10 @@ async function retryDeferredMirrorRestore(): Promise<void> {
     ensureNseColumns(parsed.db);
     ensureRecommendationColumns(parsed.db);
     ensureGoogleSheetsLedgerColumns(parsed.db);
+    // v3.43.0 defect fix: the guards above only add COLUMNS to existing tables,
+    // so a snapshot older than a new table (market_cache v3.39.x, the Google
+    // Sheets config/ledger v3.43.0) booted without it. Replay the schema too.
+    applySchema(parsed.db);
     try {
       state.db?.close();
     } catch {
@@ -1838,6 +1842,43 @@ export const SCHEMA_SQL = `
 // ---------------------------------------------------------------------------
 
 /**
+ * Replay SCHEMA_SQL onto an existing (possibly restored) mirror DB.
+ *
+ * WHY THIS IS NEEDED (v3.43.0 defect, found by live verification): the boot
+ * path preferred the durable mirror snapshot and swapped it in AS-IS — the
+ * CREATE TABLE statements only ever ran on the fresh-DB path. The
+ * `ensure*Columns` guards re-apply missing COLUMNS, but there was no equivalent
+ * for missing TABLES, so any table added to SCHEMA_SQL after a snapshot was
+ * taken simply did not exist on the snapshot path. That silently produced
+ * `no such table` on every read, which the callers swallow into empty results
+ * (e.g. `google_sheets_config`/`google_sheets_ledger` reported `dbConfigured:
+ * true` from the env fallback and a permanently empty queue; `market_cache` has
+ * been failing the same way since v3.39.x).
+ *
+ * Production impact: prod's Blobs snapshot predates any unreleased table, so
+ * the first deploy that adds one boots a mirror that can never see it.
+ *
+ * Safe to replay unconditionally: every SCHEMA_SQL statement is
+ * `CREATE TABLE/INDEX IF NOT EXISTS`, so a no-op against a current DB. Fail-open
+ * per statement so one bad future statement cannot abort the rest of the
+ * schema (and cannot fail a cold start).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySchema(db: any): void {
+  const stmts = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
+  for (const stmt of stmts) {
+    try {
+      db.run(stmt);
+    } catch (err) {
+      logger.warn({
+        msg: "SQLite: schema replay statement failed (skipped)",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/**
  * v3.25.x: add the control-plane columns the SQLite-primary daemons need, which
  * were not in the original mirror schema. Idempotent and guarded by
  * `PRAGMA table_info` so repeated init (and tests) never fail. SQLite-only —
@@ -2038,15 +2079,16 @@ export async function initSqliteBackup(): Promise<void> {
     let candidate: Database;
     if (restoredMirror) {
       candidate = restoredMirror;
+      // v3.43.0 defect fix: a restored snapshot predates any table added to
+      // SCHEMA_SQL after it was written, and the ensure*Columns guards below
+      // only back-fill columns. Replay the schema so new tables exist.
+      applySchema(candidate);
     } else {
       const SQL = await getSqlJs();
       candidate = new SQL.Database();
 
       // Create all tables (multi-statement split on ;)
-      const stmts = SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean);
-      for (const stmt of stmts) {
-        candidate.run(stmt);
-      }
+      applySchema(candidate);
     }
     // v3.25.x: add the control-plane columns the daemons need (idempotent,
     // SQLite-only — no Prisma schema change, no migration).
