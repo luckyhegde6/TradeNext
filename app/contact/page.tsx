@@ -267,6 +267,18 @@ export default function ContactPage() {
           </div>
         </div>
       </section>
+
+      {/* Legal links */}
+      <footer className="border-t border-gray-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-wrap gap-6 text-sm text-gray-500 dark:text-gray-400">
+          <a href="/privacy" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+            Privacy Policy
+          </a>
+          <a href="/terms" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+            Terms of Service
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

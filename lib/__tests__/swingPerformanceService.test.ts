@@ -83,6 +83,15 @@ const { recordSystemEvent } = require("@/lib/services/unifiedEventService") as {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Fixture timeline is anchored to `now`, never to an absolute date. A pinned
+// postedAt of 2026-08-15 aged past SWING_EXPIRY_DAYS (45d) on 2026-09-29, which
+// silently flipped the "no target/stop touch" cases to `expired: 1` — the
+// service was right and the fixture was stale. POSTED_AT stays well inside the
+// expiry window; the two window-bar fixtures sit either side of it.
+const POSTED_AT = new Date(Date.now() - 3 * DAY_MS);
+const IN_WINDOW_DAY = new Date(POSTED_AT.getTime() + DAY_MS);
+const PRE_POSTING_DAY = new Date(POSTED_AT.getTime() - 5 * DAY_MS);
+
 function makeSignal(overrides: Record<string, unknown> = {}) {
   return {
     id: "sig-1",
@@ -96,9 +105,9 @@ function makeSignal(overrides: Record<string, unknown> = {}) {
     currentPrice: null,
     returnPercent: null,
     lastCheckedAt: null,
-    postedAt: new Date("2026-08-15T10:00:00.000Z"),
-    createdAt: new Date("2026-08-15T10:00:00.000Z"),
-    updatedAt: new Date("2026-08-15T10:00:00.000Z"),
+    postedAt: POSTED_AT,
+    createdAt: POSTED_AT,
+    updatedAt: POSTED_AT,
     ...overrides,
   };
 }
@@ -513,7 +522,7 @@ describe("checkSwingPerformance", () => {
     prisma.$queryRaw
       .mockResolvedValueOnce([{ ticker: "PCJEWELLER", close: 13.3 }])
       .mockResolvedValueOnce([
-        { ticker: "PCJEWELLER", tradeDate: new Date("2026-08-16T00:00:00.000Z"), high: 14.1, low: 12.8 },
+        { ticker: "PCJEWELLER", tradeDate: IN_WINDOW_DAY, high: 14.1, low: 12.8 },
       ]);
 
     const result = await checkSwingPerformance();
@@ -551,7 +560,7 @@ describe("checkSwingPerformance", () => {
     prisma.$queryRaw
       .mockResolvedValueOnce([{ ticker: "RELIANCE", close: 2600 }])
       .mockResolvedValueOnce([
-        { ticker: "RELIANCE", tradeDate: new Date("2026-08-16T00:00:00.000Z"), high: 2620, low: 2360 },
+        { ticker: "RELIANCE", tradeDate: IN_WINDOW_DAY, high: 2620, low: 2360 },
       ]);
 
     const result = await checkSwingPerformance();
@@ -566,13 +575,13 @@ describe("checkSwingPerformance", () => {
     // excluded for a signal posted AFTER that bar. A global GROUP BY over the
     // earliest posting would wrongly count it.
     prisma.swingSignal.findMany.mockResolvedValue([
-      makeSignal({ postedAt: new Date("2026-08-15T10:00:00.000Z") }),
+      makeSignal({ postedAt: POSTED_AT }),
     ]);
     prisma.$queryRaw
       .mockResolvedValueOnce([{ ticker: "RELIANCE", close: 2500 }])
       .mockResolvedValueOnce([
         // tradeDate BEFORE postedAt → excluded; close-only eval keeps it active.
-        { ticker: "RELIANCE", tradeDate: new Date("2026-08-10T00:00:00.000Z"), high: 9999, low: 1 },
+        { ticker: "RELIANCE", tradeDate: PRE_POSTING_DAY, high: 9999, low: 1 },
       ]);
 
     const result = await checkSwingPerformance();

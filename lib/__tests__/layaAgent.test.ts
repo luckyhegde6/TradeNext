@@ -107,13 +107,16 @@ maybeDescribe("laya agent system_one decode (weights, child-process)", () => {
     const script = join(process.cwd(), "scripts", "dev-checks", "laya-agent.ts");
     const raw = execFileSync(process.execPath, ["--import", "tsx", script], {
       encoding: "utf8",
-      timeout: 120_000,
+      // 300s: the child cold-loads the 503 MB ONNX chain (~50-70 s solo). The
+      // hook cap MUST be >= this or Jest aborts a child that is still healthy
+      // (the pre-fix 60_000 hook cap failed a green 69.2 s run under load).
+      timeout: 300_000,
     });
     probe = JSON.parse(raw) as ProbeOut;
     if (!probe || probe.available !== true) {
       throw new Error(`laya-agent probe did not run: ${raw.slice(0, 200)}`);
     }
-  }, 60_000);
+  }, 300_000);
 
   const is4dp = (v: number): boolean => Math.abs(Math.round(v * 10000) - v * 10000) < 1e-6;
 

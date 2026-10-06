@@ -83,9 +83,51 @@ jest.mock("@/lib/cron-parser", () => ({
 // mirror FIRST (`getSqliteControl()`), falling back to Prisma when absent.
 // Mock it as ABSENT (null) so the poll tests exercise the Prisma path and the
 // `sql?.upsertWorkerTask?.(...)` mirror syncs are consistent no-ops.
+// v3.45.0: `mockSqlite` is mutable so the degraded-branch tests can present a
+// mirror holding due cron jobs.
+const mockSqlite: { current: Record<string, any> | null } = { current: null };
 jest.mock("@/lib/sqlite", () => ({
   __esModule: true,
-  getSqliteFallback: jest.fn(() => null),
+  getSqliteFallback: jest.fn(() => mockSqlite.current),
+}));
+
+// ── v3.45.0 (spec 21) degraded branch ──────────────────────────────────────
+// Mocked (not stubbed) so each test states the exact condition under which the
+// worker may bypass the Prisma breaker. The real modules must never run here:
+// the point of these tests is the GATE, not the queue's internals (which
+// degradedQueue.test.ts covers on its own).
+const mockIsDegradedModeActive = jest.fn().mockReturnValue(false);
+jest.mock("@/lib/services/degradedMode", () => ({
+  __esModule: true,
+  isDegradedModeActive: (...a: unknown[]) => mockIsDegradedModeActive(...(a as [])) as boolean,
+}));
+
+const mockCanExecuteDegradedWork = jest.fn().mockResolvedValue(false);
+const mockDegradedLeaseHolder = jest.fn().mockReturnValue("leader-self-abc");
+jest.mock("@/lib/services/degradedLeader", () => ({
+  __esModule: true,
+  canExecuteDegradedWork: (...a: unknown[]) => mockCanExecuteDegradedWork(...(a as [])) as Promise<boolean>,
+  degradedLeaseHolder: (...a: unknown[]) => mockDegradedLeaseHolder(...(a as [])) as string,
+}));
+
+const mockEnqueueDegradedTask = jest.fn().mockReturnValue("deg-1");
+const mockRunDegradedQueueOnce = jest.fn().mockResolvedValue({
+  claimed: 1,
+  completed: 1,
+  failed: 0,
+  skipped: 0,
+  requeuedStale: 0,
+});
+jest.mock("@/lib/services/worker/degradedQueue", () => ({
+  __esModule: true,
+  enqueueDegradedTask: (...a: unknown[]) => mockEnqueueDegradedTask(...(a as [])) as string | null,
+  runDegradedQueueOnce: (...a: unknown[]) => mockRunDegradedQueueOnce(...(a as [])) as Promise<unknown>,
+}));
+
+// Deferred-imported inside runDegradedPathIfActive.
+jest.mock("@/lib/services/worker/degradedExecutor", () => ({
+  __esModule: true,
+  executeDegradedTask: jest.fn(),
 }));
 
 // Dynamically imported inside checkScheduledJobs
@@ -100,6 +142,7 @@ import {
   reapStaleWorkerTasks,
   checkScheduledJobs,
   pollAndExecute,
+  spawnDueCronJob,
   STALE_MS,
   TASK_TIMEOUT_MS,
   TASK_HEARTBEAT_MS,
@@ -554,5 +597,303 @@ describe("pollAndExecute", () => {
     const outcomeOrder = (mockRecordSystemRunOutcome as jest.Mock).mock.invocationCallOrder[0];
     const updateOrder = (prisma.workerTask.update as jest.Mock).mock.invocationCallOrder[0];
     expect(outcomeOrder).toBeLessThan(updateOrder);
+  });
+});
+
+/**
+ * v3.45.0 (spec 21) — the degraded branch that runs BEFORE every breaker return.
+ *
+ * Finding F2: with the breaker open these entry points hard-returned, so a
+ * multi-day hold silently starved every cron. Finding F5: simply removing the
+ * gate would duplicate side effects across N instances, so the drain is
+ * leader-gated.
+ *
+ * Each test states ONE condition and asserts both the degraded action AND that
+ * the Prisma path stayed untouched — an over-broad gate would pass a weaker
+ * test, which is exactly the defect class this suite exists to prevent.
+ */
+/**
+ * v3.45.0 (spec 21) - the degraded branch that runs BEFORE every breaker return.
+ *
+ * Finding F2: with the breaker open these entry points hard-returned, so a multi-day
+ * hold silently starved every cron. Finding F5: simply removing the gate would
+ * duplicate side effects across N instances, so the drain is leader-gated.
+ *
+ * Each test states ONE condition and asserts both the degraded action AND that the
+ * Prisma path stayed untouched - an over-broad gate would pass a weaker test.
+ */
+describe("degraded branch (spec 21)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSqlite.current = null;
+    mockIsDegradedModeActive.mockReturnValue(false);
+    mockCanExecuteDegradedWork.mockResolvedValue(false);
+    mockRunDegradedQueueOnce.mockResolvedValue({
+      claimed: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      requeuedStale: 0,
+    });
+    prisma.workerTask.findFirst.mockResolvedValue(null);
+    prisma.cronJob.findMany.mockResolvedValue([]);
+  });
+
+  describe("pollAndExecute", () => {
+    it("drains the queue and touches no Prisma when breaker+mode+lease all hold", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      mockRunDegradedQueueOnce.mockResolvedValue({
+        claimed: 2,
+        completed: 2,
+        failed: 0,
+        skipped: 0,
+        requeuedStale: 1,
+      });
+
+      await pollAndExecute();
+
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledTimes(1);
+      // The lease holder must be the claimed_by owner, or a row's recorded
+      // owner would not match the lease that authorised the work.
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledWith(
+        expect.objectContaining({ leaderId: "leader-self-abc", execute: expect.any(Function) }),
+      );
+      // The whole point: zero Prisma while the breaker is open.
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+      expect(prisma.workerTask.updateMany).not.toHaveBeenCalled();
+      // A "poll" tick must NOT enqueue cron work — that is the scheduler's job.
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+    });
+
+    it("does NOT drain when the mode is inactive even if the breaker is open", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(false);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+
+      await pollAndExecute();
+
+      expect(mockRunDegradedQueueOnce).not.toHaveBeenCalled();
+      // Operator kill-switch must not be overridden by holding a valid lease.
+      expect(mockCanExecuteDegradedWork).not.toHaveBeenCalled();
+      // …and the unchanged breaker return immediately below the degraded
+      // branch still fires: `off` restores today's behaviour exactly
+      // (plan step 13 — "Breaker gates still short-circuit when off").
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("does NOT drain when the lease is not held (fail-closed, single writer)", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(false);
+
+      await pollAndExecute();
+
+      // Election is checked BEFORE any enqueue/drain: a follower that enqueued
+      // would push work the leader runs, and a follower that drained would
+      // double-execute an irreversible send.
+      expect(mockRunDegradedQueueOnce).not.toHaveBeenCalled();
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("runs the degraded path when the mode is engaged even if the breaker is CLOSED", async () => {
+      // spec §E: the breaker must NOT gate the branch. threshold/force engage
+      // preemptively on a healthy DB (plan risk table: "serves staler data …
+      // user's explicit choice"); requiring a hold here would make the admin
+      // panel's ACTIVE status cosmetic while every tick still ran Prisma.
+      mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+      mockIsDegradedModeActive.mockReturnValue(true); // threshold/force, healthy DB
+      mockCanExecuteDegradedWork.mockResolvedValue(true); // Prisma election says leader
+      mockRunDegradedQueueOnce.mockResolvedValue({
+        claimed: 1,
+        completed: 1,
+        failed: 0,
+        skipped: 0,
+        requeuedStale: 0,
+      });
+      prisma.workerTask.findFirst.mockResolvedValue(null);
+
+      await pollAndExecute();
+
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledTimes(1);
+      // The degraded branch handled the tick → the Prisma discovery read below
+      // it must never run.
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("never lets queue bookkeeping kill the worker loop", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      mockRunDegradedQueueOnce.mockRejectedValue(new Error("mirror exploded"));
+
+      // The poll also runs the stale reaper, which is breaker-guarded; a
+      // rejected drain must not reject pollAndExecute.
+      await expect(pollAndExecute()).resolves.toBeUndefined();
+    });
+  });
+
+  describe("checkScheduledJobs", () => {
+    it("enqueues mirror-due jobs then drains, without the Prisma due-cron read", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      mockSqlite.current = {
+        isReady: jest.fn(() => true),
+        getDueCronJobsFromMirror: jest.fn(() => [
+          {
+            id: "cron-1",
+            name: "Daily Recommendations",
+            taskType: "recommendations",
+            cronExpression: "0 10 * * *",
+            nextRun: "2026-10-05T04:30:00.000Z",
+            config: { systemManaged: true },
+          },
+          {
+            id: "cron-2",
+            name: "Corp Actions",
+            taskType: "corp_actions",
+            cronExpression: "0 18 * * *",
+            nextRun: null,
+            config: null,
+          },
+        ]),
+      };
+
+      await checkScheduledJobs();
+
+      // Enqueue BEFORE drain in the same tick, so newly-due work is noticed
+      // now instead of waiting an extra tick.
+      const enqueueOrder = mockEnqueueDegradedTask.mock.invocationCallOrder[0];
+      const drainOrder = mockRunDegradedQueueOnce.mock.invocationCallOrder[0];
+      expect(enqueueOrder).toBeLessThan(drainOrder);
+      expect(mockEnqueueDegradedTask).toHaveBeenCalledTimes(2);
+      expect(mockEnqueueDegradedTask).toHaveBeenNthCalledWith(1, {
+        id: "cron-1",
+        name: "Daily Recommendations",
+        taskType: "recommendations",
+        cronExpression: "0 10 * * *",
+        config: { systemManaged: true },
+      });
+      // The due-cron read is Prisma, which is the whole reason for the branch.
+      expect(prisma.cronJob.findMany).not.toHaveBeenCalled();
+    });
+
+    it("still drains the backlog when the mirror has nothing due", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      mockSqlite.current = {
+        isReady: jest.fn(() => true),
+        getDueCronJobsFromMirror: jest.fn(() => []),
+      };
+
+      await checkScheduledJobs();
+
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips enqueue but still drains when the mirror is not ready", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      mockSqlite.current = null;
+
+      await checkScheduledJobs();
+
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledTimes(1);
+    });
+
+    it("tolerates a pre-capability mirror without crashing the scheduler", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+      mockCanExecuteDegradedWork.mockResolvedValue(true);
+      // An older mirror may not expose the accessor at all.
+      mockSqlite.current = { isReady: jest.fn(() => true) };
+
+      await expect(checkScheduledJobs()).resolves.toBeUndefined();
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+      expect(mockRunDegradedQueueOnce).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the normal due-cron read when the breaker is closed", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+      prisma.cronJob.findMany.mockResolvedValue([]);
+
+      await checkScheduledJobs();
+
+      expect(mockRunDegradedQueueOnce).not.toHaveBeenCalled();
+      expect(prisma.cronJob.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("spawnDueCronJob (direct callers, e.g. admin runNow)", () => {
+    it("defers to the durable queue instead of throwing on the dedup read", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+      mockIsDegradedModeActive.mockReturnValue(true);
+
+      await spawnDueCronJob({
+        id: "job-1",
+        name: "Daily Recommendations",
+        taskType: "recommendations",
+        cronExpression: "0 10 * * *",
+        config: { systemManaged: true },
+      } as never);
+
+      expect(mockEnqueueDegradedTask).toHaveBeenCalledWith({
+        id: "job-1",
+        name: "Daily Recommendations",
+        taskType: "recommendations",
+        cronExpression: "0 10 * * *",
+        config: { systemManaged: true },
+      });
+      // The Prisma dedup read is skipped here on purpose; the queue's enqueue
+      // is idempotent within its window, which makes a double enqueue a no-op.
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+      expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    });
+
+    it("spawns normally when the mode is inactive (breaker state does not gate this branch)", async () => {
+      mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+      mockIsDegradedModeActive.mockReturnValue(false);
+      mockSpawnCronTask.mockResolvedValue({ id: "task-9" });
+
+      await spawnDueCronJob({
+        id: "job-1",
+        name: "Daily Recommendations",
+        taskType: "recommendations",
+        cronExpression: "0 10 * * *",
+        config: {},
+      } as never);
+
+      expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+      expect(mockSpawnCronTask).toHaveBeenCalledTimes(1);
+    });
+
+    it("defers to the durable queue when the mode is engaged even if the breaker is CLOSED", async () => {
+      // spec §E — an operator `force` (or a threshold state) must engage
+      // without a hold; requiring an open breaker here would make the admin
+      // panel's mode buttons a lie.
+      mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+      mockIsDegradedModeActive.mockReturnValue(true);
+
+      await spawnDueCronJob({
+        id: "job-1",
+        name: "Daily Recommendations",
+        taskType: "recommendations",
+        cronExpression: "0 10 * * *",
+        config: { systemManaged: true },
+      } as never);
+
+      expect(mockEnqueueDegradedTask).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "job-1", taskType: "recommendations" }),
+      );
+      expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+      expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    });
   });
 });

@@ -18,6 +18,7 @@ const navItems = [
   { name: "Holdings", href: "/admin/holdings" },
   { name: "Audit Logs", href: "/admin/audit" },
   { name: "Decision Engine", href: "/admin/decision" },
+  { name: "Google Sheets", href: "/admin/google-sheets" },
   { name: "Dividend Mgmt", href: "/admin/dividends" },
   { name: "Live Prices", href: "/admin/live-prices" },
   { name: "Tax Mgmt", href: "/admin/tax" },

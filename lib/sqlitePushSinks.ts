@@ -600,6 +600,31 @@ async function pushTransactions(db: Database, rows: OutboxRow[]): Promise<number
   return pushByIdUpsert(db, "transaction", "Transaction", cols, rows);
 }
 
+/** Spec 20 — Google Sheets tracker config. SINGLETON: the mirror always holds
+ *  at most one row (id = 'singleton'), so this is 1 raw upsert op per drain.
+ *
+ *  Column note: `@@map("google_sheets_config")` remaps only the TABLE name, so
+ *  the Prisma columns stay camelCase ("sheetId", "tabMarks", …) while the SQLite
+ *  mirror is snake_case — every GenCol below bridges the two, and the camelCase
+ *  side MUST stay quoted or Postgres folds it to lowercase and 42703s.
+ *
+ *  `tabMarks` is Prisma `Json?` -> `CAST($N AS jsonb)`. The mirror column is TEXT
+ *  holding the JSON string; a null stays null (a never-synced config is
+ *  distinguishable from one synced with no tabs marked). */
+async function pushGoogleSheetsConfig(db: Database, rows: OutboxRow[]): Promise<number> {
+  const cols: GenCol[] = [
+    { sql: "id", val: (m) => String(sv(m.id) ?? "singleton") },
+    { sql: '"sheetId"', val: (m) => sv(m.sheet_id) },
+    { sql: '"displayName"', val: (m) => sv(m.display_name) },
+    { sql: '"enabled"', bool: true, val: (m) => (sv(m.enabled) === 1 || sv(m.enabled) === "1" ? 1 : 0) },
+    { sql: '"lastSyncAt"', val: (m) => sv(m.last_sync_at) },
+    { sql: '"tabMarks"', json: true, val: (m) => sv(m.tab_marks) },
+    { sql: '"createdAt"', val: (m) => sv(m.created_at) },
+    { sql: '"updatedAt"', val: (m) => sv(m.updated_at) },
+  ];
+  return pushByIdUpsert(db, "google_sheets_config", "google_sheets_config", cols, rows);
+}
+
 /** Apply one mirror table's drained outbox slice to Prisma. Returns the
  *  number of outbox rows consumed (rows that should be removed from the
  *  outbox). Throws on a table-level failure so the caller retains the rows. */
@@ -636,6 +661,11 @@ export async function pushTable(db: Database, tableName: string, rows: OutboxRow
       return pushAlerts(db, rows);
     case "transaction":
       return pushTransactions(db, rows);
+    // Spec 20 — Google Sheets admin console (admin-written singleton config).
+    // REQUIRED companion to the OUTBOX_TABLES entry in lib/sqlite.ts: without
+    // this case the default arm throws and breaks the push for EVERY table.
+    case "google_sheets_config":
+      return pushGoogleSheetsConfig(db, rows);
     default:
       throw new Error(`lib/sqlitePushSinks: no sink for table "${tableName}"`);
   }

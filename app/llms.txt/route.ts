@@ -32,6 +32,8 @@ server-side (never from the browser) through a caching proxy.
 - /news — market news (India/Global)
 - /compare — stock comparison + NIFTY 50 benchmark
 - /contact — contact page
+- /privacy — privacy policy
+- /terms — terms of service
 - /auth/signin, /auth/join — authentication pages
 
 ## Public APIs

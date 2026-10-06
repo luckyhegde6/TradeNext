@@ -27,11 +27,22 @@ jest.mock("@/lib/services/intelligence/cache", () => ({
   restoreIntelligenceCacheFromDB: jest.fn().mockResolvedValue(undefined),
 }));
 
+const mockReadDegradedState = jest.fn(() => null as { mode: string; reason: string | null; updatedAt: string | null } | null);
 jest.mock("@/lib/sqlite", () => ({
   initSqliteBackup: jest.fn().mockResolvedValue(undefined),
   startOpsCounterPersistence: jest.fn(),
   startWriteBehindFlush: jest.fn(),
   startNsePromoteFlush: jest.fn(),
+  getSqliteFallback: jest.fn(() => ({ readDegradedState: mockReadDegradedState })),
+}));
+
+// v3.45.0 (spec 21): startup reconciliation of the persisted operator mode.
+const mockSetDegradedMode = jest.fn();
+const mockIsDegradedModeActive = jest.fn(() => false);
+jest.mock("@/lib/services/degradedMode", () => ({
+  __esModule: true,
+  setDegradedMode: (...a: unknown[]) => mockSetDegradedMode(...(a as [])) as void,
+  isDegradedModeActive: (...a: unknown[]) => mockIsDegradedModeActive(...(a as [])) as boolean,
 }));
 
 jest.mock("@/lib/services/priceCache", () => ({
@@ -204,5 +215,113 @@ describe("instrumentation leader watchdog wiring (v3.28.2 + v3.33.0)", () => {
     expect(cronDaemon.stopCronDaemon).not.toHaveBeenCalled();
     // The loss is surfaced in the logs with the self identifier.
     expect(logger.warn).toHaveBeenCalled();
+  });
+});
+
+/**
+ * v3.45.0 (spec 21) — degraded-mode reconciliation at boot.
+ *
+ * The operator mode is persisted in SQLite so `force`/`off` survive a deploy,
+ * but `active` is process-local (it carries hysteresis). Forgetting to re-apply
+ * the stored mode at boot would silently reset it to "auto" on every deploy —
+ * which means an operator's `off` kill-switch evaporates exactly when it is
+ * most needed.
+ */
+describe("degraded mode reconciliation at startup (spec 21)", () => {
+  const originalRuntime = process.env.NEXT_RUNTIME;
+  const originalPhase = process.env.NEXT_PHASE;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.NEXT_PHASE;
+    mockReadDegradedState.mockReturnValue(null);
+    mockIsDegradedModeActive.mockReturnValue(false);
+    captureWatchdogHandlers();
+  });
+
+  afterEach(() => {
+    mockReadDegradedState.mockReset().mockReturnValue(null);
+    mockIsDegradedModeActive.mockReset().mockReturnValue(false);
+  });
+
+  afterAll(() => {
+    if (originalRuntime === undefined) delete process.env.NEXT_RUNTIME;
+    else process.env.NEXT_RUNTIME = originalRuntime;
+    if (originalPhase === undefined) delete process.env.NEXT_PHASE;
+    else process.env.NEXT_PHASE = originalPhase;
+  });
+
+  it.each(["auto", "force", "off"] as const)("restores a persisted %s mode", async (mode) => {
+    mockReadDegradedState.mockReturnValue({ mode, reason: "operator", updatedAt: null });
+
+    await register();
+
+    expect(mockSetDegradedMode).toHaveBeenCalledWith(mode);
+  });
+
+  it("logs the reconciled mode together with the resulting active flag", async () => {
+    mockReadDegradedState.mockReturnValue({ mode: "force", reason: "manual", updatedAt: null });
+    mockIsDegradedModeActive.mockReturnValue(true);
+
+    await register();
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: "Degraded mode reconciled from SQLite", mode: "force", active: true }),
+    );
+  });
+
+  it("does NOT set a mode when nothing was ever persisted (stays auto)", async () => {
+    mockReadDegradedState.mockReturnValue(null);
+
+    await register();
+
+    expect(mockSetDegradedMode).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: "Degraded mode defaulting to auto", stored: null }),
+    );
+  });
+
+  it("ignores an unrecognised stored value instead of coercing it", async () => {
+    // The ledger is only written by an API that validates the mode, so a bad
+    // value means something upstream is wrong. Guessing here would paper over it.
+    mockReadDegradedState.mockReturnValue({ mode: "chaos", reason: null, updatedAt: null });
+
+    await register();
+
+    expect(mockSetDegradedMode).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: "Degraded mode defaulting to auto", stored: "chaos" }),
+    );
+  });
+
+  it("never throws when the mirror read blows up (cold SQLite must not block boot)", async () => {
+    mockReadDegradedState.mockImplementation(() => {
+      throw new Error("mirror not ready");
+    });
+
+    await expect(register()).resolves.toBeUndefined();
+
+    expect(mockSetDegradedMode).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: "Degraded mode reconcile failed (non-fatal, using auto)" }),
+    );
+    // Boot continued: the engines were still wired up.
+    expect(leader.watchLeaderRole).toHaveBeenCalled();
+  });
+
+  it("reconciles AFTER SQLite init so the table exists", async () => {
+    const order: string[] = [];
+    sqlite.initSqliteBackup.mockImplementation(async () => {
+      order.push("initSqliteBackup");
+    });
+    mockReadDegradedState.mockReturnValue({ mode: "force", reason: null, updatedAt: null });
+    mockSetDegradedMode.mockImplementation(() => {
+      order.push("setDegradedMode");
+    });
+
+    await register();
+
+    expect(order).toEqual(["initSqliteBackup", "setDegradedMode"]);
   });
 });

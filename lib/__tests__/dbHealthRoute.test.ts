@@ -38,6 +38,9 @@ import {
   getOpsMonthlyState,
   resetOpsMonthlyForTests,
 } from "@/lib/services/opsMonthly";
+import { getDegradedState } from "@/lib/services/degradedMode";
+import { getDegradedQueueStatus } from "@/lib/services/worker/degradedQueue";
+import { getDegradedLeaderStatus } from "@/lib/services/degradedLeader";
 
 jest.mock("@/lib/auth", () => ({ auth: jest.fn() }));
 jest.mock("@/lib/logger", () => ({
@@ -94,6 +97,51 @@ jest.mock("@/lib/services/leader", () => ({
 }));
 jest.mock("@/lib/services/readTier", () => ({ getReadMetrics: jest.fn(() => ({})) }));
 jest.mock("@/lib/cache", () => ({ getCacheMetrics: jest.fn(() => ({})) }));
+// v3.45.0 (spec 21) — the degraded block of the GET response. Mocked rather
+// than real so the assertions pin the RESPONSE SHAPE (which is the page's
+// contract) without coupling to mode thresholds, and so the Blobs-backed lease
+// read never reaches the network from a route unit test.
+jest.mock("@/lib/services/degradedMode", () => ({
+  DEGRADED_MODE_SETTINGS: ["auto", "force", "off"],
+  ENTER_RATIO: 0.9,
+  EXIT_RATIO: 0.8,
+  getDegradedState: jest.fn(() => ({
+    active: false,
+    mode: "auto",
+    reason: "threshold",
+    totalOperations: 1000,
+    planLimit: 200000,
+    planOperationsRemaining: 199000,
+    enterAt: 180000,
+    exitAt: 160000,
+    breakerOpen: false,
+    since: null,
+  })),
+}));
+jest.mock("@/lib/services/worker/degradedQueue", () => ({
+  DEGRADED_QUEUE_LIMITS: {
+    DEDUP_WINDOW_MS: 90 * 60_000,
+    DEFAULT_MAX_PER_PASS: 5,
+    STALE_RUNNING_MS: 30 * 60_000,
+  },
+  getDegradedQueueStatus: jest.fn(() => ({
+    pending: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    skipped: 0,
+    oldestPendingAt: null,
+  })),
+}));
+jest.mock("@/lib/services/degradedLeader", () => ({
+  getDegradedLeaderStatus: jest.fn(async () => ({
+    source: "unavailable",
+    holder: null,
+    self: "test-instance",
+    leaseExpiresAt: null,
+    renewals: 0,
+  })),
+}));
 jest.mock("@/lib/services/timeCorrection", () => ({
   getTimeDiagnostics: jest.fn(() => ({ hasCorrection: false, offsetMinutes: 0 })),
   parseIstDateTimeLocal: jest.fn(() => new Date("2026-09-10T09:36:00.000Z")),
@@ -389,5 +437,133 @@ describe("POST /api/admin/db-health — deploy_prep breaker-open fast-fail (v3.3
     expect(body.error).toContain("SQLite backup not initialized");
     // Fast-fail gate did not trip; the flush still ran before the mirror check.
     expect(mockFlushWriteBehind).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GET /api/admin/db-health — degraded block (v3.45.0 / spec 21)", () => {
+  const INACTIVE = {
+    active: false,
+    mode: "auto",
+    reason: "threshold",
+    totalOperations: 1000,
+    planLimit: 200000,
+    planOperationsRemaining: 199000,
+    enterAt: 180000,
+    exitAt: 160000,
+    breakerOpen: false,
+    since: null,
+  };
+
+  beforeEach(() => {
+    (getDegradedState as jest.Mock).mockReturnValue(INACTIVE);
+    (getDegradedQueueStatus as jest.Mock).mockReturnValue({
+      pending: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      oldestPendingAt: null,
+    });
+    (getDegradedLeaderStatus as jest.Mock).mockResolvedValue({
+      source: "unavailable",
+      holder: null,
+      self: "test-instance",
+      leaseExpiresAt: null,
+      renewals: 0,
+    });
+  });
+
+  it("returns the state, queue counts, lease + tuning constants and the mode list", async () => {
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(200);
+    const { degraded } = await res.json();
+
+    expect(degraded.state).toEqual(INACTIVE);
+    expect(degraded.queue).toEqual({
+      pending: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      oldestPendingAt: null,
+    });
+    expect(degraded.leader.source).toBe("unavailable");
+    // Both ratios must travel with the payload: the UI draws the enter/exit
+    // markers from them instead of hardcoding 90/80 and drifting from the
+    // service when the plan limit changes.
+    expect(degraded.tuning.enterRatio).toBe(0.9);
+    expect(degraded.tuning.exitRatio).toBe(0.8);
+    expect(degraded.tuning.queue.DEFAULT_MAX_PER_PASS).toBe(5);
+    expect(degraded.modes).toEqual(["auto", "force", "off"]);
+  });
+
+  it("hoists `active` from the SAME state object (hysteresis is not recomputed client-side)", async () => {
+    // Inside the band: 170k ops is above exitAt (160k) but below enterAt
+    // (180k). Whoever owns the hysteresis owns `active` — the route must not
+    // second-guess it with arithmetic, or the console would disagree with the
+    // engine that is actually running.
+    (getDegradedState as jest.Mock).mockReturnValue({
+      ...INACTIVE,
+      active: true,
+      reason: "forced",
+      mode: "force",
+      totalOperations: 170000,
+      enterAt: 180000,
+      exitAt: 160000,
+    });
+
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    const { degraded } = await res.json();
+
+    expect(degraded.active).toBe(true);
+    expect(degraded.state.active).toBe(true);
+    expect(getDegradedState).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces queue backlog + lease holder while engaged", async () => {
+    (getDegradedState as jest.Mock).mockReturnValue({
+      ...INACTIVE,
+      active: true,
+      reason: "breaker",
+      breakerOpen: true,
+      since: 1_757_000_000_000,
+    });
+    (getDegradedQueueStatus as jest.Mock).mockReturnValue({
+      pending: 4,
+      running: 1,
+      completed: 12,
+      failed: 2,
+      skipped: 7,
+      oldestPendingAt: "2026-09-10T09:00:00.000Z",
+    });
+    (getDegradedLeaderStatus as jest.Mock).mockResolvedValue({
+      source: "blobs",
+      holder: "worker-a#1234",
+      self: "worker-a#1234",
+      leaseExpiresAt: 1_757_000_600_000,
+      renewals: 3,
+    });
+
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    const { degraded } = await res.json();
+
+    expect(degraded.queue.pending).toBe(4);
+    expect(degraded.queue.skipped).toBe(7);
+    expect(degraded.leader).toEqual({
+      source: "blobs",
+      holder: "worker-a#1234",
+      self: "worker-a#1234",
+      leaseExpiresAt: 1_757_000_600_000,
+      renewals: 3,
+    });
+  });
+
+  it("401s before touching any degraded service when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(new Request("http://localhost/api/admin/db-health"));
+    expect(res.status).toBe(401);
+    expect(getDegradedState).not.toHaveBeenCalled();
+    expect(getDegradedQueueStatus).not.toHaveBeenCalled();
+    expect(getDegradedLeaderStatus).not.toHaveBeenCalled();
   });
 });

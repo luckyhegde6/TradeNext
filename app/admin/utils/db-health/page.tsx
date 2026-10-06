@@ -168,6 +168,46 @@ interface DbHealthData {
       serverNowIso: string;
     } | null;
   };
+  // v3.45.0 (spec 21): degraded-execution telemetry + the mode picker list.
+  // `active` is authoritative — the card must NOT recompute it from
+  // totalOperations, because hysteresis (ENTER 90% / EXIT 80%) means the
+  // naive arithmetic disagrees with the service inside the band.
+  degraded: {
+    state: {
+      active: boolean;
+      mode: "auto" | "force" | "off";
+      reason: "breaker" | "forced" | "threshold" | "off";
+      totalOperations: number;
+      planLimit: number;
+      planOperationsRemaining: number;
+      enterAt: number;
+      exitAt: number;
+      breakerOpen: boolean;
+      since: number | null;
+    };
+    active: boolean;
+    queue: {
+      pending: number;
+      running: number;
+      completed: number;
+      failed: number;
+      skipped: number;
+      oldestPendingAt: string | null;
+    };
+    leader: {
+      source: "prisma" | "blobs" | "unavailable";
+      holder: string | null;
+      self: string;
+      leaseExpiresAt: number | null;
+      renewals: number;
+    };
+    tuning: {
+      enterRatio: number;
+      exitRatio: number;
+      queue: { DEDUP_WINDOW_MS: number; DEFAULT_MAX_PER_PASS: number; STALE_RUNNING_MS: number };
+    };
+    modes: readonly ("auto" | "force" | "off")[];
+  };
 }
 
 type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
@@ -295,6 +335,10 @@ export default function DbHealthPage() {
   const [opsWrites, setOpsWrites] = useState("");
   const [syncingOps, setSyncingOps] = useState(false);
   const [opsMsg, setOpsMsg] = useState<string | null>(null);
+  // v3.45.0 (spec 21): degraded-mode picker + its own message slot so the
+  // confirmation is not confused with the ops-counter sync feedback above.
+  const [savingMode, setSavingMode] = useState(false);
+  const [modeMsg, setModeMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -448,6 +492,34 @@ export default function DbHealthPage() {
       setOpsMsg(`Sync error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncingOps(false);
+    }
+  };
+
+  // v3.45.0 (spec 21): set the degraded-mode kill switch / override. The mode
+  // is persisted to the SQLite `_degraded_state` row AND applied in-process, so
+  // the effect is immediate — but it is NOT durable across a redeploy unless
+  // the mirror survives, which is why the response is refetched afterwards
+  // rather than optimistically mirrored in local state.
+  const triggerSetDegradedMode = async (mode: "auto" | "force" | "off") => {
+    setSavingMode(true);
+    setModeMsg(null);
+    try {
+      const res = await fetch("/api/admin/degraded-mode", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const body = await parseJsonBody(res);
+      if (!res.ok) {
+        setModeMsg(`Failed: ${body.error ?? res.status}`);
+      } else {
+        setModeMsg(`Mode set to "${mode}" — ${body.state?.active ? "degraded execution ACTIVE" : "normal execution"}.`);
+        await fetchHealth();
+      }
+    } catch (e) {
+      setModeMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingMode(false);
     }
   };
 
@@ -680,7 +752,7 @@ export default function DbHealthPage() {
     );
   }
 
-  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache, time, queryConsumption } = data;
+  const { prisma, sqlite, dailyPriceCache, dbErrors, dbErrorSummary, writeBehind, leader, liveness, dbLogFiles = [], readTier, cache, time, queryConsumption, degraded } = data;
   const errorTotal = Object.values(dbErrorSummary.counts).reduce((a, b) => a + b, 0);
   const budgetPercent = prisma.ops.writeBudget > 0
     ? Math.round((prisma.ops.writes / prisma.ops.writeBudget) * 100)
@@ -948,6 +1020,158 @@ export default function DbHealthPage() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* v3.45.0 (spec 21) — Degraded Mode (SQLite-only execution) */}
+      {degraded && (
+        <div
+          className={`rounded-xl border p-5 ${
+            degraded.active
+              ? "border-red-300 dark:border-red-900/60 bg-red-50 dark:bg-red-950/20"
+              : "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+              Degraded Mode (SQLite-only execution)
+            </h3>
+            <span
+              className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                degraded.active
+                  ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                  : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+              }`}
+            >
+              {degraded.active ? "ACTIVE" : "INACTIVE"}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+            When active, recommendations + corporate actions keep running from the SQLite mirror
+            with Prisma writes deferred, instead of failing on a plan-limit hold.
+            <span className="ml-1 font-medium text-gray-700 dark:text-slate-300">
+              Mode: {degraded.state.mode}
+            </span>
+            <span className="ml-2 text-gray-400">(reason: {degraded.state.reason})</span>
+          </p>
+
+          {/* Hysteresis bar — shows the enter/exit band, not just the plan limit. */}
+          <div className="mb-4">
+            <div className="flex justify-between text-xs text-gray-500 dark:text-slate-400 mb-1">
+              <span>
+                {degraded.state.totalOperations.toLocaleString()} /{" "}
+                {degraded.state.planLimit.toLocaleString()} ops this month
+              </span>
+              <span>{degraded.state.planOperationsRemaining.toLocaleString()} remaining</span>
+            </div>
+            <div className="relative w-full bg-gray-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
+              <div
+                className={`h-4 rounded-full transition-all duration-500 ${
+                  degraded.active ? "bg-red-500" : "bg-emerald-500"
+                }`}
+                style={{
+                  width: `${Math.min(
+                    degraded.state.planLimit > 0
+                      ? (degraded.state.totalOperations / degraded.state.planLimit) * 100
+                      : 0,
+                    100,
+                  )}%`,
+                }}
+              />
+              {degraded.state.planLimit > 0 && (
+                <>
+                  <span
+                    title={`Exit threshold: ${degraded.state.exitAt.toLocaleString()} ops`}
+                    className="absolute top-0 h-4 w-px bg-emerald-700/70 dark:bg-emerald-300/70"
+                    style={{ left: `${(degraded.state.exitAt / degraded.state.planLimit) * 100}%` }}
+                  />
+                  <span
+                    title={`Enter threshold: ${degraded.state.enterAt.toLocaleString()} ops`}
+                    className="absolute top-0 h-4 w-px bg-red-700/70 dark:bg-red-300/70"
+                    style={{ left: `${(degraded.state.enterAt / degraded.state.planLimit) * 100}%` }}
+                  />
+                </>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-400 dark:text-slate-500 italic">
+              Hysteresis: flips on at {Math.round(degraded.tuning.enterRatio * 100)}% (
+              {degraded.state.enterAt.toLocaleString()}), back off at{" "}
+              {Math.round(degraded.tuning.exitRatio * 100)}% ({degraded.state.exitAt.toLocaleString()})
+              — the gap between the markers prevents flapping near the limit.
+            </p>
+          </div>
+
+          {/* Durable queue counts */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4 text-sm">
+            {(
+              [
+                ["pending", degraded.queue.pending, "text-amber-600 dark:text-amber-400"],
+                ["running", degraded.queue.running, "text-blue-600 dark:text-blue-400"],
+                ["completed", degraded.queue.completed, "text-emerald-600 dark:text-emerald-400"],
+                ["failed", degraded.queue.failed, "text-red-600 dark:text-red-400"],
+                ["skipped (unsafe)", degraded.queue.skipped, "text-gray-500 dark:text-slate-400"],
+              ] as const
+            ).map(([label, value, cls]) => (
+              <div key={label} className="border border-gray-200 dark:border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-gray-500 dark:text-slate-400">{label}</div>
+                <div className={`text-lg font-semibold font-mono ${cls}`}>{value.toLocaleString()}</div>
+              </div>
+            ))}
+            <div className="border border-gray-200 dark:border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-gray-500 dark:text-slate-400">oldest pending</div>
+              <div className="text-sm font-semibold text-gray-700 dark:text-slate-300">
+                {formatTimeAgo(degraded.queue.oldestPendingAt)}
+              </div>
+            </div>
+          </div>
+
+          {/* Single-writer lease — only meaningful while degraded. */}
+          {degraded.active && (
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+              Writer lease:{" "}
+              <span className="font-mono text-gray-700 dark:text-slate-300">
+                {degraded.leader.holder ?? degraded.leader.source}
+              </span>
+              {degraded.leader.holder === degraded.leader.self ? " (this instance)" : ""}
+              {degraded.leader.leaseExpiresAt
+                ? ` · renewals ${degraded.leader.renewals} · expires ${new Date(
+                    degraded.leader.leaseExpiresAt,
+                  ).toLocaleTimeString()}`
+                : ""}
+            </p>
+          )}
+
+          {/* Kill switch / override */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-500 dark:text-slate-400">Mode:</span>
+            {degraded.modes.map((m) => (
+              <button
+                key={m}
+                type="button"
+                disabled={savingMode}
+                onClick={() => triggerSetDegradedMode(m)}
+                className={`text-xs px-3 py-1.5 rounded border font-medium disabled:opacity-50 ${
+                  degraded.state.mode === m
+                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                    : "border-gray-300 dark:border-slate-700 text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800"
+                }`}
+              >
+                {m}
+                {m === degraded.state.mode ? " ✓" : ""}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-gray-400 dark:text-slate-500 italic">
+            <span className="font-medium">force</span> engages degraded execution regardless of the
+            counters. <span className="font-medium">off</span> is a hard kill switch that also beats an
+            open plan-limit breaker. <span className="font-medium">auto</span> follows the thresholds
+            above.
+          </p>
+          {modeMsg && (
+            <p className="mt-2 text-xs text-gray-600 dark:text-slate-300" role="status">
+              {modeMsg}
+            </p>
           )}
         </div>
       )}

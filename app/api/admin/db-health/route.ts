@@ -10,6 +10,14 @@ import { getLeaderInfo, getLeaderWatchStatuses, LEADER_CLAIM_FAST_MS, LEADER_CLA
 import { getReadMetrics } from "@/lib/services/readTier";
 import { getCacheMetrics } from "@/lib/cache";
 import {
+  DEGRADED_MODE_SETTINGS,
+  ENTER_RATIO,
+  EXIT_RATIO,
+  getDegradedState,
+} from "@/lib/services/degradedMode";
+import { DEGRADED_QUEUE_LIMITS, getDegradedQueueStatus } from "@/lib/services/worker/degradedQueue";
+import { getDegradedLeaderStatus } from "@/lib/services/degradedLeader";
+import {
   getTimeDiagnostics,
   parseIstDateTimeLocal,
   computeCorrectionOffsetMinutes,
@@ -167,6 +175,12 @@ export async function GET(req: Request) {
   // Daily price cache status
   const priceCacheStatus = getDailyPriceCacheStatus();
 
+  // v3.45.0 (spec 21): degraded-execution status. All reads are in-memory or
+  // SQLite — `getDegradedLeaderStatus()` is the one async call and it itself
+  // skips Prisma while the breaker is OPEN, so this block stays usable during
+  // the very hold it describes.
+  const degraded = getDegradedState();
+
   return NextResponse.json({
     timestamp: new Date().toISOString(),
     prisma: {
@@ -251,6 +265,29 @@ export async function GET(req: Request) {
       claimSlowMs: LEADER_CLAIM_SLOW_MS,
     },
     liveness: getSqliteFallback()?.getLivenessHeartbeats() ?? [],
+    // v3.45.0 (spec 21): degraded-mode telemetry + the tuning constants that
+    // decide it. `active` is the AUTHORITATIVE signal — the UI must not
+    // recompute it from totalOperations, because hysteresis (ENTER 90% /
+    // EXIT 80%) means the naive arithmetic disagrees with reality inside the
+    // band. `queue` counts durable _degraded_task rows; `leader` is only
+    // meaningful while active (it is the fail-closed single-writer lease).
+    degraded: {
+      state: degraded,
+      // Same object as `state.active`, hoisted so a UI can branch on it without
+      // digging. Deliberately NOT `isDegradedModeActive()`: two evaluations
+      // could straddle a threshold crossing and disagree with the state object.
+      active: degraded.active,
+      queue: getDegradedQueueStatus(),
+      leader: await getDegradedLeaderStatus(),
+      tuning: {
+        enterRatio: ENTER_RATIO,
+        exitRatio: EXIT_RATIO,
+        queue: DEGRADED_QUEUE_LIMITS,
+      },
+      // Lets the admin UI render a picker without hardcoding the list the
+      // service validates against (DEGRADED_MODE_SETTINGS).
+      modes: DEGRADED_MODE_SETTINGS,
+    },
   });
 }
 

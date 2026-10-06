@@ -11,6 +11,7 @@
 
 import { runChartinkUnifiedScreeners } from "./chartinkUnifiedScreenerService";
 import type { ScreenerResult } from "./chartinkService";
+import { exportDailyRecs } from "./googleSheets/exporter";
 import {
   analyzeStocks,
   type StockAnalysisInput,
@@ -235,12 +236,28 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
     const mirrorSymbols = new Set(existingTrackers.map(t => String(t.symbol).toUpperCase()));
     const missingSymbols = symbols.filter(s => !mirrorSymbols.has(s.toUpperCase()));
     if (missingSymbols.length > 0) {
-      const prismaTrackers = await prisma.recommendationTracker.findMany({
-        where: { symbol: { in: missingSymbols } },
-      });
-      for (const t of prismaTrackers) {
-        sqlite?.upsertRecommendationTracker({ ...t });
-        existingTrackers.push(t as unknown as Record<string, unknown>);
+      // FAULT-TOLERANT BY DESIGN (spec 21 / degraded mode). This is the ONLY
+      // Prisma read left on the run path, and it is reached whenever the mirror
+      // lacks a symbol — which is the NORMAL case on a cold instance or a
+      // restored snapshot. Unguarded it threw out of the whole run, so during a
+      // plan-limit hold the daily recommendations job failed on exactly the
+      // instances that needed it most. The backfill is only a mirror warm-up:
+      // symbols it fails to backfill simply get fresh trackers built below, and
+      // the 6h push reconciles them once the hold lifts.
+      try {
+        const prismaTrackers = await prisma.recommendationTracker.findMany({
+          where: { symbol: { in: missingSymbols } },
+        });
+        for (const t of prismaTrackers) {
+          sqlite?.upsertRecommendationTracker({ ...t });
+          existingTrackers.push(t as unknown as Record<string, unknown>);
+        }
+      } catch (err) {
+        logger.warn({
+          msg: "Recommendation tracker backfill unavailable — proceeding with mirror-only trackers",
+          missing: missingSymbols.length,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     const trackerMap = new Map(
@@ -750,6 +767,20 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
         executionTimeMs,
       },
     });
+
+    // Append the picks to the Tracker `daily-rec` tab. Only stocks with a REAL
+    // AI verdict are exported — synthetic fallback HOLDs are deliberately not
+    // persisted (v3.11.1) and must not pollute the sheet either. Fire-and-forget.
+    exportDailyRecs(
+      { runId: run.id, runDate: new Date(startTime).toISOString() },
+      successfulResults
+    ).catch((err) =>
+      logger.error({
+        msg: "Google Sheets daily-recs export dispatch failed",
+        runId: run.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
 
     // Record health metrics
     await recordMetric({
