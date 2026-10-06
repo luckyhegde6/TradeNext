@@ -1,6 +1,6 @@
 # Session Todos
 
-## Current (2026-10-06 — v3.45.0 Spec 21 Degraded SQLite execution engine + preemptive plan-limit switch — CODE + TESTS + GATES + DOCS DONE — **UNCOMMITTED**, one authorized commit + PR #133 update pending user go-ahead)
+## Current (2026-10-06 — v3.45.0 Spec 21 Degraded SQLite execution engine + preemptive plan-limit switch — CODE + TESTS + GATES + DOCS DONE — **COMMITTED `138d69a`** (code + docs) + **security-deps fix `a433039`** + PUSHED + **PR #133 all 9 checks GREEN** + **MERGED into `main`** per explicit user approval)
 - [x] Spec + plan `21-degraded-sqlite-execution-engine` written + user approved — **correction (user)**: breaker-first guard violated spec §E ordering → `isDegradedModeActive()` alone gates at 3 worker/cron sites (degraded branch ABOVE the unchanged `if (isPlanLimitBreakerOpen()) return;`); recorded as correction note under the plan's `### Deviation log`; branch `feature/google-sheets-tracking` on `f0c73c7` — DONE
 - [x] Core: `lib/services/degradedMode.ts` (modes `auto|force|off`, precedence `off > forced > breaker > threshold`, hysteresis enter ≥180000 / stay >160000 / exit ≤160000 AND breaker closed, `_degraded_state` persists operator mode only, unreadable ops → not active, **zero Prisma ops in the degraded branch incl. transitively via mirror writers** — Lesson 156) + `degradedLeader.ts` (Netlify-Blobs ETag-CAS lease 10-min/60-s renew, fail-closed) + `corpActionPurpose.ts` — DONE
 - [x] Worker engine: `lib/services/worker/{degradedExecutor,degradedQueue,degradedTaskRegistry}.ts` — SQLite queue (90-min dedup by CRON id, 5-task drain bound, 30-min stale-`running` reclaim, sync sql.js accessors), 29-type registry with 2 degraded-safe (`recommendations`, `corp_actions`), outbox flows transitively via mirror writers — DONE
@@ -8,7 +8,7 @@
 - [x] Tests: 6 new suites (~144 tests) incl. Lesson 157 2×2 gate matrix (worker-engine **36/36**, cron-daemon **25/25**) — full Jest **134/134 suites · 1972 pass / 4 skip / 0 fail** — DONE
 - [x] Gates: tsc **46 exact (0 new; prod 0)** · lint **0 errors (1158 warnings, baseline 1155)** · quickbuild **199/199** · doc budget **91.4/100 KB** — DONE
 - [x] Docs (Phase 7): `versions-v3.45.md` + CHANGELOG + versions-index + Lessons **152–157** + TODO block + Primer + agent-memory + session-todos + HANDOFF + latest.md + session archive `2026-10-06-degraded-sqlite-engine/`; **AGENTS.md NOT edited** (32,666/32,768 B cap deferral) — DONE
-- [ ] **Commit as v3.45.0** (ONE authorized commit) + update PR #133 — **PENDING USER EXPLICIT GO-AHEAD** (no auto-commit/push/PR/merge/deploy)
+- [x] **Committed as v3.45.0** `138d69a` (ONE code+docs commit) + pushed; **security-deps fix `a433039`** (next 16.3.8 / nodemailer 10.0.15 / fast-uri+sharp+source-map-js overrides / security.yml `--omit=dev` audit gate); **PR #133 all 9 checks GREEN** (security-scan + Trivy fixed); **MERGED into `main`** per explicit user approval (2026-10-06) — DONE
 - [ ] Undiagnosed prod findings recorded for next pass: follower snapshot-upload coordination (w/o changing `preserve-mirror`) · 34 Chartink HTTP 419s · prod FCP 25235 ms / TTFB 20975 ms · `themeColor` viewport warnings · redeployment requirement
 
 ## Prior (2026-09-28 — v3.44.0 Spec 02 Public legal pages — **COMMITTED + pushed** `fb29b16` → `66db159` → `ac24ede` (PR #133); superseded by v3.45.0)

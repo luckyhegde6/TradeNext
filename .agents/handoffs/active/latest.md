@@ -7,10 +7,10 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Degraded-mode + SQLite-first execution engine for the worker/cron core — recommendations + corp-actions (Spec 21) |
-| **Branch** | `feature/google-sheets-tracking` (`f0c73c7`; parents `4010a26` sqlite repair + `8dce103` CI fix) |
-| **State** | CODE + TESTS + GATES + DOCS **DONE** · **UNCOMMITTED** — one authorized Spec 21 commit + PR #133 update pending explicit user go-ahead |
-| **In-flight** | None — Phase 7 docs complete (TODO/Primer/agent-memory/session-todos/HANDOFF/latest + session archive) |
-| **Blocked** | Commit/push/PR/merge/deploy — awaiting explicit user approval (no auto-commit/push/PR/merge/deploy). Stale-CI note: one very old CI run on this branch is RED from a prior quickbuild+win32-compat change (deepmerge override `f0c73c7`); current local gates GREEN. |
+| **Branch** | `feature/google-sheets-tracking` (v3.45.0 `138d69a`; parents `f0c73c7` deepmerge override, `4010a26` sqlite repair + `8dce103` CI fix; security-fix `a433039` pushed) |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** · **COMMITTED** `138d69a` (code + docs) + **security-deps fix** `a433039` + **PUSHED** + **PR #133 all 9 checks GREEN** + **MERGED into `main`** per explicit user approval (2026-10-06) |
+| **In-flight** | None — merge complete; docs-status update committed as the final docs commit |
+| **Blocked** | Nothing code-side. Remaining (user-controlled): Netlify deploy; 5 default-branch Dependabot alerts (1 high / 4 moderate — pre-fix deps on `main`) clear once the merged deps ship. Stale-CI note resolved: the old RED run was the pre-security-fix head; `a433039` gate all-green. |
 | **Side note** | v3.44.0 legal pages COMMITTED + PUSHED (`fb29b16` → `66db159` → `ac24ede`, PR #133). v3.43.0 Sheets console `645cf85` + `aba7fa6` ride along on this branch. PR #132 (v3.41.3 Laya) remains OPEN and unrelated. P6003 hold premise proved FALSE — breaker never opened in prod; hold ended 2026-10-02. |
 
 ## What's done (v3.45.0)
@@ -25,16 +25,18 @@
 
 ## Not done (deliberately)
 
-- Commit as v3.45.0 — ONE authorized commit (code + docs); update PR #133. Needs explicit user go-ahead.
-- Push/merge/deploy — needs explicit user approval. No auto-push/PR/merge/deploy.
-- Full cross-browser e2e re-run post-commit → PR gate.
+- ~~Commit as v3.45.0 (ONE code + docs commit)~~ — **DONE** `138d69a`, pushed.
+- ~~Security-deps fix~~ — **DONE** `a433039` (next 16.3.8 / nodemailer 10.0.15 / fast-uri+sharp+source-map-js overrides / security.yml prod-only audit), pushed; PR #133 all 9 checks GREEN.
+- ~~Merge PR #133~~ — **DONE** per explicit user approval (2026-10-06).
+- Netlify deploy — user-controlled (separate step, no auto-deploy).
+- Full cross-browser e2e re-run at the PR gate — covered by the PR test check (green).
 - Undiagnosed prod findings (recorded for next pass, NOT acted on): follower snapshot-upload coordination (w/o changing `preserve-mirror`) · 34 Chartink HTTP 419s · prod FCP 25235 ms / TTFB 20975 ms · `themeColor` viewport warnings · redeployment requirement. `swingPerformanceService.test.ts` dated-fixture fix handled as a separate concern.
 
 ## Next steps
 
-1. **User decision: approve ONE v3.45.0 commit** (all Spec 21 code + docs) + PR #133 update — on explicit request only.
+1. **DONE — v3.45.0 committed `138d69a`** (all Spec 21 code + docs); **security-deps fix `a433039`** pushed; **PR #133 merged into `main`** per explicit user approval (2026-10-06).
 2. Before any public share/arm: rotate the Testing-mode token if still live (~minted Sep 28 ⇒ expired ~Oct 5); never print the OAuth refresh token.
-3. Deploy path after approval: push → PR → merge → Netlify; include full Jest + cross-browser e2e at the PR gate.
+3. Deploy path (user-controlled): Netlify deploy of merged `main`; confirm the 5 default-branch Dependabot alerts (1 high / 4 moderate) clear after the merge.
 
 ## Gotchas / lessons for this handoff
 

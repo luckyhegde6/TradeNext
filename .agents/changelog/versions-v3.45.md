@@ -1,7 +1,7 @@
 # TradeNext v3.45.0 — Spec 21 Degraded SQLite Execution Engine & Preemptive Plan-Limit Switch
 
-> **Status:** CODE + TESTS + GATES + DOCS DONE · **UNCOMMITTED** — one authorized Spec 21 commit + PR #133 update pending explicit user go-ahead.
-> **Branch:** `feature/google-sheets-tracking` (work sits on HEAD `f0c73c7` = deepmerge-ts override on the v3.43.0/v3.44.0 PR #133 chain).
+> **Status:** CODE + TESTS + GATES + DOCS DONE · **COMMITTED `138d69a`** (v3.45.0 code + docs) + **security-deps fix `a433039`** (next 16.3.8 / nodemailer 10.0.15 / overrides + prod-only audit gate) + **PUSHED**, PR #133 **all 9 checks GREEN**, **MERGED into `main`** (executed per explicit user approval 2026-10-06).
+> **Branch:** `feature/google-sheets-tracking` (v3.45.0 work committed on `138d69a` atop `f0c73c7` = deepmerge-ts override on the v3.43.0/v3.44.0 PR #133 chain; security-fix commit `a433039` pushed after).
 > **Spec / plan:** `.agents/specs/21-degraded-sqlite-execution-engine.md` + `.agents/plans/21-degraded-sqlite-execution-engine.md`.
 > **Supersedes:** nothing — builds on v3.44.0 (legal pages, committed `ac24ede`) and the v3.41.2 plan-limit fallback layer; carried by PR #133.
 
@@ -85,4 +85,4 @@ This is a **corrected implementation**, not a spec deviation (recorded as a corr
 - No Prisma migration · no new runtime dependency · no OpenAPI change (degraded-mode route is admin-internal like its peers).
 - **Findings recorded in `TODO.md`** (this version's required list): follower snapshot-upload coordination without changing `preserve-mirror`; 34 Chartink HTTP 419s; production FCP `25235 ms` / TTFB `20975 ms` at `https://tradenext6.netlify.app/`; `themeColor` viewport warnings; redeployment requirement.
 - Browser/live-sheet verification: admin db-health Degraded Mode block checked live on `:3000` (0 console errors); full e2e deferred to the PR gate (repo convention for this branch).
-- **Commit plan (pending explicit user go-ahead)**: one Spec 21 commit + PR #133 update; no push/PR/merge/deploy without the user's instruction.
+- **Executed per explicit user approval (2026-10-06)**: ONE v3.45.0 commit `138d69a` (code + docs) → pushed → PR #133 security-scan/Trivy RED → security-deps fix `a433039` (next 16.3.8 critical GHSA-vcvr-r3jv-pc5j in next/og; nodemailer 10.0.15; fast-uri 3.1.8 / sharp 0.35.5 / source-map-js 1.2.2 overrides; security.yml audit steps now `--omit=dev` — dev tooling has no fixed upstream; `npm audit --omit=dev --audit-level high` = 0) → **all 9 PR #133 checks GREEN** → **MERGED into `main`**. Docs-status update (this pass) committed as the final docs commit. Netlify deploy = separate user-controlled step.
