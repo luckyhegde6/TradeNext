@@ -419,6 +419,51 @@ describe("dailyRecommendationService", () => {
       expect(mockPrisma.dailyRecommendationRun.create).not.toHaveBeenCalled();
     });
 
+    /**
+     * v3.45.0 (spec 21) — TRANSITIVE Prisma acceptance decision.
+     *
+     * `degradedExecutor` never references prisma (structural test), but it calls
+     * `runDailyRecommendations`, which reaches Prisma through two helpers. Both
+     * are fault-tolerant BY DESIGN, and this is the test that says so out loud:
+     * during a plan-limit hold the ONE thing that must not happen is the daily
+     * run rejecting, because the queue would mark the task `failed` and today's
+     * picks would be missing on exactly the instances that need them.
+     *
+     * The two transitive touchpoints and their guards:
+     *   1. tracker backfill findMany → try/catch, warns, proceeds mirror-only
+     *   2. recordPrediction (agentPerformanceLog.create) → per-call .catch()
+     */
+    test("completes the run when EVERY transitive Prisma call fails (plan-limit hold)", async () => {
+      mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+      mockAnalyzeStocks.mockResolvedValue([makeAIResult()]);
+
+      // Touchpoint 1 — the cold-mirror backfill read.
+      mockPrisma.recommendationTracker.findMany.mockRejectedValue(
+        new Error("P6003: plan limit reached"),
+      );
+      // Touchpoint 2 — prediction tracking.
+      mockRecordPrediction.mockRejectedValue(new Error("P6003: plan limit reached"));
+
+      // MUST resolve, not reject: this is the degraded-mode contract.
+      const result = await runDailyRecommendations();
+
+      expect(result.uniqueStocks).toBe(1);
+      expect(result.aiProcessed).toBe(1);
+
+      // The run row still reaches `completed` in the mirror — a failed Prisma
+      // read must not degrade the run to a half-written state.
+      const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
+      expect(runUpserts[runUpserts.length - 1][0].status).toBe("completed");
+
+      // Fresh trackers are still built from the run itself, so the symbols the
+      // backfill could not warm are not silently dropped.
+      const created = (mockSqlite.upsertRecommendationTracker.mock.calls as any[][]).find(
+        (c) => c[0]?.symbol === "RELIANCE",
+      );
+      expect(created).toBeDefined();
+      expect(created![0].entryPrice).toBe(2500);
+    });
+
     // ── AI pre-flight gate (v3.8.0) ────────────────────────────────────
     // loadConfig() falls back to env (prisma mock has no `secret`), so
     // hasValidConfig() only returns true when OPENROUTERKEY is set.

@@ -18,6 +18,8 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import os from "os";
 import { isDbUnavailableError } from "@/lib/db-utils";
+import { isDegradedModeActive } from "@/lib/services/degradedMode";
+import { enqueueDegradedTask } from "./degradedQueue";
 import { spawnDueCronJob } from "./worker-engine";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
@@ -241,12 +243,81 @@ export async function syncCronJobs(): Promise<{ registered: number }> {
 
 /** node-cron handler — re-fetch the row so admin edits apply immediately. */
 async function fireJob(jobId: string): Promise<void> {
+  // v3.45.0 (spec 21): the very first statement below is a Prisma read, so
+  // during a plan-limit hold EVERY tick threw and logged — the daemon fired
+  // oftenest precisely when it could do least. Under an engaged degraded mode
+  // the schedule is already in the SQLite `cron_job` mirror, so the job can be
+  // enqueued (and later drained by the elected leader) without Prisma at all.
+  //
+  // Guarded on `isDegradedModeActive()` alone (spec §E: the breaker does NOT
+  // gate this branch — `force`/`threshold` engage without a hold, and an
+  // inactive `off` falls straight through to the Prisma read below so today's
+  // behaviour is byte-identical). The kill-switch/auto-threshold decision stays
+  // in one place (degradedMode), not duplicated here.
+  if (isDegradedModeActive()) {
+    await enqueueDegradedCronJobFromMirror(jobId);
+    return;
+  }
   try {
     const job = await prisma.cronJob.findUnique({ where: { id: jobId } });
     if (!job || !job.isActive) return;
     await spawnDueCronJob(job);
   } catch (error) {
     logger.error({ msg: "Cron job fire failed", jobId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/**
+ * Enqueue one specific job from the mirror, ignoring whether it is DUE.
+ *
+ * node-cron only invokes `fireJob` for a schedule it already believes fired, so
+ * the due-ness question is settled by the scheduler in memory. What is missing
+ * during a hold is the record that the job was owed — which is exactly what the
+ * durable queue provides. A job missing from the mirror (never synced) is
+ * logged and dropped: we cannot know its task type, and the registry gate
+ * refuses unknown types anyway, so guessing would only enqueue noise.
+ */
+async function enqueueDegradedCronJobFromMirror(jobId: string): Promise<void> {
+  try {
+    const sqlite = await import("@/lib/sqlite");
+    const s = sqlite.getSqliteFallback();
+    if (!s?.isReady()) return;
+    const job = (s.getCronJobs() || []).find(
+      (j: Record<string, unknown>) => j.id === jobId && j.is_active,
+    );
+    if (!job) {
+      logger.warn({ msg: "Degraded: cron job absent from mirror, not enqueuing", jobId });
+      return;
+    }
+    const rawConfig = job.config;
+    let config: unknown = rawConfig;
+    if (typeof rawConfig === "string" && rawConfig) {
+      try {
+        config = JSON.parse(rawConfig);
+      } catch {
+        config = null;
+      }
+    }
+    const id = enqueueDegradedTask({
+      id: String(job.id),
+      name: String(job.name ?? ""),
+      taskType: String(job.task_type ?? job.taskType ?? ""),
+      cronExpression: String(job.cron_expression ?? job.cronExpression ?? ""),
+      config,
+    });
+    logger.info({
+      msg: "Degraded: cron tick enqueued to durable queue",
+      jobId,
+      jobName: job.name,
+      degradedTaskId: id,
+    });
+  } catch (error) {
+    // Never let the tick throw into node-cron's scheduler loop.
+    logger.error({
+      msg: "Degraded: cron enqueue failed",
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

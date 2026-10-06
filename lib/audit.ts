@@ -141,7 +141,36 @@ export type AuditAction =
   // a sync only moves already-produced rows to the sheet, whereas a re-scan runs a
   // real scan and generates NEW rows (and spends a full-universe TV / Chartink
   // pass), so it is the more expensive and less routine of the two.
-  | 'GOOGLE_SHEETS_RESCAN';
+  | 'GOOGLE_SHEETS_RESCAN'
+  // ── v3.45.0 Spec 21: degraded-mode (preemptive SQLite-first) execution ──────
+  // Degraded mode silently reroutes cron work to SQLite while a plan-limit hold
+  // (P6003) is in force. That reroute is invisible unless it is audited: an operator
+  // seeing stale data must be able to tell "the job did not run" apart from "the job
+  // ran and wrote to the mirror", so every transition and every skip is recorded.
+  /** Degraded mode became active — `reason` carries breaker|forced|threshold. */
+  | 'DEGRADED_MODE_ENTERED'
+  /** Degraded mode returned to normal Prisma execution. */
+  | 'DEGRADED_MODE_EXITED'
+  /**
+   * A task type with no verified SQLite write path was refused rather than
+   * partially executed. `taskType` + `reason` explain the gap; the admin
+   * skipped-job counter is derived from these rows.
+   */
+  | 'DEGRADED_JOB_SKIPPED'
+  /**
+   * No fail-CLOSED leader could be established, so side-effecting degraded work was
+   * withheld. Distinct from a skip: the task was safe, we simply could not prove we
+   * were the only instance doing it (this is the R2/R3 duplicate-side-effect guard).
+   */
+  | 'DEGRADED_LEADER_UNAVAILABLE'
+  /**
+   * An operator changed the persisted mode (auto|force|off) via the admin API.
+   * Deliberately distinct from ENTERED/EXITED: a mode change is an *instruction*
+   * by a human, whereas those are *derived* state transitions. During an
+   * incident the first question is "did someone touch the switch?", and only a
+   * separate action can answer that.
+   */
+  | 'DEGRADED_MODE_SET';
 
 interface AuditLogParams {
   userId?: number;

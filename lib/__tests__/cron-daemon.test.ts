@@ -75,12 +75,57 @@ jest.mock("@/lib/services/worker/worker-service", () => ({
 }));
 
 const mockSqliteHeartbeat = jest.fn();
+// v3.45.0: mutable so the degraded fireJob tests can present a `cron_job`
+// mirror. Defaults keep the heartbeat-only surface the other suites rely on.
+const mockSqliteFallback: { current: Record<string, any> | null } = {
+  current: { isReady: () => true, writeLivenessHeartbeat: mockSqliteHeartbeat },
+};
 jest.mock("@/lib/sqlite", () => ({
   __esModule: true,
-  getSqliteFallback: jest.fn(() => ({
-    isReady: () => true,
-    writeLivenessHeartbeat: mockSqliteHeartbeat,
-  })),
+  getSqliteFallback: jest.fn(() => mockSqliteFallback.current),
+}));
+
+// ── v3.45.0 (spec 21): the degraded branch in fireJob ──────────────────────
+// db-utils was previously unmocked (real `isPlanLimitBreakerOpen` → false), so
+// the new breaker read in fireJob is controlled here explicitly.
+const mockIsPlanLimitBreakerOpen = jest.fn().mockReturnValue(false);
+jest.mock("@/lib/db-utils", () => ({
+  __esModule: true,
+  isDbUnavailableError: jest.fn(() => false),
+  isPlanLimitBreakerOpen: (...a: unknown[]) => mockIsPlanLimitBreakerOpen(...(a as [])) as boolean,
+}));
+
+const mockIsDegradedModeActive = jest.fn().mockReturnValue(false);
+jest.mock("@/lib/services/degradedMode", () => ({
+  __esModule: true,
+  isDegradedModeActive: (...a: unknown[]) => mockIsDegradedModeActive(...(a as [])) as boolean,
+}));
+
+const mockCanExecuteDegradedWork = jest.fn().mockResolvedValue(true);
+const mockDegradedLeaseHolder = jest.fn().mockReturnValue("leader-self-abc");
+jest.mock("@/lib/services/degradedLeader", () => ({
+  __esModule: true,
+  canExecuteDegradedWork: (...a: unknown[]) => mockCanExecuteDegradedWork(...(a as [])) as Promise<boolean>,
+  degradedLeaseHolder: (...a: unknown[]) => mockDegradedLeaseHolder(...(a as [])) as string,
+}));
+
+const mockEnqueueDegradedTask = jest.fn().mockReturnValue("deg-7");
+const mockRunDegradedQueueOnce = jest.fn().mockResolvedValue({
+  claimed: 0,
+  completed: 0,
+  failed: 0,
+  skipped: 0,
+  requeuedStale: 0,
+});
+jest.mock("@/lib/services/worker/degradedQueue", () => ({
+  __esModule: true,
+  enqueueDegradedTask: (...a: unknown[]) => mockEnqueueDegradedTask(...(a as [])) as string | null,
+  runDegradedQueueOnce: (...a: unknown[]) => mockRunDegradedQueueOnce(...(a as [])) as Promise<unknown>,
+}));
+
+jest.mock("@/lib/services/worker/degradedExecutor", () => ({
+  __esModule: true,
+  executeDegradedTask: jest.fn(),
 }));
 
 jest.mock("@/lib/services/worker/worker-logger", () => ({
@@ -289,6 +334,222 @@ describe("fireJob (node-cron handler)", () => {
 
     mockScheduled[0].fn();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+});
+
+/**
+ * v3.45.0 (spec 21) — fireJob's degraded branch.
+ *
+ * The original fireJob opened with `prisma.cronJob.findUnique`, so during a
+ * plan-limit hold EVERY tick threw into a `catch` that only logged. The daemon
+ * therefore fired most often precisely when it could do least, and the work was
+ * never recorded anywhere. These tests pin that the tick is now enqueued to the
+ * durable queue instead, and — just as importantly — that the normal path is
+ * untouched when the breaker is closed.
+ */
+describe("fireJob degraded branch (spec 21)", () => {
+  // Non-null view of the mutable mirror holder: `null` means "no mirror", which
+  // these tests exercise separately, so each assignment site asserts what it needs.
+  const mirror = (): Record<string, any> => mockSqliteFallback.current as Record<string, any>;
+
+  const mirrorJob = {
+    id: "job-1",
+    name: "Daily Recommendations (System)",
+    is_active: true,
+    task_type: "recommendations",
+    cron_expression: "0 10 * * *",
+    config: JSON.stringify({ systemManaged: true }),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScheduled.length = 0;
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+    mockIsDegradedModeActive.mockReturnValue(false);
+    mockCanExecuteDegradedWork.mockResolvedValue(true);
+    mockSqliteFallback.current = {
+      isReady: () => true,
+      writeLivenessHeartbeat: mockSqliteHeartbeat,
+      getCronJobs: () => [],
+    };
+  });
+
+  it("enqueues from the mirror and never touches Prisma during a hold", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    prisma.cronJob.findUnique.mockResolvedValue(activeJob());
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [mirrorJob];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(prisma.cronJob.findUnique).not.toHaveBeenCalled();
+    expect(mockEnqueueDegradedTask).toHaveBeenCalledWith({
+      id: "job-1",
+      name: "Daily Recommendations (System)",
+      taskType: "recommendations",
+      cronExpression: "0 10 * * *",
+      // The mirror stores config as a JSON string; it must arrive parsed, or
+      // the executor would read `config.systemManaged` off a string.
+      config: { systemManaged: true },
+    });
+  });
+
+  it("accepts a mirror job whose config is already an object", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [{ ...mirrorJob, config: { systemManaged: true } }];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockEnqueueDegradedTask).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { systemManaged: true } }),
+    );
+  });
+
+  it("treats unparsable config as null rather than throwing into node-cron", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [{ ...mirrorJob, config: "{not json" }];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockEnqueueDegradedTask).toHaveBeenCalledWith(
+      expect.objectContaining({ config: null }),
+    );
+  });
+
+  it("does not enqueue an inactive mirror job", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [{ ...mirrorJob, is_active: false }];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  it("drops (and does not crash on) a job absent from the mirror", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // We cannot know the task type, and the registry refuses unknown types
+    // anyway — guessing would only enqueue noise.
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  it("skips enqueue when the mirror is not ready", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mockSqliteFallback.current = null;
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  it("never lets a mirror failure escape into the scheduler", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => {
+      throw new Error("mirror corrupt");
+    };
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  it("enqueues from the mirror when the mode is engaged even if the breaker is CLOSED", async () => {
+    // spec §E — the breaker must not gate this branch: a threshold/force state
+    // engages preemptively on a healthy DB, and `off` (mode inactive) is what
+    // restores the Prisma path.
+    prisma.cronJob.findMany.mockResolvedValue([activeJob()]);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+    mockIsDegradedModeActive.mockReturnValue(true);
+    mirror().getCronJobs = () => [mirrorJob];
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(prisma.cronJob.findUnique).not.toHaveBeenCalled();
+    expect(mockEnqueueDegradedTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "job-1" }),
+    );
+  });
+
+  it("keeps the Prisma path byte-identical when the breaker is closed", async () => {
+    const sysJob = activeJob({ config: { systemManaged: true } });
+    prisma.cronJob.findMany.mockResolvedValue([sysJob]);
+    prisma.cronJob.findUnique.mockResolvedValue(sysJob);
+    await startCronDaemon();
+
+    const { spawnCronTask } = require("@/lib/services/worker/task-orchestrator") as {
+      spawnCronTask: jest.Mock;
+    };
+    spawnCronTask.mockResolvedValue({});
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(prisma.cronJob.findUnique).toHaveBeenCalledWith({ where: { id: "job-1" } });
+    expect(spawnCronTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  it("still uses Prisma during a hold when the mode is inactive (kill-switch wins)", async () => {
+    const sysJob = activeJob();
+    prisma.cronJob.findMany.mockResolvedValue([sysJob]);
+    prisma.cronJob.findUnique.mockResolvedValue(sysJob);
+    await startCronDaemon();
+
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    mockIsDegradedModeActive.mockReturnValue(false);
+
+    mockScheduled[0].fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(prisma.cronJob.findUnique).toHaveBeenCalled();
+    expect(mockEnqueueDegradedTask).not.toHaveBeenCalled();
+  });
+
+  // `mockReturnValue` survives `jest.clearAllMocks()`, so a "breaker open" case
+  // here would leak into every later describe in this file.
+  afterEach(() => {
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+    mockSqliteFallback.current = { isReady: () => true, writeLivenessHeartbeat: mockSqliteHeartbeat };
   });
 });
 

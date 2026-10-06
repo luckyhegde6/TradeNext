@@ -1,14 +1,21 @@
 # Session Todos
 
-## Current (2026-09-28 — v3.44.0 Spec 02 Public legal pages (Privacy + Terms) — CODE + TESTS + BUILDS + E2E + DOCS DONE — **UNCOMMITTED**, commit pending user, no push/PR/deploy)
-- [x] Spec + plan `02-public-legal-pages` written + user approved (3 decisions: **no date line** / **footer + Header links** / **AGENTS.md row deferral**); branch `feature/legal-pages` off `aba7fa6` (v3.43.0 wrap-up) — DONE
-- [x] Pages: `app/privacy/page.tsx` + `app/terms/page.tsx` (public static server components, no auth, truthful disclosure content, contact `mailto:luckyhegdedev+tradenext@gmail.com`) — DONE
-- [x] Unit tests **6/6** (`app/privacy/__tests__/page.test.tsx` 3 + `app/terms/__tests__/page.test.tsx` 3) — public render, no date line, expected sections/links — DONE
-- [x] Wiring: `app/contact/page.tsx` footer links + `app/Header.tsx` desktop `NavLink` + mobile `MobileNavLink` + `app/sitemap.ts` priority 0.3/monthly + `app/llms.txt` +2 — DONE
-- [x] E2E: NEW `e2e/privacy-terms.spec.ts` **4/4 chromium** (1.2 min — /privacy public, /terms public, contact legal-links strip) — DONE
-- [x] Gates: tsc **46 exact (0 new; prod 0)** · lint **0 errors** (0 in new files) · quickbuild **198/198** (+2 static: `/privacy` + `/terms` both `○`, 2.6 min — dev server killed first, Lesson 150) · doc budget **94.3/100 KB** — DONE
-- [x] Docs (Phase 5): `versions-v3.44.md` + CHANGELOG + versions-index + TODO quick-ref + Primer + agent-memory + HANDOFF + latest.md + Lesson 150 + session archive `2026-09-28-legal-pages/`; **AGENTS.md NOT edited** (cap deferral) — DONE
-- [x] **Committed as v3.44.0** (`fb29b16` + `66db159`, on user request) — moved to `feature/google-sheets-tracking` (PR #133), `feature/legal-pages` deleted — **open: user decision on push** (3 v3.43.0 wrap-up commits `9de434e`/`b8ef109`/`aba7fa6` ride along)
+## Current (2026-10-06 — v3.45.0 Spec 21 Degraded SQLite execution engine + preemptive plan-limit switch — CODE + TESTS + GATES + DOCS DONE — **UNCOMMITTED**, one authorized commit + PR #133 update pending user go-ahead)
+- [x] Spec + plan `21-degraded-sqlite-execution-engine` written + user approved — **correction (user)**: breaker-first guard violated spec §E ordering → `isDegradedModeActive()` alone gates at 3 worker/cron sites (degraded branch ABOVE the unchanged `if (isPlanLimitBreakerOpen()) return;`); recorded as correction note under the plan's `### Deviation log`; branch `feature/google-sheets-tracking` on `f0c73c7` — DONE
+- [x] Core: `lib/services/degradedMode.ts` (modes `auto|force|off`, precedence `off > forced > breaker > threshold`, hysteresis enter ≥180000 / stay >160000 / exit ≤160000 AND breaker closed, `_degraded_state` persists operator mode only, unreadable ops → not active, **zero Prisma ops in the degraded branch incl. transitively via mirror writers** — Lesson 156) + `degradedLeader.ts` (Netlify-Blobs ETag-CAS lease 10-min/60-s renew, fail-closed) + `corpActionPurpose.ts` — DONE
+- [x] Worker engine: `lib/services/worker/{degradedExecutor,degradedQueue,degradedTaskRegistry}.ts` — SQLite queue (90-min dedup by CRON id, 5-task drain bound, 30-min stale-`running` reclaim, sync sql.js accessors), 29-type registry with 2 degraded-safe (`recommendations`, `corp_actions`), outbox flows transitively via mirror writers — DONE
+- [x] Route + audit: admin `GET/POST /api/admin/degraded-mode` (mode + stats + queue + leader) + 5 audit tags `DEGRADED_MODE_{ENTERED,EXITED,SET}` + `DEGRADED_JOB_SKIPPED` + `DEGRADED_LEADER_UNAVAILABLE` — DONE
+- [x] Tests: 6 new suites (~144 tests) incl. Lesson 157 2×2 gate matrix (worker-engine **36/36**, cron-daemon **25/25**) — full Jest **134/134 suites · 1972 pass / 4 skip / 0 fail** — DONE
+- [x] Gates: tsc **46 exact (0 new; prod 0)** · lint **0 errors (1158 warnings, baseline 1155)** · quickbuild **199/199** · doc budget **91.4/100 KB** — DONE
+- [x] Docs (Phase 7): `versions-v3.45.md` + CHANGELOG + versions-index + Lessons **152–157** + TODO block + Primer + agent-memory + session-todos + HANDOFF + latest.md + session archive `2026-10-06-degraded-sqlite-engine/`; **AGENTS.md NOT edited** (32,666/32,768 B cap deferral) — DONE
+- [ ] **Commit as v3.45.0** (ONE authorized commit) + update PR #133 — **PENDING USER EXPLICIT GO-AHEAD** (no auto-commit/push/PR/merge/deploy)
+- [ ] Undiagnosed prod findings recorded for next pass: follower snapshot-upload coordination (w/o changing `preserve-mirror`) · 34 Chartink HTTP 419s · prod FCP 25235 ms / TTFB 20975 ms · `themeColor` viewport warnings · redeployment requirement
+
+## Prior (2026-09-28 — v3.44.0 Spec 02 Public legal pages — **COMMITTED + pushed** `fb29b16` → `66db159` → `ac24ede` (PR #133); superseded by v3.45.0)
+- [x] `/privacy` + `/terms` public static pages (no auth, **no date line** — user decision): truthful disclosures (account/sessions, portfolio/watchlist/alerts/Telegram chat ID, contact form, audit + server logs SQLite 14-day mirror, AI-analysis OpenRouter inputs, admin Sheets export anonymous-only) · Terms = "tool, not adviser" + NSE disclaimers + 18+ + acceptable use + "laws of India" + liability limits · contact footer + Header desktop/mobile links · sitemap 0.3/monthly · llms.txt +2 — DONE
+- [x] Unit **6/6** + NEW `e2e/privacy-terms.spec.ts` **4/4 chromium** (1.2 min) · tsc **46 exact** · lint **0 errors** · quickbuild **198/198** · doc budget **94.3/100 KB** · Lesson 150 — DONE
+- [x] Docs: `versions-v3.44.md` + index rows + TODO/Primer/agent-memory/session-todos/HANDOFF/latest + Lesson 150 + session archive `2026-09-28-legal-pages/`; **AGENTS.md row DEFERRED** (cap — Lesson 142) — DONE
+- [x] Committed + pushed on user request (PR #133 open) — full detail: `.agents/changelog/versions-v3.44.md`
 
 ## Prior (2026-09-26 — v3.43.0 Spec 20 Google Sheets admin console — CODE + TESTS + BUILD + DOCS DONE — **COMMITTED `645cf85`**, no push/PR/deploy)
 - [x] Spec + plan written + user approved: `.agents/specs/20-google-sheets-admin-console.md` + `.agents/plans/20-google-sheets-admin-console-phase1.md`; branch `feature/google-sheets-tracking` off `2fbf0c7` (v3.42.0 `a6e4e6e`) — DONE

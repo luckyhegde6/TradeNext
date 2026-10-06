@@ -6,6 +6,9 @@ import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { getCorrectedNow, getCronFrom } from "@/lib/services/timeCorrection";
+import { isDegradedModeActive } from "@/lib/services/degradedMode";
+import { canExecuteDegradedWork, degradedLeaseHolder } from "@/lib/services/degradedLeader";
+import { enqueueDegradedTask, runDegradedQueueOnce } from "./degradedQueue";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
@@ -309,6 +312,96 @@ export async function discoverPendingTask(): Promise<any | null> {
 }
 
 /**
+ * v3.45.0 (spec 21) — the degraded branch, placed BEFORE every existing
+ * breaker return.
+ *
+ * Finding F2: on a plan-limit hold these entry points hard-returned, so a
+ * multi-day hold silently starved every cron on the box. This runs the
+ * SQLite-backed queue instead, so the two work-accepting crons keep running.
+ *
+ * Order matters and is the whole safety argument (spec §E):
+ *   1. mode active?   the degraded branch sits ABOVE the existing breaker
+ *      return, so an inactive mode (`off`) falls through to the unchanged
+ *      `isPlanLimitBreakerOpen()` return below and today's behaviour is
+ *      restored exactly — while `force`/`threshold` engage WITHOUT waiting for
+ *      a hold (preemptive F7: the user's explicit choice to serve mirror data
+ *      on a healthy DB rather than keep burning the plan budget). Gating this
+ *      on the breaker instead would make threshold/force cosmetic — the admin
+ *      panel would report ACTIVE while every tick still ran the Prisma path.
+ *   2. leader lease?  exactly ONE instance drains, so removing the breaker
+ *      gate does not reintroduce N-instance duplicate side effects (F5).
+ *      `canExecuteDegradedWork()` is itself split by DB availability: Prisma's
+ *      election while the breaker is closed, the fail-closed Blobs lease while
+ *      it is open — so single-writer holds on both sides.
+ *
+ * Returns true when the degraded path handled the tick and the caller must NOT
+ * continue into the Prisma path.
+ */
+async function runDegradedPathIfActive(source: "poll" | "cron"): Promise<boolean> {
+    if (!isDegradedModeActive()) return false;
+    // Election BEFORE any enqueue/drain: a non-leader that enqueued would push
+    // work another instance then runs, and a non-leader that drained would
+    // double-execute. Fail-closed on the lease — a degraded tick that skips is
+    // recoverable, a duplicated irreversible send is not.
+    if (!(await canExecuteDegradedWork())) return false;
+
+    // Enqueue before drain so ONE tick both picks up newly-due work and runs the
+    // backlog, instead of a job waiting a full extra tick to be noticed as due.
+    if (source === "cron") await enqueueDueCronJobsFromMirror();
+
+    try {
+        const { executeDegradedTask } = await import("./degradedExecutor");
+        const result = await runDegradedQueueOnce({
+            execute: executeDegradedTask,
+            leaderId: degradedLeaseHolder(),
+        });
+        if (result.claimed > 0 || result.requeuedStale > 0) {
+            logger.info({ msg: "Degraded queue drained", source, ...result });
+        }
+    } catch (err) {
+        // Never let queue bookkeeping kill the worker loop.
+        logger.error({
+            msg: "Degraded queue drain failed",
+            source,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+    return true;
+}
+
+/**
+ * Enqueue every cron job the LOCAL mirror says is due.
+ *
+ * The schedule is readable without Prisma because `cron_job` is one of the
+ * three control mirrors `syncFromPrisma` keeps current. Without this the
+ * degraded queue would never receive work — the exact inverse of the Lesson 153
+ * defect (a queue that accepts work and never runs it would become a queue that
+ * runs nothing because nothing is ever enqueued).
+ *
+ * `next_run` is deliberately NOT advanced. The mirror is overwritten wholesale
+ * by the next successful `syncFromPrisma`, so a local advance would not survive
+ * and would only mask the double-fire. Repeat-fire cadence during a hold is
+ * governed by the enqueue dedup window (90 min), which is the operator knob.
+ */
+async function enqueueDueCronJobsFromMirror(): Promise<void> {
+    const sqlite = await getSqliteControl();
+    if (!sqlite?.isReady?.()) return;
+    const due = sqlite.getDueCronJobsFromMirror?.(getCorrectedNow(), 50) ?? [];
+    for (const job of due) {
+        enqueueDegradedTask({
+            id: job.id,
+            name: job.name,
+            taskType: job.taskType,
+            cronExpression: job.cronExpression,
+            config: job.config,
+        });
+    }
+    if (due.length > 0) {
+        logger.info({ msg: "Degraded: enqueued due cron jobs from mirror", count: due.length });
+    }
+}
+
+/**
  * Poll for pending tasks and execute them one by one
  *
  * Exported for tests.
@@ -317,6 +410,9 @@ export async function pollAndExecute() {
     // 1. Reap stale in-flight tasks (throttled to 1/5min) so a wedged
     // "running" task never blocks new work.
     await maybeReap();
+
+    // v3.45.0 (spec 21): degraded branch first — see runDegradedPathIfActive.
+    if (await runDegradedPathIfActive("poll")) return;
 
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN
     // (account on hold / DB down), skip the pending-task discovery read
@@ -614,6 +710,31 @@ export interface DueCronJob {
  *   - nextRun advanced via calculateNextRun after a successful spawn.
  */
 export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
+    // v3.45.0 (spec 21): direct callers (admin runNow, tools) reach this
+    // without passing checkScheduledJobs, and the very first thing below is a
+    // Prisma dedup read. Under an engaged degraded mode the job must still be
+    // recorded — including when the breaker is CLOSED and the mode is
+    // threshold/force-engaged (spec §E: mode alone gates the branch) — so hand
+    // it to the durable queue instead of reaching for Prisma. The dedup read is
+    // skipped here deliberately — the queue's own enqueue is idempotent within
+    // its window, which is what makes a double enqueue harmless.
+    if (isDegradedModeActive()) {
+        const id = enqueueDegradedTask({
+            id: job.id,
+            name: job.name,
+            taskType: job.taskType,
+            cronExpression: job.cronExpression,
+            config: job.config,
+        });
+        logger.info({
+            msg: "Cron spawn deferred to degraded queue",
+            jobName: job.name,
+            jobId: job.id,
+            degradedTaskId: id,
+        });
+        return;
+    }
+
     const { spawnCronTask } = await import("./task-orchestrator");
 
     logger.info({ msg: "Cron job due, spawning task", jobName: job.name, jobId: job.id, taskType: job.taskType });
@@ -684,6 +805,11 @@ export async function checkScheduledJobs() {
     // still fires and advances nextRun on IST wall time. Identity when no
     // correction is persisted.
     const now = getCorrectedNow();
+
+    // v3.45.0 (spec 21): degraded branch first — the due-cron read below is a
+    // Prisma query, so without this the two work-accepting crons starve for
+    // the whole hold. `source: "cron"` enqueues mirror-due jobs before draining.
+    if (await runDegradedPathIfActive("cron")) return;
 
     // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN,
     // skip the cron-due read entirely — the prod "Cron daemon resync deferred

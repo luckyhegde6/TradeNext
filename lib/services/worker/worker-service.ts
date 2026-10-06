@@ -4,6 +4,7 @@ import logger from "@/lib/logger";
 import { getIndexStocks, syncStocksToDatabase } from "@/lib/index-service";
 import { logTaskEvent } from "@/lib/services/worker/task-orchestrator";
 import { recordCronRun, SYSTEM_JOB_NAME_BY_TASK_TYPE } from "@/lib/services/recommendationCronService";
+import { parseActionPurpose } from "@/lib/services/corpActionPurpose";
 
 /**
  * Worker Service - Handles execution of various worker tasks
@@ -232,41 +233,7 @@ export async function executeStockSync(payload?: Record<string, unknown>): Promi
 /**
  * Parse purpose string to determine action type
  */
-function parseActionPurpose(purpose: string): { actionType: string; dividendAmount?: number } {
-  const p = (purpose || "").toUpperCase();
-  let actionType = "OTHER";
-  let dividendAmount: number | undefined = undefined;
-
-  // Check for dividend patterns
-  if (p.includes("DIVIDEND") || p.includes("INTERIM DIVIDEND") || p.includes("FINAL DIVIDEND")) {
-    actionType = "DIVIDEND";
-    // Try to extract dividend amount from purpose
-    const match = purpose.match(/Rs\.?\s*([\d,.]+)/i) || purpose.match(/₹\s*([\d,.]+)/i);
-    if (match) {
-      dividendAmount = parseFloat(match[1].replace(/,/g, ""));
-    }
-  } else if (p.includes("BONUS")) {
-    actionType = "BONUS";
-  } else if (p.includes("SPLIT") || p.includes("SUB-DIVISION")) {
-    actionType = "SPLIT";
-  } else if (p.includes("RIGHTS")) {
-    actionType = "RIGHTS";
-  } else if (p.includes("BUYBACK")) {
-    actionType = "BUYBACK";
-  } else if (p.includes("INTEREST")) {
-    actionType = "INTEREST";
-  } else if (p.includes("DEMERGER")) {
-    actionType = "DEMERGER";
-  } else if (p.includes("REDEMPTION")) {
-    actionType = "REDEMPTION";
-  } else if (p.includes("AMALGAMATION") || p.includes("MERGER")) {
-    actionType = "MERGER";
-  }
-
-  return { actionType, dividendAmount };
-}
-
-export async function executeCorpActionsSync(payload?: Record<string, unknown>): Promise<unknown> {
+async function executeCorpActionsSync(payload?: Record<string, unknown>): Promise<unknown> {
   const { getIndexCorporateActions } = await import("@/lib/index-service");
 
   logger.info({ msg: "Starting corporate actions sync" });

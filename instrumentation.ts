@@ -18,12 +18,13 @@ export async function register() {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   try {
-    const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { default: logger }] = await Promise.all([
+    const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, getSqliteFallback, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { setDegradedMode, isDegradedModeActive }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
       import("@/lib/services/worker/worker-engine"),
       import("@/lib/services/intelligence/cache"),
       import("@/lib/sqlite"),
       import("@/lib/services/priceCache"),
+      import("@/lib/services/degradedMode"),
       import("@/lib/logger"),
     ]);
 
@@ -87,6 +88,40 @@ export async function register() {
     await initSqliteBackup().catch((err: unknown) =>
       logger.warn({ msg: "SQLite backup init failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
+
+    // v3.45.0 (spec 21) — reconcile the PERSISTED operator mode into the process.
+    //
+    // The mode lives in SQLite `_degraded_state` so a `force`/`off` survives a
+    // deploy, but the ACTIVE flag is process-local (it carries hysteresis: stay
+    // engaged until usage falls back below the exit ratio). Without this step a
+    // restart would silently reset the mode to "auto" and re-derive activity from
+    // the ops counter — so an operator's `force` (or, far worse, their `off`
+    // kill-switch) would evaporate on every deploy.
+    //
+    // Placed AFTER initSqliteBackup so the table exists, and best-effort: a
+    // cold/unavailable mirror must not block boot. An unknown stored value is
+    // ignored (leaving "auto") rather than coerced — the ledger is written by an
+    // API that validates the mode, so a bad value means something upstream we
+    // should not paper over by guessing.
+    try {
+      const persisted = getSqliteFallback()?.readDegradedState?.();
+      if (persisted?.mode === "auto" || persisted?.mode === "force" || persisted?.mode === "off") {
+        setDegradedMode(persisted.mode);
+        logger.info({
+          msg: "Degraded mode reconciled from SQLite",
+          mode: persisted.mode,
+          storedReason: persisted.reason,
+          active: isDegradedModeActive(),
+        });
+      } else {
+        logger.info({ msg: "Degraded mode defaulting to auto", stored: persisted?.mode ?? null });
+      }
+    } catch (err: unknown) {
+      logger.warn({
+        msg: "Degraded mode reconcile failed (non-fatal, using auto)",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Start daily price flush timer (batch-writes to daily_prices after 4pm IST)
     startDailyPriceFlushTimer();

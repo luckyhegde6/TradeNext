@@ -2302,6 +2302,18 @@ describe("SQLite backup fallback", () => {
       expect(rows.length).toBe(1);
       expect((rows[0].values[0][0] as string).toLowerCase()).toBe("transaction");
 
+      // v3.45.0: pin the table named in the production incident. A restored
+      // snapshot predating market_cache booted without it, and the boot sync
+      // then logged `no such table: market_cache` on every attempt — the 14
+      // analytics tabs silently fell back to live NSE fetches. The fix was the
+      // restore-path SCHEMA_SQL replay (v3.43.0/4010a26); this asserts strict
+      // replay really does produce the table, so the replay cannot be dropped
+      // or reordered without failing here.
+      for (const t of ["market_cache", "_degraded_state", "_degraded_task"]) {
+        const found = db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='${t}'`);
+        expect(found.length).toBe(1);
+      }
+
       db.close();
     });
 
@@ -2419,6 +2431,383 @@ describe("SQLite backup fallback", () => {
       });
 
       db.close();
+    });
+
+    // v3.45.0 Spec 21 — the durable degraded queue is the ONLY hand-off between
+    // "cron fired" and "the side-effecting executor ran", so a broken statement here
+    // silently stops all work during a plan-limit hold while every caller still
+    // reports success. The accessors swallow SQL errors into `null`/`[]` by design
+    // (a bookkeeping failure must not kill the daemon), which means a typo'd column
+    // or a missing bind is indistinguishable from "nothing to run" in production.
+    // Only a real engine catches that, so run the PRODUCTION exported strings here.
+    it("Spec 21 degraded-queue SQL binds and filters on real SQLite (v3.45.0 regression)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: unknown[]): unknown;
+          exec(sql: string, params?: unknown[]): Array<{
+            columns: string[];
+            values: unknown[][];
+          }>;
+          getRowsModified(): number;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const db = new SQL.Database();
+
+      const {
+        SCHEMA_SQL,
+        DEGRADED_DEDUP_SQL,
+        DEGRADED_CLAIM_CANDIDATE_SQL,
+        DEGRADED_CLAIM_SQL,
+        DEGRADED_COMPLETE_SQL,
+        DEGRADED_LIST_SQL,
+        DEGRADED_COUNTS_SQL,
+        DEGRADED_OLDEST_PENDING_SQL,
+        DEGRADED_REQUEUE_STALE_SQL,
+      } = require("../sqlite") as Record<string, string>;
+
+      for (const raw of SCHEMA_SQL.split(";").map((s: string) => s.trim()).filter(Boolean)) {
+        const stripped = raw
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) db.run(stripped);
+      }
+
+      const ins = (taskType: string, dedupKey: string, createdAt: string) =>
+        db.run(
+          `INSERT INTO _degraded_task
+             (id, task_type, dedup_key, status, attempts, created_at, updated_at)
+           VALUES (?,?,?, 'pending', 0, ?, ?)`,
+          [`id-${dedupKey}`, taskType, dedupKey, createdAt, createdAt],
+        );
+
+      const t0 = "2026-10-05T00:00:00.000Z";
+      const t1 = "2026-10-05T00:01:00.000Z";
+      const tOld = "2026-10-04T00:00:00.000Z";
+      ins("recommendations", "k-rec", t0);
+      ins("alerts", "k-alert", t1);
+
+      // --- dedup: only UNDELIVERED rows inside the window suppress a re-enqueue ---
+      const dedupId = (key: string, since: string) =>
+        db.exec(DEGRADED_DEDUP_SQL, [key, since])[0]?.values?.[0]?.[0] as string | undefined;
+      expect(dedupId("k-rec", tOld)).toBe("id-k-rec");
+      // Same key but the existing row is older than the window → a legitimate
+      // re-fire must NOT be suppressed.
+      expect(dedupId("k-rec", t1)).toBeUndefined();
+      expect(dedupId("k-nope", tOld)).toBeUndefined();
+
+      // A COMPLETED row must not block a later re-fire: mark k-rec terminal, then
+      // the same dedup key must be free again.
+      db.run(DEGRADED_COMPLETE_SQL, ["completed", t1, null, t1, "id-k-rec"]);
+      expect(dedupId("k-rec", tOld)).toBeUndefined();
+
+      // Bind-count guard. sql.js has TWO distinct arity behaviours and only ONE is loud:
+      //   - too MANY binds (count+1) -> THROWS "Too many parameter values were provided"
+      //   - too FEW binds           -> remaining placeholders evaluate as NULL and the
+      //                                 statement runs to a SILENT wrong result
+      // A too-few bind is the real hazard: an accessor that drops an argument makes
+      // dedup match nothing, which the caller reads as "no recent task" and happily
+      // re-enqueues a duplicate. So pin the exact placeholder counts (catching SQL vs
+      // accessor drift), assert the loud path, then pin the silent path explicitly.
+      const placeholders = (sql: string) => (sql.match(/\?/g) ?? []).length;
+      expect(placeholders(DEGRADED_DEDUP_SQL)).toBe(2);
+      expect(placeholders(DEGRADED_CLAIM_SQL)).toBe(4);
+      expect(placeholders(DEGRADED_COMPLETE_SQL)).toBe(5);
+      expect(placeholders(DEGRADED_LIST_SQL)).toBe(1);
+      expect(() => db.exec(DEGRADED_DEDUP_SQL, [0, 0, 0])).toThrow();
+      expect(() => db.exec(DEGRADED_CLAIM_SQL, [0, 0, 0, 0, 0])).toThrow();
+      expect(() => db.exec(DEGRADED_COMPLETE_SQL, [0, 0, 0, 0, 0, 0])).toThrow();
+      expect(() => db.exec(DEGRADED_LIST_SQL, [1, 1])).toThrow();
+      // Too few binds does NOT raise. exec() returns an EMPTY ARRAY — no result set
+      // at all — so the caller cannot distinguish "query ran, no match" from "query
+      // never really ran". That is precisely why the arity assertions above are the
+      // only thing standing between a dropped argument and a silent duplicate.
+      expect(db.exec(DEGRADED_DEDUP_SQL, ["only-one-bind"])).toEqual([]);
+      expect(db.exec(DEGRADED_DEDUP_SQL)).toEqual([]);
+      // Contrast: a correctly-bound query that genuinely matches returns a result set,
+      // so `dedupId` above can read values out of it. Empty-vs-absent is the tell.
+      expect(Array.isArray(db.exec(DEGRADED_DEDUP_SQL, ["k-alert", tOld]))).toBe(true);
+
+      // --- claim: oldest-first, status-guarded, exactly one winner ---
+      ins("recommendations", "k-rec2", tOld);
+      const candRes = db.exec(DEGRADED_CLAIM_CANDIDATE_SQL)[0];
+      const cols = candRes.columns as string[];
+      const candId = String(candRes.values[0][cols.indexOf("id")]);
+      // id-k-rec2 is the oldest PENDING row (k-rec completed, k-alert newer).
+      expect(candId).toBe("id-k-rec2");
+
+      // sql.js `run()` returns the Database itself, NOT a result object — the changed-row
+      // count comes from `getRowsModified()`. Reading `.changes` off `run()` yields
+      // undefined and would make this assertion vacuously pass/fail on nothing.
+      db.run(DEGRADED_CLAIM_SQL, ["w-1", t1, t1, candId]);
+      expect(db.getRowsModified()).toBe(1);
+      // A second claimant on the SAME row must change 0 rows and stand down.
+      db.run(DEGRADED_CLAIM_SQL, ["w-2", t1, t1, candId]);
+      expect(db.getRowsModified()).toBe(0);
+
+      const rowStatus = (id: string) => {
+        const r = db.exec("SELECT status, claimed_by, attempts FROM _degraded_task WHERE id = ?", [id]);
+        return r[0]?.values?.[0] as unknown[];
+      };
+      expect(rowStatus(candId)).toEqual(["running", "w-1", 1]);
+
+      // --- listing: newest-first, LIMIT bound ---
+      const listIds = (limit: number) =>
+        db
+          .exec(DEGRADED_LIST_SQL, [limit])
+          .flatMap((r) => r.values.map((v) => String(v[r.columns.indexOf("id")])));
+      // Newest-first by created_at DESC, independent of status. Note id-k-rec2 was
+      // inserted with the OLDEST timestamp but lands last, behind both Oct-5 rows.
+      expect(listIds(10)).toEqual(["id-k-alert", "id-k-rec", "id-k-rec2"]);
+      expect(listIds(1)).toEqual(["id-k-alert"]);
+
+      // --- stats: per-status counts + oldest PENDING age ---
+      const c: Record<string, number> = {};
+      for (const v of db.exec(DEGRADED_COUNTS_SQL)[0].values) c[String(v[0])] = Number(v[1]);
+      expect(c).toEqual({ completed: 1, running: 1, pending: 1 });
+      // Oldest PENDING age. At this point id-k-rec is completed and id-k-rec2 was
+      // just claimed (running), so the only pending row is id-k-alert at t1 — the
+      // aggregate must ignore terminal AND in-flight rows, not report tOld.
+      expect(String(db.exec(DEGRADED_OLDEST_PENDING_SQL)[0].values[0][0])).toBe(t1);
+
+      // --- stale-running reclaim ---
+      // The mirror image of the claim defect: a row claimed by a leader that then
+      // dies mid-executor is otherwise stranded in 'running' FOREVER — nothing
+      // else can claim it, so the job is silently lost. Reclaim must make the row
+      // claimable again (not merely visible), which means clearing claimed_by AND
+      // flipping status back to 'pending'.
+      ins("recommendations", "k-stale-old", tOld);
+      ins("recommendations", "k-stale-fresh", tOld);
+      ins("recommendations", "k-stale-null", tOld);
+      db.run(DEGRADED_CLAIM_SQL, ["w-old", tOld, tOld, "id-k-stale-old"]);
+      db.run(DEGRADED_CLAIM_SQL, ["w-fresh", t1, t1, "id-k-stale-fresh"]);
+      db.run(DEGRADED_CLAIM_SQL, ["w-null", t1, t1, "id-k-stale-null"]);
+      // A running row with no claim timestamp (hand-written/migrated state) must
+      // not be guessed at — `claimed_at IS NOT NULL` is the guard.
+      db.run("UPDATE _degraded_task SET claimed_at = NULL WHERE id = ?", ["id-k-stale-null"]);
+
+      const requeueStale = (updatedAt: string, cutoff: string) => {
+        db.run(DEGRADED_REQUEUE_STALE_SQL, [updatedAt, cutoff]);
+        return db.getRowsModified();
+      };
+      // Cutoff t1: only the Oct-4 claim is genuinely older than the bound.
+      expect(requeueStale(t1, t1)).toBe(1);
+
+      const reclaimed = () => {
+        const r = db.exec(
+          "SELECT status, claimed_by, claimed_at FROM _degraded_task WHERE id = ?",
+          ["id-k-stale-old"],
+        )[0];
+        const idx = r.columns.indexOf("status");
+        return {
+          status: r.values[0][idx],
+          claimedBy: r.values[0][r.columns.indexOf("claimed_by")],
+          claimedAt: r.values[0][r.columns.indexOf("claimed_at")],
+        };
+      };
+      expect(reclaimed()).toEqual({ status: "pending", claimedBy: null, claimedAt: null });
+      // Idempotent: a second reclaim pass over the same state changes 0 rows.
+      expect(requeueStale(t1, t1)).toBe(0);
+      // ...and the still-fresh + untimestamped rows are untouched. The bound is strict
+      // `<`, and the caller keeps it above the 10-min lease, so a LIVE leader's
+      // in-flight row is never stolen.
+      expect(rowStatus("id-k-stale-fresh")).toEqual(["running", "w-fresh", 1]);
+      expect(rowStatus("id-k-stale-null")).toEqual(["running", "w-null", 1]);
+      // The reclaimed row is immediately claimable — that is the whole point.
+      // It is also the OLDEST pending row again, so the candidate scan finds it.
+      const rescan = db.exec(DEGRADED_CLAIM_CANDIDATE_SQL)[0];
+      expect(String(rescan.values[0][rescan.columns.indexOf("id")])).toBe("id-k-stale-old");
+      expect(placeholders(DEGRADED_REQUEUE_STALE_SQL)).toBe(2);
+      expect(() => db.exec(DEGRADED_REQUEUE_STALE_SQL, [t1, t1, t1])).toThrow();
+
+      db.close();
+    });
+
+    // The guard above pins the SQL. This one pins the ACCESSORS that consume it —
+    // which is where the real defect lived: `claimNextDegradedTask()` read
+    // `.changes` off sql.js `run()`, which returns the Database itself, so the
+    // count was always undefined and every claim "lost its race". The queue would
+    // accept work and never run any of it, while every caller still reported
+    // success. Correct SQL + a broken caller is still broken, and only a real
+    // engine surfaces it (Lesson 153).
+    it("Spec 21 degraded-queue ACCESSORS complete a real claim (v3.45.0 regression)", async () => {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new (data?: Uint8Array) => {
+          run(sql: string, params?: unknown[]): unknown;
+          close(): void;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const raw = new SQL.Database();
+
+      type Row = {
+        id: string;
+        taskType: string;
+        status: string;
+        attempts: number;
+      };
+      const { SCHEMA_SQL, setSqliteDbForTests, resetSqliteStateForTests } =
+        require("../sqlite") as {
+          SCHEMA_SQL: string;
+          setSqliteDbForTests: (d: unknown) => {
+            enqueueDegradedTask(row: {
+              taskType: string;
+              dedupKey: string;
+              payload?: unknown;
+              dedupWindowMs?: number;
+            }): string | null;
+            claimNextDegradedTask(workerId: string): Row | null;
+            completeDegradedTask(
+              id: string,
+              outcome: "completed" | "failed" | "skipped",
+              error?: string | null,
+            ): void;
+            getDegradedTasks(limit?: number): Row[];
+            requeueStaleDegradedTasks(staleMs: number): number;
+            getDegradedTaskStats(): {
+              pending: number;
+              running: number;
+              completed: number;
+              failed: number;
+              skipped: number;
+              oldestPendingAt: string | null;
+            };
+          };
+          resetSqliteStateForTests: () => void;
+        };
+
+      for (const stmt of SCHEMA_SQL.split(";").map((s: string) => s.trim()).filter(Boolean)) {
+        const stripped = stmt
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) raw.run(stripped);
+      }
+
+      const fb = setSqliteDbForTests(raw);
+      try {
+        // ── enqueue: the returned id must be usable by claim ──
+        const id = fb.enqueueDegradedTask({
+          taskType: "recommendations",
+          dedupKey: "k-rec",
+          dedupWindowMs: 60_000,
+        });
+        expect(id).toEqual(expect.any(String));
+        expect(id).toBeTruthy();
+
+        // Dedup while still PENDING: a re-fire inside the window returns the SAME
+        // id rather than queueing a duplicate cron run.
+        expect(
+          fb.enqueueDegradedTask({
+            taskType: "recommendations",
+            dedupKey: "k-rec",
+            dedupWindowMs: 60_000,
+          }),
+        ).toBe(id);
+        expect(fb.getDegradedTasks(10)).toHaveLength(1);
+
+        // ── THE assertion that used to fail: a real claim must WIN the race ──
+        const claimed = fb.claimNextDegradedTask("w-1");
+        expect(claimed).not.toBeNull();
+        expect(claimed).toMatchObject({
+          id,
+          taskType: "recommendations",
+          status: "running",
+          attempts: 1,
+        });
+
+        // A second claimant must NOT get the same row — that is precisely what
+        // the status-guarded UPDATE buys.
+        expect(fb.claimNextDegradedTask("w-2")).toBeNull();
+
+        // Dedup while RUNNING must also be idempotent.
+        expect(
+          fb.enqueueDegradedTask({
+            taskType: "recommendations",
+            dedupKey: "k-rec",
+            dedupWindowMs: 60_000,
+          }),
+        ).toBe(id);
+
+        // ── terminal write ──
+        fb.completeDegradedTask(id as string, "completed", null);
+        expect(fb.getDegradedTasks(10)).toHaveLength(1);
+        expect(fb.getDegradedTasks(10)[0]).toMatchObject({ id, status: "completed" });
+        expect(fb.getDegradedTaskStats()).toMatchObject({
+          pending: 0,
+          running: 0,
+          completed: 1,
+          oldestPendingAt: null,
+        });
+
+        // A COMPLETED row must not block a legitimate later re-fire of the same
+        // key — otherwise the dedup window would silently swallow every future
+        // daily run of this job, and the queue would look healthy while doing
+        // nothing.
+        const later = fb.enqueueDegradedTask({
+          taskType: "recommendations",
+          dedupKey: "k-rec",
+          dedupWindowMs: 60_000,
+        });
+        expect(later).not.toBe(id);
+        expect(fb.getDegradedTasks(10)).toHaveLength(2);
+        const claimed2 = fb.claimNextDegradedTask("w-1");
+        expect(claimed2).toMatchObject({ id: later, status: "running" });
+        fb.completeDegradedTask(later as string, "failed", "boom");
+        expect(fb.getDegradedTaskStats()).toMatchObject({ completed: 1, failed: 1 });
+
+        // ── stale-running reclaim ──
+        // A claim whose complete never arrives (leader died mid-executor) would
+        // otherwise strand the row forever: the claim is status-guarded, so a
+        // 'running' row is invisible to every future claim. The accessor must
+        // both COUNT the reclaimed rows and return them to the claimable pool.
+        const stranded = fb.enqueueDegradedTask({
+          taskType: "corp_actions",
+          dedupKey: "k-stranded",
+        }) as string;
+        expect(fb.claimNextDegradedTask("dead-leader")).toMatchObject({
+          id: stranded,
+          status: "running",
+        });
+        // Nothing is stale at a 30-min bound while the claim is seconds old.
+        expect(fb.requeueStaleDegradedTasks(30 * 60_000)).toBe(0);
+        expect(fb.claimNextDegradedTask("w-1")).toBeNull();
+        // Backdate the claim past the bound: now it is reclaimable, and the
+        // REAL `getRowsModified()` count must come back (Lesson 153 — a `.changes`
+        // read off `run()` is undefined and would report 0 reclaimed forever).
+        raw.run(
+          "UPDATE _degraded_task SET claimed_at = ? WHERE id = ?",
+          [new Date(Date.now() - 31 * 60_000).toISOString(), stranded],
+        );
+        expect(fb.requeueStaleDegradedTasks(30 * 60_000)).toBe(1);
+        // Idempotent — a second pass has nothing left to do.
+        expect(fb.requeueStaleDegradedTasks(30 * 60_000)).toBe(0);
+        // And the reclaimed row is genuinely claimable again (not merely visible).
+        expect(fb.claimNextDegradedTask("w-2")).toMatchObject({
+          id: stranded,
+          status: "running",
+          claimedBy: "w-2",
+        });
+      } finally {
+        resetSqliteStateForTests();
+        raw.close();
+      }
     });
 
     // v3.43.0: the operator path for an unreadable ledger row. The drain reports
@@ -2951,4 +3340,260 @@ describe("SQLite backup fallback", () => {
         expect(fs.existsSync(mirrorFile)).toBe(true); // re-created by the tick
       });
     });
+
+  /**
+   * v3.45.0 (spec 21) — getDueCronJobsFromMirror against REAL sql.js.
+   *
+   * This is the reader that lets the worker engine and cron daemon discover
+   * which schedules are due while Prisma is unreachable. Every other spec-21
+   * test mocks @/lib/sqlite wholesale, which is exactly why a bind-count or
+   * placeholder mistake in this one query would ship undetected: its catch
+   * returns [] on error, so a broken query is indistinguishable from "no cron
+   * is due" and degraded mode would silently never fire anything.
+   */
+  describe("getDueCronJobsFromMirror real-sql.js regression", () => {
+    type DueRow = {
+      id: string;
+      name: string;
+      taskType: string;
+      cronExpression: string;
+      nextRun: string | null;
+      config: unknown;
+    };
+    type RealDb = {
+      run(sql: string, params?: unknown[]): void;
+      close(): void;
+    };
+    type Fallback = {
+      getDueCronJobsFromMirror(now: Date, limit?: number): DueRow[];
+    };
+
+    // 04:30 UTC == the 10:00 IST daily-recommendations cron tick.
+    const NOW = new Date("2026-10-05T04:30:00.000Z");
+
+    /** Schema-complete real db + the production fallback, mirroring boot order. */
+    async function realFallback(): Promise<{ fb: Fallback; raw: RealDb }> {
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new () => RealDb & {
+          exec(sql: string, params?: unknown[]): Array<{ columns: string[]; values: unknown[][] }>;
+        };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const raw = new SQL.Database();
+
+      const { SCHEMA_SQL, setSqliteDbForTests } = require("../sqlite") as {
+        SCHEMA_SQL: string;
+        setSqliteDbForTests: (d: unknown) => Fallback;
+      };
+      for (const rawStmt of SCHEMA_SQL.split(";")
+        .map((s: string) => s.trim())
+        .filter(Boolean)) {
+        const stripped = rawStmt
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) raw.run(stripped);
+      }
+      // `config` is NOT in SCHEMA_SQL — ensureControlColumns() adds it
+      // (lib/sqlite.ts). That guard is unexported, so mirror it here; init
+      // runs it before the accessor is ever reachable.
+      raw.run("ALTER TABLE cron_job ADD COLUMN config TEXT");
+
+      return { fb: setSqliteDbForTests(raw), raw };
+    }
+
+    function insert(
+      raw: RealDb,
+      row: { id: string; nextRun: string | null; isActive?: number; config?: string | null },
+    ): void {
+      raw.run(
+        `INSERT INTO cron_job (id, name, task_type, cron_expression, next_run, config, is_active)
+         VALUES (?,?,?,?,?,?,?)`,
+        [
+          row.id,
+          `${row.id} name`,
+          "recommendations",
+          "0 10 * * *",
+          row.nextRun,
+          row.config ?? null,
+          row.isActive ?? 1,
+        ],
+      );
+    }
+
+    it("returns only active jobs due at or before now, oldest first", async () => {
+      const { fb, raw } = await realFallback();
+      try {
+        insert(raw, { id: "past", nextRun: "2026-10-05T00:00:00.000Z" });
+        insert(raw, { id: "exact", nextRun: NOW.toISOString() });
+        insert(raw, { id: "future", nextRun: "2026-10-05T09:00:00.000Z" });
+        insert(raw, { id: "inactive", nextRun: "2026-10-05T00:00:00.000Z", isActive: 0 });
+
+        // Inclusive boundary: a job due exactly NOW must fire, or the
+        // 04:30:00 tick skips it and waits a full cycle.
+        expect(fb.getDueCronJobsFromMirror(NOW).map((r) => r.id)).toEqual(["past", "exact"]);
+      } finally {
+        raw.close();
+      }
+    });
+
+    it("excludes a job with a NULL next_run (never scheduled yet)", async () => {
+      const { fb, raw } = await realFallback();
+      try {
+        insert(raw, { id: "unscheduled", nextRun: null });
+        insert(raw, { id: "due", nextRun: "2026-10-05T00:00:00.000Z" });
+        expect(fb.getDueCronJobsFromMirror(NOW).map((r) => r.id)).toEqual(["due"]);
+      } finally {
+        raw.close();
+      }
+    });
+
+    it("parses a JSON config string and projects the remaining columns", async () => {
+      const { fb, raw } = await realFallback();
+      try {
+        insert(raw, {
+          id: "cfg",
+          nextRun: "2026-10-05T00:00:00.000Z",
+          config: JSON.stringify({ systemManaged: true, indexName: "NIFTY 50" }),
+        });
+        const [row] = fb.getDueCronJobsFromMirror(NOW);
+        expect(row).toMatchObject({
+          id: "cfg",
+          name: "cfg name",
+          taskType: "recommendations",
+          cronExpression: "0 10 * * *",
+          nextRun: "2026-10-05T00:00:00.000Z",
+          config: { systemManaged: true, indexName: "NIFTY 50" },
+        });
+      } finally {
+        raw.close();
+      }
+    });
+
+    it("yields config null for unparsable JSON rather than throwing", async () => {
+      const { fb, raw } = await realFallback();
+      try {
+        insert(raw, { id: "bad", nextRun: "2026-10-05T00:00:00.000Z", config: "{not json" });
+        const [row] = fb.getDueCronJobsFromMirror(NOW);
+        expect(row).toMatchObject({ id: "bad", config: null });
+      } finally {
+        raw.close();
+      }
+    });
+
+    it("clamps out-of-range limits instead of emitting LIMIT 0 or unbounded", async () => {
+      const { fb, raw } = await realFallback();
+      try {
+        for (let i = 0; i < 5; i++) {
+          insert(raw, {
+            id: `j${i}`,
+            nextRun: new Date(Date.parse("2026-10-05T00:00:00.000Z") + i * 1000).toISOString(),
+          });
+        }
+        expect(fb.getDueCronJobsFromMirror(NOW, 2)).toHaveLength(2);
+        // 0 / negative would emit `LIMIT 0` (drops everything) or a negative
+        // limit (SQLite reads as unbounded).
+        expect(fb.getDueCronJobsFromMirror(NOW, 0)).toHaveLength(1);
+        expect(fb.getDueCronJobsFromMirror(NOW, -5)).toHaveLength(1);
+        // Above the 500 hard ceiling — capped, not passed through.
+        expect(fb.getDueCronJobsFromMirror(NOW, 10_000)).toHaveLength(5);
+      } finally {
+        raw.close();
+      }
+    });
+  });
+
+  /**
+   * v3.45.0 (spec 21) — the catch path is a SILENT STARVATION risk, so it has to
+   * be loud exactly once.
+   *
+   * A broken query and "no cron is due" return the same `[]`. With `logger.debug`
+   * nothing distinguished them, and the scheduler polls this every 30s — so a
+   * mirror whose `ensureControlColumns()` failed at boot would enqueue nothing
+   * for the entire duration of a plan-limit hold, with no signal at all. Warn
+   * fires on the first failure and stays quiet after, because a warn per tick
+   * would flood the log instead.
+   */
+  describe("getDueCronJobsFromMirror failure visibility", () => {
+    const NOW = new Date("2026-10-05T04:30:00.000Z");
+
+    beforeEach(async () => {
+      const { resetSqliteStateForTests } = require("../sqlite") as {
+        resetSqliteStateForTests: () => void;
+      };
+      resetSqliteStateForTests();
+    });
+
+    it("warns once naming the consequence, then stays quiet, and never throws", async () => {
+      type RealDb = { run(sql: string, params?: unknown[]): void; close(): void };
+      type Fallback = { getDueCronJobsFromMirror(now: Date): unknown[] };
+
+      const initSqlJs = jest.requireActual("sql.js") as unknown as (
+        config?: { wasmBinary?: Uint8Array },
+      ) => Promise<{
+        Database: new () => RealDb & { exec(sql: string, params?: unknown[]): unknown };
+      }>;
+      const wasmBinary = require("fs").readFileSync(
+        require.resolve("sql.js/dist/sql-wasm.wasm"),
+      );
+      const SQL = await initSqlJs({ wasmBinary });
+      const raw = new SQL.Database();
+
+      const { SCHEMA_SQL, setSqliteDbForTests } = require("../sqlite") as {
+        SCHEMA_SQL: string;
+        setSqliteDbForTests: (d: unknown) => Fallback;
+      };
+      for (const rawStmt of SCHEMA_SQL.split(";")
+        .map((s: string) => s.trim())
+        .filter(Boolean)) {
+        const stripped = rawStmt
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => !l.startsWith("--"))
+          .join(" ")
+          .trim();
+        if (stripped) raw.run(stripped);
+      }
+      // NOTE: no `config` ALTER here on purpose. `config` is NOT part of
+      // SCHEMA_SQL — ensureControlColumns() adds it at boot. Replaying the raw
+      // schema therefore reproduces, exactly, a mirror whose boot repair failed:
+      // `cron_job` exists but has no `config` column, so the SELECT below fails
+      // with "no such column: config" — the real-world trigger for this path.
+      const fb = setSqliteDbForTests(raw);
+
+      const realLogger = require("@/lib/logger").default as {
+        warn: (...a: unknown[]) => void;
+        debug: (...a: unknown[]) => void;
+      };
+      const warnSpy = jest.spyOn(realLogger, "warn").mockImplementation(() => {});
+      const debugSpy = jest.spyOn(realLogger, "debug").mockImplementation(() => {});
+
+      try {
+        // Never throws, never enqueues garbage — the queue contract holds.
+        expect(fb.getDueCronJobsFromMirror(NOW)).toEqual([]);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        const first = warnSpy.mock.calls[0]?.[0] as { msg?: string } | undefined;
+        expect(first?.msg).toContain("enqueue NOTHING");
+        // The console needs the reason, not just the fact.
+        expect(JSON.stringify(first)).toContain("config");
+
+        // Subsequent polls stay at debug so a lasting fault cannot flood logs.
+        expect(fb.getDueCronJobsFromMirror(NOW)).toEqual([]);
+        expect(fb.getDueCronJobsFromMirror(NOW)).toEqual([]);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(debugSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        warnSpy.mockRestore();
+        debugSpy.mockRestore();
+        raw.close();
+      }
+    });
+  });
 });

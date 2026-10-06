@@ -269,6 +269,84 @@ export const GS_LEDGER_COUNTS_SQL =
 export const GS_LEDGER_ROWS_BY_SEQ_SQL =
   "SELECT seq, tab, row_json, delivered FROM google_sheets_ledger WHERE seq IN ({{SEQS}})";
 
+/** v3.45.0 Spec 21 — one row of the durable degraded-task queue. */
+export interface DegradedTaskRow {
+  id: string;
+  taskType: string;
+  dedupKey: string;
+  payload: Record<string, unknown> | null;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  attempts: number;
+  claimedBy: string | null;
+  claimedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** v3.45.0 Spec 21 — exported so the real-sql.js guard in `sqlite.test.ts` executes the
+ *  PRODUCTION string against a real engine. Every `?` MUST be bound: sql.js does NOT
+ *  error on a missing bind — an unbound placeholder evaluates as NULL, so `dedup_key = NULL`
+ *  matches nothing and the SELECT silently returns zero rows, which the accessor would
+ *  surface as "no recent task" and re-enqueue a duplicate. (sql.js only throws when you
+ *  pass an EXPLICIT array whose length disagrees with the placeholder count.)
+ *  Bind order: [dedupKey, sinceIso].
+ *  Only undelivered statuses are considered so a COMPLETED row does not suppress a
+ *  legitimate re-fire of the same cron later. */
+export const DEGRADED_DEDUP_SQL =
+  "SELECT id FROM _degraded_task WHERE dedup_key = ? AND status IN ('pending','running') AND created_at >= ? LIMIT 1";
+
+/** Spec 21 — claim candidate scan, oldest-first. No binds. The atomicity of the
+ *  claim comes from the status-guarded UPDATE below, not from this SELECT. */
+export const DEGRADED_CLAIM_CANDIDATE_SQL =
+  "SELECT * FROM _degraded_task WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1";
+
+/** Spec 21 — the atomic claim. `status = 'pending'` in the WHERE clause is what makes
+ *  two claimants safe: both may read the same candidate row, but only the first
+ *  UPDATE moves it out of 'pending', and the loser sees 0 rows modified and stands down.
+ *
+ *  The changed-row count comes from `db.getRowsModified()`, NOT from `run()`'s return
+ *  value: sql.js `run()` returns the `Database` itself, so `res.changes` is always
+ *  `undefined`. Reading it that way made `Number(undefined ?? 0) === 0` permanently
+ *  true and the claim ALWAYS lose its race — the queue would accept work and never
+ *  run any of it (Lesson 153).
+ *  Bind order: [workerId, nowIso, nowIso, id]. */
+export const DEGRADED_CLAIM_SQL =
+  "UPDATE _degraded_task SET status='running', claimed_by=?, claimed_at=?, attempts=attempts+1, updated_at=? WHERE id=? AND status='pending'";
+
+/** Spec 21 — terminal state write. Bind order: [outcome, nowIso, error, nowIso, id].
+ *  NOTE there is no status guard: completing an already-terminal row is idempotent
+ *  by design (a retried completion must not resurrect it), unlike the claim. */
+export const DEGRADED_COMPLETE_SQL =
+  "UPDATE _degraded_task SET status=?, completed_at=?, error=?, updated_at=? WHERE id=?";
+
+/** Spec 21 — admin/task listing, newest-first. Bind order: [limit]. */
+export const DEGRADED_LIST_SQL = "SELECT * FROM _degraded_task ORDER BY created_at DESC LIMIT ?";
+
+/** Spec 21 — per-status counts for the admin panel. No binds. */
+export const DEGRADED_COUNTS_SQL = "SELECT status, COUNT(*) AS n FROM _degraded_task GROUP BY status";
+
+/** Spec 21 — age of the oldest still-pending row, so the admin panel can show how
+ *  long work has been backing up. No binds. */
+export const DEGRADED_OLDEST_PENDING_SQL =
+  "SELECT MIN(created_at) FROM _degraded_task WHERE status = 'pending'";
+
+/** Spec 21 — reclaim rows stranded in 'running' by a crashed leader.
+ *
+ *  Without this a row claimed but never completed (leader died mid-executor) would
+ *  stay 'running' forever: nothing else would ever re-claim it, so the job is
+ *  silently lost forever. That is the mirror image of the claim-always-loses
+ *  defect in Lesson 153 — one strands work, the other never runs it.
+ *
+ *  The staleness bound is applied by the CALLER (`STALE_RUNNING_MS`), which must
+ *  exceed the degraded leader lease so a still-live leader's in-flight row is
+ *  never stolen. Resetting `claimed_by`/`claimed_at` is what makes the row
+ *  claimable again rather than merely visible.
+ *  Bind order: [updatedAtIso, staleCutoffIso]. */
+export const DEGRADED_REQUEUE_STALE_SQL =
+  "UPDATE _degraded_task SET status='pending', claimed_by=NULL, claimed_at=NULL, updated_at=? WHERE status='running' AND claimed_at IS NOT NULL AND claimed_at < ?";
+
 export interface SqliteFallback {
   /** Spec 20 — record encoded rows in the export ledger. `delivered` is true when
    *  the live append already landed (audit trail, never replayed) and false when
@@ -429,6 +507,86 @@ export interface SqliteFallback {
    */
   touchControlMirror(table: "worker_task" | "worker_status" | "cron_job"): void;
 
+  // ── v3.45.0 Spec 21: degraded-mode queue + control state ──────────────────
+  /**
+   * Persist the operator's degraded mode (auto|force|off) into `_degraded_state`
+   * (singleton row) so a cold start does not lose the kill switch. Best-effort,
+   * never throws.
+   */
+  writeDegradedState(row: {
+    mode: string;
+    reason?: string | null;
+    updatedBy?: string | null;
+  }): void;
+  /** Read the persisted degraded mode, or null when never written. */
+  readDegradedState(): { mode: string; reason: string | null; updatedAt: string | null } | null;
+  /**
+   * Enqueue a degraded task. Idempotent within `dedupWindowMs`: when a row with
+   * the same `dedupKey` exists and is still pending, the existing id is returned
+   * instead of inserting a duplicate. Best-effort, never throws — returns null
+   * when the mirror is unavailable.
+   */
+  enqueueDegradedTask(row: {
+    taskType: string;
+    dedupKey: string;
+    payload?: unknown;
+    dedupWindowMs?: number;
+  }): string | null;
+  /**
+   * Atomically claim the oldest pending degraded task for `workerId`. The
+   * status-guarded UPDATE is what makes the claim safe against concurrent
+   * instances: only one UPDATE can move a given row out of 'pending'.
+   */
+  claimNextDegradedTask(workerId: string): DegradedTaskRow | null;
+  /** Terminal state write for a claimed task. */
+  completeDegradedTask(
+    id: string,
+    outcome: "completed" | "failed" | "skipped",
+    error?: string | null,
+  ): void;
+  /**
+   * Reclaim rows stranded in `running` by a crashed leader so they become
+   * claimable again. `staleMs` is measured from `claimed_at` and MUST exceed
+   * the degraded leader lease, otherwise a live leader's in-flight row gets
+   * stolen and its job runs twice. Returns the number reclaimed.
+   */
+  requeueStaleDegradedTasks(staleMs: number): number;
+  /** Read tasks for admin visibility / drain accounting. */
+  getDegradedTasks(limit?: number): DegradedTaskRow[];
+  /** Per-status counts + oldest pending age, for the admin surface. */
+  getDegradedTaskStats(): {
+    pending: number;
+    running: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+    oldestPendingAt: string | null;
+  };
+  /**
+   * Active cron jobs whose `next_run` has passed, read from the LOCAL mirror.
+   *
+   * v3.45.0 (spec 21): the degraded path needs to know what is DUE while the
+   * Prisma plan-limit breaker is open. `cron_job` is one of the three control
+   * mirrors already synced by `syncFromPrisma`, so the schedule is readable
+   * without Prisma — without this the degraded queue would never receive work
+   * (the "queue accepts work and never runs it" defect, Lesson 153, inverted).
+   *
+   * `nextRun` is NOT advanced here: the mirror is overwritten wholesale by the
+   * next `syncFromPrisma`, so a write would not survive and would only hide the
+   * double-fire. Repeat-fire cadence is governed by the enqueue dedup window.
+   */
+  getDueCronJobsFromMirror(
+    now: Date,
+    limit?: number,
+  ): Array<{
+    id: string;
+    name: string;
+    taskType: string;
+    cronExpression: string;
+    nextRun: string | null;
+    config: unknown;
+  }>;
+
   // ── v3.28.0 NSE-backed data store (SQLite-first) ──────────────────────────
   /** Upsert a stock (Symbol) row into SQLite. */
   upsertSymbol(row: {
@@ -553,6 +711,20 @@ export interface SqliteFallback {
 }
 
 let _instance: SqliteFallback | null = null;
+
+/**
+ * v3.45.0 (spec 21): one-shot latch so a BROKEN mirror schema warns loudly
+ * exactly once instead of silently degrading forever.
+ *
+ * `getDueCronJobsFromMirror()` is polled every 30s by the scheduler. If it
+ * returns [] on a query error (say `no such column: config`, because
+ * `ensureControlColumns()` failed at boot and is warn-only), degraded mode
+ * would silently enqueue nothing at all — the exact "queue accepts work and
+ * never runs it" shape from the other side (Lesson 153). Logging at `debug`
+ * hid it; logging at `warn` every tick would flood the log for as long as the
+ * fault lasts. So: warn on the FIRST failure, stay quiet after.
+ */
+let dueCronSchemaWarned = false;
 
 // Cache of the resolved sql.js module so admin backup/restore can construct a
 // fresh in-memory DB from exported bytes without re-running initSqlJs.
@@ -1836,6 +2008,44 @@ export const SCHEMA_SQL = `
     delivered   INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_gs_ledger_tab_seq ON google_sheets_ledger (tab, seq);
+
+  -- v3.45.0 Spec 21: degraded-mode control state. SINGLETON — the row id is
+  -- always the literal 'singleton', mirroring the google_sheets_config pattern.
+  -- Holds the durable operator mode (auto|force|off) so a cold start keeps the
+  -- kill switch — the ACTIVE flag itself is process-local hysteresis state in
+  -- lib/services/degradedMode.ts (it is a per-instance read/write routing
+  -- decision, not shared truth), so it is intentionally NOT persisted here.
+  CREATE TABLE IF NOT EXISTS _degraded_state (
+    id           TEXT PRIMARY KEY,
+    mode         TEXT NOT NULL DEFAULT 'auto',
+    reason       TEXT,
+    updated_at   TEXT,
+    updated_by   TEXT
+  );
+
+  -- v3.45.0 Spec 21: durable degraded task queue. This is the ONLY durable
+  -- hand-off between "cron fired" and "the side-effecting executor ran", so a
+  -- crash between enqueue and execute cannot lose the job. Rows are claimed
+  -- atomically via the status guard in claimDegradedTask.
+  -- dedup_key makes an enqueue idempotent within a window so a cron that fires
+  -- on several instances (or a retried tick) cannot queue the same work twice.
+  CREATE TABLE IF NOT EXISTS _degraded_task (
+    id             TEXT PRIMARY KEY,
+    task_type      TEXT NOT NULL,
+    dedup_key      TEXT NOT NULL,
+    payload        TEXT,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    claimed_by     TEXT,
+    claimed_at     TEXT,
+    completed_at   TEXT,
+    error          TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+  );
+  -- Claim scans pending rows oldest-first, dedup lookups hit dedup_key.
+  CREATE INDEX IF NOT EXISTS idx_degraded_task_status ON _degraded_task (status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_degraded_task_dedup ON _degraded_task (dedup_key);
 `;
 
 // ---------------------------------------------------------------------------
@@ -2442,6 +2652,25 @@ export function stopOpsCounterPersistence(): void {
 }
 
 /**
+ * Test hook — install a REAL sql.js Database into the shared state and hand back
+ * a `SqliteFallback` bound to it, so tests can drive the production accessors
+ * against the actual engine instead of a mock.
+ *
+ * WHY THIS EXISTS (Lesson 153): the Spec 21 guard pinned every exported SQL
+ * string against real SQLite, which proved the SQL was correct while leaving the
+ * accessors that CONSUME it untested — so `claimNextDegradedTask()` reading
+ * `.changes` off `run()`'s return (always `undefined` → always "lost the race")
+ * passed the entire suite. Correct SQL + a broken caller is still broken, and only
+ * a real engine reveals it. Follows the `setMirrorSnapshotPathForTests` pattern.
+ */
+export function setSqliteDbForTests(db: Database): SqliteFallback {
+  state.db = db;
+  state.ready = true;
+  _instance = null;
+  return createFallback(db);
+}
+
+/**
  * Test hook — reset the backup layer to a fresh (not-ready) state so tests can
  * exercise re-initialization / retry paths deterministically. Clears timers
  * and mutates the shared state object IN PLACE (a naive `g.__sqliteBackup = …`
@@ -2466,6 +2695,9 @@ export function resetSqliteStateForTests(): void {
   // next real init) start from a clean slate.
   resetMirrorSnapshotOverrides();
   resetMirrorBlobsOverrides();
+  // v3.45.0: re-arm the one-shot due-cron warn so a test (or a real re-init
+  // after a schema repair) can assert the loud-first-failure behaviour again.
+  dueCronSchemaWarned = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -4561,6 +4793,39 @@ function toJsonVal(v: unknown): string | null {
   return JSON.stringify(v);
 }
 
+/** Map a raw `_degraded_task` row (snake_case) to the camelCase contract.
+ *  `payload` is stored as TEXT and rehydrated to an object here; a malformed
+ *  payload degrades to null rather than throwing on a control-plane read. */
+function degradedTaskRow(rec: Record<string, unknown>): DegradedTaskRow {
+  let payload: Record<string, unknown> | null = null;
+  const raw = rec.payload;
+  if (raw != null) {
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        payload = parsed as Record<string, unknown>;
+      }
+    } catch {
+      payload = null;
+    }
+  }
+  const status = String(rec.status ?? "pending") as DegradedTaskRow["status"];
+  return {
+    id: String(rec.id ?? ""),
+    taskType: String(rec.task_type ?? "unknown"),
+    dedupKey: String(rec.dedup_key ?? ""),
+    payload,
+    status,
+    attempts: Number(rec.attempts ?? 0),
+    claimedBy: rec.claimed_by != null ? String(rec.claimed_by) : null,
+    claimedAt: rec.claimed_at != null ? String(rec.claimed_at) : null,
+    completedAt: rec.completed_at != null ? String(rec.completed_at) : null,
+    error: rec.error != null ? String(rec.error) : null,
+    createdAt: String(rec.created_at ?? ""),
+    updatedAt: String(rec.updated_at ?? ""),
+  };
+}
+
 /** Rehydrate a mirror row (snake_case DDL columns) into the Prisma-shaped
  *  camelCase contract the write-through helpers AND the swap-site services
  *  expect: date columns become `Date` instances, JSON columns become parsed
@@ -5591,6 +5856,318 @@ function createFallback(db: Database): SqliteFallback {
           msg: "SQLite: upsertWorkerTask failed",
           error: err instanceof Error ? err.message : String(err),
         });
+      }
+    },
+
+    // ── v3.45.0 Spec 21: degraded-mode queue + control state ────────────────
+    // The queue is the ONLY durable hand-off between "cron fired" and "the
+    // side-effecting executor ran", so a crash in that window cannot lose work.
+    // Every method is best-effort and never throws: a bookkeeping failure must
+    // not take down the daemon that called it.
+    // -------------------------------------------------------------------------
+
+    writeDegradedState(row: { mode: string; reason?: string | null; updatedBy?: string | null }): void {
+      if (!db) return;
+      try {
+        db.run(
+          `INSERT INTO _degraded_state (id, mode, reason, updated_at, updated_by)
+           VALUES ('singleton', ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             mode=excluded.mode,
+             reason=excluded.reason,
+             updated_at=excluded.updated_at,
+             updated_by=excluded.updated_by`,
+          [
+            String(row.mode ?? "auto"),
+            row.reason != null ? String(row.reason) : null,
+            new Date().toISOString(),
+            row.updatedBy != null ? String(row.updatedBy) : null,
+          ],
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: writeDegradedState failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    readDegradedState(): { mode: string; reason: string | null; updatedAt: string | null } | null {
+      if (!db) return null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = db.exec(
+          "SELECT mode, reason, updated_at FROM _degraded_state WHERE id = 'singleton' LIMIT 1",
+        );
+        const row = res?.[0]?.values?.[0] as unknown[] | undefined;
+        if (!row) return null;
+        return {
+          mode: String(row[0] ?? "auto"),
+          reason: row[1] != null ? String(row[1]) : null,
+          updatedAt: row[2] != null ? String(row[2]) : null,
+        };
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: readDegradedState failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+
+    enqueueDegradedTask(row: {
+      taskType: string;
+      dedupKey: string;
+      payload?: unknown;
+      dedupWindowMs?: number;
+    }): string | null {
+      if (!db) return null;
+      const dedupKey = String(row.dedupKey ?? "");
+      const windowMs = Number(row.dedupWindowMs ?? 0);
+      try {
+        // Idempotency guard: a pending row with this dedup key inside the window
+        // wins, so N instances firing the same cron queue ONE job. Checked
+        // first (not via a unique index) because completed rows must not block
+        // a legitimate re-fire later.
+        if (windowMs > 0 && dedupKey) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dup: any = db.exec(DEGRADED_DEDUP_SQL, [
+            dedupKey,
+            new Date(Date.now() - windowMs).toISOString(),
+          ]);
+          const existingId = dup?.[0]?.values?.[0]?.[0];
+          if (existingId) return String(existingId);
+        }
+        const now = new Date().toISOString();
+        const id = randomUUID();
+        db.run(
+          `INSERT INTO _degraded_task
+             (id, task_type, dedup_key, payload, status, attempts, created_at, updated_at)
+           VALUES (?,?,?,?, 'pending', 0, ?, ?)`,
+          [
+            id,
+            String(row.taskType ?? "unknown"),
+            dedupKey,
+            row.payload != null ? JSON.stringify(row.payload) : null,
+            now,
+            now,
+          ],
+        );
+        return id;
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: enqueueDegradedTask failed",
+          taskType: row.taskType,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+
+    claimNextDegradedTask(workerId: string): DegradedTaskRow | null {
+      if (!db) return null;
+      try {
+        // SELECT the candidate, then claim it with a status-guarded UPDATE. The
+        // guard (status='pending') is what makes this safe: two instances can
+        // select the same row, but only one UPDATE can move it out of
+        // 'pending', and the loser sees count===0 and moves on.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cand: any = db.exec(DEGRADED_CLAIM_CANDIDATE_SQL);
+        const values = cand?.[0]?.values?.[0] as unknown[] | undefined;
+        if (!values) return null;
+        const cols = (cand[0].columns as string[]) ?? [];
+        const rec = Object.fromEntries(cols.map((c, i) => [c, values[i]])) as Record<string, unknown>;
+        const id = String(rec.id);
+
+        const now = new Date().toISOString();
+        db.run(DEGRADED_CLAIM_SQL, [String(workerId), now, now, id]);
+        // MUST be read immediately after the UPDATE and before any other statement
+        // — getRowsModified() reports only the most recent one. `run()` returns the
+        // Database, so `res.changes` would be undefined and the claim would always
+        // look lost (Lesson 153).
+        if (db.getRowsModified() === 0) return null; // lost the race
+
+        return degradedTaskRow({
+          ...rec,
+          status: "running",
+          claimed_by: String(workerId),
+          claimed_at: now,
+          attempts: Number(rec.attempts ?? 0) + 1,
+          updated_at: now,
+        });
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: claimNextDegradedTask failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+
+    completeDegradedTask(
+      id: string,
+      outcome: "completed" | "failed" | "skipped",
+      error?: string | null,
+    ): void {
+      if (!db) return;
+      try {
+        const now = new Date().toISOString();
+        db.run(DEGRADED_COMPLETE_SQL, [
+          outcome,
+          now,
+          error != null ? String(error) : null,
+          now,
+          String(id),
+        ]);
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: completeDegradedTask failed",
+          id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    requeueStaleDegradedTasks(staleMs: number): number {
+      if (!db) return 0;
+      const ms = Math.max(1, Math.floor(staleMs) || 1);
+      try {
+        const now = new Date().toISOString();
+        db.run(DEGRADED_REQUEUE_STALE_SQL, [now, new Date(Date.now() - ms).toISOString()]);
+        // getRowsModified() immediately after the UPDATE (Lesson 153: `run()`
+        // returns the Database, so `res.changes` is always undefined).
+        return db.getRowsModified();
+      } catch (err) {
+        logger.warn({
+          msg: "SQLite: requeueStaleDegradedTasks failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return 0;
+      }
+    },
+
+    getDegradedTasks(limit = 50): DegradedTaskRow[] {
+      if (!db) return [];
+      try {
+        const capped = Math.max(1, Math.min(500, Math.floor(limit) || 50));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = db.exec(DEGRADED_LIST_SQL, [capped]);
+        const cols = (res?.[0]?.columns as string[]) ?? [];
+        const rows = (res?.[0]?.values ?? []) as unknown[][];
+        return rows.map((v) => degradedTaskRow(Object.fromEntries(cols.map((c, i) => [c, v[i]]))));
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getDegradedTasks failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    getDegradedTaskStats(): {
+      pending: number;
+      running: number;
+      completed: number;
+      failed: number;
+      skipped: number;
+      oldestPendingAt: string | null;
+    } {
+      const zero = {
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+        skipped: 0,
+        oldestPendingAt: null as string | null,
+      };
+      if (!db) return zero;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = db.exec(DEGRADED_COUNTS_SQL);
+        const rows = (res?.[0]?.values ?? []) as unknown[][];
+        for (const [status, n] of rows) {
+          const count = Number(n);
+          if (status === "pending") zero.pending = count;
+          else if (status === "running") zero.running = count;
+          else if (status === "completed") zero.completed = count;
+          else if (status === "failed") zero.failed = count;
+          else if (status === "skipped") zero.skipped = count;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const oldest: any = db.exec(DEGRADED_OLDEST_PENDING_SQL);
+        const v = oldest?.[0]?.values?.[0]?.[0];
+        zero.oldestPendingAt = v != null ? String(v) : null;
+        return zero;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getDegradedTaskStats failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return zero;
+      }
+    },
+
+    getDueCronJobsFromMirror(
+      now: Date,
+      limit?: number,
+    ): Array<{
+      id: string;
+      name: string;
+      taskType: string;
+      cronExpression: string;
+      nextRun: string | null;
+      config: unknown;
+    }> {
+      if (!db) return [];
+      try {
+        const cap = Math.min(500, Math.max(1, Math.floor(limit ?? 100)));
+        // ISO compare: `next_run` is ISO-normalised on write by both
+        // syncFromPrisma and upsertCronJob, so a lexical compare against
+        // `now.toISOString()` is order-preserving.
+        const res = db.exec(
+          `SELECT id, name, task_type, cron_expression, next_run, config
+             FROM cron_job
+            WHERE is_active = 1
+              AND next_run IS NOT NULL
+              AND next_run <= ?
+            ORDER BY next_run ASC
+            LIMIT ?`,
+          [now.toISOString(), cap],
+        );
+        const rows = (res?.[0]?.values ?? []) as unknown[][];
+        return rows.map((row) => {
+          const [id, name, taskType, cronExpression, nextRun, config] = row;
+          let parsed: unknown = config;
+          if (typeof config === "string" && config) {
+            try {
+              parsed = JSON.parse(config);
+            } catch {
+              parsed = null;
+            }
+          }
+          return {
+            id: String(id),
+            name: String(name ?? ""),
+            taskType: String(taskType ?? ""),
+            cronExpression: String(cronExpression ?? ""),
+            nextRun: nextRun == null ? null : String(nextRun),
+            config: parsed,
+          };
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (dueCronSchemaWarned) {
+          logger.debug({ msg: "SQLite: getDueCronJobsFromMirror failed", error: message });
+        } else {
+          dueCronSchemaWarned = true;
+          logger.warn({
+            msg:
+              "SQLite: getDueCronJobsFromMirror failed — degraded cron will enqueue NOTHING until this is fixed",
+            error: message,
+            alreadyLogged: true,
+          });
+        }
+        return [];
       }
     },
 

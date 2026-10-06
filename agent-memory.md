@@ -15,6 +15,18 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-06 | v3.45.0 — Spec 21 Degraded SQLite execution engine + preemptive plan-limit switch
+
+**Request (spec 21, user-approved; branch `feature/google-sheets-tracking` on `f0c73c7`)**: after the 2026-10-02 P6003 hold-lift, the breaker-never-opened reality (vestigial v3.41.2 Prisma fallbacks) → a preemptive, plan-limit-budget-driven switch that runs the worker/cron core (recommendations + corp-actions) on the SQLite execution engine BEFORE any Prisma op.
+
+**Execution** (user corrected a breaker-first guard violation to match spec §E ordering — degraded branch ABOVE the unchanged `if (isPlanLimitBreakerOpen()) return;`): `lib/services/degradedMode.ts` (precedence `off > forced > breaker > threshold`, hysteresis enter ≥180,000 / stay >160,000 / exit ≤160,000 AND breaker closed, `_degraded_state` persists operator mode only, unreadable ops → not active, zero Prisma incl. transitively via mirror writers) · `lib/services/degradedLeader.ts` (Netlify-Blobs ETag-CAS lease, fail-closed) · `lib/services/corpActionPurpose.ts` · `lib/services/worker/{degradedExecutor,degradedQueue,degradedTaskRegistry}.ts` (90-min CRON dedup, 5-task drain bound, 30-min stale-`running` reclaim; 29-type registry, 2 degraded-safe) · 3 mode-only gate sites (`worker-engine.ts` ~341/~713, `cron-daemon.ts` `fireJob` ~255) · admin `GET/POST /api/admin/degraded-mode` · 5 audit tags.
+
+**Verification**: 6 new suite (~144 tests) + Lesson 157 2×2 gate matrix — full Jest **134/134 suites · 1972 pass / 4 skip / 0 fail** · tsc **46 exact (0 new; prod 0)** · lint **0 errors (1158 warnings, baseline 1155)** · quickbuild **199/199** · doc budget **91.4/100 KB**.
+
+**Docs**: `versions-v3.45.md` + CHANGELOG + versions-index + Lessons **152–157** + TODO block + Primer + session-todos + HANDOFF + latest.md + session archive `2026-10-06-degraded-sqlite-engine/`. **AGENTS.md row DEFERRED** (32,666/32,768 B cap — Lesson 142; recorded in the changelog).
+
+**Commit**: pending explicit user approval — ONE authorized v3.45.0 commit + PR #133 update (no auto-commit/push/PR/merge/deploy). Undiagnosed prod findings (follower snapshot-upload coordination, 34 Chartink HTTP 419s, FCP 25235 ms / TTFB 20975 ms, `themeColor` warnings, redeployment) recorded in TODO + changelog for the next pass.
+
 ### 2026-09-28 | PR #133 quality-gate fix — `applySchema` strict/failOpen split (b8ef109 regression)
 
 **Request (merge-readiness continuity)**: PR #133 pushed head (`ac24ede`) failed the quality-gate — one Jest test red; verify/fix so the merge gate goes green.
