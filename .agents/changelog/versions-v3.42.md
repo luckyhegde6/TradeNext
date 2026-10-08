@@ -1,8 +1,8 @@
 # v3.42.0 — Google Sheets tracking (Spec 19)
 
-> **Branch**: `feature/google-sheets-tracking` (on `main` @ `67eb3fe`) — **UNCOMMITTED, no push/PR/deploy**
+> **Branch**: `feature/google-sheets-tracking` (on `main` @ `67eb3fe`) — **COMMITTED `a6e4e6e` + PUSHED + PR #133 MERGED into `main` (2026-10-06)**
 > **Spec**: `.agents/specs/19-google-sheets-tracking.md` · **Plan**: `.agents/plans/19-google-sheets-tracking.md`
-> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc **46 exact baseline (0 new; prod 0)** · lint **0 errors (1155 pre-existing warnings, byte-identical to v3.41.3)** · **118/118 suites (1601 pass / 4 skip / 0 fail, +62)** · quickbuild **189/189** ✓ · **Phase 4 live check NOT RUN** (OAuth consent not performed) · **no commit/push/PR/merge/deploy claimed**
+> **Status**: CODE + TESTS + VERIFICATION + DOCS DONE — tsc **46 exact baseline (0 new; prod 0)** · lint **0 errors (1155 pre-existing warnings, byte-identical to v3.41.3)** · **118/118 suites (1601 pass / 4 skip / 0 fail, +62)** · quickbuild **189/189** ✓ · **Phase 4 live check NOT RUN** (OAuth consent not performed) · **COMMITTED `a6e4e6e` + PUSHED + PR #133 MERGED (2026-10-06)**
 
 ## Why
 

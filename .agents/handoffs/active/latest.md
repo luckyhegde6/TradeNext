@@ -11,7 +11,7 @@
 | **State** | CODE + TESTS + GATES + DOCS **DONE** · **COMMITTED** `138d69a` (code + docs) + **security-deps fix** `a433039` + **PUSHED** + **PR #133 all 9 checks GREEN** + **MERGED into `main`** per explicit user approval (2026-10-06) |
 | **In-flight** | None — merge complete; docs-status update committed as the final docs commit |
 | **Blocked** | Nothing code-side. Remaining (user-controlled): Netlify deploy; 5 default-branch Dependabot alerts (1 high / 4 moderate — pre-fix deps on `main`) clear once the merged deps ship. Stale-CI note resolved: the old RED run was the pre-security-fix head; `a433039` gate all-green. |
-| **Side note** | v3.44.0 legal pages COMMITTED + PUSHED (`fb29b16` → `66db159` → `ac24ede`, PR #133). v3.43.0 Sheets console `645cf85` + `aba7fa6` ride along on this branch. PR #132 (v3.41.3 Laya) remains OPEN and unrelated. P6003 hold premise proved FALSE — breaker never opened in prod; hold ended 2026-10-02. |
+| **Side note** | v3.44.0 legal pages COMMITTED + PUSHED (`fb29b16` → `66db159` → `ac24ede`, PR #133). v3.43.0 Sheets console `645cf85` + `aba7fa6` ride along on this branch. PR #132 (v3.41.3 Laya) was MERGED `4b68e30` (2026-09-25). P6003 hold premise proved FALSE — breaker never opened in prod; hold ended 2026-10-02. |
 
 ## What's done (v3.45.0)
 
@@ -48,8 +48,8 @@
 
 ## Remaining-merge state of PREVIOUS workstreams
 
-- v3.44.0 (legal): committed + pushed — `fb29b16` → `66db159` → `ac24ede` (PR #133 open).
-- v3.43.0 (Sheets console): committed `645cf85` + `aba7fa6` — push/merge pending user (rides on this branch).
-- v3.41.3 (Laya): pushed, PR #132 OPEN — merge/deploy pending user.
+- v3.44.0 (legal): committed + pushed — `fb29b16` → `66db159` → `ac24ede` + `4010a26` (PR #133 MERGED 2026-10-06).
+- v3.43.0 (Sheets console): committed `645cf85` + `aba7fa6` — pushed, PR #133 MERGED 2026-10-06.
+- v3.41.3 (Laya): pushed, PR #132 MERGED `4b68e30` (2026-09-25).
 - v3.38.x: PR #121 OPEN, PR #118 OPEN — merge/deploy pending user.
 - Full detail: `.agents/changelog/versions-index.md`.
