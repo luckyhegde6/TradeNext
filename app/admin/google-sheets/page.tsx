@@ -13,8 +13,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import type { HeaderState } from "@/lib/services/googleSheets/tabs";
 
-type HeaderState = "match" | "mismatch" | "empty" | "unreadable" | "absent" | "unknown";
 type TabName = "swing" | "daily-rec" | "screener" | "custom" | "decisions" | "metrics";
 
 interface TabStatus {
@@ -121,12 +121,11 @@ interface LedgerDeleteResponse {
   error?: string;
 }
 
-const HEADER_BADGE: Record<HeaderState, { label: string; cls: string }> = {
-  match: { label: "header ok", cls: "bg-green-100 dark:bg-emerald-500/15 text-green-800 dark:text-emerald-300" },
-  mismatch: { label: "header mismatch", cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300" },
-  empty: { label: "header written", cls: "bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300" },
-  unreadable: { label: "unreadable", cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300" },
-  absent: { label: "tab missing", cls: "bg-red-100 dark:bg-red-500/15 text-red-800 dark:text-red-300" },
+/** Server `HeaderState` (tabs.ts) → badge. `unknown` is the defensive fallback. */
+export const HEADER_BADGE: Record<HeaderState, { label: string; cls: string }> = {
+  matched: { label: "header ok", cls: "bg-green-100 dark:bg-emerald-500/15 text-green-800 dark:text-emerald-300" },
+  drifted: { label: "header drifted", cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300" },
+  absent: { label: "no header yet", cls: "bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300" },
   unknown: { label: "unknown", cls: "bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200" },
 };
 

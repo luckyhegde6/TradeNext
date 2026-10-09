@@ -15,6 +15,20 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-09 | v3.47.0 — Specs 25 + 26 scheduled-execution reliability + GS header-label fix (branch `fix/daily-rec-swing-cron-worker`, base `main` = PR #134 MERGED)
+
+**Request (specs 25/26, user-approved; branch `fix/daily-rec-swing-cron-worker`)**: (25) cron jobs missed while Netlify suspends an idle instance must be re-fired, the daemon must default to UTC, and the degraded-executor must behave correctly when recurring; (26) the admin GS console shows "unknown" for healthy tabs because the client's HeaderState union doesn't match the server contract.
+
+**Execution**: (25) `catchUpMissedCronJobs()` (`CRON_CATCHUP_WINDOW_MS=15min`) in `lib/services/worker/worker-engine.ts` (~L791) — missed ≤15min spawned (same guards as `checkScheduledJobs`, skip `running`), stale re-armed advance never fired; wired daemon boot + 5-min resync tick; `cron-daemon.ts` defaults `DEFAULT_TIMEZONE = "UTC"` with per-job override kept. **Smoke-verified live** (dev daemon, UTC logs): degraded enqueue 13:49:58 → completed 13:50:43 (`stockCount: 10870`); re-enqueue 13:54:59 + mid-run kill → durable `running` row in mirror table **`_degradated_task`** (`logs/sqlite-mirror.sqlite`, 36 tables — queue IS SQLite-persisted, corrects earlier in-memory belief); restore verified 3 ways (psql nextRun 2026-10-12 ×4 + mirror dump + live boot 14:21:17 `Recomputed` ×4 `changed=false`). **BUG A (follow-up)**: degraded executor doesn't advance mirror `next_run` on completion → recurring job legitimately re-fires every 5-min tick; fix idea = advance via `calculateNextRun` (:729/:762). BUG B non-issue: `POST /api/admin/degraded-mode` 405 (GET+PATCH only). (26) `app/admin/google-sheets/page.tsx` `HeaderState` local union → `import type { HeaderState } from "@/lib/services/googleSheets/tabs"` (4 server keys `matched|drifted|absent|unknown`); `HEADER_BADGE` exported 4-key map (`absent` = "no header yet" blue — was red "tab missing"); server contract untouched.
+
+**Verification**: Spec 25 COMMITTED `480cd3b` (14 files +821/−274, pre-commit green incl. tsc prod + context budget 91.8/100 KB) · targeted Jest **93/93 (4/4)** · Lesson **159**. Spec 26: NEW `lib/__tests__/googleSheetsHeaderBadge.test.ts` **5/5** · tsc **46 exact (no new)** · eslint 0 on touched files · live dev `/admin/google-sheets` (admin session) renders all tabs with zero console errors (local reads `unknown` — no live sheet; mapping covered by unit test).
+
+**Docs**: `versions-v3.47.md` + AGENTS.md v3.47.0 row + CHANGELOG + versions-index + TODO block + Primer + HANDOFF + latest.md + session archive `2026-10-09-ops-counter-fixes/` (flow addendum + decisions D14/D15).
+
+**Commit**: Spec 26 code + docs — commit PENDING USER (D9: commit on explicit request only; merge/deploy user-only).
+
+---
+
 ### 2026-10-09 | PROD-FIX pass on v3.46.0 — live diagnosis + ops-counter correction executed (branch `feature/fix-ops-counter-authority-sync` = PR #134, HEAD `d0ea87e`, all 11 checks green)
 
 **Request**: investigate the reported live prod issues (stuck SQLite→Prisma outbox, ops-counter drift, Google Sheets tracking off, decision engine inert) — read-only first, fixes approval-gated.
