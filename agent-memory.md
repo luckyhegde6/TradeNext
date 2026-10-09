@@ -15,7 +15,17 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
-### 2026-10-06 | v3.45.0 — Spec 21 Degraded SQLite execution engine + preemptive plan-limit switch
+### 2026-10-09 | v3.46.0 — Specs 22/23/24 ops-counter authority sync + GS table-missing tolerance + cron missed-tick catch-up
+
+**Request (specs 22/23/24, user-approved; branch `feature/fix-ops-counter-authority-sync` = PR #134 on `main` `5a0ddb2`)**: three production-hardening fixes — (22) a drifted Postgres ops counter must be correctable via API and the ops month must mirror the live day; (23) Google-Sheets tables missing on prod must not throw into the worker, and the deploy must run migrations before the build; (24) cron jobs missed while Netlify suspends an idle instance must be caught up rather than silently skipped.
+
+**Execution**: (22) `buildQueryConsumption(state, live, planLimit, authorityToday?)` in `lib/services/opsMonthly.ts` — authority day now mirrors `DbHealthCheck.live_ops_month`/`last_reset`; db-health route GET (counters + authority) + PATCH `set_ops_counter` (zod, :226/:444, audit `DB_HEALTH_SET_OPS_COUNTER`). (23) `lib/sqlite.ts` mirror-writer tolerates `P2021`/"does not exist" for the Google-Sheets tables (`logger.info` + `return null`, never throws); `netlify.toml` build = `npx prisma migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild` (**production-affecting — flagged in PR**). (24) `catchUpMissedCronJobs()` in `worker-engine.ts` (`CRON_CATCHUP_WINDOW_MS=15min`): missed ≤15min **spawned** (same guards as `checkScheduledJobs`, skip `running`), stale re-armed advance **never fired**; wired at daemon boot + 5-min resync tick in `cron-daemon.ts`.
+
+**Verification**: 10 new tests (7 catch-up in `worker-engine.test.ts` + 3 wiring in `cron-daemon.test.ts`) — full Jest **133/134 suites · 1979 pass / 4 skip / 3 fail** (only pre-existing `check-doc-sizes.test.ts` red — AGENTS.md 32,949 B > 32,768 B cap, Lesson 142; not caused by this diff) · tsc **46 exact (prod 0)** · ESLint 0 (8 files) · quickbuild **199/199**.
+
+**Docs**: `versions-v3.46.md` + CHANGELOG + versions-index + Lesson **158** + TODO block + Primer + session-todos + HANDOFF + latest.md + session archive `2026-10-09-ops-counter-fixes/`. **AGENTS.md rows v3.44.0–v3.46.0 LANDED** — AGENTS.md trimmed −3,367 B to 29,197 B (user-approved 2026-10-09; doc-gate `check-doc-sizes.test.ts` 14/14 green).
+
+**Commit**: **PENDING USER** — commit to PR #134 (flag the `netlify.toml` prisma-migrate-deploy production change in the PR description), push, then merge/deploy.
 
 **Request (spec 21, user-approved; branch `feature/google-sheets-tracking` on `f0c73c7`)**: after the 2026-10-02 P6003 hold-lift, the breaker-never-opened reality (vestigial v3.41.2 Prisma fallbacks) → a preemptive, plan-limit-budget-driven switch that runs the worker/cron core (recommendations + corp-actions) on the SQLite execution engine BEFORE any Prisma op.
 

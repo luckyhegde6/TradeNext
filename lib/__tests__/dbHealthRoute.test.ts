@@ -249,6 +249,9 @@ describe("POST /api/admin/db-health — set_ops_counter (v3.38.0)", () => {
     expect(json.success).toBe(true);
     expect(json.message).toBe("Set ops counter for 2026-09-10 (today)");
     expect(json.entry).toEqual({ reads: 400, writes: 50 });
+    // Authority passed to buildQueryConsumption (Spec 22)
+    expect(json.queryConsumption).toBeDefined();
+    expect(json.queryConsumption.today).toEqual(expect.objectContaining({ reads: 400, writes: 50 }));
 
     // Ledger entry was REPLACED, not Math.max-merged (authority-fix semantics).
     expect(getOpsMonthlyState().days["2026-09-10"]).toEqual({ reads: 400, writes: 50 });

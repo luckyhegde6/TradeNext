@@ -6,8 +6,9 @@
 // Design:
 //   - On start: ensure the SYSTEM recommendation cron rows exist, then load all
 //     active CronJob rows and register one node-cron task per job.
-//   - Re-sync every 60s: admin edits (new job / expression change / deactivate)
-//     are applied without a restart.
+//   - Re-sync every 5 min: admin edits (new job / expression change / deactivate)
+//     are applied without a restart. The same tick runs the Spec 24 missed-tick
+//     catch-up (recover jobs the suspended Netlify instance missed).
 //   - Each fire re-fetches the job row and delegates to the shared
 //     spawnDueCronJob (dedup guard + nextRun advance), so the in-process daemon
 //     and the legacy 60s poll scheduler behave identically.
@@ -20,7 +21,7 @@ import os from "os";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { isDegradedModeActive } from "@/lib/services/degradedMode";
 import { enqueueDegradedTask } from "./degradedQueue";
-import { spawnDueCronJob } from "./worker-engine";
+import { spawnDueCronJob, catchUpMissedCronJobs } from "./worker-engine";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
 // v3.20.1: intervals tuned to stay under 10K Prisma Postgres ops/day.
@@ -112,6 +113,21 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
+  // Spec 24: recover jobs whose node-cron tick was missed while the instance
+  // was suspended/recycled. Run on boot (a fresh Netlify instance picks up jobs
+  // that ticked moments before the recycle) AND on every 5-min resync tick.
+  try {
+    const res = await catchUpMissedCronJobs();
+    if (res.recovered > 0 || res.skipped > 0) {
+      logger.info({ msg: "Cron boot catch-up", recovered: res.recovered, skipped: res.skipped });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Cron boot catch-up deferred (DB unavailable)",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   resyncInterval = setInterval(() => {
     syncCronJobs().catch((error) => {
       if (isDbUnavailableError(error)) {
@@ -119,6 +135,16 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
         logger.warn({ msg: "Cron daemon resync deferred (DB unavailable)", error: error instanceof Error ? error.message : String(error) });
       } else {
         logger.error({ msg: "Cron daemon resync failed", error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+    // Spec 24: recover jobs missed while the process was suspended. Guards
+    // inside catchUpMissedCronJobs keep this a no-op during a hold/degraded
+    // mode, and the spawn dedup guard prevents double firing with node-cron.
+    catchUpMissedCronJobs().catch((error) => {
+      if (isDbUnavailableError(error)) {
+        logger.warn({ msg: "Cron catch-up deferred (DB unavailable)", error: error instanceof Error ? error.message : String(error) });
+      } else {
+        logger.error({ msg: "Cron catch-up failed", error: error instanceof Error ? error.message : String(error) });
       }
     });
     // v3.13.0: drain the swing analysis job queue (throttled to 1/15min since

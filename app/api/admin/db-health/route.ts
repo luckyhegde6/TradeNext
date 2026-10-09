@@ -444,6 +444,7 @@ export async function POST(req: Request) {
           getOpsMonthlyState(),
           { reads: dbOpsCounter.reads, writes: dbOpsCounter.writes },
           Number(process.env.DB_PLAN_LIMIT_OPS_MONTHLY) || 200_000,
+          (scope === "today" ? { dayKey, reads, writes } : (entry ? { dayKey, reads: entry.reads, writes: entry.writes } : { dayKey, reads, writes })),
         ),
       });
     } catch (err) {
