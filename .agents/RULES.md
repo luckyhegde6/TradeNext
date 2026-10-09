@@ -79,6 +79,7 @@ Merged from the CLAUDE.md operating contract. Tradeoff: **caution over speed** �
 - Never force-push, never `--no-verify` unless intentional, never commit secrets/junk.
 - Commit message: `type(scope): description` (full table in `.agents/linear-history.md`).
 - Pre-push: tests pass + tsc clean + local build (`npm run quickbuild`) passes + docs updated.
+- **MERGE and DEPLOY are ALWAYS user actions (user directive 2026-10-09 — RULE)** — an agent NEVER merges a PR and NEVER triggers a production deploy, regardless of green CI, review sign-off, or earlier approval of the underlying work. The agent's maximum git action is COMMIT, and only when explicitly requested. Push/PR are request-based per policy; merge + deploy are user-only, no exceptions.
 
 ## 7. Sensitive Operations — ALWAYS ASK
 

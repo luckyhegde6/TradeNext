@@ -1,6 +1,9 @@
 [build]
-  # Predeploy guard runs FIRST (self-gates to CONTEXT=production; soft-fail).
-  command = "node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild"
+  # Migrations run FIRST — quickbuild skips `prisma migrate deploy`, and without
+  # it prod tables (e.g. google_sheets_config/ledger) never get created. Then the
+  # predeploy guard (self-gates to CONTEXT=production; soft-fail), client regen,
+  # and the quickbuild.
+  command = "npx prisma migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild"
   publish = ".next"
 
 [build.environment]

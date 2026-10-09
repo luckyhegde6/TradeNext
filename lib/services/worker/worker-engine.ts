@@ -836,6 +836,72 @@ export async function checkScheduledJobs() {
     }
 }
 
+// ─── Missed-tick catch-up (Spec 24) ─────────────────────────────────────────
+// Netlify suspends the persistent process between requests and recycles it
+// roughly every 2h, so a node-cron tick that lands while the instance is
+// suspended/recycled is simply MISSED (log: `WARN [NODE-CRON] missed
+// execution`). Nothing re-scans `nextRun` afterwards — the 60s
+// `checkScheduledJobs` poll is never started in production — so once-daily
+// jobs (Daily Recommendations, Rec Performance, Daily Market Sync) were
+// dropped for the day.
+//
+// The cron daemon's 5-min resync tick now calls this to recover jobs whose
+// tick was missed within `CRON_CATCHUP_WINDOW_MS` (user policy: catch up
+// within ~5 min of the miss; SKIP + advance nextRun when a job is more than
+// 15 min overdue so a long downtime cannot pile up stale runs). `now` is
+// injectable for tests; defaults to the corrected clock used by
+// `checkScheduledJobs`.
+export const CRON_CATCHUP_WINDOW_MS = 15 * 60_000;
+
+export async function catchUpMissedCronJobs(options?: {
+    now?: Date;
+    maxLatenessMs?: number;
+}): Promise<{ recovered: number; skipped: number }> {
+    const now = options?.now ?? getCorrectedNow();
+    const maxLatenessMs = options?.maxLatenessMs ?? CRON_CATCHUP_WINDOW_MS;
+
+    // Same guards as checkScheduledJobs: under an engaged degraded mode the
+    // durable queue is the designed recovery path, and with the breaker open
+    // nothing can spawn anyway — no-op instead of hammering a held DB.
+    if (isDegradedModeActive() || isPlanLimitBreakerOpen()) {
+        return { recovered: 0, skipped: 0 };
+    }
+
+    const dueJobs = await prisma.cronJob.findMany({
+        where: { isActive: true, nextRun: { lte: now } },
+    });
+    if (dueJobs.length === 0) return { recovered: 0, skipped: 0 };
+
+    const threshold = new Date(now.getTime() - maxLatenessMs);
+    let recovered = 0;
+    let skipped = 0;
+    for (const job of dueJobs) {
+        if (!job.nextRun || job.nextRun.getTime() < threshold.getTime()) {
+            // Missed by more than the window: do NOT run it. Advance nextRun so
+            // the schedule keeps ticking and the next occurrence fires normally.
+            await prisma.cronJob.update({
+                where: { id: job.id },
+                data: { nextRun: calculateNextRun(job.cronExpression, getCronFrom()), updatedAt: new Date() },
+            });
+            skipped++;
+            logger.info({
+                msg: "Cron job missed catch-up window; advancing nextRun without running",
+                jobId: job.id,
+                name: job.name,
+                overdueMs: job.nextRun ? now.getTime() - job.nextRun.getTime() : 0,
+            });
+            continue;
+        }
+        try {
+            await spawnDueCronJob(job);
+            recovered++;
+        } catch (error) {
+            logger.error({ msg: "Failed to spawn missed cron job", jobId: job.id, error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+    return { recovered, skipped };
+}
+
 /**
  * Reset a task to 'pending' if it is still safely requeueable (used when the
  * worker comes back from a restart and finds tasks it was mid-flight on).

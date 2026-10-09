@@ -1,0 +1,50 @@
+# Session Decisions — 2026-10-09 v3.46.0 Specs 22/23/24
+
+Branch: `feature/fix-ops-counter-authority-sync` (PR #134, base `main` `5a0ddb2`)
+
+## Decisions
+
+### D1. Spec 22 — authority day lives in `DbHealthCheck`, not the ops counter state
+- **What**: `buildQueryConsumption(state, live, planLimit, authorityToday?)` in `lib/services/opsMonthly.ts`; the ops month mirrors the live day from `DbHealthCheck.live_ops_month`/`last_reset`; db-health route GET (counters + authority) + PATCH `set_ops_counter` (zod, :226/:444, audit `DB_HEALTH_SET_OPS_COUNTER`).
+- **Why**: the month boundary (and which day "today" is) belongs to the DB health record, the same authority the ops counter itself is enforced against — a drifted Postgres counter can then be corrected through the API instead of manual SQL.
+
+### D2. Spec 23 — missing Google-Sheets tables are tolerated at the mirror-writer, never a worker throw
+- **What**: `lib/sqlite.ts` catches Prisma `P2021`/"does not exist" for the Google-Sheets tables → `logger.info` + `return null` (no-op). `netlify.toml` build = `npx prisma migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild`.
+- **Why**: the prod schema bootstrap predates the v3.43.0 GS models; a cold-start deploy must not have the SQLite sync write path throw into the worker. Running `migrate deploy` before the build creates the tables on prod. **Flagged as production-affecting in the PR.**
+
+### D3. Spec 24 — missed ticks: in-window spawn, stale re-arm forward, never retro-fire
+- **What**: `catchUpMissedCronJobs()` (`worker-engine.ts` ~L855), `CRON_CATCHUP_WINDOW_MS=15min`; missed ≤15min **spawned** (same guards as `checkScheduledJobs`, skip `running`); stale >15min re-armed (`nextRun` advanced), record `cron_missed_tick` then set the nextRun forward WITHOUT firing. Wired at daemon boot + 5-min resync tick (`cron-daemon.ts`).
+- **Why**: Netlify suspends idle instances ~2h so node-cron ticks stop; the daemon only polls due jobs so a missed `nextRun` is never re-discovered on wake. Spawning stale jobs retroactively would produce meaningless duplicate work — the window binds what may still be "fresh enough" to fire.
+
+### D4. Docs: AGENTS.md row deferred again (cap), detail moved to `.agents/changelog/versions-v3.46.md` (Lesson 142 pattern)
+- **Why**: AGENTS.md is 32,949 B > 32,768 B cap; the version-row edit is recorded in the changelog and must be landed when AGENTS.md is next slimmed (Lesson 158).
+- **D4 addendum (2026-10-09, same session)**: the user then approved **"Trim AGENTS.md now (+4 KB)"** — superseding the deferral. AGENTS.md was rewritten (temp script → committed version): re-landed v3.44.0/v3.45.0/v3.46.0 rows, compacted v3.43.0/v3.41.x rows → **32,564 → 29,197 B** (< cap). The user also approved **"Commit + push to PR #134"** (ONE commit: code + docs + trim; merge/deploy still user-controlled).
+
+### D5. No OpenAPI/swagger update for v3.46.0
+- **Why**: no new API routes in this diff (only existing routes changed); per Lesson 151 the swagger capture is route-coverage based.
+
+### D6. 26,819 = CURRENT MONTH (user correction) → counter fix EXECUTED
+- **What**: the user corrected the prior-session premise: Prisma Console 26,819 is **October-to-date usage, NOT lifetime** — so the month ledger (120 ops) undercounts real proxy ops ~220× and the `set_ops_counter` correction WAS required (the plan-limit breaker/degraded thresholds ≥180,000 are effectively blind without it).
+- **Split**: the user approved the **ratio estimate** (the actual reads/writes split is not exposed) → 26,819 × 43/120 reads ≈ **9,610** · × 77/120 writes ≈ **17,209** (43:77 = observed ledger ratio, reads:writes ≈ 1:1.79).
+- **Execution**: POST `/api/admin/db-health` `{action:"set_ops_counter", reads:9610, writes:17209, scope:"month"}` on prod → 200 with `totalOperations = 26,819` (today backfilled 9,575R/17,132W by difference; other 7 days' 35R/77W untouched; live counter never zeroed — honest). Audit `ADMIN_DB_SET_OPS_COUNTER` recorded.
+- **Why scope=month**: a `today` correction would only fix today's cell; the mismatch the user cares about (Prisma Console month usage) is the month aggregate.
+
+### D7. Ops ledger is per-Netlify-instance → deploy is the propagation vehicle
+- **What**: the follow-up GET on a different instance returned 122 — the ops ledger lives in `globalThis` + a per-instance SQLite snapshot; the 60s persist tick writes disk only; Blobs uploads happen only on boot `syncFromPrisma()` or deploy `preserve-mirror.mjs`.
+- **Decision**: do NOT chase per-instance counter drift by repeated PATCHes. Merge + deploy PR #134 (which itself runs preserve-mirror at build) → verify cluster-wide 26,819 on the v3.46 build; if a fresh instance still shows a stale ledger, one re-PATCH `set_ops_counter` scope=month lands properly thanks to v3.46's `authorityToday`.
+
+### D8. Docs: no stale "lifetime" claim to correct
+- Swept `.agents/*.md` for "lifetime"/"26,819" — the prior-session belief was never written to any doc; only this session's corrected entries exist. No doc correction needed beyond the session-todos/flow/decisions updates.
+
+### D9. MERGE and DEPLOY are ALWAYS user actions (user directive — RULE, codified)
+- **User directive (verbatim, answer to the PR #134 merge/deploy question)**: "Only Commit, merge and deploy is always a user action and make it rule".
+- **Meaning**: the agent's maximum git action is COMMIT (and only when explicitly requested); **MERGE and DEPLOY are user-only, no exceptions** — never auto-merge a green PR, never trigger a deploy, even after the user approved the underlying work.
+- **Codified**: `.agents/RULES.md` §6 Git Rules (bolded rule line) + `.agents/rules/session-memory-rules.md` §6 Git Guidelines. AGENTS.md agentic-workflow step 7 already stated the equivalent ("commit on explicit user request only (agents never auto-push/deploy/merge)") — now sharpened by the new rule.
+- **Action taken**: PR #134 stays OPEN (11/11 checks green, mergeable) awaiting the user; no deploy triggered. The pending v3.46.0 code is already committed+pushed (`d0ea87e`); this turn's PROD-FIX docs were COMMITTED locally (not pushed) per the directive.
+
+## Gate results (recorded, not re-run)
+
+- tsc **46 exact (0 new; prod 0)** · ESLint **0 errors (8 files)** · quickbuild **199/199**.
+- Targeted Jest 4 suites **192/192** (10 new: 7 catch-up + 3 wiring).
+- Full Jest **133/134 suites · 1979 pass / 4 skip / 3 fail** — only `check-doc-sizes.test.ts` red (AGENTS.md 32,949 > 32,768 B; pre-existing, not caused by this diff).
+- **Post-trim (same session)**: AGENTS.md 29,197 B → `check-doc-sizes.test.ts` **14/14 green** → full Jest **134/134 · 1979 pass / 4 skip / 0 fail**; doc-budget gate 91.8/100 KB OK.

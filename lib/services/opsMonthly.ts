@@ -125,20 +125,33 @@ export function setOpsMonthlyTotal(
  *  is today's dbOpsCounter — merged over any persisted entry so a just-restarted
  *  instance with a lower in-memory counter still reports the high-water mark.
  *  Today's day is NOT double-counted: the persisted entry for the current IST
- *  day is replaced by the merged value before summing. */
+ *  day is replaced by the merged value before summing.
+ *
+ *  Spec 22: when `authorityToday` is supplied (the Sync Today / Sync Month
+ *  confirmation path), today's entry is set to EXACTLY the operator-entered
+ *  reads/writes — the Math.max high-water merge is SUSPENDED for that one
+ *  response, so the reported month total matches the authority figure typed
+ *  from Prisma Console. Live ops still count afterwards: the next GET passes no
+ *  `authorityToday` and the Math.max high-water merge resumes. `authorityToday`
+ *  with a stale `dayKey` (an IST day rollover between persist and build) is
+ *  ignored so we never overwrite the new day with yesterday's figure. */
 export function buildQueryConsumption(
   state: OpsMonthlyState,
   live: { reads: number; writes: number },
   planLimit: number,
+  authorityToday?: { dayKey: string; reads: number; writes: number },
 ): QueryConsumption {
   const dayKey = getIstDayKey();
   const merged: Record<string, OpsMonthlyEntry> = { ...state.days };
   const persistedToday = merged[dayKey] ?? { reads: 0, writes: 0 };
-  const today = {
-    dayKey,
-    reads: Math.max(persistedToday.reads, live.reads),
-    writes: Math.max(persistedToday.writes, live.writes),
-  };
+  const today =
+    authorityToday && authorityToday.dayKey === dayKey
+      ? { dayKey, reads: authorityToday.reads, writes: authorityToday.writes }
+      : {
+          dayKey,
+          reads: Math.max(persistedToday.reads, live.reads),
+          writes: Math.max(persistedToday.writes, live.writes),
+        };
   merged[dayKey] = { reads: today.reads, writes: today.writes };
   let reads = 0;
   let writes = 0;

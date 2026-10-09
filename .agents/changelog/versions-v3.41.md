@@ -2,7 +2,7 @@
 
 > **Branch**: `feature/ph22-decision-engine` (on `5b088e3` = v3.41.2 committed; parent `a269057` = v3.41.1 committed; grandparent `ab6fd65` = v3.41.0 committed)
 > **Spec**: `.agents/specs/18-laya-real-inference.md` · **Plan**: `.agents/plans/18-laya-real-inference.md`
-> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **COMMITTED `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · docs sweep `2ac5e1f` · PR #132 OPEN — merge/deploy pending user** (PR-fix commit pending: CodeQL `js/shell-command-injection-from-environment` cleared in `scripts/dev-checks/check-tsc-baseline.mjs` via shell-free `execFileSync` + `NODE_ENV=test`-gated seam — Lesson 140; suite **1539 pass**)
+> **Status**: CODE + TESTS + VERIFICATION (incl. live in-process real ping, user-accepted) DONE — tsc **46 exact baseline (0 new)** · lint **0 errors (1155 pre-existing warnings)** · **116/116 suites (1538 pass / 4 skip / 0 fail)** · quickbuild **189/189** ✓ · doc budget **85.4/100 KB** ✓ · **COMMITTED `3c765b9` (46 files, +4426/−80, hook green) · wiki `5cdba9e` · docs sweep `2ac5e1f` · pushed · PR #132 MERGED `4b68e30` (2026-09-25)** (PR-fix `535f4cc` landed: CodeQL `js/shell-command-injection-from-environment` cleared in `scripts/dev-checks/check-tsc-baseline.mjs` via shell-free `execFileSync` + `NODE_ENV=test`-gated seam — Lesson 140; suite **1539 pass**)
 
 ## Why
 
@@ -103,7 +103,7 @@ v3.41.0 shipped the decision-engine core; there was NO observability — nothing
 
 ## Follow-ups
 
-- Commit as v3.41.1 pending user approval (no push/PR). After commit: P1–P3 real Laya inference behind a parity gate (laya-mock stays default) — user approval + key.
+- Commit as v3.41.1 DONE `a269057` (pushed via PR #132, MERGED `4b68e30`); P1–P3 real Laya inference followed as v3.41.3 `3c765b9` (parity gate, laya-mock default).
 - Notes: no Prisma migration (P6003 hold), no new packages, `SECRETS_SCAN_OMIT_PATHS` already covers `e2e/` (netlify.toml) but the spec carries no literals by design.
 
 ---
@@ -113,7 +113,7 @@ v3.41.0 shipped the decision-engine core; there was NO observability — nothing
 > **Branch**: `feature/ph22-decision-engine` (on `2909b22` = v3.40.8 spike VERDICT APPROVE; parent `5453d91` = v3.40.7)
 > **Spec**: `.agents/specs/16-decision-engine.md` · **Plan**: `.agents/plans/16-decision-engine.md`
 > **Session**: `.agents/sessions/2026-09-23-decision-engine/`
-> **Status**: **COMMITTED `ab6fd65`** (no push/PR; carried by PR #132) — tsc 46 exact baseline · lint 0 · 107/107 suites (1401 pass / 4 skip / 0 fail) · quickbuild 188/188 · superseded by v3.41.1 above
+> **Status**: **COMMITTED `ab6fd65`** (pushed via PR #132, MERGED `4b68e30`) — tsc 46 exact baseline · lint 0 · 107/107 suites (1401 pass / 4 skip / 0 fail) · quickbuild 188/188 · superseded by v3.41.1 above
 
 User-approved option (D1): **"Build engine core + POC A/B"** — no SDK install, no real provider, no live smoke (P6003 plan-limit hold).
 

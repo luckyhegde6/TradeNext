@@ -143,6 +143,8 @@ import {
   checkScheduledJobs,
   pollAndExecute,
   spawnDueCronJob,
+  catchUpMissedCronJobs,
+  CRON_CATCHUP_WINDOW_MS,
   STALE_MS,
   TASK_TIMEOUT_MS,
   TASK_HEARTBEAT_MS,
@@ -374,6 +376,131 @@ describe("checkScheduledJobs", () => {
 
     expect(mockSpawnCronTask).not.toHaveBeenCalled();
     expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Spec 24: missed-tick catch-up (Netlify suspension recovery) ────────────
+// Netlify suspends the persistent process between requests and recycles it
+// roughly every 2h; a node-cron tick landing while suspended is simply MISSED
+// and nothing re-scanned `nextRun` afterwards. catchUpMissedCronJobs is the
+// 5-min resync piggyback: jobs missed within the 15-min window are spawned,
+// jobs beyond it are re-armed WITHOUT running (user policy — a long downtime
+// must not pile up stale runs).
+
+describe("catchUpMissedCronJobs", () => {
+  const NOW = new Date("2026-10-09T04:35:00.000Z");
+  const jobFor = (id: string, nextRun: Date) => ({
+    id,
+    name: "Daily Recommendations (System)",
+    isActive: true,
+    nextRun,
+    cronExpression: "30 4 * * 1-5",
+    taskType: "recommendations",
+    config: { systemManaged: true },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+    mockIsDegradedModeActive.mockReturnValue(false);
+    prisma.workerTask.findFirst.mockResolvedValue(null);
+    prisma.cronJob.update.mockResolvedValue({});
+    mockSpawnCronTask.mockResolvedValue({});
+  });
+
+  it("spawns a job whose tick was missed within the 15-min window", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-within", new Date(NOW.getTime() - 5 * 60_000)),
+    ]);
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 1, skipped: 0 });
+    expect(mockSpawnCronTask).toHaveBeenCalledTimes(1);
+    expect(mockSpawnCronTask).toHaveBeenCalledWith(
+      "job-within",
+      expect.objectContaining({ taskType: "recommendations" }),
+    );
+    // nextRun advanced so the schedule keeps ticking
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "job-within" },
+      data: expect.objectContaining({ nextRun: expect.any(Date) }),
+    });
+  });
+
+  it("skips + advances a job missed beyond the window (never fires a stale run)", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-stale", new Date(NOW.getTime() - 16 * 60_000)),
+    ]);
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 0, skipped: 1 });
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "job-stale" },
+      data: expect.objectContaining({ nextRun: expect.any(Date) }),
+    });
+  });
+
+  it("partitions a mixed due list into recovered vs skipped", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-within", new Date(NOW.getTime() - 3 * 60_000)),
+      jobFor("job-stale", new Date(NOW.getTime() - 16 * 60_000)),
+    ]);
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 1, skipped: 1 });
+    expect(mockSpawnCronTask).toHaveBeenCalledTimes(1);
+    expect(mockSpawnCronTask).toHaveBeenCalledWith(
+      "job-within",
+      expect.objectContaining({ taskType: "recommendations" }),
+    );
+  });
+
+  it("counts as recovered when an already pending/running task covers the missed job", async () => {
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-within", new Date(NOW.getTime() - 5 * 60_000)),
+    ]);
+    prisma.workerTask.findFirst.mockResolvedValue({ id: "task-1", name: "Scheduled: Daily Recommendations (System)" });
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 1, skipped: 0 });
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+    // dedup branch still re-arms nextRun
+    expect(prisma.cronJob.update).toHaveBeenCalled();
+  });
+
+  it("is a no-op when the plan-limit breaker is OPEN (no Prisma reads)", async () => {
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-within", new Date(NOW.getTime() - 5 * 60_000)),
+    ]);
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 0, skipped: 0 });
+    expect(prisma.cronJob.findMany).not.toHaveBeenCalled();
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when degraded mode is engaged (durable queue is the recovery path)", async () => {
+    mockIsDegradedModeActive.mockReturnValue(true);
+    prisma.cronJob.findMany.mockResolvedValue([
+      jobFor("job-within", new Date(NOW.getTime() - 5 * 60_000)),
+    ]);
+
+    const result = await catchUpMissedCronJobs({ now: NOW });
+
+    expect(result).toEqual({ recovered: 0, skipped: 0 });
+    expect(prisma.cronJob.findMany).not.toHaveBeenCalled();
+    expect(mockSpawnCronTask).not.toHaveBeenCalled();
+  });
+
+  it("CRON_CATCHUP_WINDOW_MS is 15 minutes (user policy)", () => {
+    expect(CRON_CATCHUP_WINDOW_MS).toBe(15 * 60_000);
   });
 });
 

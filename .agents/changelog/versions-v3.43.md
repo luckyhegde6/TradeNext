@@ -1,6 +1,6 @@
 # v3.43.0 — Spec 20 Google Sheets Admin Console
 
-> **Status:** CODE + TESTS + BUILD + DOCS DONE. **COMMITTED** as `645cf85` (51 files, +7,574/−114) — no push / PR / deploy.
+> **Status:** CODE + TESTS + BUILD + DOCS DONE. **COMMITTED** as `645cf85` (51 files, +7,574/−114) + live-verification wrap-up `aba7fa6` (+ follow-ups `9de434e` / `b8ef109` / `4010a26`) — **PUSHED + PR #133 MERGED into `main` (2026-10-06)**.
 > **Branch:** `feature/google-sheets-tracking` (parent `2fbf0c7`; v3.42.0 = `a6e4e6e`)
 > **Spec / plan:** `.agents/specs/20-google-sheets-admin-console.md` · `.agents/plans/20-google-sheets-admin-console-phase1.md`
 
@@ -223,7 +223,8 @@ OAuth consent **performed** (Testing-mode token, sheet owner); the complete flow
    only UNDELIVERED rows; `lastMark` is the *drain* cursor, so `null` after a successful direct append is
    by-design, not a defect.
 7. The P0 SQLite snapshot-restore fix (`lib/sqlite.ts` + `sqliteMirror.test.ts`) was verified live earlier
-   (34 tables healed, persisted) and remains **uncommitted** alongside the A1 fix.
+   (34 tables healed, persisted) and was committed as `b8ef109` alongside the A1 header-probe `9de434e`
+   (strict-schema follow-up `4010a26`) — all merged via PR #133 (2026-10-06).
 8. Jest 58/58 targeted; tsc **46 exact / prod 0 / +0 new** (0 hits on touched files); ESLint clean.
    Dev server booted once (PID 56228, 15:13:55 `Ready in 4.4s`); repeated "Auth route: Server starting"
    lines are lazy per-route Turbopack re-inits, not restarts.
@@ -234,7 +235,7 @@ OAuth consent **performed** (Testing-mode token, sheet owner); the complete flow
   the remote DB and `ScanConfig` **reads** for custom Re-scan. The metrics projection runs fine (verified
   live above); the earlier "holds the metrics projection" assumption is corrected.
 - `migrate reset` must not be run; `scripts/dev-checks/google-oauth-consent.mjs` is retained.
-- Commits of the two uncommitted fix sets (P0 SQLite restore + A1 header-probe) are **pending user approval**.
+- The two fix sets (P0 SQLite restore `b8ef109` + A1 header-probe `9de434e`, strict-schema follow-up `4010a26`) were **committed, pushed and merged** via PR #133 (2026-10-06).
 
 ## Not done (deliberate)
 

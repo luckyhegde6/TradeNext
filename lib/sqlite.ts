@@ -4384,7 +4384,29 @@ export async function syncFromPrisma(opts?: {
     // and the row is created lazily on the admin's first write -> return null to
     // skip the table rather than materialising a fake row.
     totalRows += await syncTable(db, "google_sheets_config", async () => {
-      const row = await prisma.googleSheetsConfig.findFirst({ orderBy: { id: "asc" } });
+      // Spec 23: on a deployment where the google_sheets_config migration has not
+      // been applied yet (netlify.toml used to build with quickbuild, which skips
+      // `prisma migrate deploy`), the table does not exist and every boot threw a
+      // Prisma error. Fail open: a missing table is treated as "no config yet"
+      // (the singleton row is created lazily on the admin's first write anyway),
+      // so the mirror stays up and the GS console simply reads an empty config.
+      let row: Awaited<ReturnType<typeof prisma.googleSheetsConfig.findFirst>> = null;
+      try {
+        row = await prisma.googleSheetsConfig.findFirst({ orderBy: { id: "asc" } });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isMissingTable =
+          (err !== null && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2021") ||
+          msg.includes("does not exist");
+        if (isMissingTable) {
+          logger.info({
+            msg: "SQLite: google_sheets_config table missing (migration pending?) — skipping GS mirror sync",
+            error: msg,
+          });
+          return null;
+        }
+        throw err;
+      }
       if (!row) return null;
       return {
         columns: "id, sheet_id, display_name, enabled, last_sync_at, tab_marks, created_at, updated_at",

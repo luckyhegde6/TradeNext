@@ -70,6 +70,8 @@ See `.agents/documentation-standards.md` for the full table. Minimum per change:
 □ Commit message: type(scope): description  (feat/fix/chore/docs/style/refactor/test/perf/ci/security)
 □ Never commit secrets, .env, junk artifacts (yaml snapshots, logs, screenshots)
 □ Pre-push: npm run test + npx tsc --noEmit + docs updated
+□ MERGE + DEPLOY are ALWAYS user actions (RULE, user directive 2026-10-09) — never merge a
+  PR and never trigger a deploy, even on green CI; agent max action = commit (on request only)
 ```
 
 ## 7. Context & Token Efficiency
