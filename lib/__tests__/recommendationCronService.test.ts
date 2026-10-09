@@ -46,6 +46,7 @@ import {
   MARKET_SYNC_CRON_EXPR,
   AI_CONNECTION_TEST_CRON_NAME,
   AI_CONNECTION_TEST_CRON_EXPR,
+  SYSTEM_CRON_TIMEZONE,
   SYSTEM_JOB_NAME_BY_TASK_TYPE,
 } from "@/lib/services/recommendationCronService";
 
@@ -207,7 +208,7 @@ describe("ensureRecommendationCrons", () => {
     expect(aiData.data.taskType).toBe("ai_connection_test");
     expect(aiData.data.cronExpression).toBe(AI_CONNECTION_TEST_CRON_EXPR);
     expect(aiData.data.isActive).toBe(true);
-    expect(aiData.data.config).toEqual({ systemManaged: true, timezone: "Asia/Kolkata" });
+    expect(aiData.data.config).toEqual({ systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE });
 
     expect(result.ensured).toBe(4);
     expect(result.jobs).toEqual(
@@ -222,11 +223,11 @@ describe("ensureRecommendationCrons", () => {
   });
 
   it("recomputes nextRun (no create) when all four jobs exist unchanged", async () => {
-    const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean }> = {
-      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true },
-      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true },
-      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true },
-      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true },
+    const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean; config: Record<string, unknown> }> = {
+      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
+      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
+      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
+      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
     };
     prisma.cronJob.findFirst.mockImplementation(
       async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
@@ -270,10 +271,35 @@ describe("ensureRecommendationCrons", () => {
         taskType: "ai_connection_test",
         cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
         isActive: true,
-        config: { systemManaged: true, timezone: "Asia/Kolkata" },
+        config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE },
       }),
     });
     expect(prisma.cronJob.create).not.toHaveBeenCalled();
+    expect(result.ensured).toBe(4);
+  });
+
+  it("self-heals a row whose config drifted to the old IST timezone (spec 25)", async () => {
+    // v3.46.0 and earlier persisted `timezone: "Asia/Kolkata"`; the daemon then
+    // registered 5.5h off the (UTC-evaluated) nextRun. The config-drift check
+    // must rewrite the row even though expression/active state match.
+    prisma.cronJob.findFirst.mockResolvedValue({
+      id: "r1",
+      name: RECOMMENDATION_CRON_NAME,
+      taskType: "recommendations",
+      cronExpression: RECOMMENDATION_CRON_EXPR,
+      isActive: true,
+      config: { systemManaged: true, timezone: "Asia/Kolkata" },
+    });
+    prisma.cronJob.update.mockResolvedValue({});
+
+    const result = await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "r1" },
+      data: expect.objectContaining({
+        config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE },
+      }),
+    });
     expect(result.ensured).toBe(4);
   });
 

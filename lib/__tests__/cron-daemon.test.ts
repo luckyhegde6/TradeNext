@@ -2,7 +2,9 @@
  * Tests for the in-process cron daemon (lib/services/worker/cron-daemon.ts) —
  * v3.11.0. Covers:
  *   - startCronDaemon: ensures system crons, registers active jobs on the
- *     node-cron scheduler (Asia/Kolkata default), idempotent second start.
+ *     node-cron scheduler (UTC default — expressions are evaluated in UTC by
+ *     lib/cron-parser, so registering in IST split-brained nextRun), idempotent
+ *     second start.
  *   - syncCronJobs: re-register on expression change, skip invalid
  *     expressions, drop deactivated jobs, per-job timezone from config.
  *   - fireJob: re-fetches the row, delegates to spawnDueCronJob, no-op when
@@ -80,9 +82,14 @@ const mockSqliteHeartbeat = jest.fn();
 const mockSqliteFallback: { current: Record<string, any> | null } = {
   current: { isReady: () => true, writeLivenessHeartbeat: mockSqliteHeartbeat },
 };
+// v3.47.0 (spec 25): the 5-min resync tick drains the write-behind outbox via
+// getSqliteFallback's sibling `pushSqliteToPrisma` (dynamic import). Captured so
+// the wiring test can assert the tick triggers it.
+const mockPushSqliteToPrisma = jest.fn().mockResolvedValue({ ran: true, synced: 0, failed: 0, errors: [] });
 jest.mock("@/lib/sqlite", () => ({
   __esModule: true,
   getSqliteFallback: jest.fn(() => mockSqliteFallback.current),
+  pushSqliteToPrisma: (...a: unknown[]) => mockPushSqliteToPrisma(...(a as [])),
 }));
 
 // ── v3.45.0 (spec 21): the degraded branch in fireJob ──────────────────────
@@ -199,7 +206,7 @@ afterEach(() => {
 });
 
 describe("startCronDaemon", () => {
-  it("ensures system crons and registers each active job with Asia/Kolkata timezone", async () => {
+  it("ensures system crons and registers each active job with UTC timezone", async () => {
     prisma.cronJob.findMany.mockResolvedValue([activeJob(), activeJob({ id: "job-2", cronExpression: "30 10 * * 1-5" })]);
 
     const result = await startCronDaemon();
@@ -210,7 +217,7 @@ describe("startCronDaemon", () => {
     expect(mockSchedule.mock.calls[0]).toEqual([
       "30 4 * * 1-5",
       expect.any(Function),
-      { timezone: "Asia/Kolkata" },
+      { timezone: "UTC" },
     ]);
     expect(getRegisteredJobIds()).toEqual(["job-1", "job-2"]);
   });
@@ -287,25 +294,26 @@ describe("syncCronJobs", () => {
   });
 });
 
-// ─── Spec 24: missed-tick catch-up wiring ───────────────────────────────────
+// ─── Spec 25: missed-tick catch-up + outbox-drain wiring ────────────────────
 // Netlify suspends/recycles the process (ticks missed → node-cron "missed
-// execution" warnings). startCronDaemon now runs catchUpMissedCronJobs on boot
-// AND on the 5-min resync tick. The function itself is unit-tested in
-// worker-engine.test.ts; these tests pin the WIRING (boot + resync tick call
-// the real worker-engine function through the daemon's own mocks).
+// execution" warnings). startCronDaemon runs catchUpMissedCronJobs on boot AND
+// on the 5-min resync tick, and drains the SQLite→Prisma outbox on that same
+// tick. The catch-up logic itself is unit-tested in worker-engine.test.ts;
+// these tests pin the WIRING (boot + resync tick drive the real functions
+// through the daemon's own mocks).
 
-describe("spec 24 missed-tick catch-up wiring", () => {
-  it("runs catch-up on boot and spawns a job whose tick was missed (<15 min overdue)", async () => {
+describe("spec 25 missed-tick catch-up + outbox-drain wiring", () => {
+  const spawnMock = () =>
+    (require("@/lib/services/worker/task-orchestrator") as { spawnCronTask: jest.Mock }).spawnCronTask;
+
+  it("runs catch-up on boot and spawns a job whose tick was missed", async () => {
     const missed = activeJob({ id: "job-missed", nextRun: new Date(Date.now() - 5 * 60_000) });
     prisma.cronJob.findMany.mockResolvedValue([missed]);
     prisma.workerTask.findFirst.mockResolvedValue(null);
-    const { spawnCronTask: mockSpawn } = require("@/lib/services/worker/task-orchestrator") as {
-      spawnCronTask: jest.Mock;
-    };
 
     await startCronDaemon();
 
-    expect(mockSpawn).toHaveBeenCalledWith(
+    expect(spawnMock()).toHaveBeenCalledWith(
       "job-missed",
       expect.objectContaining({ taskType: "recommendations" }),
     );
@@ -314,16 +322,16 @@ describe("spec 24 missed-tick catch-up wiring", () => {
     );
   });
 
-  it("only re-arms (advances nextRun, no spawn) when the missed job is beyond the 15-min window", async () => {
-    const stale = activeJob({ id: "job-stale", nextRun: new Date(Date.now() - 16 * 60_000) });
+  it("spawns even a LONG-overdue job — no lateness cutoff (spec 25 §B)", async () => {
+    // A once-daily job whose tick was missed >15 min ago must still run; the
+    // dedup guard in spawnDueCronJob (not a lateness window) prevents doubles.
+    const stale = activeJob({ id: "job-stale", nextRun: new Date(Date.now() - 6 * 60 * 60_000) });
     prisma.cronJob.findMany.mockResolvedValue([stale]);
-    const { spawnCronTask: mockSpawn } = require("@/lib/services/worker/task-orchestrator") as {
-      spawnCronTask: jest.Mock;
-    };
+    prisma.workerTask.findFirst.mockResolvedValue(null);
 
     await startCronDaemon();
 
-    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(spawnMock()).toHaveBeenCalledWith("job-stale", expect.objectContaining({ taskType: "recommendations" }));
     expect(prisma.cronJob.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "job-stale" } }),
     );
@@ -332,26 +340,41 @@ describe("spec 24 missed-tick catch-up wiring", () => {
   it("resync tick (5-min) also runs catch-up — recovers a job missed during a recycle", async () => {
     jest.useFakeTimers();
     try {
-      const { spawnCronTask: mockSpawn } = require("@/lib/services/worker/task-orchestrator") as {
-        spawnCronTask: jest.Mock;
-      };
       prisma.cronJob.findMany.mockResolvedValue([]);
       await startCronDaemon();
-      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(spawnMock()).not.toHaveBeenCalled();
 
       // The instance was recycled ~2 min ago: node-cron timers died with the
-      // old process; a once-daily job ticked while suspended and is now 5 min
-      // overdue on a fresh instance. The next 5-min resync tick must recover it.
+      // old process; a once-daily job ticked while suspended and is now overdue
+      // on a fresh instance. The next 5-min resync tick must recover it.
       prisma.cronJob.findMany.mockResolvedValue([
         activeJob({ id: "job-missed", nextRun: new Date(Date.now() - 5 * 60_000) }),
       ]);
 
       await jest.advanceTimersByTimeAsync(5 * 60_000);
 
-      expect(mockSpawn).toHaveBeenCalledWith(
+      expect(spawnMock()).toHaveBeenCalledWith(
         "job-missed",
         expect.objectContaining({ taskType: "recommendations" }),
       );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("resync tick (5-min) drains the write-behind outbox (spec 25 §A)", async () => {
+    jest.useFakeTimers();
+    try {
+      prisma.cronJob.findMany.mockResolvedValue([]);
+      await startCronDaemon();
+
+      // Not on boot — only on the recurring tick, so a fresh instance is not
+      // stampeded with a push while it is still warming up.
+      expect(mockPushSqliteToPrisma).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(5 * 60_000);
+
+      expect(mockPushSqliteToPrisma).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

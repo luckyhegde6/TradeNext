@@ -212,7 +212,7 @@ describe("syncCronJobs — SQLite-first read", () => {
           name: "Daily Recommendations (System)",
           cron_expression: "30 4 * * *",
           is_active: 1,
-          config: '{"timezone":"Asia/Kolkata"}',
+          config: '{"timezone":"UTC"}',
         },
         {
           id: "cron-2",
@@ -248,7 +248,7 @@ describe("syncCronJobs — SQLite-first read", () => {
         name: "AI Connection Test (System)",
         cronExpression: "*/30 3-10 * * 1-5",
         isActive: true,
-        config: { timezone: "Asia/Kolkata" },
+        config: { timezone: "UTC" },
       },
     ]);
 
