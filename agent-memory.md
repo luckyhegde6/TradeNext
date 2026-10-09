@@ -15,6 +15,20 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-09 | PROD-FIX pass on v3.46.0 — live diagnosis + ops-counter correction executed (branch `feature/fix-ops-counter-authority-sync` = PR #134, HEAD `d0ea87e`, all 11 checks green)
+
+**Request**: investigate the reported live prod issues (stuck SQLite→Prisma outbox, ops-counter drift, Google Sheets tracking off, decision engine inert) — read-only first, fixes approval-gated.
+
+**Execution (read-only diagnosis, admin login via Playwright at `/auth/signin`)**: outbox stuck since **2026-09-16T23:00** (`chartink_screener_result` 13,261 · `recommendation_tracker` 300 · `daily_recommendation_stock` 200 · `daily_recommendation_run` 3); `sqlite.recentSyncs` = boot `prisma_to_sqlite` ONLY — zero `sqlite_to_prisma` (breaker CLOSED); `queryConsumption` month 2026-10 = **120 ops (43r/77w) → undercounts Prisma dashboard 26,819**; GS `envEnabled false` / `oauthConfigured.refreshToken false` (**Netlify lacks `GOOGLE_OAUTH_REFRESH_TOKEN`**); prod = PRE-v3.46.0. **ROOT CAUSE pinned**: `startRecoveryProbe()` is a 6h `setInterval` (`lib/sqlite.ts` ~2412-2476) that never survives Netlify's ~2h idle suspension ⇒ push fires only via manual "Push to Prisma" (`leaderGate:false`) or deploy-time `preserve-mirror.mjs`.
+
+**Counter fix EXECUTED (user-approved)**: user corrected the premise — **26,819 = CURRENT MONTH (Oct-to-date), NOT lifetime** → correction WAS needed; user chose the ratio estimate → POST `/api/admin/db-health` `{action:"set_ops_counter", reads:9610, writes:17209, scope:"month"}` (43:77 ledger ratio) → 200, `totalOperations = 26,819` (today backfilled 9,575R/17,132W; live counter untouched; audit `ADMIN_DB_SET_OPS_COUNTER`). **Durability caveat verified**: ops ledger is per-Netlify-instance (`globalThis` + per-instance SQLite; 60s tick disk-only `persistOpsMonthly` :2592 / `startOpsCounterPersistence` :2634 / disk-only comment :2640-2642; Blobs uploads only on boot `syncFromPrisma()` or deploy `preserve-mirror`); a follow-up GET on another instance showed 122 → **cluster-wide convergence happens at PR #134 deploy** (post-deploy verify = GET 26,819 or one re-PATCH on the v3.46 build).
+
+**Docs**: session-todos (counter todo → executed + post-deploy verify), session archive `2026-10-09-ops-counter-fixes/` flow.md addendum + decisions D6–D8, agent-memory entry. Swept `.agents/*.md` for a stale "lifetime" claim — none exists (prior-session belief never written to docs).
+
+**Commit**: **PENDING USER** — merge PR #134 (+ deploy = propagates the corrected counter + runs preserve-mirror outbox push) · GS OAuth refresh token (consent URL sent; `code` await — fallback local token len 103) · decision-engine env decision (`DECISION_PROVIDER=none`/`DECISION_POC_ENABLED=false`; Laya 503MB weights).
+
+---
+
 ### 2026-10-09 | v3.46.0 — Specs 22/23/24 ops-counter authority sync + GS table-missing tolerance + cron missed-tick catch-up
 
 **Request (specs 22/23/24, user-approved; branch `feature/fix-ops-counter-authority-sync` = PR #134 on `main` `5a0ddb2`)**: three production-hardening fixes — (22) a drifted Postgres ops counter must be correctable via API and the ops month must mirror the live day; (23) Google-Sheets tables missing on prod must not throw into the worker, and the deploy must run migrations before the build; (24) cron jobs missed while Netlify suspends an idle instance must be caught up rather than silently skipped.

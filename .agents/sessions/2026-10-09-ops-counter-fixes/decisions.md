@@ -23,6 +23,25 @@ Branch: `feature/fix-ops-counter-authority-sync` (PR #134, base `main` `5a0ddb2`
 ### D5. No OpenAPI/swagger update for v3.46.0
 - **Why**: no new API routes in this diff (only existing routes changed); per Lesson 151 the swagger capture is route-coverage based.
 
+### D6. 26,819 = CURRENT MONTH (user correction) → counter fix EXECUTED
+- **What**: the user corrected the prior-session premise: Prisma Console 26,819 is **October-to-date usage, NOT lifetime** — so the month ledger (120 ops) undercounts real proxy ops ~220× and the `set_ops_counter` correction WAS required (the plan-limit breaker/degraded thresholds ≥180,000 are effectively blind without it).
+- **Split**: the user approved the **ratio estimate** (the actual reads/writes split is not exposed) → 26,819 × 43/120 reads ≈ **9,610** · × 77/120 writes ≈ **17,209** (43:77 = observed ledger ratio, reads:writes ≈ 1:1.79).
+- **Execution**: POST `/api/admin/db-health` `{action:"set_ops_counter", reads:9610, writes:17209, scope:"month"}` on prod → 200 with `totalOperations = 26,819` (today backfilled 9,575R/17,132W by difference; other 7 days' 35R/77W untouched; live counter never zeroed — honest). Audit `ADMIN_DB_SET_OPS_COUNTER` recorded.
+- **Why scope=month**: a `today` correction would only fix today's cell; the mismatch the user cares about (Prisma Console month usage) is the month aggregate.
+
+### D7. Ops ledger is per-Netlify-instance → deploy is the propagation vehicle
+- **What**: the follow-up GET on a different instance returned 122 — the ops ledger lives in `globalThis` + a per-instance SQLite snapshot; the 60s persist tick writes disk only; Blobs uploads happen only on boot `syncFromPrisma()` or deploy `preserve-mirror.mjs`.
+- **Decision**: do NOT chase per-instance counter drift by repeated PATCHes. Merge + deploy PR #134 (which itself runs preserve-mirror at build) → verify cluster-wide 26,819 on the v3.46 build; if a fresh instance still shows a stale ledger, one re-PATCH `set_ops_counter` scope=month lands properly thanks to v3.46's `authorityToday`.
+
+### D8. Docs: no stale "lifetime" claim to correct
+- Swept `.agents/*.md` for "lifetime"/"26,819" — the prior-session belief was never written to any doc; only this session's corrected entries exist. No doc correction needed beyond the session-todos/flow/decisions updates.
+
+### D9. MERGE and DEPLOY are ALWAYS user actions (user directive — RULE, codified)
+- **User directive (verbatim, answer to the PR #134 merge/deploy question)**: "Only Commit, merge and deploy is always a user action and make it rule".
+- **Meaning**: the agent's maximum git action is COMMIT (and only when explicitly requested); **MERGE and DEPLOY are user-only, no exceptions** — never auto-merge a green PR, never trigger a deploy, even after the user approved the underlying work.
+- **Codified**: `.agents/RULES.md` §6 Git Rules (bolded rule line) + `.agents/rules/session-memory-rules.md` §6 Git Guidelines. AGENTS.md agentic-workflow step 7 already stated the equivalent ("commit on explicit user request only (agents never auto-push/deploy/merge)") — now sharpened by the new rule.
+- **Action taken**: PR #134 stays OPEN (11/11 checks green, mergeable) awaiting the user; no deploy triggered. The pending v3.46.0 code is already committed+pushed (`d0ea87e`); this turn's PROD-FIX docs were COMMITTED locally (not pushed) per the directive.
+
 ## Gate results (recorded, not re-run)
 
 - tsc **46 exact (0 new; prod 0)** · ESLint **0 errors (8 files)** · quickbuild **199/199**.
