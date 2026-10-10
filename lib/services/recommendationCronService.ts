@@ -19,13 +19,13 @@ import { getCronFrom } from "@/lib/services/timeCorrection";
  *
  * The four jobs are executed by the in-process cron daemon (v3.11.0):
  * lib/services/worker/cron-daemon.ts registers each active CronJob row on
- * the node-cron scheduler (timezone Asia/Kolkata) and spawns a WorkerTask
- * via spawnDueCronJob → spawnCronTask. The daemon replaced the old Netlify
- * scheduled functions (cron-recommendations / cron-performance /
- * cron-market-sync / cron-ai-connection-test → run-cron-background.ts,
- * deleted in v3.11.0). WorkerTask execution still flows through
- * executeTask, which handles all four taskTypes (plus `ai_connection_test`
- * for local/admin-triggered runs).
+ * the node-cron scheduler (timezone UTC — see `SYSTEM_CRON_TIMEZONE`) and
+ * spawns a WorkerTask via spawnDueCronJob → spawnCronTask. The daemon replaced
+ * the old Netlify scheduled functions (cron-recommendations /
+ * cron-performance / cron-market-sync / cron-ai-connection-test →
+ * run-cron-background.ts, deleted in v3.11.0). WorkerTask execution still flows
+ * through executeTask, which handles all four taskTypes (plus
+ * `ai_connection_test` for local/admin-triggered runs).
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
  * picks up due jobs via `nextRun` and spawns tasks through `spawnCronTask`,
@@ -43,6 +43,14 @@ export const RECOMMENDATION_CRON_EXPR = "30 4 * * 1-5"; // 10:00 AM IST Mon-Fri
 export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM IST Mon-Fri
 export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
 export const AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"; // 08:30–15:30 IST Mon-Fri
+
+/**
+ * Timezone every SYSTEM cron row is persisted with. MUST equal the daemon's
+ * `DEFAULT_TIMEZONE` (UTC) so node-cron registration agrees with
+ * `calculateNextRun` (UTC) — the previous `"Asia/Kolkata"` value produced a
+ * 5.5h split-brain between when a job fired and when it was due (spec 25).
+ */
+export const SYSTEM_CRON_TIMEZONE = "UTC";
 
 /**
  * Maps every SYSTEM cron task type to its CronJob name so worker outcome
@@ -194,10 +202,18 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
         // worker/Netlify startup. ensureRecommendationCrons runs once per
         // start, never inside the 5s poll loop, so re-anchoring to the next
         // future occurrence is safe (strictly-future; no immediate fire).
+        const existingConfig = (existing.config ?? {}) as Record<string, unknown>;
+        // Spec 25: a system row persisted with the old `timezone: "Asia/Kolkata"`
+        // (or missing the systemManaged flag) must be rewritten, else the daemon
+        // keeps registering it 5.5h off its UTC nextRun.
+        const configDrifted =
+          existingConfig.systemManaged !== true ||
+          existingConfig.timezone !== SYSTEM_CRON_TIMEZONE;
         const changed =
           existing.isActive !== true ||
           existing.taskType !== def.taskType ||
-          existing.cronExpression !== def.cronExpression;
+          existing.cronExpression !== def.cronExpression ||
+          configDrifted;
 
         const data: Parameters<typeof prisma.cronJob.update>[0]["data"] = { nextRun };
         if (changed) {
@@ -205,7 +221,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
           data.cronExpression = def.cronExpression;
           data.description = def.description;
           data.isActive = true;
-          data.config = { systemManaged: true, timezone: "Asia/Kolkata" };
+          data.config = { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE };
         }
 
         await prisma.cronJob.update({ where: { id: existing.id }, data });
@@ -224,7 +240,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
             cronExpression: def.cronExpression,
             isActive: true,
             nextRun,
-            config: { systemManaged: true, timezone: "Asia/Kolkata" },
+            config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE },
           },
         });
         logger.info({ msg: "Created system recommendation cron job", name: def.name, nextRun });

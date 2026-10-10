@@ -117,6 +117,10 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "fscore_single":
         result = await executeFScoreSingle(payload);
         break;
+      // Google Sheets re-scan (Spec 27)
+      case "google_sheets_rescan":
+        result = await executeGoogleSheetsRescan(payload);
+        break;
       default:
         throw new Error(`Unknown task type: ${taskType}`);
     }
@@ -360,6 +364,73 @@ export async function executeScreenerSync(payload?: Record<string, unknown>): Pr
   }
 
   return { recordCount: result.recordCount, message: result.message };
+}
+
+/**
+ * Google Sheets re-scan (Spec 27) — runs a `screener`/`custom` re-scan on the
+ * worker queue instead of inside the HTTP request.
+ *
+ * The route that used to run the scan synchronously got killed by the gateway on
+ * a slow `forceRefresh` pass (502). It now enqueues this task and the console
+ * polls the task result. The scan itself is unchanged — `rescanService` still owns
+ * it.
+ *
+ * THROWS on any failure so the engine marks the task `failed`: a re-scan either
+ * ran or it did not, and `completed` must never be a lie. `rescanService` RETURNS
+ * its errors rather than throwing, so a failed outcome is converted to a throw
+ * here.
+ */
+export async function executeGoogleSheetsRescan(payload?: Record<string, unknown>): Promise<unknown> {
+  const { RESCAN_ROW_LIMIT, rescanScreener, rescanCustomConfig } = await import(
+    "@/lib/services/googleSheets/rescanService"
+  );
+
+  const tab = payload?.tab;
+  if (tab !== "screener" && tab !== "custom") {
+    throw new Error(`google_sheets_rescan: invalid tab ${String(tab)} (expected "screener" or "custom")`);
+  }
+
+  logger.info({ msg: "Starting Google Sheets re-scan", tab });
+
+  const outcome =
+    tab === "screener"
+      ? await rescanScreener({
+          categoryId: typeof payload?.categoryId === "string" ? payload.categoryId : undefined,
+          templateIds: Array.isArray(payload?.templateIds) ? (payload.templateIds as string[]) : undefined,
+          tvFallbackLimit: RESCAN_ROW_LIMIT,
+        })
+      : await rescanCustomConfig(readRescanConfigId(payload));
+
+  if (!outcome.ok) {
+    throw new Error(`Google Sheets re-scan failed (${outcome.reason}): ${outcome.error}`);
+  }
+
+  logger.info({
+    msg: "Google Sheets re-scan complete",
+    tab: outcome.tab,
+    appended: outcome.appended,
+    total: outcome.total,
+    executionMs: outcome.executionMs,
+    delegatedExport: outcome.delegatedExport,
+  });
+  return {
+    ok: true,
+    tab: outcome.tab,
+    appended: outcome.appended,
+    total: outcome.total,
+    executionMs: outcome.executionMs,
+    delegatedExport: outcome.delegatedExport,
+    rowLimit: RESCAN_ROW_LIMIT,
+  };
+}
+
+/** A `custom` re-scan is addressed by config id; refuse to guess one. */
+function readRescanConfigId(payload?: Record<string, unknown>): string {
+  const configId = payload?.configId;
+  if (typeof configId !== "string" || configId.length === 0) {
+    throw new Error("google_sheets_rescan: configId is required for a custom re-scan");
+  }
+  return configId;
 }
 
 /**

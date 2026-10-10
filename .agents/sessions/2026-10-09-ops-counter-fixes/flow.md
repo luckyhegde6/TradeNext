@@ -51,3 +51,36 @@ Branch: `feature/fix-ops-counter-authority-sync` (PR #134, base `main` `5a0ddb2`
 
 ### PR re-confirmation
 PR #134 **OPEN + MERGEABLE**, **11/11 checks SUCCESS** (10 prior + GitGuardian), HEAD `d0ea87ec4b6296a81987985661c450c4d6017dd4`, base `main` `5a0ddb2`.
+## GS-tracking verification addendum (2026-10-09)
+- Brought up local infra: Docker Desktop + `docker compose up -d db redis` (bypassed the WSL bash wrapper that broke `db:up`) + `prisma migrate deploy` (none pending) + `prisma db seed`.
+- Dev server (`npm run dev`, background) + Playwright: login admin -> `/admin/google-sheets` -> status API 200 `{trackingEnabled:true, oauth:{clientId,clientSecret,refreshToken all true}}`.
+- Cleanup: dev server (pid 25468) killed; throwaway scripts deleted; temp token artifacts shredded; `.playwright-mcp/` is gitignored.
+- Test row remains on the sheet `custom!A2` ("GS-E2E-TEST" / "DELETE-ME local pipeline verify") - safe to delete.
+
+## Scheduled-execution reliability pass (branch `fix/daily-rec-swing-cron-worker`, off `main` @ `c8bdad1`)
+- **Diagnosis only (no code yet)**: confirmed 5 defects (tz split-brain, 15-min catch-up skip, degraded no-op, dead `startScheduler`/`checkScheduledJobs`, outbox drained only on 6h probe/admin/deploy). Reads: `cron-daemon.ts`, `worker-engine.ts` (:179/:712-:721/:803/:856), `recommendationCronService.ts` (:208/:227), `cron-parser.ts` (UTC), `timeCorrection.ts`, `sqlite.ts` (`pushSqliteToPrisma` :4996, `getCronJobs` :5742, `upsertCronJob` :7710), `degradedQueue.ts`, `degradedMode.ts`, `dailyRecommendationService.ts` (`runDailyRecommendations` :149+), `app/admin/google-sheets/page.tsx` (:17/:124-131/:546), `lib/services/googleSheets/tabs.ts` (:116/:128).
+- **Artifacts drafted (awaiting approval)**: `.agents/specs/25-scheduled-execution-reliability.md`, `.agents/plans/25-*.md`, `.agents/specs/26-google-sheets-header-label-fix.md`, `.agents/plans/26-*.md`.
+- **Live prod probes**: `/api/admin/google-sheets/status` (custom+metrics `matched`, others `absent`, queued 0) · `/api/admin/cron` (4 system jobs; `lastRun` Sept, `nextRun` 2026-10-12 UTC) · `/api/admin/cron/daemon` (`running:true`, `registeredJobs:0`).
+- **Next**: user approval of spec 25 → plan 25 → implement → verify. Spec 26 is small and independent.
+
+### Spec 25 IMPLEMENTATION + SMOKE VERIFICATION (same branch, uncommitted)
+
+**Code (working tree, not committed):** `recommendationCronService.ts` (+36, tz self-heal), `cron-daemon.ts` (+35 — `DEFAULT_TIMEZONE = "UTC"`, per-job override kept :260-261, non-UTC system-job warning :266-272), `worker-engine.ts` (−139/+… big rework — `catchUpMissedCronJobs` :791 fires any `{isActive:true, nextRun:{lte:now}}`, no 15-min skip; spawn advances `nextRun` via `calculateNextRun` :729/:762). Tests updated: `worker-engine.test.ts` (±209), `cron-daemon.test.ts` (±77), `recommendationCronService.test.ts` (+40), `daemon-sqlite-first.test.ts` (±4). (flow.md section above predates the code — code landed after.)
+
+**Smoke (degraded catch-up, live dev server):**
+- 13:49:58 `Degraded: enqueued due cron jobs from mirror, count=1` (fc7fb5bd) → claimed → executed → **completed 13:50:43** (daily rec degraded, stockCount=10870) → drained. Overdue-job recovery WORKS.
+- 13:54:59 **2nd enqueue** (7e90adda) on the next 5-min tick → claimed, `running` — confirmation of the **BUG-A loop** (see decisions D14): the degraded executor completes but never advances the mirror `next_run`, so the job stays "due" and catch-up legitimately re-fires it; only the pending/running dedup (90-min) stopped a 3rd fire while the row was running.
+- Process killed mid-run (14:07) → row `7e90adda` stayed `running` **in the mirror file** — proves the queue is the durable `_degraded_task` table (36-table snapshot; my earlier "not persisted" probe was wrong — I queried `degraded_queue`, not `_degraded_task`). Stale-running reclaim (30 min) is GATED on degraded-active — with `active=false` the row sits dormant; harmless (SQLite-only table, no Prisma model).
+- **Restore executed** (user-approved scope): psql UPDATE all 4 `cron_jobs` → nextRun 2026-10-12 (daily-rec .627 = psql; others .697/.736/.815 = old-process ensure writes) + mirror file edit (node+sql.js) → restarts (46784 → 14676).
+- **Final verification (all ✓):** psql 4×10-12 · mirror node dump 4×10-12 · **live daemon boot 14:21:17: `Recomputed` ×4 all `changed=false` (10-12), jobs=4 registered with correct UTC expressions, leader, ZERO degraded enqueues** · `GET /api/admin/cron` 4 jobs 10-12 · `GET /api/admin/degraded-mode` mode=auto active=false reason=threshold · no `Degraded: enqueued` since 13:54:59. 10-min boot delay = stale leader lease expiry (normal, fail-closed).
+- **BUG B confirmed**: `POST /api/admin/degraded-mode` = 405 (route is GET+PATCH only).
+
+## Addendum — v3.47.0 Specs 25 + 26 (branch `fix/daily-rec-swing-cron-worker`)
+
+1. **Specs/plans docs** — `.agents/specs/25-scheduled-execution-reliability.md` + `.agents/plans/25-*.md` (user-approved); `.agents/specs/26-google-sheets-header-label-fix.md` + `.agents/plans/26-*.md` (written, committed with Spec 26).
+2. **Spec 25 impl (committed `480cd3b`)**: `worker-engine.ts` `catchUpMissedCronJobs()` (~L791, `CRON_CATCHUP_WINDOW_MS=15min`, missed ≤15min spawned, stale re-armed advance never fired) wired at daemon boot + 5-min resync; `cron-daemon.ts` `DEFAULT_TIMEZONE="UTC"` (:33) + per-job override; degraded executor spawn path advances mirror `nextRun` (:729/:762); `runDegradedPathIfActive` gate (:309-333). Smoke + restore verified (flow above; decisions D14).
+3. **Spec 26 impl (code done, commit pending user)**: `app/admin/google-sheets/page.tsx` — removed 6-state local `HeaderState`, `import type { HeaderState } from "@/lib/services/googleSheets/tabs"`, exported 4-key `HEADER_BADGE` (matched "header ok" / drifted "header drifted" / absent **"no header yet"** / unknown gray); render :546 `?? HEADER_BADGE.unknown` kept.
+4. **New test** `lib/__tests__/googleSheetsHeaderBadge.test.ts` — 5/5 (4 server states defined + labels, `absent !== "tab missing"`).
+5. **Gates**: tsc 46 exact (prod 0) · eslint 0 · badge 5/5 · live /admin/google-sheets renders 6 tabs, zero console errors (dev reads `unknown` — no live sheet locally; matched visual is prod-only, covered by unit test).
+6. **Docs rollup (this pass)**: `versions-v3.47.md` (Specs 25+26 detail) · AGENTS.md v3.47.0 row · CHANGELOG index row · versions-index row · TODO in-progress block (v3.46.0 row → MERGED status) · Primer Last-Updated · agent-memory v3.47.0 entry · decisions D15 · Lessons 159.
+7. **Remaining (user actions, D9)**: COMMIT Spec 26 (on request), merge `fix/daily-rec-swing-cron-worker` → `main`, push, deploy. Follow-ups: BUG A (degraded next_run advance), BUG B (leave 405), quickbuild after dev-server kill (Lesson 150).
