@@ -10,7 +10,7 @@
  * non-admins client-side, but that is UX only — it is NOT the security boundary.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import type { HeaderState } from "@/lib/services/googleSheets/tabs";
@@ -104,13 +104,27 @@ interface MetricsResponse {
 }
 interface RescanResponse {
   success: boolean;
+  /** True when the scan was accepted as a queued worker task (HTTP 202). */
+  queued: boolean;
+  /** Id of the `google_sheets_rescan` worker task to poll. */
+  taskId: string;
   tab: TabName;
-  appended: number;
-  total: number;
-  delegatedExport: boolean;
-  executionMs: number;
-  rowLimit: number;
   reason?: string;
+  error?: string;
+}
+
+/** The `/api/admin/workers?taskId=` poll surface: one task, with its result. */
+interface TaskPollResponse {
+  task?: {
+    status?: string;
+    result?: {
+      appended?: number;
+      total?: number;
+      delegatedExport?: boolean;
+      rowLimit?: number;
+    } | null;
+    error?: string | null;
+  };
   error?: string;
 }
 interface LedgerDeleteResponse {
@@ -129,6 +143,10 @@ export const HEADER_BADGE: Record<HeaderState, { label: string; cls: string }> =
   unknown: { label: "unknown", cls: "bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200" },
 };
 
+/** A queued re-scan is polled until it finishes. ~10 min ceiling (200 × 3 s). */
+const RESCAN_POLL_INTERVAL_MS = 3000;
+const RESCAN_POLL_MAX_ATTEMPTS = 200;
+
 export default function AdminGoogleSheetsPage() {
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
@@ -146,6 +164,9 @@ export default function AdminGoogleSheetsPage() {
   const [busyTab, setBusyTab] = useState<TabName | null>(null);
   const [configIds, setConfigIds] = useState<Record<string, string>>({});
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
+  // Aborts the in-flight task poll when the page unmounts, so the poll loop
+  // cannot outlive the component and set state after teardown.
+  const rescanAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -179,6 +200,8 @@ export default function AdminGoogleSheetsPage() {
   useEffect(() => {
     if (sessionStatus === "authenticated") load();
   }, [sessionStatus, load]);
+
+  useEffect(() => () => rescanAbortRef.current?.abort(), []);
 
   const save = useCallback(async () => {
     setBusy(true);
@@ -261,6 +284,10 @@ export default function AdminGoogleSheetsPage() {
    * Run a scan and queue its results. Distinct from Sync: Sync drains rows that
    * were already captured, Rescan produces NEW ones. The two are separate
    * buttons because merging them would make a drain click fire network scans.
+   *
+   * Spec 27: the scan runs on the worker queue, not in the request. This
+   * enqueues it, then polls the task until it finishes (or the ~10-min ceiling),
+   * so a slow scan can no longer time out the admin request behind it.
    */
   const rescan = useCallback(
     async (tab: TabName) => {
@@ -272,31 +299,80 @@ export default function AdminGoogleSheetsPage() {
       setBusyTab(tab);
       setError(null);
       setNotice(null);
+
+      const controller = new AbortController();
+      rescanAbortRef.current?.abort();
+      rescanAbortRef.current = controller;
+
+      const sleep = (ms: number) =>
+        new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, ms);
+          controller.signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(t);
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+
       try {
         const res = await fetch("/api/admin/google-sheets/rescan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(tab === "custom" ? { tab, configId } : { tab }),
+          signal: controller.signal,
         });
         const body = (await res.json()) as RescanResponse;
         if (!res.ok || !body.success) {
           throw new Error(body.error ?? `rescan ${res.status}`);
         }
-        // The screener path appends fire-and-forget from inside the producer, so
-        // its count is "queued", not "delivered" — say so, or the operator will
-        // look for rows that have not landed yet.
-        setNotice(
-          body.appended === 0
-            ? `Re-scan of ${tab} matched nothing.`
-            : `Re-scan of ${tab} queued ${body.appended} row(s)${
-                body.total > body.appended ? ` of ${body.total} matches (cap ${body.rowLimit})` : ""
-              }.${body.delegatedExport ? " Sync to append them." : ""}`,
-        );
-        await load();
+
+        setNotice(`Re-scan of ${tab} queued. Waiting for the worker…`);
+
+        // Poll the existing task read surface until it reaches a terminal state.
+        for (let attempt = 0; attempt < RESCAN_POLL_MAX_ATTEMPTS; attempt++) {
+          await sleep(RESCAN_POLL_INTERVAL_MS);
+          const pr = await fetch(`/api/admin/workers?taskId=${encodeURIComponent(body.taskId)}`, {
+            signal: controller.signal,
+          });
+          if (!pr.ok) continue; // transient — keep polling until the ceiling
+          const poll = (await pr.json()) as TaskPollResponse;
+          const taskStatus = poll.task?.status;
+
+          if (taskStatus === "completed") {
+            const r = poll.task?.result ?? {};
+            const appended = r.appended ?? 0;
+            const total = r.total ?? 0;
+            // The screener path appends fire-and-forget from inside the producer,
+            // so its count is "queued", not "delivered" — say so, or the operator
+            // will look for rows that have not landed yet.
+            setNotice(
+              appended === 0
+                ? `Re-scan of ${tab} matched nothing.`
+                : `Re-scan of ${tab} queued ${appended} row(s)${
+                    total > appended ? ` of ${total} matches (cap ${r.rowLimit ?? "—"})` : ""
+                  }.${r.delegatedExport ? " Sync to append them." : ""}`,
+            );
+            await load();
+            return;
+          }
+          if (taskStatus === "failed") {
+            throw new Error(poll.task?.error ?? `re-scan ${tab} failed`);
+          }
+          // pending / running — keep polling.
+        }
+        // Ceiling reached while the task is still going: never claim a result.
+        setNotice(`Re-scan of ${tab} is still running. Check the Workers page for its result.`);
       } catch (e) {
+        if ((e as { name?: string })?.name === "AbortError") return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setBusyTab(null);
+        if (rescanAbortRef.current === controller) {
+          rescanAbortRef.current = null;
+          if (!controller.signal.aborted) setBusyTab(null);
+        }
       }
     },
     [configIds, load],

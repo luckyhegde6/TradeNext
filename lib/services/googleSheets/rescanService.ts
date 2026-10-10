@@ -108,6 +108,67 @@ export async function rescanScreener(
 }
 
 /**
+ * The synchronous, scan-free half of a `custom` re-scan — everything that can be
+ * decided from the database alone.
+ *
+ * Spec 27 split this out so the route can keep answering 404/409/503 IMMEDIATELY
+ * (a typo'd config id must not be enqueued as a doomed task) while the scan moves
+ * to the worker queue. `rescanCustomConfig` calls it first and REUSES the returned
+ * config, so there is one read and one source of truth for the checks rather than
+ * two copies that can drift apart.
+ *
+ * Never throws: a DB error is mapped to `db_unavailable` (plan-limit hold) or
+ * `error` (anything else) so both callers get a discriminated reason instead of a
+ * bare throw.
+ */
+export type CustomRescanPrecheck =
+  | {
+      ok: true;
+      config: { id: string; name: string; userId: number; filters: unknown };
+      filterGroup: NonNullable<ReturnType<typeof asFilterGroup>>;
+    }
+  | {
+      ok: false;
+      reason: "db_unavailable" | "not_found" | "no_filter_group" | "error";
+      error: string;
+    };
+
+export async function precheckCustomRescan(configId: string): Promise<CustomRescanPrecheck> {
+  if (isPlanLimitBreakerOpen()) {
+    // `ScanConfig` is a Prisma-only model with no SQLite mirror, so there is no
+    // fallback read: report it rather than pretending the config is missing.
+    return { ok: false, reason: "db_unavailable", error: "Database unavailable" };
+  }
+  try {
+    const config = await prisma.scanConfig.findUnique({ where: { id: configId } });
+    if (!config) {
+      return { ok: false, reason: "not_found", error: `Config not found: ${configId}` };
+    }
+    const filterGroup = asFilterGroup(config.filters);
+    if (!filterGroup) {
+      return {
+        ok: false,
+        reason: "no_filter_group",
+        error: `Config ${configId} has no usable filter group`,
+      };
+    }
+    return {
+      ok: true,
+      config: { id: config.id, name: config.name, userId: config.userId, filters: config.filters },
+      filterGroup,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isDbUnavailableError(error)) {
+      logger.warn({ msg: "Google Sheets custom re-scan precheck: DB unavailable", message });
+      return { ok: false, reason: "db_unavailable", error: message };
+    }
+    logger.error({ msg: "Google Sheets custom re-scan precheck failed", configId, message });
+    return { ok: false, reason: "error", error: message };
+  }
+}
+
+/**
  * Re-run ONE saved scan config through the shared pipeline and append the results.
  *
  * `configId` is the only input: the config itself carries the filter group, the
@@ -117,26 +178,12 @@ export async function rescanScreener(
  */
 export async function rescanCustomConfig(configId: string): Promise<RescanResult> {
   const tab = "custom" as const;
-  if (isPlanLimitBreakerOpen()) {
-    // `ScanConfig` is a Prisma-only model with no SQLite mirror, so there is no
-    // fallback read: report it rather than pretending the config is missing.
-    return { ok: false, tab, reason: "db_unavailable", error: "Database unavailable" };
+  const pre = await precheckCustomRescan(configId);
+  if (!pre.ok) {
+    return { ok: false, tab, reason: pre.reason, error: pre.error };
   }
+  const { config, filterGroup } = pre;
   try {
-    const config = await prisma.scanConfig.findUnique({ where: { id: configId } });
-    if (!config) {
-      return { ok: false, tab, reason: "not_found", error: `Config not found: ${configId}` };
-    }
-    const filterGroup = asFilterGroup(config.filters);
-    if (!filterGroup) {
-      return {
-        ok: false,
-        tab,
-        reason: "no_filter_group",
-        error: `Config ${configId} has no usable filter group`,
-      };
-    }
-
     const { stocks, total, executionMs } = await runCustomScan(
       { id: config.id, filters: config.filters },
       { limit: RESCAN_ROW_LIMIT, offset: 0, sortOrder: "desc" },

@@ -74,9 +74,11 @@ export type DegradedTaskType =
   // F-Score task types
   | "fscore_calc"
   | "fscore_batch"
-  | "fscore_single";
+  | "fscore_single"
+  // google-sheets task types
+  | "google_sheets_rescan";
 
-/** All 29 dispatchable types, in worker-service.ts order. */
+/** All 30 dispatchable types, in worker-service.ts order. */
 export const DEGRADED_TASK_TYPES: readonly DegradedTaskType[] = [
   "stock_sync",
   "corp_actions",
@@ -107,6 +109,7 @@ export const DEGRADED_TASK_TYPES: readonly DegradedTaskType[] = [
   "fscore_calc",
   "fscore_batch",
   "fscore_single",
+  "google_sheets_rescan",
 ] as const;
 
 export interface DegradedTaskCapability {
@@ -252,6 +255,10 @@ const REGISTRY: Record<DegradedTaskType, DegradedTaskCapability> = {
   fscore_single: {
     degradedSafe: false,
     reason: "Same executor as fscore_calc.",
+  },
+  google_sheets_rescan: {
+    degradedSafe: false,
+    reason: "Appends rows to an EXTERNAL Google Sheet (irreversible) and reads a Prisma-only ScanConfig; must not run while Prisma is unavailable.",
   },
 };
 
