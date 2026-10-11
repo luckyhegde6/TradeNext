@@ -75,6 +75,17 @@ jest.mock("@/lib/services/worker/worker-logger", () => ({
   writeLog: jest.fn(),
 }));
 
+// v3.49.0 (Spec 28): the reaper asks the Accelerate probe whether to skip the
+// sweep. Default to "DB reachable, do not skip" so the existing reap tests run
+// unchanged; the skip path gets its own dedicated tests. Mocks are defined
+// INSIDE the factory (SWC hoists jest.mock above const declarations — TDZ);
+// tests mutate them via jest.requireMock.
+jest.mock("@/lib/services/accelerateProbe", () => ({
+  __esModule: true,
+  shouldSkipReap: jest.fn().mockResolvedValue(false),
+  getCachedAccelerateProbe: jest.fn(() => null),
+}));
+
 jest.mock("@/lib/cron-parser", () => ({
   __esModule: true,
   calculateNextRun: jest.fn(() => new Date("2026-08-12T04:30:00.000Z")),
@@ -314,6 +325,23 @@ describe("reapStaleWorkerTasks", () => {
     expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
     expect(prisma.workerTask.updateMany).not.toHaveBeenCalled();
     expect(prisma.dailyRecommendationRun.updateMany).not.toHaveBeenCalled();
+    expect(mockRecordSystemRunOutcome).not.toHaveBeenCalled();
+  });
+
+  // ── Spec 28 (2026-10-11): Accelerate probe skip gate ──────────────────────
+  it("is a no-op WITHOUT touching the DB when the Accelerate probe says skip", async () => {
+    const accelerateProbeMock = jest.requireMock("@/lib/services/accelerateProbe") as {
+      shouldSkipReap: jest.Mock;
+    };
+    accelerateProbeMock.shouldSkipReap.mockResolvedValueOnce(true);
+
+    const result = await reapStaleWorkerTasks();
+
+    expect(result).toEqual({ reapedTasks: 0, reapedRuns: 0 });
+    // The gate sits BEFORE the liveness read — zero Prisma reads on skip.
+    expect(prisma.workerStatus.findMany).not.toHaveBeenCalled();
+    expect(prisma.workerTask.findMany).not.toHaveBeenCalled();
+    expect(prisma.dailyRecommendationRun.findMany).not.toHaveBeenCalled();
     expect(mockRecordSystemRunOutcome).not.toHaveBeenCalled();
   });
 });

@@ -30,6 +30,7 @@ jest.mock("@/lib/prisma", () => {
     dailyRecommendationRun: {
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
       delete: jest.fn(),
@@ -254,6 +255,7 @@ jest.mock("@/lib/stock-service", () => ({
 import {
   runDailyRecommendations,
   getLatestRecommendations,
+  repairFailedRunsWithPicks,
   getRecommendationHistory,
   getStockRecommendationDetail,
   checkRecommendationPerformance,
@@ -842,9 +844,15 @@ describe("dailyRecommendationService", () => {
 
       // v3.10.1 honest latest-run: NO BUY/SELL verdict filter — an all-HOLD
       // run must surface today's date instead of a stale actionable run.
+      // v3.49.0 (Spec 29): the legitimate previous predicate
+      // `status IN (completed, failed)` is gone — a run qualifies ONLY when it
+      // completed AND the AI layer produced verdicts (aiProcessed > 0). A
+      // failed run with raw screener picks must NEVER shadow good runs
+      // (prod 2026-10-11: 100 forced HOLD rows from run 347d6887…).
       const where = mockPrisma.dailyRecommendationRun.findFirst.mock.calls[0][0]?.where;
-      expect(where.status).toEqual({ in: ["completed", "failed"] });
+      expect(where.status).toEqual("completed");
       expect(where.uniqueStocks).toEqual({ gt: 0 });
+      expect(where.aiProcessed).toEqual({ gt: 0 });
       expect(where.stocks).toBeUndefined();
     });
 
@@ -873,6 +881,92 @@ describe("dailyRecommendationService", () => {
       expect(result.stocks).toHaveLength(1);
       expect(result.latestRun?.id).toBe("run-failed");
       expect(result.latestRun?.status).toBe("failed");
+    });
+
+    // ── v3.49.0 (Spec 29) ─────────────────────────────────────────────
+    test("a FAILED run with raw picks but zero AI verdicts is never the latest run (prod bug)", async () => {
+      // prod 2026-10-11: run 347d6887-1139-4620-ab47-0940882b4109, runDate
+      // 2026-09-04, status failed, uniqueStocks 100, aiProcessed 0. Under the
+      // old predicate (`status IN (completed,failed) AND uniqueStocks > 0`)
+      // it surfaced as "Today's" with 100 forced HOLD rows. The honest
+      // predicate skips it for the payload and reports it only as latestRun.
+      const goodRun = {
+        id: "run-good",
+        status: "completed",
+        runDate: new Date("2026-09-02T00:00:00Z"),
+        aiProcessed: 98,
+        stocks: [
+          { symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "BUY", tracker: { id: "t1" } },
+        ],
+      };
+      const failedPicksRun = {
+        id: "run-failed-picks",
+        status: "failed",
+        runDate: new Date("2026-09-04T09:20:52Z"),
+        uniqueStocks: 100,
+        aiProcessed: 0,
+      };
+      mockPrisma.dailyRecommendationRun.findFirst
+        .mockResolvedValueOnce(goodRun)
+        .mockResolvedValueOnce(failedPicksRun);
+
+      const result = await getLatestRecommendations();
+      expect(result.run?.id).toBe("run-good");
+      expect(result.run?.status).toBe("completed");
+      expect(result.latestRun?.id).toBe("run-failed-picks");
+      expect(result.latestRun?.status).toBe("failed");
+    });
+
+    test("cache fingerprint AND payload query use the SAME honest predicate (parity)", async () => {
+      // The cache is validated by re-probing the SAME predicate — otherwise a
+      // failed run could be cached under one predicate and served under the
+      // other. Both finds must deep-equal LATEST_RUN_WHERE.
+      cache.get.mockReturnValue({
+        runId: "run-old",
+        newestRunId: "run-old",
+        data: { run: { id: "run-old" }, stocks: [], latestRun: { id: "run-old" } },
+      });
+      mockPrisma.dailyRecommendationRun.findFirst
+        .mockResolvedValueOnce({ id: "run-new" }) // fingerprint: qualifying run
+        .mockResolvedValueOnce({ id: "run-new" }) // fingerprint: newest run
+        .mockResolvedValueOnce({
+          id: "run-new",
+          status: "completed",
+          runDate: new Date(),
+          stocks: [{ symbol: "RELIANCE", screenerCount: 2, tracker: { id: "t1" } }],
+        })
+        .mockResolvedValueOnce({ id: "run-new", runDate: new Date(), status: "completed" });
+
+      await getLatestRecommendations();
+
+      const calls = mockPrisma.dailyRecommendationRun.findFirst.mock.calls;
+      const expectedWhere = { status: "completed", uniqueStocks: { gt: 0 }, aiProcessed: { gt: 0 } };
+      // fingerprint qualifying-run probe (call 0) and heavy payload query (call 2)
+      expect(calls[0][0]?.where).toEqual(expectedWhere);
+      expect(calls[2][0]?.where).toEqual(expectedWhere);
+      // newest-run probes stay predicate-free (they observe ANY run)
+      expect(calls[1][0]?.where).toBeUndefined();
+      expect(calls[3][0]?.where).toBeUndefined();
+    });
+
+    test("lastSuccessfulRunDate is the ISO date of the latest COMPLETED+AI run", async () => {
+      const mockRun = {
+        id: "run-1",
+        status: "completed",
+        runDate: new Date("2026-09-02T00:00:00Z"),
+        stocks: [{ symbol: "RELIANCE", screenerCount: 3, aiRecommendation: "BUY", tracker: { id: "t1" } }],
+      };
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(mockRun);
+
+      const result = await getLatestRecommendations();
+      expect(result.lastSuccessfulRunDate).toBe("2026-09-02T00:00:00.000Z");
+    });
+
+    test("lastSuccessfulRunDate is null when no successful run exists", async () => {
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
+
+      const result = await getLatestRecommendations();
+      expect(result.lastSuccessfulRunDate).toBeNull();
     });
 
     test("returns empty when no runs exist", async () => {
@@ -1005,6 +1099,55 @@ describe("dailyRecommendationService", () => {
         const entry = cache.set.mock.calls[0][1];
         expect(entry).toMatchObject({ runId: "run-good", newestRunId: "newest-new" });
       });
+    });
+  });
+
+  // ── v3.49.0 (Spec 29) ─────────────────────────────────────────────
+  describe("repairFailedRunsWithPicks", () => {
+    test("zeroes the pick pivot on legacy failed/ai-zero runs and invalidates the cache", async () => {
+      mockPrisma.dailyRecommendationRun.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await repairFailedRunsWithPicks();
+
+      expect(mockPrisma.dailyRecommendationRun.updateMany).toHaveBeenCalledWith({
+        where: { status: "failed", aiProcessed: 0, uniqueStocks: { gt: 0 } },
+        data: { uniqueStocks: 0 },
+      });
+      expect(result.repaired).toBe(2);
+      // cache invalidation (recommendationsCache.flushAll) fires on repair
+      expect(cache.flushAll).toHaveBeenCalled();
+    });
+
+    test("does NOT touch completed or partial-AI failed runs", async () => {
+      mockPrisma.dailyRecommendationRun.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await repairFailedRunsWithPicks();
+
+      // The where clause guarantees only failed+aiProcessed 0+uniqueStocks>0
+      // rows match — completed runs and runs with ANY AI verdicts are excluded.
+      const where = mockPrisma.dailyRecommendationRun.updateMany.mock.calls[0][0]?.where;
+      expect(where.status).toEqual("failed");
+      expect(where.aiProcessed).toEqual(0);
+      expect(where.uniqueStocks).toEqual({ gt: 0 });
+      expect(result.repaired).toBe(0);
+    });
+
+    test("is idempotent — a second sweep is a zero no-op with NO cache invalidation", async () => {
+      mockPrisma.dailyRecommendationRun.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await repairFailedRunsWithPicks();
+
+      expect(result.repaired).toBe(0);
+      // cache invalidation only fires when something was actually repaired
+      expect(cache.flushAll).not.toHaveBeenCalled();
+    });
+
+    test("never throws — returns repaired 0 and logs on DB failure", async () => {
+      mockPrisma.dailyRecommendationRun.updateMany.mockRejectedValue(new Error("Accelerate down"));
+
+      const result = await repairFailedRunsWithPicks();
+
+      expect(result).toEqual({ repaired: 0 });
     });
   });
 

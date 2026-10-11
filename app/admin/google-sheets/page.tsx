@@ -523,6 +523,16 @@ export default function AdminGoogleSheetsPage() {
             {status.status.oauthConfigured.clientSecret ? "✓" : "✗"} · refresh token{" "}
             {status.status.oauthConfigured.refreshToken ? "✓" : "✗"}
           </div>
+          {status.status.missingEnvVars.length > 0 && (
+              <div className="mt-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/10 text-sm text-violet-300">
+                🛡 Armed: {status.status.missingEnvVars.length} env var(s) missing — <a
+                  href="/scripts/google-sheets/verify-prod-env.ts"
+                  target="_blank"
+                  rel="noopener"
+                >run verify-prod-env.ts</a> for details
+              </div>
+            )}
+
           {!status.status.trackingEnabled && (
             <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
               Tracking cannot write yet. It needs the env master flag, a configured spreadsheet id, and

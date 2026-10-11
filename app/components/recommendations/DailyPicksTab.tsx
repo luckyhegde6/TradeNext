@@ -45,6 +45,17 @@ interface DailyPicksTabProps {
   aiUnavailable?: boolean;
   /** runDate of the newer failed run, for the notice text. */
   aiUnavailableDate?: string | null;
+  /**
+   * v3.49.0 (Spec 30): ISO timestamp of the next scheduled recommendations run,
+   * or null when unknown. Shown in the staleness banner.
+   */
+  nextRunAt?: string | null;
+  /**
+   * v3.49.0 (Spec 30): true when the newest successful run is older than the
+   * staleness window (default 48h) — e.g. a Friday run viewed on Sunday. Renders
+   * a NEUTRAL banner (not an error): the weekday-only schedule is intentional.
+   */
+  isStale?: boolean;
 }
 
 type SortKey = "screener" | "volume" | "price" | "confidence" | "marketCap" | "createdAt";
@@ -75,6 +86,8 @@ export default function DailyPicksTab({
   loading,
   aiUnavailable = false,
   aiUnavailableDate = null,
+  nextRunAt = null,
+  isStale = false,
 }: DailyPicksTabProps) {
   // ─── State ─────────────────────────────────────────────────────────
   const [recFilter, setRecFilter] = useState<string>("all");
@@ -188,13 +201,35 @@ export default function DailyPicksTab({
     );
   }
 
+  // v3.49.0 (Spec 30): neutral staleness banner. The weekday-only schedule is
+  // intentional (NSE is closed on weekends), so this is informational, not an
+  // error — violet (not the amber AI-unavailable notice). Uses the last
+  // SUCCESSFUL run date (runDate), never the failed-run date (pairs with Spec 29).
+  const staleBanner = isStale ? (
+    <div
+      className="mb-4 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-xs text-violet-300"
+      data-testid="stale-banner"
+    >
+      {runDate
+        ? `Last successful run ${new Date(runDate).toLocaleDateString("en-IN")} — next run ${
+            nextRunAt ? new Date(nextRunAt).toLocaleString("en-IN") : "scheduled"
+          } (Mon–Fri, 10:00 IST)`
+        : `No successful run yet — next run ${
+            nextRunAt ? new Date(nextRunAt).toLocaleString("en-IN") : "scheduled"
+          } (Mon–Fri, 10:00 IST)`}
+    </div>
+  ) : null;
+
   // ─── Empty ─────────────────────────────────────────────────────────
   if (stocks.length === 0) {
     return (
-      <div className="text-center py-12">
-        <div className="text-4xl mb-3">📊</div>
-        <h3 className="text-lg font-medium text-gray-300">No recommendations yet</h3>
-        <p className="text-sm text-gray-500 mt-1">Next scan at 10:00 AM IST tomorrow</p>
+      <div>
+        {staleBanner}
+        <div className="text-center py-12">
+          <div className="text-4xl mb-3">📊</div>
+          <h3 className="text-lg font-medium text-gray-300">No recommendations yet</h3>
+          <p className="text-sm text-gray-500 mt-1">Next scan at 10:00 AM IST tomorrow</p>
+        </div>
       </div>
     );
   }
@@ -202,6 +237,8 @@ export default function DailyPicksTab({
   // ─── Render ────────────────────────────────────────────────────────
   return (
     <div>
+      {staleBanner}
+
       {/* AI-unavailable notice: a newer run failed with no picks, the list
           below is the last good run (v3.11.1 — no synthetic all-HOLD rows). */}
       {aiUnavailable && runDate && (

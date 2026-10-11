@@ -21,7 +21,7 @@ import os from "os";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { isDegradedModeActive } from "@/lib/services/degradedMode";
 import { enqueueDegradedTask } from "./degradedQueue";
-import { spawnDueCronJob, catchUpMissedCronJobs } from "./worker-engine";
+import { spawnDueCronJob, catchUpMissedCronJobs, ensureDailyRecommendationRan } from "./worker-engine";
 
 // Cron expressions in this app are authored in UTC (see recommendationCronService:
 // "Times are UTC: IST = UTC + 5:30") and `calculateNextRun` (lib/cron-parser.ts)
@@ -135,6 +135,22 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
+  // Spec 30: day-level recommendations catch-up on boot. A failed weekday run
+  // (or an instance cold across the whole 04:30 UTC window) would otherwise
+  // leave `nextRun` advanced with nothing to re-fire. Guards inside keep this a
+  // no-op on weekends / before the window / when a run already succeeded.
+  try {
+    const res = await ensureDailyRecommendationRan();
+    if (res.enqueued) {
+      logger.info({ msg: "Cron boot recommendations catch-up enqueued", reason: res.reason });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Cron boot recommendations catch-up deferred",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   resyncInterval = setInterval(() => {
     syncCronJobs().catch((error) => {
       if (isDbUnavailableError(error)) {
@@ -153,6 +169,13 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
       } else {
         logger.error({ msg: "Cron catch-up failed", error: error instanceof Error ? error.message : String(error) });
       }
+    });
+    // Spec 30: day-level recommendations catch-up on the 5-min tick. Leader-
+    // gated and guarded (weekday, ≥04:30 UTC, no successful run today, no
+    // in-flight rec task); enqueues at most one catch-up run per day. Never
+    // throws — the helper swallows its own errors.
+    ensureDailyRecommendationRan().catch((error) => {
+      logger.warn({ msg: "Recommendations catch-up tick failed", error: error instanceof Error ? error.message : String(error) });
     });
     // v3.47.0 (spec 25): drain the SQLite→Prisma write-behind outbox on the
     // same 5-min tick. Previously the only drains were the 6h recovery probe,

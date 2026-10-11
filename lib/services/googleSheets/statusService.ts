@@ -48,6 +48,11 @@ export interface SheetsStatus {
   trackingEnabled: boolean;
   /** One entry per tab, in `TRACKER_TABS` declaration order. */
   perTab: TabStatus[];
+  /** v3.49.0 (Spec 31): env vars from the required set that are currently unset.
+   *  Empty array means all 5 are present. The UI uses this to render an
+   *  "armed-state" card — the console shows "env missing" when this is non-empty.
+   */
+  missingEnvVars: string[];
 }
 
 /** True when an env var is present and non-blank. Never logs the value. */
@@ -90,6 +95,19 @@ export async function getStatus(): Promise<SheetsStatus> {
     },
     trackingEnabled: isTrackingActive() && Boolean(config.sheetId),
     perTab,
+    // Spec 31: list which of the 5 required env vars are currently unset.
+    // The UI uses this to render an "armed-state" card that shows "env missing"
+    // when the list is non-empty.
+    missingEnvVars: (() => {
+      const required = [
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REFRESH_TOKEN",
+        "GOOGLE_SHEETS_TRACKING_ENABLED",
+        "GOOGLE_SHEET_ID",
+      ];
+      return required.filter(name => !isSet(name));
+    })(),
   };
 
   logger.debug({

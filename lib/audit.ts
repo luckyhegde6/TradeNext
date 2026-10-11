@@ -170,7 +170,22 @@ export type AuditAction =
    * incident the first question is "did someone touch the switch?", and only a
    * separate action can answer that.
    */
-  | 'DEGRADED_MODE_SET';
+  | 'DEGRADED_MODE_SET'
+  // ── v3.49.0 Spec 28: Accelerate connectivity probe ─────────────────────────
+  // Admin-initiated probe of Accelerate reachability (`SELECT 1`). Metadata:
+  // state (ok|unreachable|open), latencyMs, checkedAt, probeId, force. Fragile
+  // by nature, so only admin-triggered probes are audited — reaper skips log at
+  // warn level instead (no audit spam during an outage).
+  | 'ACCELERATE_PROBE'
+  // ── v3.49.0 Spec 29: AI-stage failed-run repair ────────────────────────────
+  // Admin sweep that zeroes the pick pivot (uniqueStocks) on legacy failed runs
+  // with uniqueStocks>0 and aiProcessed=0, so they stop shadowing good runs.
+  // Metadata: repaired (count).
+  | 'RECS_REPAIR_FAILED_RUNS'
+  // ── v3.49.0 Spec 30: day-level recommendations catch-up ────────────────────
+  // The daemon noticed that today's 04:30Z weekday run window produced no
+  // successful run and enqueued a catch-up task. Metadata: scope, hadRun, reason.
+  | 'RECOMMENDATIONS_CATCHUP';
 
 interface AuditLogParams {
   userId?: number;

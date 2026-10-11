@@ -2,7 +2,12 @@
 // ROUTE_CACHE_KEY) -> SQLite mirror while the plan-limit breaker is open ->
 // Prisma with Accelerate cacheStrategy on the heavy latest-run reads.
 import { NextRequest, NextResponse } from "next/server";
-import { getLatestRecommendations } from "@/lib/services/dailyRecommendationService";
+import {
+  getLatestRecommendations,
+  computeFreshnessFields,
+  computeIsStale,
+  RECOMMENDATION_CRON_DISPLAY,
+} from "@/lib/services/dailyRecommendationService";
 import { recommendationsCache } from "@/lib/cache";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { getSqliteFallback } from "@/lib/sqlite";
@@ -24,8 +29,44 @@ const ROUTE_CACHE_TTL_SECONDS = 60;
 
 interface RouteRecommendationsCacheBody {
   success: boolean;
+  run?: unknown;
+  latestRun?: unknown;
+  lastSuccessfulRunDate?: string | null;
+  // Spec 30 freshness fields (additive; optional so a pre-upgrade cached body
+  // still type-checks — the route backfills defaults where absent).
+  nextRunAt?: string | null;
+  lastUpdatedAt?: string | null;
+  isStale?: boolean;
+  scheduleCron?: string;
   stocks: unknown[];
   timestamp: string;
+}
+
+/**
+ * Spec 30: contract-required defaults for degraded/fallback payloads — all four
+ * freshness keys are ALWAYS present (values nullable). Used by the plan-limit
+ * mirror path where a full `computeFreshnessFields()` (which reads Prisma) must
+ * NOT run.
+ */
+const FRESHNESS_DEFAULTS = {
+  nextRunAt: null as string | null,
+  lastUpdatedAt: null as string | null,
+  isStale: false,
+  scheduleCron: RECOMMENDATION_CRON_DISPLAY,
+};
+
+/**
+ * Spec 30 §10.6 / §13: on a route-cache hit, patch freshness from current time
+ * without a DB read (O(1)). Only `isStale` can flip inside the 60s TTL, so it is
+ * recomputed from the cached `lastUpdatedAt`; the state-derived `nextRunAt` /
+ * `lastUpdatedAt` stay (≤60s staleness is acceptable, §16).
+ */
+function patchFreshness<T extends RouteRecommendationsCacheBody>(body: T): T {
+  return {
+    ...body,
+    isStale: computeIsStale(body.lastUpdatedAt ?? null),
+    timestamp: new Date().toISOString(),
+  };
 }
 
 // GET /api/recommendations — Get latest daily recommendations
@@ -48,6 +89,7 @@ export async function GET(req: NextRequest) {
           requestId,
         });
         return NextResponse.json({
+          ...FRESHNESS_DEFAULTS,
           ...cached,
           timestamp: new Date().toISOString(),
           servedFrom: "sqlite_mirror",
@@ -60,7 +102,7 @@ export async function GET(req: NextRequest) {
           msg: "Recommendations: plan-limit breaker open — serving memory cache",
           requestId,
         });
-        return NextResponse.json({ ...memCached, servedFrom: "memory_cache" });
+        return NextResponse.json({ ...patchFreshness(memCached), servedFrom: "memory_cache" });
       }
     }
 
@@ -80,11 +122,15 @@ export async function GET(req: NextRequest) {
         hit: true,
       });
       logger.debug({ msg: "Recommendations served from route memory cache" });
-      return NextResponse.json({ ...memCached, servedFrom: "memory_cache" });
+      return NextResponse.json({ ...patchFreshness(memCached), servedFrom: "memory_cache" });
     }
 
     const _recStart = performance.now();
-    const { run, stocks, latestRun } = await getLatestRecommendations();
+    const { run, stocks, latestRun, lastSuccessfulRunDate } = await getLatestRecommendations();
+    // Spec 30 §4C/§10.6: compute freshness BEFORE caching so a cached body never
+    // carries stale info. computeFreshnessFields() never throws (defaults on any
+    // failure), so a freshness problem can never 500 the reads.
+    const freshness = await computeFreshnessFields();
     recordRead("recommendations.prisma", {
       source: "prisma",
       latencyMs: Math.max(0, Math.round(performance.now() - _recStart)),
@@ -124,6 +170,13 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
+    // v3.49.0 (Spec 29): ISO date of the last COMPLETED run with AI verdicts.
+    // Prefer `run.runDate` (the payload run IS the last successful run under
+    // the new predicate); fall back to the service-level field (already an ISO
+    // string set by getLatestRecommendations) when `run` is null.
+    const serializedLastSuccessfulRunDate: string | null =
+      serializedRun?.runDate ?? lastSuccessfulRunDate ?? null;
+
     // Serialize stocks — convert BigInt, ensure plain objects
     const serializedStocks = stocks.map((s) => ({
       symbol: s.symbol,
@@ -151,6 +204,9 @@ export async function GET(req: NextRequest) {
       success: true,
       run: serializedRun,
       latestRun: serializedLatestRun,
+      lastSuccessfulRunDate: serializedLastSuccessfulRunDate,
+      // Spec 30 freshness (additive; all four keys always present).
+      ...freshness,
       stocks: serializedStocks,
       timestamp: new Date().toISOString(),
     };

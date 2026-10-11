@@ -5,9 +5,11 @@ import { executeTask, recordSystemRunOutcome } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { shouldSkipReap, getCachedAccelerateProbe } from "@/lib/services/accelerateProbe";
 import { getCorrectedNow, getCronFrom } from "@/lib/services/timeCorrection";
 import { isDegradedModeActive } from "@/lib/services/degradedMode";
 import { canExecuteDegradedWork, degradedLeaseHolder } from "@/lib/services/degradedLeader";
+import { isLeader } from "@/lib/services/leader";
 import { enqueueDegradedTask, runDegradedQueueOnce } from "./degradedQueue";
 import os from "os";
 
@@ -550,6 +552,21 @@ export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<
     if (isPlanLimitBreakerOpen()) {
         return { reapedTasks: 0, reapedRuns: 0 };
     }
+    // v3.49.0 (Spec 28): Accelerate can be NETWORK-unreachable without the
+    // plan-limit breaker opening (prod 2026-10-11: "Stale recommendation-run reap
+    // failed … Unable to connect to the Accelerate API" every minute). When the
+    // TTL-cached SELECT 1 probe answers unreachable, skip the whole 4-read sweep
+    // and report "nothing reaped" — the sweep resumes automatically once the
+    // probe turns ok again.
+    if (await shouldSkipReap()) {
+        const probe = getCachedAccelerateProbe();
+        logger.warn({
+            msg: "Skipping stale reap — Accelerate unreachable",
+            probeId: probe?.probeId,
+            checkedAt: probe?.checkedAt,
+        });
+        return { reapedTasks: 0, reapedRuns: 0 };
+    }
     const cutoff = new Date(Date.now() - staleMs);
     let reapedTasks = 0;
     let reapedRuns = 0;
@@ -821,6 +838,126 @@ export async function catchUpMissedCronJobs(options?: {
         logger.info({ msg: "Recovered overdue cron jobs", recovered });
     }
     return { recovered, skipped: 0 };
+}
+
+// ─── Day-level recommendations catch-up (Spec 30) ───────────────────────────
+// `catchUpMissedCronJobs` (Spec 24/25) recovers jobs whose `nextRun` is in the
+// past — but a weekday run that FAILED silently (or an instance that was cold
+// across the whole 04:30 UTC window) leaves `nextRun` advanced, so nothing
+// re-fires and the page stays stale for days (prod 2026-10-11: failed run from
+// 2026-09-04). This guard adds DAY-level semantics: on a weekday after the
+// scheduled fire time, with no successful run today and none in flight, enqueue
+// exactly ONE catch-up. It NEVER changes the cron schedule (weekend NSE-closed
+// runs stay off) and is leader-only (single writer).
+//
+// Safety (all must pass): breaker/degraded closed · leader · weekday (UTC) ·
+// now ≥ 04:30 UTC · no completed+AI run today · no pending/running rec task
+// within the dedup window. `now` is injectable for tests.
+export async function ensureDailyRecommendationRan(
+    now: Date = getCorrectedNow()
+): Promise<{ enqueued: boolean; reason: string | null }> {
+    // Degraded hold: the durable SQLite queue is the designed recovery path —
+    // never Prisma-enqueue here.
+    if (isPlanLimitBreakerOpen() || isDegradedModeActive()) {
+        return { enqueued: false, reason: "degraded" };
+    }
+
+    // Leader-only: one instance enqueues so N instances never double-fire.
+    if (!(await isLeader("worker"))) {
+        logger.debug({ msg: "Recommendations catch-up skipped (not leader)" });
+        return { enqueued: false, reason: "not-leader" };
+    }
+
+    // Weekday guard (UTC 0=Sun..6=Sat). NSE is closed on weekends — the schedule
+    // is Mon–Fri and that is correct; do NOT catch up on weekends.
+    const dow = now.getUTCDay();
+    if (dow === 0 || dow === 6) {
+        logger.debug({ msg: "Recommendations catch-up skipped (weekend)", dow });
+        return { enqueued: false, reason: "weekend" };
+    }
+
+    // Fire time guard: before 04:30 UTC the cron will still fire normally.
+    const fireTodayMs = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        4,
+        30,
+        0
+    );
+    if (now.getTime() < fireTodayMs) {
+        logger.debug({ msg: "Recommendations catch-up skipped (before window)", now: now.toISOString() });
+        return { enqueued: false, reason: "before-window" };
+    }
+
+    // Day-level guard: a successful run today ⇒ nothing to do.
+    const { hasSuccessfulRunToday } = await import("@/lib/services/dailyRecommendationService");
+    if (await hasSuccessfulRunToday(now)) {
+        logger.debug({ msg: "Recommendations catch-up skipped (already ran today)" });
+        return { enqueued: false, reason: "already-ran" };
+    }
+
+    // In-flight guard: a pending/running recommendations task within the window
+    // (mirrors the 90-min spawn dedup) ⇒ the run is already on its way.
+    try {
+        const inFlight = await prisma.workerTask.findFirst({
+            where: {
+                taskType: "recommendations",
+                status: { in: ["pending", "running"] },
+                createdAt: { gte: new Date(now.getTime() - DEDUP_WINDOW_MS) },
+            },
+            select: { id: true },
+        });
+        if (inFlight) {
+            logger.debug({ msg: "Recommendations catch-up skipped (task in flight)", taskId: inFlight.id });
+            return { enqueued: false, reason: "in-flight" };
+        }
+    } catch (error) {
+        logger.warn({
+            msg: "Recommendations catch-up in-flight check failed — skipping this tick",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { enqueued: false, reason: "in-flight-check-failed" };
+    }
+
+    // All guards passed — enqueue exactly one catch-up run.
+    try {
+        const { spawnRegularTask } = await import("./task-orchestrator");
+        const task = await spawnRegularTask({
+            name: "Catch-up: Daily Recommendations",
+            taskType: "recommendations",
+            triggeredBy: "catchup",
+            payload: { source: "catchup", reason: "missed-daily-window" },
+        });
+        // Audit only on an actual enqueue (Spec 30 §9) — never on a skip.
+        try {
+            const { createAuditLog } = await import("@/lib/audit");
+            void createAuditLog({
+                action: "RECOMMENDATIONS_CATCHUP",
+                resource: "recommendations",
+                responseStatus: 200,
+                metadata: {
+                    scope: "day",
+                    hadRun: false,
+                    reason: "missed-daily-window",
+                    taskId: task.id,
+                },
+            });
+        } catch (auditErr) {
+            logger.warn({
+                msg: "Recommendations catch-up audit failed",
+                error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
+        }
+        logger.info({ msg: "Recommendations catch-up enqueued", taskId: task.id });
+        return { enqueued: true, reason: "missed-daily-window" };
+    } catch (error) {
+        logger.error({
+            msg: "Recommendations catch-up enqueue failed",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { enqueued: false, reason: "enqueue-failed" };
+    }
 }
 
 /**

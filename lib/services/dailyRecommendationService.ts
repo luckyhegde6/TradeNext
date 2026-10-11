@@ -37,6 +37,9 @@ import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { getSqliteFallback } from "@/lib/sqlite";
+import { calculateNextRun } from "@/lib/cron-parser";
+import { getCronFrom } from "@/lib/services/timeCorrection";
+import { RECOMMENDATION_CRON_NAME, RECOMMENDATION_CRON_EXPR } from "./recommendationCronService";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -80,6 +83,13 @@ export interface LatestRecommendations {
    * notice while still displaying the last good run's stocks.
    */
   latestRun?: { id: string; runDate: Date; status: string } | null;
+  /**
+   * v3.49.0 (Spec 29): ISO date of the most recent COMPLETED run with AI
+   * verdicts (the run whose stocks are returned above), or null when no
+   * successful run exists yet. Mirrors `run?.runDate` but is explicit so the
+   * UI can compare it to the newest run on a failed day.
+   */
+  lastSuccessfulRunDate?: string | null;
 }
 
 /** Prisma DailyRecommendationRun with nested stocks. */
@@ -1223,6 +1233,22 @@ const LATEST_KEY = "recommendations:latest";
 // the fingerprint probe below. (v3.12.0 — was the 23h NodeCache default.)
 const LATEST_CACHE_TTL_SECONDS = 15 * 60;
 
+/**
+ * v3.49.0 (Spec 29): the ONE predicate that defines "the latest successful run"
+ * — shared by BOTH the cache fingerprint and the payload query. Previously the
+ * two were inline-duplicated as `status IN (completed, failed)` +
+ * `uniqueStocks > 0`, so a run that FAILED while the AI layer was down
+ * (`aiProcessed 0` — prod 2026-10-11, run `347d6887…`, runDate 2026-09-04)
+ * surfaced as the "latest run" with 100 HOLD picks and a misleading
+ * "Last updated" date. A run counts as the latest ONLY when it completed AND
+ * the AI layer actually produced verdicts.
+ */
+const LATEST_RUN_WHERE = {
+  status: "completed",
+  uniqueStocks: { gt: 0 },
+  aiProcessed: { gt: 0 },
+} as const;
+
 /** Fingerprint of the two runs that make up the latest-recs payload.
  *
  * Cross-instance staleness guard: the in-memory recommendationsCache is
@@ -1236,7 +1262,7 @@ const LATEST_CACHE_TTL_SECONDS = 15 * 60;
 async function getLatestRunFingerprint(): Promise<{ runId: string | null; newestRunId: string | null }> {
   const [run, newestRun] = await Promise.all([
     prisma.dailyRecommendationRun.findFirst({
-      where: { status: { in: ["completed", "failed"] }, uniqueStocks: { gt: 0 } },
+      where: LATEST_RUN_WHERE,
       orderBy: { runDate: "desc" },
       select: { id: true },
     }),
@@ -1295,18 +1321,17 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
     }
   }
 
-  // Honest latest-run selection: ONE query — latest completed/failed run with
-  // stocks, NO verdict filter. All stocks (incl. HOLD) are returned so the
-  // "Last updated" date always reflects the newest run (v3.10.1).
+  // Honest latest-run selection: ONE query — the latest COMPLETED run whose AI
+  // stage actually produced verdicts (LATEST_RUN_WHERE, shared with the cache
+  // fingerprint, v3.49.0). NO verdict filter on the stocks: all results
+  // (incl. HOLD) are returned so the "Last updated" date always reflects the
+  // newest successful run (v3.10.1).
   try {
     const latestRun = await prisma.dailyRecommendationRun.findFirst(
       // v3.28.4: edge-cache the heavy stocks-include query (short TTL + SWR —
       // the in-memory fingerprint guard above already returns early on hit).
       withAccelerateCache({ ttl: 60, swr: 30 })({
-        where: {
-          status: { in: ["completed", "failed"] },
-          uniqueStocks: { gt: 0 },
-        },
+        where: LATEST_RUN_WHERE,
         orderBy: { runDate: "desc" },
         include: {
           stocks: {
@@ -1337,6 +1362,7 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
       run: latestRun as RunWithStocks | null,
       stocks: serializedStocks as unknown as StockWithTracker[],
       latestRun: newestRun,
+      lastSuccessfulRunDate: latestRun?.runDate ? latestRun.runDate.toISOString() : null,
     };
 
     // Store in cache (validated on read by run-id fingerprint + 15-min TTL
@@ -1360,7 +1386,7 @@ export async function getLatestRecommendations(): Promise<LatestRecommendations>
         msg: "Latest recommendations: DB unavailable — returning empty results",
         error: dbErr instanceof Error ? dbErr.message : String(dbErr),
       });
-      return { run: null, stocks: [], latestRun: null };
+      return { run: null, stocks: [], latestRun: null, lastSuccessfulRunDate: null };
     }
     throw dbErr;
   }
@@ -1431,6 +1457,199 @@ export async function getRecommendationHistory(options: {
 export function invalidateRecommendationsCache(): void {
   recommendationsCache.flushAll();
   logger.info({ msg: "Recommendations cache invalidated" });
+}
+
+/**
+ * v3.49.0 (Spec 29): one-shot corrective sweep for legacy failed runs that
+ * carry raw screener picks but were never AI-processed (prod 2026-10-11:
+ * run `347d6887…`, runDate 2026-09-04, status "failed", uniqueStocks 100,
+ * aiProcessed 0 — it shadowed good runs because the old read predicate
+ * selected `status in [completed, failed] AND uniqueStocks > 0`).
+ *
+ * The sweep zeroes ONLY the pivot `uniqueStocks` on those rows — the stocks
+ * journal rows are KEPT (referenced by explicit runId from History/Performance)
+ * so nothing else breaks. Runs stop passing `uniqueStocks > 0` selection, the
+ * predicate (now `status completed + aiProcessed > 0`) can never surface them,
+ * and the cache is invalidated so every instance re-reads.
+ *
+ * Idempotent by construction: a second call matches nothing → `repaired: 0`.
+ * Completed runs and partial-AI-failed runs (`aiProcessed > 0`) are untouched.
+ * Never throws — returns `{ repaired: 0 }` and logs the error.
+ */
+export async function repairFailedRunsWithPicks(): Promise<{ repaired: number }> {
+  try {
+    const { count } = await prisma.dailyRecommendationRun.updateMany({
+      where: { status: "failed", aiProcessed: 0, uniqueStocks: { gt: 0 } },
+      data: { uniqueStocks: 0 },
+    });
+    if (count > 0) {
+      invalidateRecommendationsCache();
+      logger.warn({
+        msg: "Legacy failed runs repaired (pivot zeroed)",
+        repaired: count,
+      });
+    } else {
+      logger.info({ msg: "Repair sweep: nothing to repair", repaired: 0 });
+    }
+    return { repaired: count };
+  } catch (error) {
+    logger.error({
+      msg: "Repair sweep failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { repaired: 0 };
+  }
+}
+
+// ─── Spec 30: freshness / next-run surfacing ────────────────────────────────
+//
+// The daily recommendations cron is weekday-only (`30 4 * * 1-5`, 10:00 IST
+// Mon–Fri). That is CORRECT (NSE is closed on weekends), but a weekend viewer
+// previously saw a month-old "Last updated" with no explanation. These helpers
+// let the API + UI be honest: "next run <when>" + a neutral staleness banner,
+// never a red error. They are additive — the run itself is unchanged.
+
+/**
+ * Human-readable schedule descriptor. Single source of truth for the API
+ * (`scheduleCron`) and the UI copy (Spec 30 §4A).
+ */
+export const RECOMMENDATION_CRON_DISPLAY = "30 4 * * 1-5 (Mon-Fri)";
+
+/**
+ * A run is STALE when the newest successful run is older than this window.
+ * Default 48h — a Friday run viewed Sunday is "stale by elapsed time", which
+ * the UI states in neutral terms (not an error). Env: `RECS_STALE_AFTER_MS`.
+ */
+const RECS_STALE_AFTER_MS = (() => {
+  const raw = Number(process.env.RECS_STALE_AFTER_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 48 * 60 * 60_000;
+})();
+
+/**
+ * Pure staleness test shared by `computeFreshnessFields` and the API route's
+ * cache-hit patch (Spec 30 §13: an O(1) recompute with no DB read). Exported so
+ * the route never duplicates the threshold/env logic.
+ */
+export function computeIsStale(lastUpdatedAt: string | null | undefined, now: Date = new Date()): boolean {
+  const lastMs = lastUpdatedAt ? Date.parse(lastUpdatedAt) : NaN;
+  return !Number.isFinite(lastMs) || now.getTime() - lastMs > RECS_STALE_AFTER_MS;
+}
+
+/** Start of the UTC calendar day containing `now`. */
+function startOfUtcDay(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * Next scheduled fire of the recommendations cron. Prefers the system cron
+ * row's `nextRun`; falls back to computing it from the expression. Never throws.
+ */
+export async function getNextRunAt(): Promise<Date | null> {
+  try {
+    const row = await prisma.cronJob.findFirst({
+      where: { name: RECOMMENDATION_CRON_NAME },
+      select: { nextRun: true },
+    });
+    if (row?.nextRun instanceof Date) return row.nextRun;
+  } catch (error) {
+    logger.warn({
+      msg: "getNextRunAt: cron row read failed — computing from expression",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  try {
+    return calculateNextRun(RECOMMENDATION_CRON_EXPR, getCronFrom());
+  } catch (error) {
+    logger.warn({
+      msg: "getNextRunAt: calculateNextRun failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * ISO date of the newest COMPLETED run with AI verdicts (the honest "last
+ * SUCCESSFUL update"), or null. Same predicate as the latest-run payload so the
+ * field can never disagree with the displayed run. DB-unavailable → null.
+ */
+async function getLastSuccessfulRunDate(): Promise<string | null> {
+  try {
+    const row = await prisma.dailyRecommendationRun.findFirst({
+      where: LATEST_RUN_WHERE,
+      orderBy: { runDate: "desc" },
+      select: { runDate: true },
+    });
+    return row?.runDate ? row.runDate.toISOString() : null;
+  } catch (error) {
+    if (isDbUnavailableError(error)) {
+      logger.warn({ msg: "getLastSuccessfulRunDate: DB unavailable — null" });
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Freshness payload returned to the API (all fields always present). */
+export interface RecommendationFreshness {
+  nextRunAt: string | null;
+  lastUpdatedAt: string | null;
+  isStale: boolean;
+  scheduleCron: string;
+}
+
+/**
+ * Compute the freshness fields for the recommendations API (Spec 30 §4A).
+ * Never throws — on any failure returns nulls + `isStale: false` so a
+ * freshness-info problem can never 500 the reads.
+ */
+export async function computeFreshnessFields(
+  now: Date = new Date()
+): Promise<RecommendationFreshness> {
+  const scheduleCron = RECOMMENDATION_CRON_DISPLAY;
+  try {
+    const [nextRunAt, lastUpdatedAt] = await Promise.all([
+      getNextRunAt(),
+      getLastSuccessfulRunDate(),
+    ]);
+    return {
+      nextRunAt: nextRunAt ? nextRunAt.toISOString() : null,
+      lastUpdatedAt,
+      isStale: computeIsStale(lastUpdatedAt, now),
+      scheduleCron,
+    };
+  } catch (error) {
+    logger.warn({
+      msg: "computeFreshnessFields failed — returning defaults",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { nextRunAt: null, lastUpdatedAt: null, isStale: false, scheduleCron };
+  }
+}
+
+/**
+ * Whether a COMPLETED + AI-processed run exists for the current UTC day. Used
+ * ONLY by the day-level catch-up guard (Spec 30 §4A). DB-unavailable →
+ * fail-open `false` (catch-up may then enqueue; the degraded engine owns that
+ * path) — logged at warn.
+ */
+export async function hasSuccessfulRunToday(now: Date = new Date()): Promise<boolean> {
+  try {
+    const count = await prisma.dailyRecommendationRun.count({
+      where: {
+        status: "completed",
+        aiProcessed: { gt: 0 },
+        runDate: { gte: startOfUtcDay(now) },
+      },
+    });
+    return count > 0;
+  } catch (error) {
+    logger.warn({
+      msg: "hasSuccessfulRunToday: DB unavailable — fail-open false",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /**

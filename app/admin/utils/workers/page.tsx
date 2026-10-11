@@ -56,6 +56,22 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-800",
 };
 
+// v3.49.0 (Spec 28) — Accelerate connectivity probe surface.
+interface AccelerateProbe {
+  state: "unknown" | "ok" | "unreachable" | "open";
+  latencyMs: number | null;
+  checkedAt: string;
+  probeId: string;
+  ttlMs: number;
+}
+
+const PROBE_BADGE: Record<AccelerateProbe["state"], string> = {
+  ok: "bg-green-100 text-green-800",
+  unreachable: "bg-red-100 text-red-800",
+  open: "bg-amber-100 text-amber-800",
+  unknown: "bg-gray-100 text-gray-600",
+};
+
 export default function WorkersPage() {
   const { data: session, status } = useSession();
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
@@ -91,6 +107,10 @@ export default function WorkersPage() {
   const [pollPaused, setPollPaused] = useState(false);
   const pollFailureRef = useRef(0);
 
+  // v3.49.0 (Spec 28) — Accelerate connectivity probe (the reaper's skip gate).
+  const [probe, setProbe] = useState<AccelerateProbe | null>(null);
+  const [probeLoading, setProbeLoading] = useState(false);
+
   useEffect(() => {
     if (status !== "authenticated") return;
     let cancelled = false;
@@ -113,6 +133,7 @@ export default function WorkersPage() {
     };
 
     checkEngineStatus();
+    void loadProbe();
     void tick();
 
     return () => {
@@ -130,6 +151,25 @@ export default function WorkersPage() {
       }
     } catch (error) {
       console.error("Failed to check engine status:", error);
+    }
+  };
+
+  // v3.49.0 (Spec 28): probe Accelerate reachability. `force` bypasses the
+  // server TTL cache ("Test now"). The probe route never 5xxes on an
+  // unreachable proxy — it returns `state:"unreachable"` — so failures here
+  // are network-level page errors only.
+  const loadProbe = async (force = false) => {
+    try {
+      if (force) setProbeLoading(true);
+      const res = await fetch(`/api/admin/accelerate/probe${force ? "?force=1" : ""}`);
+      if (res.ok) {
+        const data = await res.json();
+        setProbe(data.probe ?? null);
+      }
+    } catch (error) {
+      console.error("Failed to load Accelerate probe:", error);
+    } finally {
+      setProbeLoading(false);
     }
   };
 
@@ -594,6 +634,46 @@ export default function WorkersPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* v3.49.0 (Spec 28) — Accelerate connectivity probe */}
+        {(activeTab === "tasks" || activeTab === "workers") && (
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Accelerate Connectivity</h2>
+              <button
+                onClick={() => loadProbe(true)}
+                disabled={probeLoading}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              >
+                {probeLoading ? "Testing…" : "⚡ Test now"}
+              </button>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-gray-200 dark:border-slate-800">
+              {probe ? (
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${PROBE_BADGE[probe.state]}`}>
+                    {probe.state === "ok" ? "Reachable"
+                      : probe.state === "unreachable" ? "Unreachable"
+                      : probe.state === "open" ? "Breaker open"
+                      : "Unknown"}
+                  </span>
+                  {probe.state === "ok" && probe.latencyMs !== null && (
+                    <span className="text-gray-600 dark:text-gray-400">SELECT 1 · {probe.latencyMs} ms</span>
+                  )}
+                  {probe.state === "unreachable" && (
+                    <span className="text-red-600 dark:text-red-400">Stale-task sweeps are paused until Accelerate recovers</span>
+                  )}
+                  {probe.state === "open" && (
+                    <span className="text-amber-600 dark:text-amber-400">Plan-limit hold — reads disabled</span>
+                  )}
+                  <span className="text-gray-500">{new Date(probe.checkedAt).toLocaleString()}</span>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">No probe result yet — runs automatically with the scheduler.</p>
+              )}
+            </div>
           </div>
         )}
 

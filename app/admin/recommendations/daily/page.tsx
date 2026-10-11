@@ -51,6 +51,10 @@ export default function AdminDailyRecommendationsPage() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
+  // Spec 30 §4E: actual next fire + freshness for the system cron job.
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
+  const [scheduleCron, setScheduleCron] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +103,9 @@ export default function AdminDailyRecommendationsPage() {
       if (data.success) {
         setStats(data.stats);
         setRuns(data.recentRuns || []);
+        setNextRunAt(data.nextRunAt ?? null);
+        setIsStale(!!data.isStale);
+        setScheduleCron(data.scheduleCron ?? "");
       } else {
         setError(data.error || "Failed to load data");
       }
@@ -339,6 +346,21 @@ export default function AdminDailyRecommendationsPage() {
             </button>
           </div>
         </div>
+
+        {/* Spec 30 §4E: actual next fire + freshness for the system job. */}
+        {nextRunAt && (
+          <div
+            className={`p-3 rounded-lg border text-xs ${
+              isStale
+                ? "bg-violet-500/10 border-violet-500/30 text-violet-300"
+                : "bg-gray-800/40 border-gray-700/50 text-gray-400"
+            }`}
+          >
+            Next scheduled run: <strong className="text-white">{new Date(nextRunAt).toLocaleString("en-IN")}</strong>
+            {scheduleCron && <span className="ml-1">({scheduleCron})</span>}
+            {isStale && <span className="ml-2">• last successful run is older than 48h</span>}
+          </div>
+        )}
 
         {/* Error */}
         {error && (

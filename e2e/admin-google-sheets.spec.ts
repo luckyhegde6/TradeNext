@@ -204,17 +204,28 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
     const req = r.request();
     seen.push({ url: req.url(), body: req.postData() ?? '' });
     await r.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, taskId: 'task_screener_1', tab: 'screener' }),
+    });
+  });
+
+  // Spec 27: the rescan is queued (202), never run in-request. The console polls
+  // the task read surface until the worker completes, then renders its result.
+  await page.route('**/api/admin/workers?taskId=*', async (r) => {
+    const taskId = new URL(r.request().url()).searchParams.get('taskId') ?? '';
+    const isScreener = taskId === 'task_screener_1';
+    await r.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        success: true,
-        tab: 'screener',
-        appended: 4,
-        total: 9,
-        delegatedExport: true,
-        executionMs: 1200,
-        elapsedMs: 1300,
-        rowLimit: 200,
+        task: {
+          id: taskId,
+          status: 'completed',
+          result: isScreener
+            ? { ok: true, tab: 'screener', appended: 4, total: 9, executionMs: 1200, delegatedExport: true, rowLimit: 200 }
+            : { ok: true, tab: 'custom', appended: 2, total: 2, executionMs: 300, delegatedExport: false, rowLimit: 200 },
+        },
       }),
     });
   });
@@ -225,6 +236,8 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
   await expect.poll(() => seen.length).toBe(1);
   expect(JSON.parse(seen[0].body)).toEqual({ tab: 'screener' });
   // 4 of 9 matches, under the cap, and the delegated-append caveat is surfaced.
+  // The final notice only appears after the first poll (~3 s) returns the
+  // completed task, so these assertions wait on the polled result.
   await expect(page.getByRole('status')).toContainText('queued 4 row(s) of 9 matches (cap 200)');
   await expect(page.getByRole('status')).toContainText('Sync to append them.');
 
@@ -234,18 +247,9 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
     if (JSON.parse(r.request().postData() ?? '{}').tab === 'custom') {
       customCalls++;
       await r.fulfill({
-        status: 200,
+        status: 202,
         contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          tab: 'custom',
-          appended: 2,
-          total: 2,
-          delegatedExport: false,
-          executionMs: 300,
-          elapsedMs: 310,
-          rowLimit: 200,
-        }),
+        body: JSON.stringify({ success: true, queued: true, taskId: 'task_custom_1', tab: 'custom' }),
       });
       return;
     }
@@ -260,7 +264,9 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
   await tabRow(page, 'custom').getByRole('button', { name: 'Rescan' }).click();
 
   await expect.poll(() => customCalls).toBe(1);
-  // No "Sync to append them" here: custom awaited its own export.
+  // No "Sync to append them" here: custom awaited its own export. The assertion
+  // order matters: the queued-2 assertion first waits for the custom poll to
+  // swap the notice, so the negative check below never sees the stale screener text.
   await expect(page.getByRole('status')).toContainText('queued 2 row(s)');
   await expect(page.getByRole('status')).not.toContainText('Sync to append them.');
 });
