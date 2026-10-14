@@ -142,10 +142,35 @@ jest.mock("@/lib/services/worker/degradedExecutor", () => ({
   executeDegradedTask: jest.fn(),
 }));
 
-// Dynamically imported inside spawnDueCronJob / pollAndExecute
+// Dynamically imported inside spawnDueCronJob / pollAndExecute / ensureDailyRecommendationRan
 jest.mock("@/lib/services/worker/task-orchestrator", () => ({
   __esModule: true,
   spawnCronTask: jest.fn(),
+  // v3.49.0 (Spec 30): the day-level catch-up enqueues a REGULAR task.
+  spawnRegularTask: jest.fn(),
+}));
+
+// ── v3.49.0 (Spec 30) day-level recommendations catch-up ───────────────────
+// ensureDailyRecommendationRan is leader-only and consults the daily-run
+// success state via a dynamic import. Both are mocked so the engine test states
+// the gate condition explicitly and never drags in the orchestrator/AI graph.
+const mockIsLeader = jest.fn().mockResolvedValue(true);
+jest.mock("@/lib/services/leader", () => ({
+  __esModule: true,
+  isLeader: (...a: unknown[]) => mockIsLeader(...(a as [])) as Promise<boolean>,
+}));
+
+const mockHasSuccessfulRunToday = jest.fn().mockResolvedValue(false);
+jest.mock("@/lib/services/dailyRecommendationService", () => ({
+  __esModule: true,
+  hasSuccessfulRunToday: (...a: unknown[]) =>
+    mockHasSuccessfulRunToday(...(a as [])) as Promise<boolean>,
+}));
+
+// Dynamically imported only on an ACTUAL enqueue (audit is never written on a skip).
+jest.mock("@/lib/audit", () => ({
+  __esModule: true,
+  createAuditLog: jest.fn(async () => ({ id: 1 })),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────
@@ -155,6 +180,7 @@ import {
   pollAndExecute,
   spawnDueCronJob,
   catchUpMissedCronJobs,
+  ensureDailyRecommendationRan,
   STALE_MS,
   TASK_TIMEOUT_MS,
   TASK_HEARTBEAT_MS,
@@ -162,8 +188,13 @@ import {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const prisma = require("@/lib/prisma").default as Record<string, any>;
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { spawnCronTask: mockSpawnCronTask } = require("@/lib/services/worker/task-orchestrator") as { spawnCronTask: jest.Mock };
+const { spawnCronTask: mockSpawnCronTask, spawnRegularTask: mockSpawnRegularTask } =
+  jest.requireMock<{ spawnCronTask: jest.Mock; spawnRegularTask: jest.Mock }>(
+    "@/lib/services/worker/task-orchestrator",
+  );
+const { createAuditLog: mockCreateAuditLog } = jest.requireMock<{ createAuditLog: jest.Mock }>(
+  "@/lib/audit",
+);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { executeTask: mockExecuteTask, recordSystemRunOutcome: mockRecordSystemRunOutcome } = require(
   "@/lib/services/worker/worker-service",
@@ -1035,5 +1066,151 @@ describe("degraded branch (spec 21)", () => {
       expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
       expect(mockSpawnCronTask).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * v3.49.0 (Spec 30) — day-level recommendations catch-up.
+ *
+ * `catchUpMissedCronJobs` (Spec 24/25) recovers jobs whose `nextRun` is overdue,
+ * but a weekday run that FAILED silently — or an instance that was cold across
+ * the whole 04:30 UTC window — leaves `nextRun` advanced, so nothing re-fires and
+ * the page stays stale for days (prod 2026-10-11: a failed run from 2026-09-04).
+ * `ensureDailyRecommendationRan` adds DAY-level semantics: on a weekday after the
+ * fire time, with no successful run today and none in flight, enqueue exactly ONE
+ * catch-up. These tests pin every guard, in order, plus the "audit only on an
+ * actual enqueue" rule — a skip must be a silent no-op.
+ */
+describe("ensureDailyRecommendationRan (Spec 30)", () => {
+  // Wednesday 05:00 UTC — after the 04:30 fire time, on a weekday.
+  const WED_AFTER_WINDOW = new Date("2026-10-14T05:00:00.000Z");
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIsPlanLimitBreakerOpen.mockReturnValue(false);
+    mockIsDegradedModeActive.mockReturnValue(false);
+    mockIsLeader.mockResolvedValue(true);
+    mockHasSuccessfulRunToday.mockResolvedValue(false);
+    prisma.workerTask.findFirst.mockResolvedValue(null);
+    mockSpawnRegularTask.mockResolvedValue({ id: "task-catchup-1" });
+  });
+
+  it("enqueues exactly one catch-up run when every guard passes", async () => {
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: true, reason: "missed-daily-window" });
+    expect(mockSpawnRegularTask).toHaveBeenCalledTimes(1);
+    expect(mockSpawnRegularTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskType: "recommendations",
+        triggeredBy: "catchup",
+      }),
+    );
+  });
+
+  it("audits RECOMMENDATIONS_CATCHUP on an actual enqueue", async () => {
+    await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(mockCreateAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "RECOMMENDATIONS_CATCHUP",
+        resource: "recommendations",
+        metadata: expect.objectContaining({ scope: "day", taskId: "task-catchup-1" }),
+      }),
+    );
+  });
+
+  it("never audits a SKIP — audit is written only on an enqueue", async () => {
+    mockHasSuccessfulRunToday.mockResolvedValue(true);
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "already-ran" });
+    expect(mockCreateAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("skips (degraded) and touches no Prisma when the plan-limit breaker is open", async () => {
+    mockIsPlanLimitBreakerOpen.mockReturnValue(true);
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "degraded" });
+    // The degraded SQLite queue is the designed recovery path — never Prisma here.
+    expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+    expect(mockIsLeader).not.toHaveBeenCalled();
+  });
+
+  it("skips (degraded) when degraded mode is engaged even with the breaker closed", async () => {
+    mockIsDegradedModeActive.mockReturnValue(true);
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "degraded" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("skips (not-leader) so N instances never double-fire", async () => {
+    mockIsLeader.mockResolvedValue(false);
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "not-leader" });
+    // Leader gate is BEFORE the day-level guard.
+    expect(mockHasSuccessfulRunToday).not.toHaveBeenCalled();
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("skips (weekend) — NSE is closed, the weekday schedule is intentional", async () => {
+    const saturday = new Date("2026-10-17T05:00:00.000Z");
+
+    const result = await ensureDailyRecommendationRan(saturday);
+
+    expect(result).toEqual({ enqueued: false, reason: "weekend" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("skips (before-window) — the cron will still fire normally today", async () => {
+    const beforeFire = new Date("2026-10-14T03:00:00.000Z");
+
+    const result = await ensureDailyRecommendationRan(beforeFire);
+
+    expect(result).toEqual({ enqueued: false, reason: "before-window" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("skips (already-ran) when a successful run exists for today", async () => {
+    mockHasSuccessfulRunToday.mockResolvedValue(true);
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "already-ran" });
+    // The in-flight read is only reached after the day-level guard.
+    expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("skips (in-flight) when a recommendations task is already pending/running", async () => {
+    prisma.workerTask.findFirst.mockResolvedValue({ id: "inflight-1" });
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "in-flight" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("skips (in-flight-check-failed) when the in-flight read throws", async () => {
+    prisma.workerTask.findFirst.mockRejectedValue(new Error("DB down"));
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "in-flight-check-failed" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+  });
+
+  it("returns (enqueue-failed) when the spawn rejects — never throws", async () => {
+    mockSpawnRegularTask.mockRejectedValue(new Error("spawn boom"));
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "enqueue-failed" });
   });
 });

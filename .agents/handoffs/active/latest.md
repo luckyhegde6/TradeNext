@@ -1,58 +1,57 @@
-# Live Resume — v3.48.0 Spec 27 Async Google Sheets re-scan (worker queue migration)
+# Live Resume — v3.49.0 Specs 28–31 completion (missing plan tests) + PR #135 CI fixes
 
-> Updated: 2026-10-10 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-10-11 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | Spec 27 — the prod GS admin console "Rescan" ran the scan synchronously in the HTTP request (`forceRefresh` + `tvFallbackLimit:200`) → Netlify function gateway **502**. Migrated re-scan onto the worker task queue (never scans in-request). |
-| **Branch** | `fix/daily-rec-swing-cron-worker` (base `main` = PR #134 MERGED; Spec 26 COMMITTED `44156e6`) |
-| **State** | Spec 27 CODE + TESTS + GATES + LIVE-VERIFY + DOCS **DONE** — **COMMIT PENDING USER (D9)** · merge/push/deploy = user actions |
-| **In-flight** | None — awaiting user "Commit Now" |
-| **Blocked** | (none — commit only on explicit request per D9 RULE) |
+| **Task** | PR #135 was red on 2 checks (Quality Gate `tsc-baseline` + Playwright e2e), and the approved Spec 30/31 plans required tests that had never been written. Fixed both checks + authored the missing tests; verified everything against a locally-reproduced CI environment. |
+| **Branch** | `fix/daily-rec-swing-cron-worker` (Specs 28–31 code already COMMITTED as `28d6806`) |
+| **State** | CODE + TESTS + GATES + e2e + DOCS **DONE** — **COMMIT + PUSH done on explicit user request (2026-10-15)** · merge/deploy = user actions (D9) |
+| **In-flight** | None — awaiting user merge/deploy decision |
+| **Blocked** | (none — merge/deploy only on explicit request per D9 RULE) |
 | **Side note** | ⚠️ **BUG A (still open, from v3.47.0/25)**: degraded executor completes but never advances mirror `next_run` → recurring job re-fires every 5-min tick while due; fix idea = advance via `calculateNextRun` (`worker-engine.ts` :729/:762). |
 
-## What's done (v3.48.0)
+## What's done (v3.49.0)
 
-- **Queue migration**: new dispatchable task type `google_sheets_rescan` (**#30** in `lib/services/worker/degradedTaskRegistry.ts`, `degradedSafe:false` — irreversible external append + Prisma-only ScanConfig, `maxRetries:0`).
-- **Route** (`app/api/admin/google-sheets/rescan/route.ts`): VALIDATES → (custom only) `precheckCustomRescan` → `spawnRegularTask` → audit `GOOGLE_SHEETS_RESCAN` → **202 `{success, queued, taskId, tab}`**. Never scans in-request. Preserves validation 400s + custom 404/409/503/500 + breaker 503 + enqueue-fail 503.
-- **Helper**: extracted `precheckCustomRescan` in `lib/services/googleSheets/rescanService.ts` (single DB read, reused by `rescanCustomConfig`).
-- **Executor** (`lib/services/worker/worker-service.ts`): `executeGoogleSheetsRescan` — screener→`rescanScreener`, custom→`rescanCustomConfig`; throws on `ok:false`; returns `{tab, appended, total, executionMs, delegatedExport, rowLimit}`.
-- **Console** (`app/admin/google-sheets/page.tsx`): enqueue → poll `GET /api/admin/workers?taskId=` (3 s × 200) → render `task.result` (identical notice text) → `await load()`; on timeout shows the notice → "track it on the Workers page".
-- **Tests**: NEW `lib/__tests__/googleSheetsRescanTask.test.ts`; `lib/__tests__/googleSheetsRescan.test.ts` rewritten to the **202** contract; registry test 29→30.
-- **Gates**: tsc **46 exact (prod 0)** · Jest **134/134 suites** · eslint 0 on changed files · quickbuild rerun in the pre-commit gate.
-- **Live-verified (end-to-end)**: task `bbd49e8c-0da9-480b-a148-c1aecc1388f9` spawned 11:34 → completed **11:40:52** `{appended:1410,total:1410,delegatedExport:true}` (scan 13 s, hits 1410); console screener 2904→4314.
-- **Docs**: `.agents/changelog/versions-v3.48.md` (Spec 27) + AGENTS.md v3.48.0 row + `.agents/CHANGELOG.md` index + TODO + `.agents/changelog/todo-quick-reference-archive.md` (v3.47 row) + Primer + agent-memory + **Lesson 160** + session-todos + HANDOFF + plan 27 checkboxes.
+- **CI Fix 1 — Quality Gate `tsc-baseline`**: `app/admin/google-sheets/page.tsx`'s local `SheetsStatus` interface had no `missingEnvVars`, but the Spec 31 "not armed" card reads `status.missingEnvVars.length` + `.map(…)` **unconditionally** → `TS2339` (`:180`) + `TS2551` (`:187`) = **2 PRODUCTION tsc errors**. Fixed the **interface** (`missingEnvVars: string[]`).
+- **Baseline NEVER raised**: `scripts/dev-checks/tsc-baseline.json` is **untouched** (absent from `git status`). Proof — raw `npx tsc --noEmit` = 46 `error TS…` lines, **all inside `__tests__/`, zero in `page.tsx`/`app/admin`**; gate → `total 46 / prod 0 / delta +0`.
+- **CI Fix 2 — Playwright route-mock drift (Lesson 161)**: `e2e/admin-google-sheets.spec.ts`'s `statusBody()` returned a mocked status **without** `missingEnvVars` → `undefined.length` threw **in render** → route ErrorBoundary → every `gs-…` assertion failed. The spec **self-skips** unless `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` (or `ADMIN_*`) are exported → GREEN locally, RED only in CI. Fixed `statusBody()` (+`missingEnvVars: []`) and added the Spec 31 regression test `an unarmed deploy lists the missing env vars by name` (`data-testid="env-not-armed"` → "3 required env var(s) missing" + the 3 var names).
+- **Missing plan tests authored** (none existed before):
+  - Spec 30 `lib/__tests__/dailyRecommendationService.test.ts` **+13 → 56/56** (`getNextRunAt` / `computeFreshnessFields` / `computeIsStale` / `hasSuccessfulRunToday`).
+  - Spec 30 `lib/__tests__/worker-engine.test.ts` **+12 → 55/55** (`ensureDailyRecommendationRan` full guard matrix: degraded / not-leader / weekend / before-window / already-ran / in-flight / check-failed / enqueue-failed + audit-on-enqueue-only).
+  - Spec 31 `lib/__tests__/googleSheetsStatus.test.ts` **+6 → 21/21** (`missingEnvVars`).
+- **Local CI reproduction** (so authenticated e2e could run at all): Docker Desktop started · `docker compose up -d db redis` (healthy, `:5432`/`:6379`) · `npx prisma migrate deploy` (38 migrations, **none pending**) · `npx tsx prisma/seed.ts` (demo **id 2** / admin **id 1**) · `npx playwright test --project=setup` **1 passed (19.3 s)**.
+- **Gates**: tsc **46 exact (prod 0, delta +0)** · Jest **137/137 suites · 2053 passed / 4 skipped / 0 failed** · Spec 28–31 targeted **6 suites / 187 tests** · eslint 0 on changed files · quickbuild **201/201, 0 `warn`** · **Playwright full suite (all projects, exactly as CI runs it) 126 passed / 2 flaky (both retry-green) / 0 failed** (10.9 m).
+- **Docs**: `.agents/changelog/versions-v3.49.md` (NEW) + AGENTS.md v3.49.0 row (464 B; 32,667/32,768 B cap — green) + `.agents/CHANGELOG.md` index row + `.agents/changelog/versions-index.md` (v3.49.0 **and the previously-missing v3.48.0** row) + `Primer.md` (Last Updated + Current Project Status) + `agent-memory.md` + **Lesson 161** + `.agents/session-todos.md` + `HANDOFF.md` + this file.
 
 ## Not done (deliberately)
 
-- **COMMIT Spec 27 — PENDING USER (explicit "Commit Now" only, D9)**: files = `lib/services/googleSheets/rescanService.ts`, `lib/services/worker/worker-service.ts`, `lib/services/worker/degradedTaskRegistry.ts`, `app/api/admin/google-sheets/rescan/route.ts`, `app/admin/google-sheets/page.tsx`, `lib/__tests__/googleSheetsRescan.test.ts`, `lib/__tests__/googleSheetsRescanTask.test.ts`, docs, `.agents/changelog/versions-v3.48.md`. Commit message style: `"Spec 27: <title> — <details>"`.
-- **BUG A**: next_run advance in degraded completion path (follow-up spec, needs user approval).
-- **quickbuild** — greens the pre-commit gate; kill dev server (PID 6612 on :3000) first (Lesson 150), restart after.
-- Merge `fix/daily-rec-swing-cron-worker` → `main`, push, deploy — **user actions (D9), never automatic.**
+- **BUG A**: next_run advance in the degraded completion path (follow-up spec, needs user approval).
+- Merge `fix/daily-rec-swing-cron-worker` → `main`, deploy — **user actions (D9)** (push performed on explicit user request 2026-10-15; merge/deploy still user-only).
 
 ## Next steps
 
-1. **Await user "Commit Now"** for Spec 27 → single commit on `fix/daily-rec-swing-cron-worker` (pre-commit hook timeout ≥ 600000 ms).
-2. After commit (user-requested): quickbuild (kill dev server first, restart after) and present gates.
-3. User decides merge/push/deploy. BUG A fix = next spec/plan cycle (needs user approval).
+1. **User decides merge/deploy** of `fix/daily-rec-swing-cron-worker` (PR #135) — never automatic (D9).
+2. BUG A fix = next spec/plan cycle (needs user approval).
 
 ## Gotchas / lessons for this handoff
 
-- **D9 RULE (user directive)**: MERGE + DEPLOY are ALWAYS user actions — agent max git action = COMMIT on explicit request. No auto-merge/deploy even on green CI (`.agents/RULES.md` §6).
-- **Lesson 160 (NEW)**: killing a dev server does **not** release the DB leader lock immediately — the new worker engine only starts after the old lease expires (TTL ~15 min; observed 11:30 boot → 11:40:08 "Starting background worker engine"). Check the server log for the actual worker-engine start timestamp **before** suspecting the queue. Task logs are **file-based** (`worker_logs/<taskId>.log`), separate from the main pino console log.
-- **Lesson 159**: a degraded/catch-up executor that completes without advancing the mirror `next_run` re-fires "due" jobs on every poll tick — dedup-only protection.
+- **D9 RULE (user directive)**: MERGE + DEPLOY are ALWAYS user actions. Push is a user action too — performed here only because the user explicitly asked ("test and commit and push"). No auto-merge/deploy even on green CI (`.agents/RULES.md` §6).
+- **Lesson 161 (NEW)**: an e2e **route mock is a contract with the page it stands in for** — when a page reads a field **unconditionally**, a mock that omits it throws in render → ErrorBoundary → the spec is **permanently red**; and you can't see it locally if the spec **self-skips without credentials** (admin specs need `E2E_ADMIN_*`/`ADMIN_*`). Any self-skipping spec has a verification blind spot. Update the mock **in the same change** as the new unconditional field read.
+- **Lesson 160**: killing a dev server does **not** release the DB leader lock immediately — the worker engine only starts after the old lease expires (TTL ~15 min). Task logs are file-based (`worker_logs/<taskId>.log`).
 - **Lesson 150**: `next build` hangs while a dev server holds `.next` — quickbuild requires killing the dev server first, then restarting it.
-- Dev server PID **6612** on :3000; Chrome page 5 authed as admin; nav timeout ≥ 60000; log timestamps UTC.
-- tsc baseline = **46 error lines (prod 0; all pre-existing test-file errors)** — must stay 46 exact.
-- Windows cmd: no `tail` (use `Get-Content ... -Tail N | Select-String` via PowerShell); `grep` tool path-scoping unreliable — use `findstr /n` or `read`.
-- AGENTS.md doc-gate cap 32,768 B (Lesson 142); AGENTS.md now **31,170 B** after the v3.48.0 row; **TODO.md is at 32,736 B — only 32 B headroom**, so any later TODO edit must be net-shrink.
+- **Dev server picks up a late-arriving DB lazily**: the server started before Docker/DB existed still authenticates once `seed.ts` runs — **no restart needed** (verified: `--project=setup` 1 passed).
+- tsc baseline = **46 error lines (prod 0; all pre-existing `__tests__/` errors)** — must stay 46 exact. Verify against the **raw** `npx tsc --noEmit`, not only the gate summary.
+- Windows cmd: no `tail` (use PowerShell `Get-Content … -Tail N`); commands are mangled by `&` chains / quoted spaced paths / `/flag` args — redirect to `worker_logs/*.txt` then `read`.
+- AGENTS.md doc-gate cap 32,768 B (Lesson 142); AGENTS.md now **32,667 B** after the v3.49.0 row (~101 B headroom).
 - Admin login `admin@tradenext6.app` / `admin123`; demo `demo@tradenext6.app` / `demo123`.
 - Pre-existing local GS OAuth expiry → `invalid_grant` on append/header-ensure (non-fatal; `delegatedExport:true`).
 
 ## Remaining-merge state of PREVIOUS workstreams
 
+- v3.48.0 (Spec 27 async re-scan): **COMMIT PENDING USER** (branch `fix/daily-rec-swing-cron-worker`).
 - v3.47.0 (Specs 25/26 — scheduled-execution reliability + GS header-label): Spec 25 COMMITTED `480cd3b`, **Spec 26 COMMITTED `44156e6`**; merge/deploy user-only.
 - v3.46.0 (ops-counter authority / GS tolerance / catch-up): **MERGED via PR #134 `c0bb972`** into `main` (2026-10-09).
 - v3.45.0 (degraded engine): **MERGED into `main`** (2026-10-06) — pending Netlify deploy + Dependabot alert clearance.

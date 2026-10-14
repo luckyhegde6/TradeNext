@@ -73,6 +73,11 @@ function statusBody(overrides: Record<string, unknown> = {}) {
       sheetIdMasked: '1AbCd…wXyZ',
       oauthConfigured: { clientId: true, clientSecret: true, refreshToken: true },
       trackingEnabled: false,
+      // Spec 31: every required var is present in this baseline payload, so the
+      // "not armed" card stays hidden. The page reads `missingEnvVars.length`
+      // unconditionally, so this field is part of the contract — omitting it
+      // throws inside the ErrorBoundary and fails every test in this file.
+      missingEnvVars: [],
       perTab: TABS.map((tab) => ({
         tab,
         headerState: 'matched',
@@ -390,6 +395,53 @@ test('a held database disables Append and says no row was queued', async ({ page
   await expect(page.getByText(/database is held \(plan limit\)/i)).toBeVisible();
   await expect(page.getByText('No row is queued.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Append snapshot' })).toBeDisabled();
+});
+
+/**
+ * Spec 31 — the "prod env not armed" surface. The server sends the NAMES of the
+ * vars that are unset so the operator can act without guessing; the console must
+ * render them and must never echo a value (the same secrecy rule as OAuth).
+ */
+test('an unarmed deploy lists the missing env vars by name', async ({ page }) => {
+  await openConsole(page);
+
+  // Last-registered route wins in Playwright, so this override supersedes the
+  // baseline status mock installed by openConsole; the reload re-fetches it.
+  await page.route('**/api/admin/google-sheets/status', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        statusBody({
+          status: {
+            envEnabled: false,
+            dbConfigured: false,
+            sheetIdMasked: null,
+            oauthConfigured: { clientId: true, clientSecret: false, refreshToken: false },
+            trackingEnabled: false,
+            missingEnvVars: [
+              'GOOGLE_OAUTH_CLIENT_SECRET',
+              'GOOGLE_OAUTH_REFRESH_TOKEN',
+              'GOOGLE_SHEET_ID',
+            ],
+            perTab: TABS.map((tab) => ({ tab, headerState: 'unknown', lastMark: null })),
+          },
+        }),
+      ),
+    }),
+  );
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Google Sheets Tracking' })).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const card = page.getByTestId('env-not-armed');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('3 required env var(s) missing');
+  await expect(card).toContainText('GOOGLE_OAUTH_CLIENT_SECRET');
+  await expect(card).toContainText('GOOGLE_OAUTH_REFRESH_TOKEN');
+  await expect(card).toContainText('GOOGLE_SHEET_ID');
 });
 
 test.describe('Google Sheets console — mobile viewport', () => {

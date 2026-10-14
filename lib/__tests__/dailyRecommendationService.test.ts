@@ -33,8 +33,13 @@ jest.mock("@/lib/prisma", () => {
       updateMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      count: jest.fn(),
       delete: jest.fn(),
       deleteMany: jest.fn(),
+    },
+    // v3.49.0 (Spec 30): getNextRunAt prefers the system cron row's nextRun.
+    cronJob: {
+      findFirst: jest.fn(),
     },
     dailyRecommendationStock: {
       create: jest.fn(),
@@ -259,6 +264,12 @@ import {
   getRecommendationHistory,
   getStockRecommendationDetail,
   checkRecommendationPerformance,
+  // v3.49.0 (Spec 30) — freshness / next-run surfacing helpers
+  getNextRunAt,
+  computeFreshnessFields,
+  computeIsStale,
+  hasSuccessfulRunToday,
+  RECOMMENDATION_CRON_DISPLAY,
 } from "@/lib/services/dailyRecommendationService";
 
 // Get mock references via require (mocks already applied by SWC hoisting)
@@ -1301,6 +1312,147 @@ describe("dailyRecommendationService", () => {
       await checkRecommendationPerformance();
 
       expect(mockGetStockQuote).toHaveBeenCalledTimes(50);
+    });
+  });
+});
+
+/**
+ * v3.49.0 (Spec 30) — freshness / next-run surfacing.
+ *
+ * The recommendations cron is weekday-only (`30 4 * * 1-5`), which is correct
+ * (NSE closed weekends) but previously left a weekend viewer staring at a stale
+ * "Last updated" with no explanation. These helpers make the API honest. The
+ * tests pin the three properties the UI depends on: (1) a stale determination
+ * that is a NEUTRAL elapsed-time fact, never an error; (2) `nextRunAt` that is
+ * always present (cron row → expression fallback, never throws); and (3) the
+ * whole payload degrading to non-500 defaults if a freshness read blows up.
+ */
+const mockLogger = jest.requireMock<{
+  warn: jest.Mock;
+  info: jest.Mock;
+  error: jest.Mock;
+  debug: jest.Mock;
+}>("@/lib/logger");
+
+describe("Spec 30 — freshness / next-run helpers", () => {
+  // A Wednesday, 05:00 UTC (after the 04:30 fire time) — a realistic weekday.
+  const NOW = new Date("2026-10-14T05:00:00.000Z");
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe("computeIsStale (pure)", () => {
+    it("treats a null / unparseable date as stale", () => {
+      expect(computeIsStale(null, NOW)).toBe(true);
+      expect(computeIsStale(undefined, NOW)).toBe(true);
+      expect(computeIsStale("not-a-date", NOW)).toBe(true);
+    });
+
+    it("is fresh within the 48h window", () => {
+      const recent = new Date(NOW.getTime() - 2 * 60 * 60_000).toISOString();
+      expect(computeIsStale(recent, NOW)).toBe(false);
+    });
+
+    it("is stale past the 48h window", () => {
+      const old = new Date(NOW.getTime() - 72 * 60 * 60_000).toISOString();
+      expect(computeIsStale(old, NOW)).toBe(true);
+    });
+  });
+
+  describe("getNextRunAt", () => {
+    it("prefers the system cron row's nextRun", async () => {
+      const next = new Date("2026-10-15T04:30:00.000Z");
+      mockPrisma.cronJob.findFirst.mockResolvedValue({ nextRun: next });
+
+      await expect(getNextRunAt()).resolves.toEqual(next);
+      expect(mockPrisma.cronJob.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { name: expect.any(String) } }),
+      );
+    });
+
+    it("falls back to calculateNextRun when the cron row is missing", async () => {
+      mockPrisma.cronJob.findFirst.mockResolvedValue(null);
+      const result = await getNextRunAt();
+      expect(result).toBeInstanceOf(Date);
+    });
+
+    it("falls back (never throws) when the cron row read rejects", async () => {
+      mockPrisma.cronJob.findFirst.mockRejectedValue(new Error("DB down"));
+      const result = await getNextRunAt();
+      expect(result).toBeInstanceOf(Date);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    });
+  });
+
+  describe("hasSuccessfulRunToday", () => {
+    it("returns true when a completed + AI run exists today", async () => {
+      mockPrisma.dailyRecommendationRun.count.mockResolvedValue(1);
+      await expect(hasSuccessfulRunToday(NOW)).resolves.toBe(true);
+      expect(mockPrisma.dailyRecommendationRun.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: "completed" }),
+        }),
+      );
+    });
+
+    it("returns false when no run exists today", async () => {
+      mockPrisma.dailyRecommendationRun.count.mockResolvedValue(0);
+      await expect(hasSuccessfulRunToday(NOW)).resolves.toBe(false);
+    });
+
+    it("fails open (false) when the DB read throws — catch-up owns the path", async () => {
+      mockPrisma.dailyRecommendationRun.count.mockRejectedValue(new Error("boom"));
+      await expect(hasSuccessfulRunToday(NOW)).resolves.toBe(false);
+      expect(mockLogger.warn).toHaveBeenCalled();
+    });
+  });
+
+  describe("computeFreshnessFields", () => {
+    it("assembles nextRunAt + lastUpdatedAt + isStale=false for a fresh run", async () => {
+      const next = new Date("2026-10-15T04:30:00.000Z");
+      const runDate = new Date(NOW.getTime() - 60 * 60_000);
+      mockPrisma.cronJob.findFirst.mockResolvedValue({ nextRun: next });
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue({ runDate });
+
+      await expect(computeFreshnessFields(NOW)).resolves.toEqual({
+        nextRunAt: next.toISOString(),
+        lastUpdatedAt: runDate.toISOString(),
+        isStale: false,
+        scheduleCron: RECOMMENDATION_CRON_DISPLAY,
+      });
+    });
+
+    it("marks a >48h-old successful run as stale", async () => {
+      const runDate = new Date(NOW.getTime() - 96 * 60 * 60_000);
+      mockPrisma.cronJob.findFirst.mockResolvedValue(null);
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue({ runDate });
+
+      const f = await computeFreshnessFields(NOW);
+      expect(f.isStale).toBe(true);
+      expect(f.lastUpdatedAt).toBe(runDate.toISOString());
+    });
+
+    it("treats 'no successful run at all' as stale (null-dated)", async () => {
+      mockPrisma.cronJob.findFirst.mockResolvedValue(null);
+      mockPrisma.dailyRecommendationRun.findFirst.mockResolvedValue(null);
+
+      const f = await computeFreshnessFields(NOW);
+      expect(f.lastUpdatedAt).toBeNull();
+      expect(f.isStale).toBe(true);
+    });
+
+    it("never throws — a hard read failure yields defaults with isStale=false", async () => {
+      mockPrisma.cronJob.findFirst.mockResolvedValue(null);
+      mockPrisma.dailyRecommendationRun.findFirst.mockRejectedValue(new Error("boom"));
+
+      const f = await computeFreshnessFields(NOW);
+      expect(f).toEqual({
+        nextRunAt: null,
+        lastUpdatedAt: null,
+        isStale: false,
+        scheduleCron: RECOMMENDATION_CRON_DISPLAY,
+      });
     });
   });
 });

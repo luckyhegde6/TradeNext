@@ -29,6 +29,9 @@ interface SheetsStatus {
   oauthConfigured: { clientId: boolean; clientSecret: boolean; refreshToken: boolean };
   trackingEnabled: boolean;
   perTab: TabStatus[];
+  /** Spec 31: required Google Sheets env vars currently unset. Empty = all present.
+   *  Mirrors the server contract in `lib/services/googleSheets/statusService.ts`. */
+  missingEnvVars: string[];
 }
 interface SyncTabState {
   tab: TabName;
@@ -524,12 +527,33 @@ export default function AdminGoogleSheetsPage() {
             {status.status.oauthConfigured.refreshToken ? "✓" : "✗"}
           </div>
           {status.status.missingEnvVars.length > 0 && (
-              <div className="mt-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/10 text-sm text-violet-300">
-                🛡 Armed: {status.status.missingEnvVars.length} env var(s) missing — <a
-                  href="/scripts/google-sheets/verify-prod-env.ts"
-                  target="_blank"
-                  rel="noopener"
-                >run verify-prod-env.ts</a> for details
+              <div
+                data-testid="env-not-armed"
+                className="mt-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm text-amber-700 dark:text-amber-300"
+              >
+                ⚠ Not armed: {status.status.missingEnvVars.length} required env var(s) missing.
+                <span className="ml-2 inline-flex flex-wrap gap-1.5 align-middle">
+                  {status.status.missingEnvVars.map((name) => (
+                    <code
+                      key={name}
+                      className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-xs"
+                    >
+                      {name}
+                    </code>
+                  ))}
+                </span>
+                <span className="mt-1 block text-xs opacity-80">
+                  Set these on the deploy target, then re-run{" "}
+                  <a
+                    href="/scripts/google-sheets/verify-prod-env.ts"
+                    target="_blank"
+                    rel="noopener"
+                    className="underline"
+                  >
+                    verify-prod-env.ts
+                  </a>{" "}
+                  for details. Values are never echoed here.
+                </span>
               </div>
             )}
 

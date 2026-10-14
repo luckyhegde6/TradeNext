@@ -196,3 +196,85 @@ describe("getStatus", () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * v3.49.0 (Spec 31) — the "prod env arming" surface.
+ *
+ * The load-bearing behaviour: `missingEnvVars` must list ONLY the NAMES of the
+ * five required vars that are unset, in a stable order, so the console can render
+ * an actionable "env missing" card — and it must never echo a configured VALUE
+ * (the same secrecy rule that governs the OAuth booleans).
+ */
+describe("missingEnvVars (Spec 31)", () => {
+  const REQUIRED = [
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_OAUTH_REFRESH_TOKEN",
+    "GOOGLE_SHEETS_TRACKING_ENABLED",
+    "GOOGLE_SHEET_ID",
+  ];
+
+  it("lists all five required names, in contract order, when none are armed", async () => {
+    mockSheets();
+    const s = await getStatus();
+    expect(s.missingEnvVars).toEqual(REQUIRED);
+  });
+
+  it("returns an empty list when every required var is present", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "cid";
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = "csecret";
+    process.env.GOOGLE_OAUTH_REFRESH_TOKEN = "rtoken";
+    process.env.GOOGLE_SHEETS_TRACKING_ENABLED = "true";
+    process.env.GOOGLE_SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+    mockSheets();
+    const s = await getStatus();
+    expect(s.missingEnvVars).toEqual([]);
+  });
+
+  it("lists only the missing names when OAuth is partially configured", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "cid";
+    mockSheets();
+    const s = await getStatus();
+    expect(s.missingEnvVars).toEqual([
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GOOGLE_OAUTH_REFRESH_TOKEN",
+      "GOOGLE_SHEETS_TRACKING_ENABLED",
+      "GOOGLE_SHEET_ID",
+    ]);
+  });
+
+  it("counts a blank value as missing", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "   ";
+    mockSheets();
+    const s = await getStatus();
+    expect(s.missingEnvVars).toContain("GOOGLE_OAUTH_CLIENT_ID");
+    expect(s.missingEnvVars).toHaveLength(REQUIRED.length);
+  });
+
+  it("emits names only — a configured value never leaks into the payload", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "client-id-value";
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = "super-secret-value";
+    process.env.GOOGLE_OAUTH_REFRESH_TOKEN = "1//refresh-token-value";
+    process.env.GOOGLE_SHEET_ID = "SHEET-ID-SENTINEL-VALUE-NEVER-LEAK";
+    // GOOGLE_SHEETS_TRACKING_ENABLED intentionally left unset.
+    mockSheets();
+    const s = await getStatus();
+
+    expect(s.missingEnvVars).toEqual(["GOOGLE_SHEETS_TRACKING_ENABLED"]);
+    const dumped = JSON.stringify(s);
+    expect(dumped).not.toContain("client-id-value");
+    expect(dumped).not.toContain("super-secret-value");
+    expect(dumped).not.toContain("1//refresh-token-value");
+    expect(dumped).not.toContain("SHEET-ID-SENTINEL-VALUE-NEVER-LEAK");
+  });
+
+  it("is independent of the master switch the UI already reads", async () => {
+    // envEnabled is driven by the (mocked) isTrackingEnabled, while
+    // missingEnvVars reads the raw env — proving the two never drift.
+    mockIsTrackingEnabled.mockReturnValue(false);
+    mockSheets();
+    const s = await getStatus();
+    expect(s.envEnabled).toBe(false);
+    expect(s.missingEnvVars).toEqual(REQUIRED);
+  });
+});
