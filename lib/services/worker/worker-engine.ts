@@ -5,15 +5,16 @@ import { executeTask, recordSystemRunOutcome } from "./worker-service";
 import { createTaskLogger, writeLog, resolveLogsDir } from "./worker-logger";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
+import { shouldSkipReap, getCachedAccelerateProbe } from "@/lib/services/accelerateProbe";
 import { getCorrectedNow, getCronFrom } from "@/lib/services/timeCorrection";
 import { isDegradedModeActive } from "@/lib/services/degradedMode";
 import { canExecuteDegradedWork, degradedLeaseHolder } from "@/lib/services/degradedLeader";
+import { isLeader } from "@/lib/services/leader";
 import { enqueueDegradedTask, runDegradedQueueOnce } from "./degradedQueue";
 import os from "os";
 
 let workerInterval: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
-let schedulerInterval: NodeJS.Timeout | null = null;
 const WORKER_ID = `worker-${os.hostname()}-${process.pid}`;
 const HEARTBEAT_INTERVAL_MS = 300_000; // 5 min — reduces DB ops from ~1,440/day to ~288/day
 // ─── DB-unavailable backoff (v3.20.3) ───────────────────────────────────────
@@ -174,32 +175,6 @@ export function startWorker(pollingIntervalMs = 30_000) {
 }
 
 /**
- * Start the cron scheduler loop
- */
-export function startScheduler(checkIntervalMs = 60000) {
-    if (schedulerInterval) {
-        logger.info({ msg: "Scheduler engine already running" });
-        return;
-    }
-
-    logger.info({ msg: "Starting cron scheduler engine", interval: checkIntervalMs });
-
-    // Ensure SYSTEM-managed recommendation crons exist (self-healing upsert).
-    import("@/lib/services/recommendationCronService")
-        .then(({ ensureRecommendationCrons }) => ensureRecommendationCrons())
-        .then((res) => logger.info({ msg: "Recommendation crons ensured", jobs: res.jobs.length }))
-        .catch((error) => logger.error({ msg: "Failed to ensure recommendation crons", error: error instanceof Error ? error.message : String(error) }));
-
-    schedulerInterval = setInterval(async () => {
-        try {
-            await checkScheduledJobs();
-        } catch (error) {
-            logger.error({ msg: "Scheduler loop error", error: error instanceof Error ? error.message : String(error) });
-        }
-    }, checkIntervalMs);
-}
-
-/**
  * Stop all loops
  */
 export function stopWorkerEngine() {
@@ -212,11 +187,7 @@ export function stopWorkerEngine() {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
     }
-    if (schedulerInterval) {
-        clearInterval(schedulerInterval);
-        schedulerInterval = null;
-    }
-    logger.info({ msg: "Worker and Scheduler engines stopped", workerId: WORKER_ID });
+    logger.info({ msg: "Worker engine stopped", workerId: WORKER_ID });
 }
 
 /** Resolve the SQLite fallback singleton (lazy import, never throws). */
@@ -581,6 +552,21 @@ export async function reapStaleWorkerTasks(staleMs: number = STALE_MS): Promise<
     if (isPlanLimitBreakerOpen()) {
         return { reapedTasks: 0, reapedRuns: 0 };
     }
+    // v3.49.0 (Spec 28): Accelerate can be NETWORK-unreachable without the
+    // plan-limit breaker opening (prod 2026-10-11: "Stale recommendation-run reap
+    // failed … Unable to connect to the Accelerate API" every minute). When the
+    // TTL-cached SELECT 1 probe answers unreachable, skip the whole 4-read sweep
+    // and report "nothing reaped" — the sweep resumes automatically once the
+    // probe turns ok again.
+    if (await shouldSkipReap()) {
+        const probe = getCachedAccelerateProbe();
+        logger.warn({
+            msg: "Skipping stale reap — Accelerate unreachable",
+            probeId: probe?.probeId,
+            checkedAt: probe?.checkedAt,
+        });
+        return { reapedTasks: 0, reapedRuns: 0 };
+    }
     const cutoff = new Date(Date.now() - staleMs);
     let reapedTasks = 0;
     let reapedRuns = 0;
@@ -796,74 +782,37 @@ export async function spawnDueCronJob(job: DueCronJob): Promise<void> {
     });
 }
 
-/**
- * Check for due cron jobs and spawn worker tasks
- * (exported for tests)
- */
-export async function checkScheduledJobs() {
-    // v3.32.0: use the corrected clock so a drifted server timezone ("IST-as-UTC")
-    // still fires and advances nextRun on IST wall time. Identity when no
-    // correction is persisted.
-    const now = getCorrectedNow();
-
-    // v3.45.0 (spec 21): degraded branch first — the due-cron read below is a
-    // Prisma query, so without this the two work-accepting crons starve for
-    // the whole hold. `source: "cron"` enqueues mirror-due jobs before draining.
-    if (await runDegradedPathIfActive("cron")) return;
-
-    // v3.23.x (user directive): when the Prisma plan-limit breaker is OPEN,
-    // skip the cron-due read entirely — the prod "Cron daemon resync deferred
-    // (DB unavailable)" noise came from hammering a held DB every tick. Nothing
-    // can spawn while Prisma is down anyway; nextRun just stays put and ticks
-    // again once the breaker closes.
-    if (isPlanLimitBreakerOpen()) return;
-
-    const dueJobs = await prisma.cronJob.findMany({
-        where: {
-            isActive: true,
-            nextRun: { lte: now },
-        },
-    });
-
-    if (dueJobs.length === 0) return;
-
-    for (const job of dueJobs) {
-        try {
-            await spawnDueCronJob(job);
-        } catch (error) {
-            logger.error({ msg: "Failed to spawn task for cron job", jobId: job.id, error: error instanceof Error ? error.message : String(error) });
-        }
-    }
-}
-
-// ─── Missed-tick catch-up (Spec 24) ─────────────────────────────────────────
+// ─── Missed-tick catch-up (Spec 24; run-any-overdue per Spec 25) ────────────
 // Netlify suspends the persistent process between requests and recycles it
 // roughly every 2h, so a node-cron tick that lands while the instance is
 // suspended/recycled is simply MISSED (log: `WARN [NODE-CRON] missed
-// execution`). Nothing re-scans `nextRun` afterwards — the 60s
-// `checkScheduledJobs` poll is never started in production — so once-daily
-// jobs (Daily Recommendations, Rec Performance, Daily Market Sync) were
-// dropped for the day.
+// execution`). Nothing re-scans `nextRun` afterwards, so once-daily jobs
+// (Daily Recommendations, Rec Performance, Daily Market Sync) were dropped
+// for the day.
 //
-// The cron daemon's 5-min resync tick now calls this to recover jobs whose
-// tick was missed within `CRON_CATCHUP_WINDOW_MS` (user policy: catch up
-// within ~5 min of the miss; SKIP + advance nextRun when a job is more than
-// 15 min overdue so a long downtime cannot pile up stale runs). `now` is
-// injectable for tests; defaults to the corrected clock used by
-// `checkScheduledJobs`.
-export const CRON_CATCHUP_WINDOW_MS = 15 * 60_000;
-
+// Spec 25: the cron daemon's 5-min resync tick calls this and runs EVERY
+// active job whose `nextRun` is in the past, regardless of how late it is.
+// The old ">15 min late ⇒ skip + advance" window silently dropped the
+// once-daily jobs above, whose tick is missed by up to ~2h of suspension.
+// Dedup on the spawn is the real double-fire guard (`spawnDueCronJob` skips
+// while a task for the same cronJobId is pending/running within
+// `DEDUP_WINDOW_MS`); a late run is better than a silently-dropped one, and
+// no live production state depends on the old skip behaviour.
+//
+// Under an engaged degraded mode (Prisma plan-limit hold / DB down) the tick
+// hands off to the durable SQLite queue via `runDegradedPathIfActive("cron")`
+// — leader-gated, it enqueues every mirror-due job (90-min dedup) and drains
+// it. Before Spec 25 this branch returned `{0,0}` and the hold had NO recovery
+// path: the only enqueuer, `checkScheduledJobs`, was never started in prod.
+// `now` is injectable for tests; defaults to the corrected clock.
 export async function catchUpMissedCronJobs(options?: {
     now?: Date;
-    maxLatenessMs?: number;
 }): Promise<{ recovered: number; skipped: number }> {
     const now = options?.now ?? getCorrectedNow();
-    const maxLatenessMs = options?.maxLatenessMs ?? CRON_CATCHUP_WINDOW_MS;
 
-    // Same guards as checkScheduledJobs: under an engaged degraded mode the
-    // durable queue is the designed recovery path, and with the breaker open
-    // nothing can spawn anyway — no-op instead of hammering a held DB.
+    // Degraded hold: the durable SQLite queue is the designed recovery path.
     if (isDegradedModeActive() || isPlanLimitBreakerOpen()) {
+        await runDegradedPathIfActive("cron");
         return { recovered: 0, skipped: 0 };
     }
 
@@ -872,26 +821,12 @@ export async function catchUpMissedCronJobs(options?: {
     });
     if (dueJobs.length === 0) return { recovered: 0, skipped: 0 };
 
-    const threshold = new Date(now.getTime() - maxLatenessMs);
     let recovered = 0;
-    let skipped = 0;
     for (const job of dueJobs) {
-        if (!job.nextRun || job.nextRun.getTime() < threshold.getTime()) {
-            // Missed by more than the window: do NOT run it. Advance nextRun so
-            // the schedule keeps ticking and the next occurrence fires normally.
-            await prisma.cronJob.update({
-                where: { id: job.id },
-                data: { nextRun: calculateNextRun(job.cronExpression, getCronFrom()), updatedAt: new Date() },
-            });
-            skipped++;
-            logger.info({
-                msg: "Cron job missed catch-up window; advancing nextRun without running",
-                jobId: job.id,
-                name: job.name,
-                overdueMs: job.nextRun ? now.getTime() - job.nextRun.getTime() : 0,
-            });
-            continue;
-        }
+        // The SQL `WHERE nextRun <= now` excludes NULLs, but a caller/mock can
+        // still hand us a row without one — and a non-Date nextRun can't be
+        // "overdue" (spawning it would loop forever advancing from undefined).
+        if (!(job.nextRun instanceof Date)) continue;
         try {
             await spawnDueCronJob(job);
             recovered++;
@@ -899,7 +834,130 @@ export async function catchUpMissedCronJobs(options?: {
             logger.error({ msg: "Failed to spawn missed cron job", jobId: job.id, error: error instanceof Error ? error.message : String(error) });
         }
     }
-    return { recovered, skipped };
+    if (recovered > 0) {
+        logger.info({ msg: "Recovered overdue cron jobs", recovered });
+    }
+    return { recovered, skipped: 0 };
+}
+
+// ─── Day-level recommendations catch-up (Spec 30) ───────────────────────────
+// `catchUpMissedCronJobs` (Spec 24/25) recovers jobs whose `nextRun` is in the
+// past — but a weekday run that FAILED silently (or an instance that was cold
+// across the whole 04:30 UTC window) leaves `nextRun` advanced, so nothing
+// re-fires and the page stays stale for days (prod 2026-10-11: failed run from
+// 2026-09-04). This guard adds DAY-level semantics: on a weekday after the
+// scheduled fire time, with no successful run today and none in flight, enqueue
+// exactly ONE catch-up. It NEVER changes the cron schedule (weekend NSE-closed
+// runs stay off) and is leader-only (single writer).
+//
+// Safety (all must pass): breaker/degraded closed · leader · weekday (UTC) ·
+// now ≥ 04:30 UTC · no completed+AI run today · no pending/running rec task
+// within the dedup window. `now` is injectable for tests.
+export async function ensureDailyRecommendationRan(
+    now: Date = getCorrectedNow()
+): Promise<{ enqueued: boolean; reason: string | null }> {
+    // Degraded hold: the durable SQLite queue is the designed recovery path —
+    // never Prisma-enqueue here.
+    if (isPlanLimitBreakerOpen() || isDegradedModeActive()) {
+        return { enqueued: false, reason: "degraded" };
+    }
+
+    // Leader-only: one instance enqueues so N instances never double-fire.
+    if (!(await isLeader("worker"))) {
+        logger.debug({ msg: "Recommendations catch-up skipped (not leader)" });
+        return { enqueued: false, reason: "not-leader" };
+    }
+
+    // Weekday guard (UTC 0=Sun..6=Sat). NSE is closed on weekends — the schedule
+    // is Mon–Fri and that is correct; do NOT catch up on weekends.
+    const dow = now.getUTCDay();
+    if (dow === 0 || dow === 6) {
+        logger.debug({ msg: "Recommendations catch-up skipped (weekend)", dow });
+        return { enqueued: false, reason: "weekend" };
+    }
+
+    // Fire time guard: before 04:30 UTC the cron will still fire normally.
+    const fireTodayMs = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        4,
+        30,
+        0
+    );
+    if (now.getTime() < fireTodayMs) {
+        logger.debug({ msg: "Recommendations catch-up skipped (before window)", now: now.toISOString() });
+        return { enqueued: false, reason: "before-window" };
+    }
+
+    // Day-level guard: a successful run today ⇒ nothing to do.
+    const { hasSuccessfulRunToday } = await import("@/lib/services/dailyRecommendationService");
+    if (await hasSuccessfulRunToday(now)) {
+        logger.debug({ msg: "Recommendations catch-up skipped (already ran today)" });
+        return { enqueued: false, reason: "already-ran" };
+    }
+
+    // In-flight guard: a pending/running recommendations task within the window
+    // (mirrors the 90-min spawn dedup) ⇒ the run is already on its way.
+    try {
+        const inFlight = await prisma.workerTask.findFirst({
+            where: {
+                taskType: "recommendations",
+                status: { in: ["pending", "running"] },
+                createdAt: { gte: new Date(now.getTime() - DEDUP_WINDOW_MS) },
+            },
+            select: { id: true },
+        });
+        if (inFlight) {
+            logger.debug({ msg: "Recommendations catch-up skipped (task in flight)", taskId: inFlight.id });
+            return { enqueued: false, reason: "in-flight" };
+        }
+    } catch (error) {
+        logger.warn({
+            msg: "Recommendations catch-up in-flight check failed — skipping this tick",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { enqueued: false, reason: "in-flight-check-failed" };
+    }
+
+    // All guards passed — enqueue exactly one catch-up run.
+    try {
+        const { spawnRegularTask } = await import("./task-orchestrator");
+        const task = await spawnRegularTask({
+            name: "Catch-up: Daily Recommendations",
+            taskType: "recommendations",
+            triggeredBy: "catchup",
+            payload: { source: "catchup", reason: "missed-daily-window" },
+        });
+        // Audit only on an actual enqueue (Spec 30 §9) — never on a skip.
+        try {
+            const { createAuditLog } = await import("@/lib/audit");
+            void createAuditLog({
+                action: "RECOMMENDATIONS_CATCHUP",
+                resource: "recommendations",
+                responseStatus: 200,
+                metadata: {
+                    scope: "day",
+                    hadRun: false,
+                    reason: "missed-daily-window",
+                    taskId: task.id,
+                },
+            });
+        } catch (auditErr) {
+            logger.warn({
+                msg: "Recommendations catch-up audit failed",
+                error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
+        }
+        logger.info({ msg: "Recommendations catch-up enqueued", taskId: task.id });
+        return { enqueued: true, reason: "missed-daily-window" };
+    } catch (error) {
+        logger.error({
+            msg: "Recommendations catch-up enqueue failed",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { enqueued: false, reason: "enqueue-failed" };
+    }
 }
 
 /**

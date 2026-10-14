@@ -2096,9 +2096,9 @@ This API is designed for programmatic access. Key endpoints:
         },
         '/api/admin/google-sheets/rescan': {
             post: {
-                summary: 'Re-run a re-scannable producer to capture fresh rows (admin)',
+                summary: 'Queue a Google Sheets re-scan as a worker task (admin)',
                 description:
-                    'Re-runs a producer on demand so its rows are captured into the ledger, then reported to the console; it does NOT drain. Re-scan and Sync are deliberately separate: Sync drains already-captured rows, Re-scan creates fresh ones. Only `screener` and `custom` are re-scannable. `screener` re-runs the unified screener with a forced refresh — that fresh path already appends to the ledger, so this route does not call the exporter a second time (`delegatedExport: true`). `custom` re-runs the saved config through the shared full-universe scan and then awaits the export under a fresh run id, reporting `delegatedExport: false`. Both are capped at the row limit; a disabled or failed export reports `appended: 0` rather than claiming success. Success is audited as GOOGLE_SHEETS_RESCAN with the tab, config, and counts.',
+                    'Enqueues a re-scan of a producer as a background worker task and returns immediately with **202** `{ success, queued, taskId, tab }` — the scan never runs inside the HTTP request (a synchronous full scan exceeded the Netlify function timeout → 502). Poll `GET /api/admin/workers?taskId=<id>` for `{ task: { status, result, error } }`; on completion `task.result` carries `{ tab, appended, total, delegatedExport, executionMs, rowLimit }`. Only `screener` and `custom` are re-scannable. Request validation runs synchronously and is preserved: `screener` re-runs the unified screener with a forced refresh (fresh path already appends → `delegatedExport: true`), `custom` is pre-checked (exists + has a filter group) and re-runs the saved config awaiting export under a fresh run id (`delegatedExport: false`). Both are capped at the row limit; a disabled or failed export reports `appended: 0` rather than claiming success. Enqueue is audited as GOOGLE_SHEETS_RESCAN with the tab, config, and counts.',
                 tags: ['Google Sheets'],
                 security: securityAdmin,
                 requestBody: {
@@ -2120,13 +2120,13 @@ This API is designed for programmatic access. Key endpoints:
                     }
                 },
                 responses: {
-                    '200': { description: '{ success, tab, appended, total, delegatedExport, executionMs, elapsedMs, rowLimit }' },
+                    '202': { description: 'Re-scan queued: { success: true, queued: true, taskId, tab } — poll GET /api/admin/workers?taskId=<id> for status + result' },
                     '400': { description: 'Invalid JSON body, failed validation, unknown tab, or missing configId for a custom re-scan' },
                     '401': { description: 'Unauthorized' },
                     '404': { description: 'The named custom config does not exist' },
                     '409': { description: 'The saved config has no valid filter group' },
-                    '500': { description: 'Re-scan failed' },
-                    '503': { description: 'Database unavailable (e.g. P6003 plan-limit hold)' }
+                    '500': { description: 'Unexpected error while enqueuing the re-scan task' },
+                    '503': { description: 'Database unavailable (e.g. P6003 plan-limit hold), the plan-limit breaker is open, or the task could not be enqueued' }
                 }
             }
         }

@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { spawnRegularTask } from "@/lib/services/worker/task-orchestrator";
 import { ensureRecommendationCrons } from "@/lib/services/recommendationCronService";
+import { computeFreshnessFields } from "@/lib/services/dailyRecommendationService";
 import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -42,6 +43,10 @@ export async function GET() {
       statusBreakdown[s.status] = s._count;
     }
 
+    // Spec 30 §4E: expose the ACTUAL next fire + freshness so the admin engine
+    // dashboard shows when the system job will next run (never throws).
+    const freshness = await computeFreshnessFields();
+
     return NextResponse.json({
       success: true,
       stats: {
@@ -49,6 +54,10 @@ export async function GET() {
         activeTrackers,
         statusBreakdown,
       },
+      nextRunAt: freshness.nextRunAt,
+      lastUpdatedAt: freshness.lastUpdatedAt,
+      isStale: freshness.isStale,
+      scheduleCron: freshness.scheduleCron,
       recentRuns: recentRuns.map((r: (typeof recentRuns)[number]) => ({
         id: r.id,
         runDate: r.runDate,

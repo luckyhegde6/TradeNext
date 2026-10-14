@@ -15,6 +15,56 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-11 | v3.49.0 — Specs 28–31 completion (missing plan tests) + PR #135 CI fixes (branch `fix/daily-rec-swing-cron-worker`, code `28d6806`; COMMIT PENDING USER — D9)
+
+**Request**: fix the 2 red PR #135 checks (Quality Gate `tsc-baseline` + Playwright e2e), then verify all Spec 28–31 functionality via unit tests + Playwright e2e + live checks; TypeScript baseline must hold (46 total / 0 production) and must **never** be raised to hide prod errors; D9 = commit only.
+
+**(a) CI Fix 1 — Quality Gate `tsc-baseline`.** Spec 31's "not armed" card in `app/admin/google-sheets/page.tsx` reads `status.missingEnvVars.length` + `.map(…)` **unconditionally**, but the page's local `SheetsStatus` interface had no `missingEnvVars` member → `TS2339` (`page.tsx:180`) + `TS2551` (`:187`) — 2 **PRODUCTION** tsc errors. Fixed the **interface** (`missingEnvVars: string[]`), not the baseline: `scripts/dev-checks/tsc-baseline.json` is untouched (absent from `git status`). Verified by the **raw** compiler: `npx tsc --noEmit` = exactly 46 `error TS…` lines, **all inside `__tests__/`, zero in `page.tsx`/`app/admin`**; gate → `total 46 (delta +0) · prod 0 (delta +0) · OK`.
+
+**(b) CI Fix 2 — Playwright route-mock drift (Lesson 161).** `e2e/admin-google-sheets.spec.ts`'s `statusBody()` returned a mocked status **without** `missingEnvVars` → `undefined.length` threw **in render** → route ErrorBoundary → every `gs-…` assertion failed. The spec **self-skips** without `E2E_ADMIN_*`/`ADMIN_*` creds, so it stayed green locally and failed only in CI. Fixed: added `missingEnvVars: []` to `statusBody()` + new regression test `'an unarmed deploy lists the missing env vars by name'` (`data-testid="env-not-armed"`, "3 required env var(s) missing", 3 var names).
+
+**(c) Missing plan tests authored** (none existed before): Spec 30 `dailyRecommendationService.test.ts` +13 (`getNextRunAt`, `computeFreshnessFields`, `computeIsStale`, `hasSuccessfulRunToday`) → 56/56; Spec 30 `worker-engine.test.ts` +12 (`ensureDailyRecommendationRan` full guard matrix: degraded/not-leader/weekend/before-window/already-ran/in-flight/check-failed/enqueue-failed + audit-on-enqueue-only) → 55/55; Spec 31 `googleSheetsStatus.test.ts` +6 (`missingEnvVars`) → 21/21.
+
+**(d) Local CI reproduction.** Docker Desktop started (`worker_logs/start-docker.ps1` → `DOCKER_READY`); `docker compose up -d db redis` (both healthy, `:5432`/`:6379`, existing volume); `npx prisma migrate deploy` → 38 migrations, none pending; `npx tsx prisma/seed.ts` → demo **id 2** / admin **id 1**. `npx playwright test --project=setup` → **1 passed (19.3 s)**: the dev server (started *before* the DB existed) picks up the DB lazily — Prisma reconnects on first query, **no restart needed**.
+
+**Gates**: tsc **46 exact (prod 0, +0)** · Jest **137/137 · 2053 passed / 4 skipped / 0 failed** (68.9 s) · Spec 28–31 targeted **6 suites / 187 tests** · ESLint 0 on changed files · quickbuild **201/201, 0 `warn`** · Playwright full (all projects, as CI) **126 passed / 2 flaky (retry-green) / 0 failed** (10.9 m).
+
+**Docs**: `.agents/changelog/versions-v3.49.md` (NEW) + AGENTS.md v3.49.0 row + `.agents/CHANGELOG.md` index row + `Primer.md` + `Lessons.md` (Lesson 161) + this entry + `.agents/session-todos.md` + `HANDOFF.md`. **No baseline change, no schema/migration, no new packages.** COMMIT pending user; merge/deploy user-only.
+
+---
+
+### 2026-10-10 | v3.48.0 — Spec 27 Async Google Sheets re-scan (worker queue migration) (branch `fix/daily-rec-swing-cron-worker`, base `main` = PR #134 MERGED, Spec 26 COMMITTED `44156e6`)
+
+**Request (spec 27, user-approved)**: the prod Google-Sheets admin console "Rescan" ran the scan synchronously in the HTTP request (`forceRefresh` + `tvFallbackLimit:200`) → Netlify function gateway 502. Rescan must be moved off the request path onto the worker task queue, preserving every existing guard/validation and the console UX.
+
+**Execution**: (1) Registered a new dispatchable task type `google_sheets_rescan` (#30 in `lib/services/worker/degradedTaskRegistry.ts`, `degradedSafe:false` — irreversible external append + Prisma-only ScanConfig, `maxRetries:0`). (2) `app/api/admin/google-sheets/rescan/route.ts` now VALIDATES → (custom only) `precheckCustomRescan` → `spawnRegularTask` → audit `GOOGLE_SHEETS_RESCAN` → **202 `{success,queued,taskId,tab}`**; never scans in-request. Validation 400s + custom 404/409/503/500 + breaker 503 + enqueue-fail 503 preserved. (3) Extracted `precheckCustomRescan` in `lib/services/googleSheets/rescanService.ts` (single DB read, reused by `rescanCustomConfig`). (4) Added executor `executeGoogleSheetsRescan` in `lib/services/worker/worker-service.ts` — screener→`rescanScreener`, custom→`rescanCustomConfig`; throws on `ok:false`; returns `{tab,appended,total,executionMs,delegatedExport,rowLimit}`. (5) `app/admin/google-sheets/page.tsx` enqueues → polls `GET /api/admin/workers?taskId=` (3s × 200) → renders `task.result` → `await load()`; on timeout shows the notice → "track it on the Workers page".
+
+**Live verification (end-to-end)**: task `bbd49e8c-0da9-480b-a148-c1aecc1388f9` spawned 11:34 → completed 11:40:52 `{appended:1410,total:1410,delegatedExport:true}` (scan 13s, hits 1410); console screener 2904→4314. The ~6-min pending was a DEV-ENV leader-lease artifact (an old killed dev server's ~15-min DB lease delayed the new worker engine start), not a code issue. `invalid_grant` append/header-ensure = pre-existing local GS OAuth expiry (non-fatal, `delegatedExport:true`).
+
+**Tests/gates**: NEW `lib/__tests__/googleSheetsRescanTask.test.ts`; `lib/__tests__/googleSheetsRescan.test.ts` rewritten to the 202 contract; registry test 29→30. tsc **46 exact (prod 0)** · Jest **134/134** · eslint 0 on changed files · quickbuild rerun in the pre-commit gate.
+
+**Docs**: `.agents/changelog/versions-v3.48.md` + AGENTS.md v3.48.0 row + `.agents/CHANGELOG.md` index row + TODO block (old v3.47 block archived to `.agents/changelog/todo-quick-reference-archive.md`) + Primer + agent-memory + session-todos + handoff + Lesson **160**.
+
+**Lesson 160**: killing a dev server does NOT release the DB leader lock immediately — the new worker engine only starts after the old lease expires (TTL ~15 min; observed 11:30 boot → 11:40:08 "Starting background worker engine"). When a task looks starved, check the server log for the actual worker-engine start timestamp BEFORE suspecting the queue. Task logs are FILE-based (`worker_logs/<taskId>.log`), separate from the main pino console log.
+
+**Commit**: code + tests + docs — COMMIT PENDING USER (D9: commit on explicit request only; merge/deploy user-only).
+
+---
+
+### 2026-10-09 | v3.47.0 — Specs 25 + 26 scheduled-execution reliability + GS header-label fix (branch `fix/daily-rec-swing-cron-worker`, base `main` = PR #134 MERGED)
+
+**Request (specs 25/26, user-approved; branch `fix/daily-rec-swing-cron-worker`)**: (25) cron jobs missed while Netlify suspends an idle instance must be re-fired, the daemon must default to UTC, and the degraded-executor must behave correctly when recurring; (26) the admin GS console shows "unknown" for healthy tabs because the client's HeaderState union doesn't match the server contract.
+
+**Execution**: (25) `catchUpMissedCronJobs()` (`CRON_CATCHUP_WINDOW_MS=15min`) in `lib/services/worker/worker-engine.ts` (~L791) — missed ≤15min spawned (same guards as `checkScheduledJobs`, skip `running`), stale re-armed advance never fired; wired daemon boot + 5-min resync tick; `cron-daemon.ts` defaults `DEFAULT_TIMEZONE = "UTC"` with per-job override kept. **Smoke-verified live** (dev daemon, UTC logs): degraded enqueue 13:49:58 → completed 13:50:43 (`stockCount: 10870`); re-enqueue 13:54:59 + mid-run kill → durable `running` row in mirror table **`_degradated_task`** (`logs/sqlite-mirror.sqlite`, 36 tables — queue IS SQLite-persisted, corrects earlier in-memory belief); restore verified 3 ways (psql nextRun 2026-10-12 ×4 + mirror dump + live boot 14:21:17 `Recomputed` ×4 `changed=false`). **BUG A (follow-up)**: degraded executor doesn't advance mirror `next_run` on completion → recurring job legitimately re-fires every 5-min tick; fix idea = advance via `calculateNextRun` (:729/:762). BUG B non-issue: `POST /api/admin/degraded-mode` 405 (GET+PATCH only). (26) `app/admin/google-sheets/page.tsx` `HeaderState` local union → `import type { HeaderState } from "@/lib/services/googleSheets/tabs"` (4 server keys `matched|drifted|absent|unknown`); `HEADER_BADGE` exported 4-key map (`absent` = "no header yet" blue — was red "tab missing"); server contract untouched.
+
+**Verification**: Spec 25 COMMITTED `480cd3b` (14 files +821/−274, pre-commit green incl. tsc prod + context budget 91.8/100 KB) · targeted Jest **93/93 (4/4)** · Lesson **159**. Spec 26: NEW `lib/__tests__/googleSheetsHeaderBadge.test.ts` **5/5** · tsc **46 exact (no new)** · eslint 0 on touched files · live dev `/admin/google-sheets` (admin session) renders all tabs with zero console errors (local reads `unknown` — no live sheet; mapping covered by unit test).
+
+**Docs**: `versions-v3.47.md` + AGENTS.md v3.47.0 row + CHANGELOG + versions-index + TODO block + Primer + HANDOFF + latest.md + session archive `2026-10-09-ops-counter-fixes/` (flow addendum + decisions D14/D15).
+
+**Commit**: Spec 26 code + docs — commit PENDING USER (D9: commit on explicit request only; merge/deploy user-only).
+
+---
+
 ### 2026-10-09 | PROD-FIX pass on v3.46.0 — live diagnosis + ops-counter correction executed (branch `feature/fix-ops-counter-authority-sync` = PR #134, HEAD `d0ea87e`, all 11 checks green)
 
 **Request**: investigate the reported live prod issues (stuck SQLite→Prisma outbox, ops-counter drift, Google Sheets tracking off, decision engine inert) — read-only first, fixes approval-gated.

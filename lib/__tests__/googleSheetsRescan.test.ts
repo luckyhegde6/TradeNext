@@ -44,6 +44,9 @@ jest.mock("@/lib/services/chartinkUnifiedScreenerService", () => ({
   runChartinkUnifiedScreeners: jest.fn(),
 }));
 jest.mock("@/lib/services/googleSheets/exporter", () => ({ exportCustomScan: jest.fn(async () => "enabled") }));
+// Spec 27: the route no longer scans; it enqueues a worker task. Mock the spawn
+// so the test asserts the enqueue contract (and never touches a real queue).
+jest.mock("@/lib/services/worker/task-orchestrator", () => ({ spawnRegularTask: jest.fn() }));
 
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
@@ -52,6 +55,7 @@ import { runCustomScan } from "@/lib/screener/customScanRunner";
 import { runChartinkUnifiedScreeners } from "@/lib/services/chartinkUnifiedScreenerService";
 import { exportCustomScan } from "@/lib/services/googleSheets/exporter";
 import { createAuditLog } from "@/lib/audit";
+import { spawnRegularTask } from "@/lib/services/worker/task-orchestrator";
 
 import { RESCAN_ROW_LIMIT, rescanCustomConfig, rescanScreener } from "@/lib/services/googleSheets/rescanService";
 import * as rescanRoute from "@/app/api/admin/google-sheets/rescan/route";
@@ -62,6 +66,7 @@ const mockScan = runCustomScan as jest.Mock;
 const mockExport = exportCustomScan as jest.Mock;
 const mockFindConfig = prisma.scanConfig.findUnique as jest.Mock;
 const mockAudit = createAuditLog as jest.Mock;
+const mockSpawn = spawnRegularTask as jest.Mock;
 
 function asAdmin() {
   mockAuth.mockResolvedValue({ user: { email: "a@b.c", id: "1", role: "admin" } });
@@ -92,6 +97,7 @@ beforeEach(() => {
   mockScan.mockResolvedValue({ stocks: [{ symbol: "AAA" }], total: 1, fetchMs: 5, executionMs: 7 });
   mockExport.mockResolvedValue("enabled");
   mockFindConfig.mockResolvedValue(CONFIG);
+  mockSpawn.mockResolvedValue({ id: "task-1" });
 });
 
 describe("rescanScreener", () => {
@@ -214,25 +220,47 @@ describe("POST /api/admin/google-sheets/rescan", () => {
   it("requires an admin session", async () => {
     asUser();
     expect((await rescanRoute.POST(post({ tab: "screener" }))).status).toBe(401);
-    expect(mockUnified).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  it("runs a screener re-scan and returns the counts", async () => {
+  it("enqueues a screener scan and returns 202 (never scans in the request)", async () => {
     const res = await rescanRoute.POST(post({ tab: "screener" }));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ success: true, tab: "screener", appended: 2, total: 2 });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ success: true, queued: true, tab: "screener", taskId: "task-1" });
+    // The whole point of Spec 27: the scan is NOT run inline.
+    expect(mockUnified).not.toHaveBeenCalled();
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskType: "google_sheets_rescan",
+        maxRetries: 0,
+        triggeredBy: "admin",
+        payload: expect.objectContaining({ tab: "screener" }),
+      }),
+    );
   });
 
-  it("runs a custom re-scan when a configId is given", async () => {
+  it("carries the caller's category/template filters into the task payload", async () => {
+    await rescanRoute.POST(post({ tab: "screener", categoryId: "trend", templateIds: ["t1"] }));
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ categoryId: "trend", templateIds: ["t1"] }) }),
+    );
+  });
+
+  it("enqueues a custom scan when a configId is given", async () => {
     const res = await rescanRoute.POST(post({ tab: "custom", configId: "cfg-1" }));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ success: true, tab: "custom", appended: 1 });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ success: true, queued: true, tab: "custom" });
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ tab: "custom", configId: "cfg-1" }) }),
+    );
+    // The pre-check reads the config, but the scan itself must not run here.
+    expect(mockScan).not.toHaveBeenCalled();
   });
 
   it("rejects a custom re-scan with no configId before doing any work", async () => {
     const res = await rescanRoute.POST(post({ tab: "custom" }));
     expect(res.status).toBe(400);
-    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown tab", async () => {
@@ -248,13 +276,13 @@ describe("POST /api/admin/google-sheets/rescan", () => {
       // button that "does nothing".
       expect(body.error).toContain("swing and daily-rec");
     }
-    expect(mockUnified).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects metrics: it is derived, so re-running it would fabricate data", async () => {
     const res = await rescanRoute.POST(post({ tab: "metrics" }));
     expect(res.status).toBe(400);
-    expect(mockUnified).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects decisions, which is never synced or re-scanned", async () => {
@@ -274,11 +302,12 @@ describe("POST /api/admin/google-sheets/rescan", () => {
     expect((await rescanRoute.POST(bad)).status).toBe(400);
   });
 
-  it("maps a missing config to 404", async () => {
+  it("maps a missing config to 404 without enqueuing", async () => {
     mockFindConfig.mockResolvedValue(null);
     const res = await rescanRoute.POST(post({ tab: "custom", configId: "nope" }));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ reason: "not_found" });
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("maps an unusable config to 409", async () => {
@@ -293,25 +322,37 @@ describe("POST /api/admin/google-sheets/rescan", () => {
     expect(await res.json()).toMatchObject({ reason: "db_unavailable" });
   });
 
-  it("maps an unexpected failure to 500", async () => {
-    mockUnified.mockRejectedValue(new Error("boom"));
-    expect((await rescanRoute.POST(post({ tab: "screener" }))).status).toBe(500);
+  it("maps an unexpected pre-check failure to 500", async () => {
+    mockFindConfig.mockRejectedValue(new Error("boom"));
+    expect((await rescanRoute.POST(post({ tab: "custom", configId: "cfg-1" }))).status).toBe(500);
   });
 
-  it("audits a successful re-scan with the counts and the row cap", async () => {
+  it("maps a queue-enqueue failure to 503 rather than a false 202", async () => {
+    mockSpawn.mockRejectedValue(new Error("queue down"));
+    const res = await rescanRoute.POST(post({ tab: "screener" }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ reason: "db_unavailable" });
+  });
+
+  it("audits the enqueue with the taskId, tab and row cap", async () => {
     await rescanRoute.POST(post({ tab: "screener", categoryId: "trend" }));
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "GOOGLE_SHEETS_RESCAN",
         resourceId: "screener",
-        metadata: expect.objectContaining({ categoryId: "trend", appended: 2, rowLimit: RESCAN_ROW_LIMIT }),
+        metadata: expect.objectContaining({
+          queued: true,
+          taskId: "task-1",
+          categoryId: "trend",
+          rowLimit: RESCAN_ROW_LIMIT,
+        }),
       }),
     );
   });
 
-  it("does not audit a failed re-scan", async () => {
-    mockUnified.mockRejectedValue(new Error("boom"));
-    await rescanRoute.POST(post({ tab: "screener" }));
+  it("does not audit when the re-scan is rejected before it is queued", async () => {
+    mockFindConfig.mockResolvedValue(null);
+    await rescanRoute.POST(post({ tab: "custom", configId: "nope" }));
     expect(mockAudit).not.toHaveBeenCalled();
   });
 });

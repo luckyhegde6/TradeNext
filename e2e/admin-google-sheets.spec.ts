@@ -73,6 +73,11 @@ function statusBody(overrides: Record<string, unknown> = {}) {
       sheetIdMasked: '1AbCd…wXyZ',
       oauthConfigured: { clientId: true, clientSecret: true, refreshToken: true },
       trackingEnabled: false,
+      // Spec 31: every required var is present in this baseline payload, so the
+      // "not armed" card stays hidden. The page reads `missingEnvVars.length`
+      // unconditionally, so this field is part of the contract — omitting it
+      // throws inside the ErrorBoundary and fails every test in this file.
+      missingEnvVars: [],
       perTab: TABS.map((tab) => ({
         tab,
         headerState: 'matched',
@@ -204,17 +209,28 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
     const req = r.request();
     seen.push({ url: req.url(), body: req.postData() ?? '' });
     await r.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, taskId: 'task_screener_1', tab: 'screener' }),
+    });
+  });
+
+  // Spec 27: the rescan is queued (202), never run in-request. The console polls
+  // the task read surface until the worker completes, then renders its result.
+  await page.route('**/api/admin/workers?taskId=*', async (r) => {
+    const taskId = new URL(r.request().url()).searchParams.get('taskId') ?? '';
+    const isScreener = taskId === 'task_screener_1';
+    await r.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        success: true,
-        tab: 'screener',
-        appended: 4,
-        total: 9,
-        delegatedExport: true,
-        executionMs: 1200,
-        elapsedMs: 1300,
-        rowLimit: 200,
+        task: {
+          id: taskId,
+          status: 'completed',
+          result: isScreener
+            ? { ok: true, tab: 'screener', appended: 4, total: 9, executionMs: 1200, delegatedExport: true, rowLimit: 200 }
+            : { ok: true, tab: 'custom', appended: 2, total: 2, executionMs: 300, delegatedExport: false, rowLimit: 200 },
+        },
       }),
     });
   });
@@ -225,6 +241,8 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
   await expect.poll(() => seen.length).toBe(1);
   expect(JSON.parse(seen[0].body)).toEqual({ tab: 'screener' });
   // 4 of 9 matches, under the cap, and the delegated-append caveat is surfaced.
+  // The final notice only appears after the first poll (~3 s) returns the
+  // completed task, so these assertions wait on the polled result.
   await expect(page.getByRole('status')).toContainText('queued 4 row(s) of 9 matches (cap 200)');
   await expect(page.getByRole('status')).toContainText('Sync to append them.');
 
@@ -234,18 +252,9 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
     if (JSON.parse(r.request().postData() ?? '{}').tab === 'custom') {
       customCalls++;
       await r.fulfill({
-        status: 200,
+        status: 202,
         contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          tab: 'custom',
-          appended: 2,
-          total: 2,
-          delegatedExport: false,
-          executionMs: 300,
-          elapsedMs: 310,
-          rowLimit: 200,
-        }),
+        body: JSON.stringify({ success: true, queued: true, taskId: 'task_custom_1', tab: 'custom' }),
       });
       return;
     }
@@ -260,7 +269,9 @@ test('Rescan posts the right body and reports queued vs appended', async ({ page
   await tabRow(page, 'custom').getByRole('button', { name: 'Rescan' }).click();
 
   await expect.poll(() => customCalls).toBe(1);
-  // No "Sync to append them" here: custom awaited its own export.
+  // No "Sync to append them" here: custom awaited its own export. The assertion
+  // order matters: the queued-2 assertion first waits for the custom poll to
+  // swap the notice, so the negative check below never sees the stale screener text.
   await expect(page.getByRole('status')).toContainText('queued 2 row(s)');
   await expect(page.getByRole('status')).not.toContainText('Sync to append them.');
 });
@@ -384,6 +395,53 @@ test('a held database disables Append and says no row was queued', async ({ page
   await expect(page.getByText(/database is held \(plan limit\)/i)).toBeVisible();
   await expect(page.getByText('No row is queued.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Append snapshot' })).toBeDisabled();
+});
+
+/**
+ * Spec 31 — the "prod env not armed" surface. The server sends the NAMES of the
+ * vars that are unset so the operator can act without guessing; the console must
+ * render them and must never echo a value (the same secrecy rule as OAuth).
+ */
+test('an unarmed deploy lists the missing env vars by name', async ({ page }) => {
+  await openConsole(page);
+
+  // Last-registered route wins in Playwright, so this override supersedes the
+  // baseline status mock installed by openConsole; the reload re-fetches it.
+  await page.route('**/api/admin/google-sheets/status', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        statusBody({
+          status: {
+            envEnabled: false,
+            dbConfigured: false,
+            sheetIdMasked: null,
+            oauthConfigured: { clientId: true, clientSecret: false, refreshToken: false },
+            trackingEnabled: false,
+            missingEnvVars: [
+              'GOOGLE_OAUTH_CLIENT_SECRET',
+              'GOOGLE_OAUTH_REFRESH_TOKEN',
+              'GOOGLE_SHEET_ID',
+            ],
+            perTab: TABS.map((tab) => ({ tab, headerState: 'unknown', lastMark: null })),
+          },
+        }),
+      ),
+    }),
+  );
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Google Sheets Tracking' })).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const card = page.getByTestId('env-not-armed');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('3 required env var(s) missing');
+  await expect(card).toContainText('GOOGLE_OAUTH_CLIENT_SECRET');
+  await expect(card).toContainText('GOOGLE_OAUTH_REFRESH_TOKEN');
+  await expect(card).toContainText('GOOGLE_SHEET_ID');
 });
 
 test.describe('Google Sheets console — mobile viewport', () => {

@@ -21,9 +21,16 @@ import os from "os";
 import { isDbUnavailableError } from "@/lib/db-utils";
 import { isDegradedModeActive } from "@/lib/services/degradedMode";
 import { enqueueDegradedTask } from "./degradedQueue";
-import { spawnDueCronJob, catchUpMissedCronJobs } from "./worker-engine";
+import { spawnDueCronJob, catchUpMissedCronJobs, ensureDailyRecommendationRan } from "./worker-engine";
 
-const DEFAULT_TIMEZONE = "Asia/Kolkata"; // NSE market timezone for all cron schedules
+// Cron expressions in this app are authored in UTC (see recommendationCronService:
+// "Times are UTC: IST = UTC + 5:30") and `calculateNextRun` (lib/cron-parser.ts)
+// evaluates them in UTC on every host. v3.47.0 (spec 25): the default was
+// "Asia/Kolkata", so node-cron fired daily jobs 5.5h off the UTC `nextRun` the
+// catch-up/admin clock uses — a split-brain that both missed ticks and double-fired
+// around DST-free IST boundaries. Register in UTC to match. A per-job
+// `config.timezone` still overrides (used by tests / non-UTC user crons).
+const DEFAULT_TIMEZONE = "UTC";
 // v3.20.1: intervals tuned to stay under 10K Prisma Postgres ops/day.
 const RESYNC_INTERVAL_MS = 300_000; // 5 min — was 60s (saves ~1,296 reads/day). Admin edits wait ≤5 min.
 const HEARTBEAT_INTERVAL_MS = 900_000; // 15 min — was 5 min (saves ~192 writes/day). Admin Cron tab refreshes every 60s anyway.
@@ -128,6 +135,22 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
+  // Spec 30: day-level recommendations catch-up on boot. A failed weekday run
+  // (or an instance cold across the whole 04:30 UTC window) would otherwise
+  // leave `nextRun` advanced with nothing to re-fire. Guards inside keep this a
+  // no-op on weekends / before the window / when a run already succeeded.
+  try {
+    const res = await ensureDailyRecommendationRan();
+    if (res.enqueued) {
+      logger.info({ msg: "Cron boot recommendations catch-up enqueued", reason: res.reason });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Cron boot recommendations catch-up deferred",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   resyncInterval = setInterval(() => {
     syncCronJobs().catch((error) => {
       if (isDbUnavailableError(error)) {
@@ -147,6 +170,26 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
         logger.error({ msg: "Cron catch-up failed", error: error instanceof Error ? error.message : String(error) });
       }
     });
+    // Spec 30: day-level recommendations catch-up on the 5-min tick. Leader-
+    // gated and guarded (weekday, ≥04:30 UTC, no successful run today, no
+    // in-flight rec task); enqueues at most one catch-up run per day. Never
+    // throws — the helper swallows its own errors.
+    ensureDailyRecommendationRan().catch((error) => {
+      logger.warn({ msg: "Recommendations catch-up tick failed", error: error instanceof Error ? error.message : String(error) });
+    });
+    // v3.47.0 (spec 25): drain the SQLite→Prisma write-behind outbox on the
+    // same 5-min tick. Previously the only drains were the 6h recovery probe,
+    // an admin "Push to Prisma", and the deploy-time preserve-mirror hook —
+    // none survive Netlify's ~2h idle suspension, so rows appended during a
+    // process lifetime (audit / api logs / events) sat unsynced for days. The
+    // push is breaker-aware (short-circuits while a plan-limit hold is open),
+    // re-entrancy-guarded, and leader-gated, so a tick that cannot drain is a
+    // safe no-op rather than a duplicate writer.
+    import("@/lib/sqlite")
+      .then((m) => m.pushSqliteToPrisma())
+      .catch((error) =>
+        logger.warn({ msg: "Outbox drain failed", error: error instanceof Error ? error.message : String(error) }),
+      );
     // v3.13.0: drain the swing analysis job queue (throttled to 1/15min since
     // v3.30.x). The DB-backed job survives instance recycle — when the process
     // that created it dies mid-analysis, the stale-running recovery + claim
@@ -239,6 +282,19 @@ export async function syncCronJobs(): Promise<{ registered: number }> {
 
     const timezone =
       (job.config as Record<string, unknown> | null)?.timezone as string | undefined || DEFAULT_TIMEZONE;
+    // Spec 25 observability: a system-managed job pinned to a non-UTC timezone
+    // is the exact drift this release fixes (prod rows were persisted with
+    // `timezone: "Asia/Kolkata"`). ensureRecommendationCrons self-heals the DB
+    // row; surface any survivor so a stale row is visible instead of silent.
+    if ((job.config as Record<string, unknown> | null)?.systemManaged === true && timezone !== DEFAULT_TIMEZONE) {
+      logger.warn({
+        msg: "System cron job has a non-UTC timezone; expected DEFAULT_TIMEZONE",
+        jobId: job.id,
+        name: job.name,
+        timezone,
+        defaultTimezone: DEFAULT_TIMEZONE,
+      });
+    }
     try {
       const task = cron.schedule(
         expression,

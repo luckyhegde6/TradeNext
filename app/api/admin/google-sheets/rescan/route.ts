@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { isTrackerTab, type TrackerTab } from "@/lib/services/googleSheets/tabs";
-import { RESCAN_ROW_LIMIT, rescanCustomConfig, rescanScreener } from "@/lib/services/googleSheets/rescanService";
+import { RESCAN_ROW_LIMIT, precheckCustomRescan } from "@/lib/services/googleSheets/rescanService";
+import { spawnRegularTask } from "@/lib/services/worker/task-orchestrator";
 import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -29,9 +30,12 @@ export const runtime = "nodejs";
  * TradingView scan, or a Chartink + TV fallback pass) and writes to an external
  * system, so the client-side redirect is UX, not access control.
  *
- * Audited, and AWAITED: unlike a producer's fire-and-forget export, this is an
- * explicit operator action whose outcome the console displays, so the audit and
- * the response must agree.
+ * Spec 27 — THE SCAN NO LONGER RUNS IN THIS REQUEST. A `forceRefresh` pass is
+ * slow enough that the gateway killed the function before it finished (a bare
+ * 502 with no usable error). The route now does all the work it can answer
+ * instantly — auth, validation, and a scan-free `custom` pre-check (404/409/503)
+ * — then ENQUEUES a `google_sheets_rescan` worker task and returns 202 with its
+ * id. The console polls the task; the worker daemon runs the unchanged scan.
  */
 const schema = z.object({
   tab: z.string(),
@@ -91,23 +95,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "configId is required for a custom re-scan" }, { status: 400 });
   }
 
-  const startedAt = Date.now();
-  const result =
-    tab === "custom"
-      ? await rescanCustomConfig(configId as string)
-      : await rescanScreener({ categoryId, templateIds });
+  // Spec 27: keep the instantly-answerable failures synchronous. A typo'd config
+  // id must come back as a 404 now, not as a doomed task the operator then has to
+  // watch fail. The pre-check only READS the config; it never runs the scan.
+  if (tab === "custom") {
+    const pre = await precheckCustomRescan(configId as string);
+    if (!pre.ok) {
+      logger.warn({ msg: "Google Sheets re-scan pre-check failed", tab, reason: pre.reason, error: pre.error });
+      return NextResponse.json(
+        { success: false, tab, reason: pre.reason, error: pre.error },
+        { status: STATUS[pre.reason] ?? 500 },
+      );
+    }
+  }
 
-  if (!result.ok) {
-    logger.warn({ msg: "Google Sheets re-scan failed", tab, reason: result.reason, error: result.error });
+  // Enqueue the scan. The worker daemon runs it; the console polls the task.
+  const payload: Record<string, unknown> = { tab };
+  if (configId) payload.configId = configId;
+  if (categoryId) payload.categoryId = categoryId;
+  if (templateIds) payload.templateIds = templateIds;
+
+  let taskId: string;
+  try {
+    const task = await spawnRegularTask({
+      name: `Google Sheets re-scan: ${tab}`,
+      taskType: "google_sheets_rescan",
+      payload,
+      // A re-scan appends rows to an external sheet — irreversible. Retrying it
+      // automatically could double the rows, so it is never retried by the engine.
+      maxRetries: 0,
+      triggeredBy: "admin",
+    });
+    taskId = task.id;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ msg: "Google Sheets re-scan enqueue failed", tab, error: message });
     return NextResponse.json(
-      { success: false, tab, reason: result.reason, error: result.error },
-      { status: STATUS[result.reason] ?? 500 },
+      { success: false, tab, reason: "db_unavailable", error: message },
+      { status: 503 },
     );
   }
 
-  // The audit must not be able to fail the operator's action, and it must not be
-  // fire-and-forget either: the console shows a result, so the record of that
-  // result should exist by the time the response is sent.
+  // The audit records the ENQUEUE (what the operator asked for, and its task id).
+  // The run's outcome is recorded by the worker against the same task id, so the
+  // console and the audit trail agree without this request waiting for the scan.
   try {
     const { createAuditLog } = await import("@/lib/audit");
     await createAuditLog({
@@ -116,11 +147,11 @@ export async function POST(request: NextRequest) {
       resourceId: tab,
       session,
       metadata: {
+        queued: true,
+        taskId,
         tab,
         configId: configId ?? null,
         categoryId: categoryId ?? null,
-        appended: result.appended,
-        total: result.total,
         rowLimit: RESCAN_ROW_LIMIT,
       },
     });
@@ -128,14 +159,5 @@ export async function POST(request: NextRequest) {
     logger.warn({ msg: "Google Sheets re-scan audit failed", tab, error: err });
   }
 
-  return NextResponse.json({
-    success: true,
-    tab,
-    appended: result.appended,
-    total: result.total,
-    delegatedExport: result.delegatedExport,
-    executionMs: result.executionMs,
-    elapsedMs: Date.now() - startedAt,
-    rowLimit: RESCAN_ROW_LIMIT,
-  });
+  return NextResponse.json({ success: true, queued: true, taskId, tab }, { status: 202 });
 }

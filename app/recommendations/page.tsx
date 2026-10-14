@@ -71,6 +71,10 @@ export default function RecommendationsPage() {
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [runInfo, setRunInfo] = useState<RunInfo | null>(null);
 const [latestRunInfo, setLatestRunInfo] = useState<LatestRunInfo | null>(null);
+  // v3.49.0 (Spec 30): freshness fields from the API (next scheduled run +
+  // staleness). Drive the DailyPicksTab staleness banner.
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +103,8 @@ const [latestRunInfo, setLatestRunInfo] = useState<LatestRunInfo | null>(null);
         setStocks(data.stocks || []);
         setRunInfo(data.run);
         setLatestRunInfo(data.latestRun || null);
+        setNextRunAt(data.nextRunAt ?? null);
+        setIsStale(!!data.isStale);
       } else {
         setError("Failed to load recommendations");
       }
@@ -259,9 +265,16 @@ const [latestRunInfo, setLatestRunInfo] = useState<LatestRunInfo | null>(null);
               runDate={runInfo?.runDate || null}
               loading={loading}
               aiUnavailable={
-                !!latestRunInfo && !!runInfo && latestRunInfo.id !== runInfo.id
+                // v3.49.0 (Spec 29): the newest run exists but is a failed
+                // zero-AI run — never show it as "Today's Picks". The list
+                // below is the last good run under the honest predicate.
+                !!latestRunInfo &&
+                latestRunInfo.status === "failed" &&
+                !(runInfo && runInfo.id === latestRunInfo.id)
               }
               aiUnavailableDate={latestRunInfo?.runDate ?? null}
+              nextRunAt={nextRunAt}
+              isStale={isStale}
             />
           )}
 
