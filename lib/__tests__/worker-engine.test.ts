@@ -39,6 +39,9 @@ jest.mock("@/lib/prisma", () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
       update: jest.fn(),
+      // v3.50.0 (Spec 30 follow-up): the day-level catch-up now counts
+      // catch-up tasks already enqueued today to bound itself to one/day.
+      count: jest.fn(),
     },
     dailyRecommendationRun: {
       findMany: jest.fn(),
@@ -1092,6 +1095,8 @@ describe("ensureDailyRecommendationRan (Spec 30)", () => {
     mockIsLeader.mockResolvedValue(true);
     mockHasSuccessfulRunToday.mockResolvedValue(false);
     prisma.workerTask.findFirst.mockResolvedValue(null);
+    // v3.50.0: default = no catch-up enqueued yet today (loop-bound guard).
+    prisma.workerTask.count.mockResolvedValue(0);
     mockSpawnRegularTask.mockResolvedValue({ id: "task-catchup-1" });
   });
 
@@ -1184,8 +1189,44 @@ describe("ensureDailyRecommendationRan (Spec 30)", () => {
     const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
 
     expect(result).toEqual({ enqueued: false, reason: "already-ran" });
-    // The in-flight read is only reached after the day-level guard.
+    // The dedup + in-flight reads are only reached after the day-level guard.
+    expect(prisma.workerTask.count).not.toHaveBeenCalled();
     expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+
+  // v3.50.0 (Spec 30 follow-up): a failed day keeps hasSuccessfulRunToday()
+  // false, so the 5-min resync re-enqueued endlessly (prod 2026-10-14/15: ~70
+  // runs → ~70 duplicate Telegram notices). One catch-up per day is the bound.
+  it("skips (already-enqueued-today) when a catch-up was already enqueued today", async () => {
+    prisma.workerTask.count.mockResolvedValue(1);
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "already-enqueued-today" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
+    // Bounded to one: the in-flight check is not even reached.
+    expect(prisma.workerTask.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("bounds the dedup window to today's UTC midnight + the catchup trigger", async () => {
+    await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(prisma.workerTask.count).toHaveBeenCalledWith({
+      where: {
+        taskType: "recommendations",
+        triggeredBy: "catchup",
+        createdAt: { gte: new Date("2026-10-14T00:00:00.000Z") },
+      },
+    });
+  });
+
+  it("skips (dedup-check-failed) when the dedup count throws", async () => {
+    prisma.workerTask.count.mockRejectedValue(new Error("DB down"));
+
+    const result = await ensureDailyRecommendationRan(WED_AFTER_WINDOW);
+
+    expect(result).toEqual({ enqueued: false, reason: "dedup-check-failed" });
+    expect(mockSpawnRegularTask).not.toHaveBeenCalled();
   });
 
   it("skips (in-flight) when a recommendations task is already pending/running", async () => {

@@ -574,7 +574,9 @@ export default function DbHealthPage() {
       if (res.ok) {
         setDeployMsg(
           body.message ??
-            `Deploy prep complete — flushed ${body.rowsFlushed} write-behind rows and refreshed the SQLite mirror`,
+            (body.queued
+              ? `Deploy prep queued (task ${body.taskId}) — check Workers → Tasks for progress`
+              : `Deploy prep complete — flushed ${body.rowsFlushed} write-behind rows and refreshed the SQLite mirror`),
         );
         await fetchHealth();
       } else {

@@ -897,6 +897,36 @@ export async function ensureDailyRecommendationRan(
         return { enqueued: false, reason: "already-ran" };
     }
 
+    // v3.50.0 (Spec 30 follow-up): enforce "at most ONE catch-up per day".
+    // `hasSuccessfulRunToday()` stays FALSE for the whole day while a run fails
+    // on EVERY stock (Spec 29 keeps the last good run, so no completed+AI run is
+    // recorded). The old guard therefore treated every 5-min resync tick as "the
+    // run was missed" and re-enqueued a full pipeline run — prod 2026-10-14/15
+    // logged ~70 runs and ~70 duplicate "AI Analysis Unavailable" Telegram
+    // notices in a single day. Spec 30 §4B/§16 promises exactly ONE retry; cap
+    // the retry here so the loop cannot run all day. The scheduled cron run is a
+    // separate task (triggeredBy "system"), so this never suppresses it.
+    try {
+        const utcDayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        const alreadyCaughtUp = await prisma.workerTask.count({
+            where: {
+                taskType: "recommendations",
+                triggeredBy: "catchup",
+                createdAt: { gte: utcDayStart },
+            },
+        });
+        if (alreadyCaughtUp > 0) {
+            logger.debug({ msg: "Recommendations catch-up skipped (already enqueued today)" });
+            return { enqueued: false, reason: "already-enqueued-today" };
+        }
+    } catch (error) {
+        logger.warn({
+            msg: "Recommendations catch-up dedup check failed — skipping this tick",
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { enqueued: false, reason: "dedup-check-failed" };
+    }
+
     // In-flight guard: a pending/running recommendations task within the window
     // (mirrors the 90-min spawn dedup) ⇒ the run is already on its way.
     try {

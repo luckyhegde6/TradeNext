@@ -26,7 +26,7 @@ const workerTaskSchema = z.object({
     // Async types
     "csv_processing", "historical_sync",
     // Regular types
-    "cleanup", "password_reset", "notification_broadcast", "announcement_mgmt", "user_query", "maintenance",
+    "cleanup", "password_reset", "notification_broadcast", "announcement_mgmt", "user_query", "maintenance", "deploy_prep",
     // F-Score types
     "fscore_calc", "fscore_batch", "fscore_single",
     // v3.14.1: IPO analysis pre-warm + cleanup

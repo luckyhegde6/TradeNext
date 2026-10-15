@@ -1,19 +1,29 @@
-# Live Resume — v3.49.0 Specs 28–31 completion (missing plan tests) + PR #135 CI fixes
+# Live Resume — v3.50.0 Prod hotfixes (deploy-prep 502 → async worker + AI-unavailable Telegram spam)
 
-> Updated: 2026-10-11 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-10-15 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | PR #135 was red on 2 checks (Quality Gate `tsc-baseline` + Playwright e2e), and the approved Spec 30/31 plans required tests that had never been written. Fixed both checks + authored the missing tests; verified everything against a locally-reproduced CI environment. |
-| **Branch** | `fix/daily-rec-swing-cron-worker` (Specs 28–31 code already COMMITTED as `28d6806`) |
-| **State** | CODE + TESTS + GATES + e2e + DOCS **DONE** — **COMMIT + PUSH done on explicit user request (2026-10-15)** · merge/deploy = user actions (D9) |
-| **In-flight** | None — awaiting user merge/deploy decision |
-| **Blocked** | (none — merge/deploy only on explicit request per D9 RULE) |
+| **Task** | (1) "Prepare for Deploy" `/admin/utils/db-health` returned **HTTP 502**; (2) Telegram received **dozens/day** of "AI Analysis Unavailable" (far more than once). Plus: swing + performance subsystem review of the attached prod logs. |
+| **Branch** | session started clean at `7d03998` — **changes uncommitted** |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** — **COMMIT PENDING USER** (D9; merge/push/deploy = user actions) |
+| **In-flight** | None |
+| **Blocked** | (none code-wise.) External/operational: OpenRouter free-tier daily quota exhausted (HTTP 429 `free-models-per-day`); Prisma plan-limit hold + Accelerate-degraded + `PrismaQueryTimeoutError`. |
 | **Side note** | ⚠️ **BUG A (still open, from v3.47.0/25)**: degraded executor completes but never advances mirror `next_run` → recurring job re-fires every 5-min tick while due; fix idea = advance via `calculateNextRun` (`worker-engine.ts` :729/:762). |
 
-## What's done (v3.49.0)
+## What's done (v3.50.0)
+
+- **(1) Deploy-prep 502 → async worker task.** `POST /api/admin/db-health` `action:"deploy_prep"` ran `flushWriteBehind()` + `ensureSqliteBackup()` + `sqlite.syncFromPrisma({force:true})` **synchronously in-request**; under the Netlify gateway timeout (plan-limit hold drives each Prisma call to its per-query timeout) it never returned → **502**, UI saw `undefined`. Now the route **enqueues** a worker task (`spawnRegularTask`, `taskType:"deploy_prep"`, priority 10) → **202 `{queued:true, taskId}`** + audit `ADMIN_DB_DEPLOY_PREP_QUEUED`; identical steps moved verbatim into new `executeDeployPrep(taskId)` in `worker-service.ts` (`case "deploy_prep"`); `degradedTaskRegistry` **30 → 31** types; `workers` route taskType enum; `db-health/page.tsx` 202 message. Removed unused `isPlanLimitBreakerOpen` import + in-route breaker short-circuit (executor owns it).
+- **(2a) Fix A — bound the catch-up to ≤1/UTC-day** (`worker-engine.ts` `ensureDailyRecommendationRan`): `prisma.workerTask.count({taskType:"recommendations", triggeredBy:"catchup", createdAt ≥ UTC-day-start})`; `≥1` → `already-enqueued-today`; count **throw** → `dedup-check-failed` (fail SAFE — never re-spawn on an uncertain read). Dedup key matches the catch-up spawn path (`spawnDueCronJob` → `triggeredBy:"catchup"`, payload `{source:"catchup"}`).
+- **(2b) Fix B — dedup the notice** (`dailyRecommendationService.ts` + `worker-service.ts`): `runDailyRecommendations({ notifyAiUnavailable })` (default `true`) gates the Telegram heartbeat; `executeRecommendations` passes `payload.source !== "catchup"` ⇒ catch-up retries silent ⇒ **≤1 notice/day** (scheduled `30 4 * * 1-5` run still sends it).
+- **Root trigger is external**: OpenRouter `openrouter/free` HTTP 429 `free-models-per-day` (daily quota exhausted) — needs credits or a model change; not code.
+- **Swing/performance review** of the same log: swing `templates=34` (Chartink HTTP 419 → TradingView fallback, normal); recommendations `templates=117`; `"Recommendation Performance Check (System)"` cron present — **no loop** in either; the spam is entirely the recommendations catch-up path. Also observed: Prisma plan-limit + Accelerate-degraded + SQLite `pushTable failed — outbox retained` (incl. FK `daily_recommendation_stocks_runId_fkey`) + leader-flapping ("Leader lock acquired (stale claimed)" / "Lost leader lock") with many cold starts (each boot also calls `ensureDailyRecommendationRan`, now bounded by Fix A).
+- **Tests/Gates**: `worker-engine.test.ts` +43, `dailyRecommendationService.test.ts` +56 (both suites pass) · tsc **46 exact (prod 0)** · eslint 0 on changed files. Diff 10 files +230/−62.
+- **Docs**: `.agents/changelog/versions-v3.50.md` (NEW) + AGENTS.md v3.50.0 row (trimmed oldest rows for the 32 KB cap) + `.agents/CHANGELOG.md` index + `.agents/changelog/versions-index.md` + `Primer.md` + `agent-memory.md` + **Lesson 162** + `.agents/session-todos.md` + `HANDOFF.md` + this file.
+
+## Prior — v3.49.0 Specs 28–31 completion (missing plan tests) + PR #135 CI fixes
 
 - **CI Fix 1 — Quality Gate `tsc-baseline`**: `app/admin/google-sheets/page.tsx`'s local `SheetsStatus` interface had no `missingEnvVars`, but the Spec 31 "not armed" card reads `status.missingEnvVars.length` + `.map(…)` **unconditionally** → `TS2339` (`:180`) + `TS2551` (`:187`) = **2 PRODUCTION tsc errors**. Fixed the **interface** (`missingEnvVars: string[]`).
 - **Baseline NEVER raised**: `scripts/dev-checks/tsc-baseline.json` is **untouched** (absent from `git status`). Proof — raw `npx tsc --noEmit` = 46 `error TS…` lines, **all inside `__tests__/`, zero in `page.tsx`/`app/admin`**; gate → `total 46 / prod 0 / delta +0`.
@@ -28,6 +38,7 @@
 
 ## Not done (deliberately)
 
+- **v3.50.0 changes are UNCOMMITTED** — commit awaits explicit user request (D9); task = current (see above). Do **NOT** commit `15OctProdlog..txt` (user-provided, untracked); delete scratch `eslint-out.txt`/`jest-out*.txt`/`tsc-out.txt`.
 - **BUG A**: next_run advance in the degraded completion path (follow-up spec, needs user approval).
 - Merge `fix/daily-rec-swing-cron-worker` → `main`, deploy — **user actions (D9)** (push performed on explicit user request 2026-10-15; merge/deploy still user-only).
 

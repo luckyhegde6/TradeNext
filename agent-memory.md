@@ -15,6 +15,24 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-15 | v3.50.0 — Prod hotfixes: deploy-prep 502 (async worker task) + AI-unavailable Telegram spam (retries bounded + notice deduped); COMMIT PENDING USER — D9
+
+**Request (user)**: fix the production "Prepare for Deploy" **HTTP 502** on `/admin/utils/db-health`; analyse the attached prod logs (`15OctProdlog..txt` + a newer ~2h live excerpt, 09:33 PM–11:32 PM) for why Telegram receives **dozens/day** of "AI Analysis Unavailable" alerts (far more than the intended once); also check the swing + performance subsystems.
+
+**(a) Deploy-prep 502 → async.** Root cause: `POST /api/admin/db-health` `action:"deploy_prep"` ran `flushWriteBehind()` + `ensureSqliteBackup()` + `sqlite.syncFromPrisma({force:true})` **synchronously in-request**; under the Netlify gateway timeout (the plan-limit hold drives every Prisma call to its per-query timeout) the response never arrived → 502, UI saw `undefined`. Fix: the route now **enqueues a worker task** (`spawnRegularTask`, `taskType:"deploy_prep"`) and returns **202 `{queued:true, taskId}`** (audit `ADMIN_DB_DEPLOY_PREP_QUEUED`); the identical steps moved verbatim into `executeDeployPrep()` in `worker-service.ts` (`case "deploy_prep"`); `degradedTaskRegistry` **30 → 31** types; `workers` route taskType enum + `db-health/page.tsx` 202 handling. Removed the now-unused `isPlanLimitBreakerOpen` import + in-route breaker short-circuit (the executor owns the breaker check).
+
+**(b) AI-unavailable Telegram spam — root cause (live-log verified).** Spec 30 `ensureDailyRecommendationRan()` runs at daemon boot **and on every 5-min resync**; its day guard `hasSuccessfulRunToday()` only returns true when a *succeeding AI* run is persisted. On a day where AI fails on **every** stock the run persists `status:"failed", aiProcessed:0`, so the guard stays **false all day** ⇒ every tick re-enqueued a full pipeline run, each failing and each broadcasting `buildAiUnavailableNotice()` → ~70 runs / ~70 duplicate notices on 2026-10-14/15 (log: `reason=missed-daily-window` + `Daily run failed — AI unavailable on all stocks` + `Telegram broadcast for AI unavailability notice, sent=1`, every 4–20 min). Fix **A** (`worker-engine.ts`): per-UTC-day dedup — `prisma.workerTask.count({taskType:"recommendations", triggeredBy:"catchup", createdAt ≥ UTC-day-start})`; `≥1` → `already-enqueued-today`; **count throw → `dedup-check-failed` (fail safe)** ⇒ ≤1 catch-up/day (the dedup key matches the catch-up spawn path: `catchUpMissedCronJobs` → `spawnDueCronJob` spawns with `triggeredBy:"catchup"`, payload `{source:"catchup"}`). Fix **B** (`dailyRecommendationService.ts` + `worker-service.ts`): `runDailyRecommendations({ notifyAiUnavailable })` (default true) gates the notice; `executeRecommendations` derives `payload.source !== "catchup"` ⇒ catch-up retries silent, scheduled `30 4 * * 1-5` run still sends one heartbeat.
+
+**(c) Real AI-failure trigger = external.** OpenRouter `openrouter/free` returns **HTTP 429 `free-models-per-day`** with `X-RateLimit-Reset` — the free daily quota is exhausted (needs credits or a model change). Not a code bug; the fix makes the app resilient to it, not the quota.
+
+**(d) Swing + performance review of the same log.** Swing runs `templates=34` with Chartink **HTTP 419** → TradingView fallback (normal); recommendations `templates=117`; `"Recommendation Performance Check (System)"` cron `30 10 * * 1-5` present. No loop in either subsystem — the spam is entirely the recommendations catch-up path. Also observed: `PlanLimitOpenError` / plan-limit breaker open, Accelerate probe timeouts, `PrismaQueryTimeoutError`, SQLite `pushTable failed — outbox retained for retry` (incl. FK violation `daily_recommendation_stocks_runId_fkey`), and daemon leader-flapping ("Leader lock acquired (stale claimed)" / "Lost leader lock") with many cold starts — each boot also calls `ensureDailyRecommendationRan`, which Fix A now bounds.
+
+**Gates**: tsc **46 exact (prod 0)** · targeted Jest green (`worker-engine.test.ts` +43, `dailyRecommendationService.test.ts` +56; both suites pass) · eslint 0 on changed files. Lesson 162. Diff: 10 files, +230/−62.
+
+**Artifacts**: `15OctProdlog..txt` (user-provided, **NOT committed**); scratch `eslint-out.txt`/`jest-out*.txt`/`tsc-out.txt` deleted before commit.
+
+---
+
 ### 2026-10-11 | v3.49.0 — Specs 28–31 completion (missing plan tests) + PR #135 CI fixes (branch `fix/daily-rec-swing-cron-worker`, code `28d6806`; COMMIT PENDING USER — D9)
 
 **Request**: fix the 2 red PR #135 checks (Quality Gate `tsc-baseline` + Playwright e2e), then verify all Spec 28–31 functionality via unit tests + Playwright e2e + live checks; TypeScript baseline must hold (46 total / 0 production) and must **never** be raised to hide prod errors; D9 = commit only.

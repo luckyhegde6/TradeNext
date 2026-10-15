@@ -156,10 +156,17 @@ const MAX_RECOMMENDED_STOCKS = 50;
  *
  * @param options.triggeredBy Source of this run: "system" (cron/scheduler) or "admin" (manual Run Now). Defaults to "system".
  */
-export async function runDailyRecommendations(options: { triggeredBy?: string } = {}): Promise<DailyRunResult> {
+export async function runDailyRecommendations(
+  options: { triggeredBy?: string; notifyAiUnavailable?: boolean } = {},
+): Promise<DailyRunResult> {
   const startTime = Date.now();
   const todayMidnight = getTodayMidnight();
   const triggeredBy = options.triggeredBy ?? "system";
+  // v3.50.0 (Spec 30 follow-up): a catch-up run is a RETRY of a day whose
+  // scheduled run already broadcast the "AI unavailable" heartbeat — re-sending
+  // it per retry is what spammed Telegram (prod 2026-10-14/15). Default true so
+  // the scheduled run (and every existing caller) keeps notifying exactly once.
+  const notifyAiUnavailable = options.notifyAiUnavailable !== false;
 
   logger.info({ msg: "Daily recommendation run starting", triggeredBy });
 
@@ -614,18 +621,23 @@ export async function runDailyRecommendations(options: { triggeredBy?: string } 
 
       invalidateRecommendationsCache();
 
-      // v3.16.0: Notify subscribers even when AI is entirely unavailable so
-      // they know the system is operating normally. Without this, a total AI
-      // failure silently swallows the broadcast — subscribers think the bot
-      // is dead.
-      try {
-        const { broadcastToSubscribers } = await import("./telegramBotService");
-        const { buildAiUnavailableNotice } = await import("./recommendationBroadcast");
-        const tgMessage = buildAiUnavailableNotice();
-        const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage);
-        logger.info({ msg: "Telegram broadcast for AI unavailability notice", sent });
-      } catch (tgErr) {
-        logger.warn({ msg: "Telegram AI-unavailable broadcast failed (non-critical)", error: tgErr });
+      // v3.16.0: send a heartbeat so subscribers know the system is operating
+      // normally even when AI failed on every stock (a silent failure makes the
+      // bot look dead). v3.50.0: only the SCHEDULED/caller run notifies — the
+      // Spec 30 catch-up retry passes notifyAiUnavailable:false so a day-long AI
+      // outage produces ONE notice, not one per 5-min retry.
+      if (notifyAiUnavailable) {
+        try {
+          const { broadcastToSubscribers } = await import("./telegramBotService");
+          const { buildAiUnavailableNotice } = await import("./recommendationBroadcast");
+          const tgMessage = buildAiUnavailableNotice();
+          const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage);
+          logger.info({ msg: "Telegram broadcast for AI unavailability notice", sent });
+        } catch (tgErr) {
+          logger.warn({ msg: "Telegram AI-unavailable broadcast failed (non-critical)", error: tgErr });
+        }
+      } else {
+        logger.info({ msg: "AI-unavailable notice suppressed (retry run — already notified today)" });
       }
 
       logger.warn({

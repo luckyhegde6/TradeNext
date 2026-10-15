@@ -76,9 +76,11 @@ export type DegradedTaskType =
   | "fscore_batch"
   | "fscore_single"
   // google-sheets task types
-  | "google_sheets_rescan";
+  | "google_sheets_rescan"
+  // admin deploy-prep (v3.50.0)
+  | "deploy_prep";
 
-/** All 30 dispatchable types, in worker-service.ts order. */
+/** All 31 dispatchable types, in worker-service.ts order. */
 export const DEGRADED_TASK_TYPES: readonly DegradedTaskType[] = [
   "stock_sync",
   "corp_actions",
@@ -110,6 +112,7 @@ export const DEGRADED_TASK_TYPES: readonly DegradedTaskType[] = [
   "fscore_batch",
   "fscore_single",
   "google_sheets_rescan",
+  "deploy_prep",
 ] as const;
 
 export interface DegradedTaskCapability {
@@ -259,6 +262,10 @@ const REGISTRY: Record<DegradedTaskType, DegradedTaskCapability> = {
   google_sheets_rescan: {
     degradedSafe: false,
     reason: "Appends rows to an EXTERNAL Google Sheet (irreversible) and reads a Prisma-only ScanConfig; must not run while Prisma is unavailable.",
+  },
+  deploy_prep: {
+    degradedSafe: false,
+    reason: "Flushes write-behind into Prisma and force-refreshes the mirror FROM Prisma — meaningless (and lossy) with the database held.",
   },
 };
 

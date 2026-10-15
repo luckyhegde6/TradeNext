@@ -121,6 +121,9 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
       case "google_sheets_rescan":
         result = await executeGoogleSheetsRescan(payload);
         break;
+      case "deploy_prep":
+        result = await executeDeployPrep(taskId, payload);
+        break;
       default:
         throw new Error(`Unknown task type: ${taskType}`);
     }
@@ -424,6 +427,41 @@ export async function executeGoogleSheetsRescan(payload?: Record<string, unknown
   };
 }
 
+/**
+ * Deploy prep - async wrapper to flush write-behind logs and refresh SQLite mirror
+ * (prevents serverless HTTP timeout by running in background worker)
+ */
+export async function executeDeployPrep(taskId: string, payload?: Record<string, unknown>): Promise<unknown> {
+  const { isPlanLimitBreakerOpen } = await import("@/lib/db-utils");
+  const { flushWriteBehind, ensureSqliteBackup } = await import("@/lib/sqlite");
+  const logger = await import("@/lib/logger").then((m) => m.default);
+
+  logger.info({ msg: "Starting deploy prep (async)", taskId, payload });
+
+  if (isPlanLimitBreakerOpen()) {
+    throw new Error("Plan-limit circuit breaker is open (recent DB query timeouts/hold) — try again in a few minutes");
+  }
+
+  const flushed = await flushWriteBehind();
+  const sqlite = await ensureSqliteBackup();
+  if (!sqlite) {
+    throw new Error("SQLite backup not initialized (logs flushed, mirror sync skipped)");
+  }
+  await sqlite.syncFromPrisma({ force: true, reason: "admin" });
+  sqlite.persistOpsCounter();
+  sqlite.persistDbErrorCounts();
+  const health = sqlite.getHealthStatus();
+  const rowsFlushed = Object.values(flushed.flushed).reduce((a, b) => a + b, 0);
+
+  return {
+    flushed: flushed.flushed,
+    retained: flushed.retained,
+    pending: flushed.pending,
+    rowsFlushed,
+    sqlite: health.sqlite,
+  };
+}
+
 /** A `custom` re-scan is addressed by config id; refuse to guess one. */
 function readRescanConfigId(payload?: Record<string, unknown>): string {
   const configId = payload?.configId;
@@ -633,7 +671,11 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
     const { runDailyRecommendations } = await import("@/lib/services/dailyRecommendationService");
     // System cron → "system"; admin manual trigger → "admin" (spawnRegularTask sets payload.source)
     const triggeredBy = payload?.source === "admin_manual" ? "admin" : "system";
-    const result = await runDailyRecommendations({ triggeredBy });
+    // Spec 30 catch-up is a silent RETRY (payload.source === "catchup"): the
+    // scheduled run already sent the "AI unavailable" heartbeat, so re-notifying
+    // here is what spammed Telegram on 2026-10-14/15.
+    const notifyAiUnavailable = payload?.source !== "catchup";
+    const result = await runDailyRecommendations({ triggeredBy, notifyAiUnavailable });
     logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId, triggeredBy });
     return result;
   } catch (error) {

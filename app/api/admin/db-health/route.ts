@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
 import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
@@ -655,56 +654,34 @@ export async function POST(req: Request) {
   }
 
   if (action === "deploy_prep") {
-    // Fail fast when the plan-limit circuit breaker is open: every Prisma call
-    // in deploy-prep would otherwise stall up to the per-query timeout and the
-    // gateway kills the request before it returns — leaving the admin UI with
-    // "Deploy prep failed: undefined". 503 carries a real message instead.
-    if (isPlanLimitBreakerOpen()) {
-      return NextResponse.json(
-        { error: "Deploy prep failed", detail: "Plan-limit circuit breaker is open (recent DB query timeouts/hold) — try again in a few minutes" },
-        { status: 503 },
-      );
-    }
-    // "Prepare for Deploy": the SQLite backup layer is an in-memory sql.js DB,
-    // so a deploy/restart wipes the queued write-behind logs + heartbeat data.
-    // Step 1 — bulk-flush pending write-behind logs (APIRequestLog/ServerLog/
-    // AuditLog) from SQLite into Prisma so nothing queued is lost on restart.
-    // Step 2 — force-refresh the SQLite read-mirror from the current Prisma
-    // state so DB-down reads after deploy serve recent data.
     try {
-      const flushed = await flushWriteBehind();
-      const sqlite = await ensureSqliteBackup();
-      if (!sqlite) {
-        return NextResponse.json(
-          { error: "SQLite backup not initialized (logs flushed, mirror sync skipped)" },
-          { status: 503 },
-        );
-      }
-      await sqlite.syncFromPrisma({ force: true, reason: "admin" });
-      sqlite.persistOpsCounter();
-      sqlite.persistDbErrorCounts();
-      const health = sqlite.getHealthStatus();
-      const rowsFlushed = Object.values(flushed.flushed).reduce((a, b) => a + b, 0);
+      const { spawnRegularTask } = await import("@/lib/services/worker/task-orchestrator");
+      const task = await spawnRegularTask({
+        name: "Deploy prep (flush logs + refresh mirror)",
+        taskType: "deploy_prep",
+        priority: 10,
+        payload: { reason: "admin_deploy_prep", triggeredBy: "admin" },
+      });
       void createAuditLog({
         userId: session.user.id ? parseInt(session.user.id) : undefined,
         userEmail: session.user.email,
-        action: "ADMIN_DB_DEPLOY_PREP",
+        action: "ADMIN_DB_DEPLOY_PREP_QUEUED",
         resource: "sqlite",
-        responseStatus: 200,
-        metadata: { rowsFlushed, pushed: flushed.flushed, retained: flushed.retained, pending: flushed.pending },
+        responseStatus: 202,
+        metadata: { taskId: task.id },
       });
-      return NextResponse.json({
-        success: true,
-        message: `Deploy prep complete — promoted ${rowsFlushed} important write-behind rows to Prisma and refreshed the SQLite mirror`,
-        flushed: flushed.flushed,
-        retained: flushed.retained,
-        pending: flushed.pending,
-        rowsFlushed,
-        sqlite: health.sqlite,
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          queued: true,
+          taskId: task.id,
+          message: "Deploy prep queued — check Workers → Tasks for progress",
+        },
+        { status: 202 },
+      );
     } catch (err) {
       return NextResponse.json(
-        { error: "Deploy prep failed", detail: err instanceof Error ? err.message : String(err) },
+        { error: "Failed to queue deploy prep", detail: err instanceof Error ? err.message : String(err) },
         { status: 500 },
       );
     }

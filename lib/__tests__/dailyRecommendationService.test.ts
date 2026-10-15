@@ -572,6 +572,62 @@ describe("dailyRecommendationService", () => {
       }
     });
 
+    // v3.50.0 (Spec 30 follow-up): a catch-up RETRY must not re-send the
+    // "AI unavailable" Telegram heartbeat — one notice per day, not one per
+    // 5-min resync (prod 2026-10-14/15: ~70 duplicate notices in a day).
+    test("sends the AI-unavailable notice on the default (scheduled) run", async () => {
+      process.env.OPENROUTERKEY = "test-key";
+      try {
+        mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+        mockRunAiConnectionTest.mockResolvedValue({
+          testedAt: new Date().toISOString(),
+          status: "failed",
+          configuredModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          primary: { model: "nvidia/nemotron-3-ultra-550b-a55b:free", ok: false, responseTimeMs: 120, error: "timeout" },
+          fallbacks: [],
+        });
+
+        await runDailyRecommendations();
+
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          expect.objectContaining({ msg: "Telegram broadcast for AI unavailability notice" }),
+        );
+      } finally {
+        delete process.env.OPENROUTERKEY;
+      }
+    });
+
+    test("suppresses the AI-unavailable notice on a catch-up retry", async () => {
+      process.env.OPENROUTERKEY = "test-key";
+      try {
+        mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
+        mockRunAiConnectionTest.mockResolvedValue({
+          testedAt: new Date().toISOString(),
+          status: "failed",
+          configuredModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          primary: { model: "nvidia/nemotron-3-ultra-550b-a55b:free", ok: false, responseTimeMs: 120, error: "timeout" },
+          fallbacks: [],
+        });
+
+        const result = await runDailyRecommendations({
+          triggeredBy: "system",
+          notifyAiUnavailable: false,
+        });
+
+        expect(result.aiProcessed).toBe(0);
+        expect(mockLogger.info).not.toHaveBeenCalledWith(
+          expect.objectContaining({ msg: "Telegram broadcast for AI unavailability notice" }),
+        );
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          expect.objectContaining({
+            msg: "AI-unavailable notice suppressed (retry run — already notified today)",
+          }),
+        );
+      } finally {
+        delete process.env.OPENROUTERKEY;
+      }
+    });
+
     test("marks run as failed when screeners throw", async () => {
       mockRunDailyScreeners.mockRejectedValue(new Error("Screener crash"));
 
