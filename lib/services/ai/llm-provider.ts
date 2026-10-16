@@ -143,7 +143,13 @@ export async function directPrompt(
     if (!response.ok) {
       const errText = await response.text();
       logger.error({ msg: "OpenRouter API error", status: response.status, error: errText });
-      return `AI request failed (HTTP ${response.status}). Please check your OpenRouter API key.`;
+      // v3.51.0: keep the plain "HTTP <status>" marker (isQuotaExhausted keys
+      // off it) AND surface a trimmed copy of the provider body so the daily
+      // free-quota latch can detect `free-models-per-day`. The body is
+      // provider JSON — attached only as a bracketed detail, never as control
+      // flow, so existing substring checks keep working unchanged.
+      const detail = errText.replace(/\s+/g, " ").trim().slice(0, 300);
+      return `AI request failed (HTTP ${response.status}). Please check your OpenRouter API key.${detail ? ` [${detail}]` : ""}`;
     }
 
     const data = await response.json();

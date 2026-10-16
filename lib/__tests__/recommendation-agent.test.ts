@@ -52,6 +52,15 @@ jest.mock("@/lib/services/ai/config", () => ({
   })),
 }));
 
+// v3.51.0 — the per-UTC-day AI quota latch. Mocked so the agent's wiring can be
+// asserted deterministically; the latch's own logic is covered by quotaLatch.test.ts.
+jest.mock("@/lib/services/ai/quotaLatch", () => ({
+  __esModule: true,
+  isAiQuotaExhausted: jest.fn(() => false),
+  markAiQuotaExhausted: jest.fn(),
+  isDailyFreeQuotaMessage: jest.fn(() => false),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────
 
 import {
@@ -100,11 +109,64 @@ describe("recommendation-agent", () => {
   const { directPrompt: mockDirectPrompt } = require("@/lib/services/ai/llm-provider") as { directPrompt: jest.Mock };
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { trackAiCall: mockTrackAiCall } = require("@/lib/services/ai/ai-monitoring") as { trackAiCall: jest.Mock };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const llmMock = require("@/lib/services/ai/llm-provider") as { isQuotaExhausted: jest.Mock };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const quotaMock = require("@/lib/services/ai/quotaLatch") as {
+    isAiQuotaExhausted: jest.Mock;
+    markAiQuotaExhausted: jest.Mock;
+    isDailyFreeQuotaMessage: jest.Mock;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockDirectPrompt.mockReset();
     mockTrackAiCall.mockReset();
+    // `clearAllMocks` clears calls, not implementations — reset the ones tests override.
+    llmMock.isQuotaExhausted.mockReturnValue(false);
+    quotaMock.isAiQuotaExhausted.mockReturnValue(false);
+    quotaMock.markAiQuotaExhausted.mockReset();
+    quotaMock.isDailyFreeQuotaMessage.mockReturnValue(false);
+  });
+
+  // ── daily free-quota latch wiring (v3.51.0) ──────────────────────────
+
+  describe("daily free-quota latch", () => {
+    test("makes ZERO AI calls and returns all-failed when the latch is already set", async () => {
+      quotaMock.isAiQuotaExhausted.mockReturnValue(true);
+      const stocks = [makeStock({ symbol: "AAA" }), makeStock({ symbol: "BBB" })];
+
+      const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
+
+      expect(mockDirectPrompt).not.toHaveBeenCalled();
+      expect(results).toHaveLength(2);
+      expect(results.every((r) => r.success === false)).toBe(true);
+      expect(results[0].error).toMatch(/quota/i);
+    });
+
+    test("latches the UTC day when a batch returns the free-models-per-day 429", async () => {
+      llmMock.isQuotaExhausted.mockReturnValue(true);
+      quotaMock.isDailyFreeQuotaMessage.mockReturnValue(true);
+      mockDirectPrompt.mockResolvedValue(
+        'AI request failed (HTTP 429). Please check your OpenRouter API key. [{"error":{"message":"free-models-per-day"}}]',
+      );
+
+      const results = await analyzeStocks([makeStock()], VALID_AI_CONFIG);
+
+      expect(results[0].success).toBe(false);
+      expect(quotaMock.markAiQuotaExhausted).toHaveBeenCalledTimes(1);
+      expect(quotaMock.markAiQuotaExhausted.mock.calls[0][0]).toMatchObject({ model: "test-model" });
+    });
+
+    test("does NOT latch a generic 429 (transient per-minute rate limit)", async () => {
+      llmMock.isQuotaExhausted.mockReturnValue(true);
+      quotaMock.isDailyFreeQuotaMessage.mockReturnValue(false);
+      mockDirectPrompt.mockResolvedValue("AI request failed (HTTP 429). Please check your OpenRouter API key.");
+
+      await analyzeStocks([makeStock()], VALID_AI_CONFIG);
+
+      expect(quotaMock.markAiQuotaExhausted).not.toHaveBeenCalled();
+    });
   });
 
   // ── analyzeStocks — basic flow ───────────────────────────────────────

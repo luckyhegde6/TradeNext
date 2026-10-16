@@ -292,10 +292,17 @@ export interface DegradedTaskRow {
  *  surface as "no recent task" and re-enqueue a duplicate. (sql.js only throws when you
  *  pass an EXPLICIT array whose length disagrees with the placeholder count.)
  *  Bind order: [dedupKey, sinceIso].
- *  Only undelivered statuses are considered so a COMPLETED row does not suppress a
- *  legitimate re-fire of the same cron later. */
+ *
+ *  v3.51.0 (BUG A, Lesson 159): ANY row — including a terminal
+ *  `completed`/`failed`/`skipped` one — suppresses a re-enqueue inside the
+ *  window. The old `status IN ('pending','running')` filter only stopped a
+ *  duplicate while a task was IN FLIGHT; once it finished, the still-"due"
+ *  cron (the mirror `next_run` is deliberately static) was re-enqueued on the
+ *  next resync. Because the enqueue carries the job's OWN cadence gap as
+ *  `dedupWindowMs` (see `degradedQueue.cronDedupWindowMs`), one row per
+ *  occurrence is now the rule — the cadence itself is the window. */
 export const DEGRADED_DEDUP_SQL =
-  "SELECT id FROM _degraded_task WHERE dedup_key = ? AND status IN ('pending','running') AND created_at >= ? LIMIT 1";
+  "SELECT id FROM _degraded_task WHERE dedup_key = ? AND created_at >= ? LIMIT 1";
 
 /** Spec 21 — claim candidate scan, oldest-first. No binds. The atomicity of the
  *  claim comes from the status-guarded UPDATE below, not from this SELECT. */
@@ -2846,6 +2853,47 @@ export function restoreTimeCorrection(): TimeCorrectionRecord | null {
   } catch (err) {
     logger.error({ msg: "SQLite: restore time correction failed", error: err instanceof Error ? err.message : String(err) });
     return null;
+  }
+}
+
+// ─── Generic `_backup_meta` key/value helpers (v3.51.0) ────────────────────────
+// A minimal, Prisma-free KV surface for small operational flags that must
+// survive a restart AND remain readable during a Prisma account hold (the AI
+// daily-quota latch is the first consumer). Writes use INSERT OR REPLACE, so
+// callers own the encoding. All three never throw — a missing mirror is a
+// no-op, not an error.
+
+/** Upsert a raw string value under `key` in the local SQLite `_backup_meta`. Never throws. */
+export function persistBackupMeta(key: string, value: string): void {
+  if (!state.db || !state.ready || !key) return;
+  try {
+    state.db.run("INSERT OR REPLACE INTO _backup_meta (key, value) VALUES (?, ?)", [key, value]);
+  } catch (err) {
+    logger.debug({ msg: "SQLite: persist backup meta failed", key, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Read the raw string value stored under `key`, or null when absent. Never throws. */
+export function restoreBackupMeta(key: string): string | null {
+  if (!state.db || !state.ready || !key) return null;
+  try {
+    const result = state.db.exec("SELECT value FROM _backup_meta WHERE key = ? LIMIT 1", [key]);
+    if (!result.length || !result[0].values.length) return null;
+    const raw = result[0].values[0][0];
+    return typeof raw === "string" ? raw : raw == null ? null : String(raw);
+  } catch (err) {
+    logger.debug({ msg: "SQLite: restore backup meta failed", key, error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/** Remove `key` from the local SQLite `_backup_meta`. Never throws. */
+export function deleteBackupMeta(key: string): void {
+  if (!state.db || !state.ready || !key) return;
+  try {
+    state.db.run("DELETE FROM _backup_meta WHERE key = ?", [key]);
+  } catch (err) {
+    logger.debug({ msg: "SQLite: delete backup meta failed", key, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -5947,10 +5995,13 @@ function createFallback(db: Database): SqliteFallback {
       const dedupKey = String(row.dedupKey ?? "");
       const windowMs = Number(row.dedupWindowMs ?? 0);
       try {
-        // Idempotency guard: a pending row with this dedup key inside the window
-        // wins, so N instances firing the same cron queue ONE job. Checked
-        // first (not via a unique index) because completed rows must not block
-        // a legitimate re-fire later.
+        // Idempotency guard: ANY row with this dedup key inside the window wins
+        // (v3.51.0 — including a terminal `completed`/`failed`/`skipped` row),
+        // so N instances firing the same cron queue ONE job and a finished run
+        // is not re-enqueued every resync while its mirror `next_run` stays
+        // static. The window is the job's own cadence, so the next scheduled
+        // occurrence still fires. Checked in SQL (not via a unique index) so the
+        // window can vary per job.
         if (windowMs > 0 && dedupKey) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const dup: any = db.exec(DEGRADED_DEDUP_SQL, [

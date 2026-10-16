@@ -1,6 +1,31 @@
-# Live Resume — v3.50.0 Prod hotfixes (deploy-prep 502 → async worker + AI-unavailable Telegram spam)
+# Live Resume — v3.51.0 Spec 32 prod resilience (AI daily free-quota latch · breaker trips on the CAUSE · degraded-queue cadence dedup)
 
-> Updated: 2026-10-15 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-10-16 · Snapshot of the active handoff for the current session state.
+
+## Status
+
+| Field | Value |
+|-------|-------|
+| **Task** | Spec 32 — three independent prod-resilience fixes: (1) the OpenRouter free-tier **daily-quota 429** causing silent all-AI-fail days + Telegram spam (bounded in v3.50.0 but still *attempted* every resync); (2) a **transient `PrismaQueryTimeoutError` wrongly tripping the 5-min plan-limit breaker** and freezing the app; (3) the **degraded executor completing a run while the job re-fires every 5-min resync** (mirror `next_run` deliberately static). |
+| **Branch** | session started clean at `0a712eb` — **changes uncommitted** |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** — **COMMIT PENDING USER** (D9; merge/push/deploy = user actions) |
+| **In-flight** | None |
+| **Blocked** | (none code-wise.) External/operational: OpenRouter free-tier daily quota exhausted (HTTP 429 `free-models-per-day` — Fix 1 bounds the damage, a restore needs credits/model change); Prisma plan-limit hold + Accelerate-degraded (Fix 2 only tightens *our* breaker). |
+| **Spec/Plan** | `.agents/specs/32-prod-resilience-fixes.md` · `.agents/plans/32-prod-resilience-fixes.md` · detail `.agents/changelog/versions-v3.51.md` |
+
+## What's done (v3.51.0)
+
+- **(1) AI daily free-quota latch — NEW `lib/services/ai/quotaLatch.ts` (zero Prisma).** `isDailyFreeQuotaMessage()` matches **only** the account-wide *daily free* 429 (`free-models-per-day` / `free models per day`), never a per-minute 429. `markAiQuotaExhausted({model, detail, resetAt?})` latches the **UTC day** (`resetAt` defaults to next UTC midnight); `isAiQuotaExhausted()`/`getAiQuotaStatus()` **self-clear** (a wrong-day or expired record is ignored **and deleted** — no reset job); `clearAiQuotaExhausted()` is the operator path. Persistence = the generic `_backup_meta` KV in `lib/sqlite.ts` (`persistBackupMeta`/`restoreBackupMeta`/`deleteBackupMeta`, never throw, no-op when the mirror isn't ready) **plus** a `globalThis.__aiQuotaLatch` memo (a cold mirror must not disable the short-circuit mid-instance). Wiring: `llm-provider.directPrompt` keeps its `HTTP <status>` marker and appends the trimmed provider body (≤300 chars, whitespace-collapsed); `recommendation-agent.analyzeBatch` latches on `isDailyFreeQuotaMessage(raw)` only; `analyzeStocks` returns labelled failed results with **zero HTTP calls** when latched; `app/api/admin/ai/monitoring/route.ts` adds `quota` to stats + `?type=quota` + `POST {action:"clear-quota"}` (unknown → 400); `app/admin/utils/ai-monitoring/page.tsx` renders an amber banner (day · model · auto-clear · detail) with **Clear latch**.
+- **(2) Breaker keys on the HOLD (`lib/db-utils.ts`).** `isPlanLimitHoldError()` dropped `name.includes("timeout")`; it now matches **only** `code === "P6003"` / `"hold on your account"` / `"planlimitreached"`. A transient `PrismaQueryTimeoutError` (our own 120 s deadline, exceeded by a slow proxy on a *healthy* DB) degrades **per-query** via `isDbUnavailableError` instead of latching the 5-min global freeze. Test pins the 2×2 (`isPlanLimitHoldError(timeout) === false` while `isDbUnavailableError(timeout) === true`).
+- **(3) Degraded-queue dedup on the job's cadence (`lib/sqlite.ts` + `lib/cron-parser.ts` + `lib/services/worker/degradedQueue.ts`).** `DEGRADED_DEDUP_SQL` dropped `AND status IN ('pending','running')` → **status-agnostic** (a terminal `completed`/`failed`/`skipped` row suppresses a re-enqueue inside the window; before, only in-flight rows did — the re-fire loop). New `cronNextGapMs(expr, from?)` returns −1 for a non-5-field expression (so `calculateNextRun`'s +60 s invalid-expression fallback is never mistaken for a real gap). New `cronDedupWindowMs(expr, from?)` = that gap clamped `60 s…32 d`, falling back to the 90-min `DEDUP_WINDOW_MS`; `enqueueDegradedTask` now defaults `dedupWindowMs` to it. With the mirror `next_run` intentionally static, the window **is** the schedule (daily ⇒ once/day, hourly ⇒ once/hour).
+- **Bonus (v3.50.0 residual).** 2 tests in `lib/__tests__/dbHealthRoute.test.ts` still asserted the **pre-`0a712eb` synchronous** deploy-prep contract (red on `main`); rewritten to the async **202 `{queued,taskId}`** contract (orchestrator mocked) → **21/21**.
+- **Tests/Gates**: NEW `quotaLatch.test.ts` + `cronParser`/`degradedQueue`/`sqlite`/`recommendation-agent`/`db-utils` updated. tsc **46 exact (prod 0)** · full Jest **138/138 · 2078 pass / 4 skip / 0 fail** · eslint 0 on touched files · quickbuild **201/201**. Diff 14 modified + 1 new source/test file; no schema change → no migration; no new runtime package.
+- **Playwright** (admin login, dev server :3000 — pre-existing, NOT started by me): `/admin/utils/ai-monitoring` renders with **0 real console errors**; `?type=stats` now carries `quota`; `?type=quota` → 200; `POST {action:"clear-quota"}` → 200; unknown action → 400; banner markup + `Clear latch` confirmed in the served client chunks (16 scanned). **Not visually confirmed**: the banner renders only once the latch is set (needs a real daily-free 429 or a dev-mirror write — not approved).
+- **Docs**: `.agents/changelog/versions-v3.51.md` (NEW) + AGENTS.md v3.51.0 row (v3.41.1–3 collapsed → **31,697 B**) + `.agents/CHANGELOG.md` index + `.agents/changelog/versions-index.md` + `TODO.md` + `Primer.md` (Last Updated + Current Project Status) + `agent-memory.md` + **Lesson 163** + `.agents/session-todos.md` + `HANDOFF.md` + this file + session archive `2026-10-16-prod-resilience/`.
+
+## Prior — v3.50.0 Prod hotfixes (deploy-prep 502 → async worker + AI-unavailable Telegram spam)
+
+> Snapshot from 2026-10-15.
 
 ## Status
 
@@ -38,31 +63,38 @@
 
 ## Not done (deliberately)
 
-- **v3.50.0 changes are UNCOMMITTED** — commit awaits explicit user request (D9); task = current (see above). Do **NOT** commit `15OctProdlog..txt` (user-provided, untracked); delete scratch `eslint-out.txt`/`jest-out*.txt`/`tsc-out.txt`.
-- **BUG A**: next_run advance in the degraded completion path (follow-up spec, needs user approval).
-- Merge `fix/daily-rec-swing-cron-worker` → `main`, deploy — **user actions (D9)** (push performed on explicit user request 2026-10-15; merge/deploy still user-only).
+- **v3.51.0 changes are UNCOMMITTED** — commit awaits explicit user request (D9); merge/push/deploy are user actions. Scratch `_docs-scratch.cjs`/`_docs-edit.cjs`/`_docs-todo.cjs` deleted after use.
+- **Not verified locally**: the AI-quota banner renders only once the latch is actually set (would need a real `free-models-per-day` 429 or a dev-mirror write — not approved). Covered by unit tests + the served-chunk string check.
+- **BUG A (v3.47.0/25) — resolved by window, not by cursor**: the proposed "advance mirror `next_run`" fix was **rejected by the user**; Fix 3 instead makes the dedup window equal the job's own cadence and status-agnostic, which is what actually stops the every-tick re-fire. `next_run` stays static by design.
+- Merge `fix/daily-rec-swing-cron-worker` → `main`, deploy — **user actions (D9)**.
 
 ## Next steps
 
-1. **User decides merge/deploy** of `fix/daily-rec-swing-cron-worker` (PR #135) — never automatic (D9).
-2. BUG A fix = next spec/plan cycle (needs user approval).
+1. **User commits** on explicit request (D9); then merge/deploy (user-only).
+2. OpenRouter quota restore (credits or a non-free model) is an external/user action — not code.
+3. Optional: reproduce a real daily-free 429 (or write the dev-mirror latch) to visually confirm the AI-Monitoring banner.
 
 ## Gotchas / lessons for this handoff
 
 - **D9 RULE (user directive)**: MERGE + DEPLOY are ALWAYS user actions. Push is a user action too — performed here only because the user explicitly asked ("test and commit and push"). No auto-merge/deploy even on green CI (`.agents/RULES.md` §6).
-- **Lesson 161 (NEW)**: an e2e **route mock is a contract with the page it stands in for** — when a page reads a field **unconditionally**, a mock that omits it throws in render → ErrorBoundary → the spec is **permanently red**; and you can't see it locally if the spec **self-skips without credentials** (admin specs need `E2E_ADMIN_*`/`ADMIN_*`). Any self-skipping spec has a verification blind spot. Update the mock **in the same change** as the new unconditional field read.
+- **Lesson 163 (NEW)**: fix the classification, not the symptom — a breaker predicate must match the *cause's own evidence* (`P6003` / `"hold on your account"` / `planlimitreached`), never a generic symptom class (`name.includes("timeout")`) that it shares with unrelated failures; and a dedup window must be derived from the schedule it guards (`cronNextGapMs` → `cronDedupWindowMs`) whenever the schedule cursor is immutable — a fixed 90-min window re-fires a *daily* job every 90 min once the row is terminal, so the SQL must also be **status-agnostic** (a finished run must suppress, or it suppresses nothing).
+- **Lesson 161**: an e2e **route mock is a contract with the page it stands in for** — when a page reads a field **unconditionally**, a mock that omits it throws in render → ErrorBoundary → the spec is **permanently red**; and you can't see it locally if the spec **self-skips without credentials** (admin specs need `E2E_ADMIN_*`/`ADMIN_*`). Any self-skipping spec has a verification blind spot. Update the mock **in the same change** as the new unconditional field read.
 - **Lesson 160**: killing a dev server does **not** release the DB leader lock immediately — the worker engine only starts after the old lease expires (TTL ~15 min). Task logs are file-based (`worker_logs/<taskId>.log`).
 - **Lesson 150**: `next build` hangs while a dev server holds `.next` — quickbuild requires killing the dev server first, then restarting it.
 - **Dev server picks up a late-arriving DB lazily**: the server started before Docker/DB existed still authenticates once `seed.ts` runs — **no restart needed** (verified: `--project=setup` 1 passed).
 - tsc baseline = **46 error lines (prod 0; all pre-existing `__tests__/` errors)** — must stay 46 exact. Verify against the **raw** `npx tsc --noEmit`, not only the gate summary.
 - Windows cmd: no `tail` (use PowerShell `Get-Content … -Tail N`); commands are mangled by `&` chains / quoted spaced paths / `/flag` args — redirect to `worker_logs/*.txt` then `read`.
-- AGENTS.md doc-gate cap 32,768 B (Lesson 142); AGENTS.md now **32,667 B** after the v3.49.0 row (~101 B headroom).
+- AGENTS.md doc-gate cap 32,768 B (Lesson 142); AGENTS.md now **31,697 B** after the v3.51.0 row (the verbose v3.41.1–v3.41.3 rows collapsed into one pointer row — ~1,071 B headroom). TODO.md **~32.6 KB** (tight — trim before the next row).
+- **Banner-not-set locally**: `POST {action:"clear-quota"}` and `?type=quota` are the API-level proof; the amber banner itself only mounts when `isAiQuotaExhausted()` is true, so a unit test + a served-chunk string check is the strongest local evidence.
 - Admin login `admin@tradenext6.app` / `admin123`; demo `demo@tradenext6.app` / `demo123`.
 - Pre-existing local GS OAuth expiry → `invalid_grant` on append/header-ensure (non-fatal; `delegatedExport:true`).
 
 ## Remaining-merge state of PREVIOUS workstreams
 
-- v3.48.0 (Spec 27 async re-scan): **COMMIT PENDING USER** (branch `fix/daily-rec-swing-cron-worker`).
+- v3.51.0 (Spec 32 prod resilience): **COMMIT PENDING USER** (session started clean at `0a712eb`).
+- v3.50.0 (prod hotfixes — deploy-prep async + AI-spam): **COMMITTED `0a712eb`** on local `main`, **unpushed** (`main` ahead of `origin/main` by 1); merge/deploy user-only.
+- v3.49.0 (Specs 28–31 tests + PR #135 CI fixes): **PUSHED** with the v3.50.0 commit (PR #135 merged into `main`).
+- v3.48.0 (Spec 27 async re-scan): **COMMITTED** (branch `fix/daily-rec-swing-cron-worker`).
 - v3.47.0 (Specs 25/26 — scheduled-execution reliability + GS header-label): Spec 25 COMMITTED `480cd3b`, **Spec 26 COMMITTED `44156e6`**; merge/deploy user-only.
 - v3.46.0 (ops-counter authority / GS tolerance / catch-up): **MERGED via PR #134 `c0bb972`** into `main` (2026-10-09).
 - v3.45.0 (degraded engine): **MERGED into `main`** (2026-10-06) — pending Netlify deploy + Dependabot alert clearance.

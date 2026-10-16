@@ -6,6 +6,7 @@
  * Processes in batches of 5 to stay within token limits.
  */
 import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
+import { markAiQuotaExhausted, isAiQuotaExhausted, isDailyFreeQuotaMessage } from "./quotaLatch";
 import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
@@ -119,6 +120,19 @@ export async function analyzeStocks(
   if (!hasValidConfig(config)) {
     logger.warn({ msg: "AI not configured, skipping recommendation analysis" });
     return stocks.map((s) => failedResult(s, "AI is not configured"));
+  }
+
+  // v3.51.0: the account-wide free daily quota is already spent for this UTC
+  // day — every model in the chain would 429 the same way, so make ZERO HTTP
+  // calls. Cleared automatically at the UTC reset (see quotaLatch.ts).
+  if (isAiQuotaExhausted()) {
+    logger.warn({
+      msg: "AI daily free quota latched — skipping analysis without any API calls",
+      stocks: stocks.length,
+    });
+    return stocks.map((s) =>
+      failedResult(s, "AI daily free quota exhausted (resets at UTC midnight)"),
+    );
   }
 
   const results: StockAnalysisResult[] = new Array(stocks.length);
@@ -265,6 +279,12 @@ async function analyzeBatch(
       // also fail, so stop immediately to save requests.
       if (isQuotaExhausted(raw)) {
         lastError = QUOTA_EXHAUSTED_MESSAGE;
+        // v3.51.0: latch the UTC day ONLY for the account-wide free DAILY budget
+        // (`free-models-per-day`). A transient per-minute 429 must not disable
+        // the AI for a whole day, so it is intentionally not latched.
+        if (isDailyFreeQuotaMessage(raw)) {
+          markAiQuotaExhausted({ model, detail: raw.slice(0, 300) });
+        }
         logger.warn({
           msg: "Rate limited — stopping batch (quota exhausted)",
           model,

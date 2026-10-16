@@ -198,10 +198,12 @@ export function classifyDbError(error: unknown): DbErrorType {
 // and executeRaw (which the write-budget guard doesn't cover). That turns a
 // plan-limited account into massive request latency + log flooding.
 //
-// This breaker, once a hold/timeout is observed, short-circuits ALL subsequent
-// ops to fail fast for a cooldown window, then lets one probe through to test
-// whether the hold has lifted. State lives on globalThis so it survives
-// hot-reloads in dev and is shared across module graphs (mirrors lib/prisma.ts).
+// This breaker, once a genuine hold is observed (P6003 / "the account is on
+// hold"), short-circuits ALL subsequent ops to fail fast for a cooldown window,
+// then lets ops flow again to test whether the hold has lifted. It deliberately
+// does NOT trip on a bare timeout (v3.51.0) — see `isPlanLimitHoldError`. State
+// lives on globalThis so it survives hot-reloads in dev and is shared across
+// module graphs (mirrors lib/prisma.ts).
 //
 // These helpers are deliberately Prisma-free so they can be unit-tested
 // without instantiating a PrismaClient.
@@ -220,20 +222,26 @@ export class PlanLimitOpenError extends Error {
 
 /**
  * Detect an error that indicates the Prisma Postgres account is on HOLD
- * (code P6003 / "planLimitReached") or that a DB operation timed out — the two
- * symptoms that should trip the plan-limit circuit breaker.
+ * (code P6003 / "planLimitReached" / "hold on your account") — the ONLY symptom
+ * that should trip the plan-limit circuit breaker.
+ *
+ * v3.51.0 — a timeout is NO LONGER a hold. `PrismaQueryTimeoutError` (our own
+ * 120s deadline) fires on a *healthy* DB whenever the Accelerate proxy is slow,
+ * which matches `isDbUnavailableError` too; treating it as a hold latched the
+ * 5-minute global freeze on transient latency (split leadership → duplicate
+ * work). A transient timeout now degrades per-query (via
+ * `isDbUnavailableError`) instead of freezing the whole app. A real hold still
+ * trips the breaker, because the proxy returns P6003/"hold on your account".
  */
 export function isPlanLimitHoldError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const code = (error as any)?.code;
   const msg = error.message.toLowerCase();
-  const name = error.name?.toLowerCase() ?? "";
   return (
     code === "P6003" ||
     msg.includes("hold on your account") ||
-    msg.includes("planlimitreached") ||
-    name.includes("timeout")
+    msg.includes("planlimitreached")
   );
 }
 

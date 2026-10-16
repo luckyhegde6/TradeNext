@@ -11,7 +11,7 @@
  * Expected dates are therefore constructed with Date.UTC components.
  */
 
-import { calculateNextRun } from "@/lib/cron-parser";
+import { calculateNextRun, cronNextGapMs } from "@/lib/cron-parser";
 
 // UTC helper: construct a Date from UTC components (Y, M, D, h, m).
 const utc = (y: number, m: number, d: number, h: number, min: number): Date =>
@@ -134,5 +134,30 @@ describe("cron-parser calculateNextRun", () => {
       const next = calculateNextRun("", from);
       expect(next.getTime()).toBe(from.getTime() + 60_000);
     });
+  });
+});
+
+describe("cron-parser cronNextGapMs (v3.51.0)", () => {
+  it("returns -1 for an expression that is not 5-field (invalid)", () => {
+    expect(cronNextGapMs("", utc(2026, 8, 3, 10, 0))).toBe(-1);
+    expect(cronNextGapMs("30 4 * *", utc(2026, 8, 3, 10, 0))).toBe(-1);
+    expect(cronNextGapMs("not a cron here", utc(2026, 8, 3, 10, 0))).toBe(-1);
+  });
+
+  it("returns the gap to the next occurrence of a daily job from its scheduled instant", () => {
+    // Anchored exactly on the boundary → next occurrence is tomorrow (24h).
+    const from = utc(2026, 8, 3, 10, 0);
+    expect(cronNextGapMs("0 10 * * *", from)).toBe(24 * 60 * 60_000);
+  });
+
+  it("returns the step gap for an every-5-min job", () => {
+    const from = utc(2026, 8, 3, 10, 15);
+    expect(cronNextGapMs("*/5 * * * *", from)).toBe(5 * 60_000);
+  });
+
+  it("returns the true weekday gap (Fri → Mon), not a nominal 24h", () => {
+    // 2026-08-07 is a Friday. "0 10 * * 1-5" from Fri 10:00 → Mon 10:00 = 3 days.
+    const friday = utc(2026, 8, 7, 10, 0);
+    expect(cronNextGapMs("0 10 * * 1-5", friday)).toBe(3 * 24 * 60 * 60_000);
   });
 });

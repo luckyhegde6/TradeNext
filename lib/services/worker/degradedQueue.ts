@@ -27,6 +27,7 @@
 import logger from "@/lib/logger";
 import { createAuditLog } from "@/lib/audit";
 import { getSqliteFallback, type DegradedTaskRow } from "@/lib/sqlite";
+import { cronNextGapMs } from "@/lib/cron-parser";
 import { getDegradedCapability } from "./degradedTaskRegistry";
 
 /**
@@ -47,11 +48,33 @@ export interface DegradableCronJob {
 /**
  * Dedup window for enqueue, in ms.
  *
- * 90 min mirrors `DEDUP_WINDOW_MS` in `worker-engine.ts` deliberately: the
- * degraded path must dedup exactly as strictly as the Prisma path it replaces,
- * or the "fix" would let more work through than the code it replaced.
+ * Used as the FALLBACK when a job's own cadence cannot be computed (invalid /
+ * empty cron expression). For a real cron job the window is the job's own gap
+ * to its next occurrence (`cronDedupWindowMs`), which is what makes a daily job
+ * fire once a day and an hourly job once an hour — even though the mirror
+ * `next_run` is never advanced on the degraded path (BUG A, v3.51.0).
  */
 const DEDUP_WINDOW_MS = 90 * 60_000;
+
+/** Bounds for the cadence-derived window (1 min … 32 days). */
+const MIN_DEDUP_WINDOW_MS = 60_000;
+const MAX_DEDUP_WINDOW_MS = 32 * 24 * 60 * 60_000;
+
+/**
+ * The dedup window for a cron job = the job's own cadence (time to its next
+ * occurrence), clamped and with a safe fallback for unparseable expressions.
+ *
+ * WHY the cadence, not a fixed number: the degraded path deliberately does NOT
+ * advance the mirror `next_run` (it is overwritten wholesale by the next
+ * `syncFromPrisma`), so a still-"due" job would otherwise be re-enqueued on
+ * every 5-min resync forever. The window is the clock: once this occurrence is
+ * queued, the same key is suppressed until the schedule comes round again.
+ */
+export function cronDedupWindowMs(cronExpression: string, from: Date = new Date()): number {
+  const gap = cronNextGapMs(cronExpression, from);
+  if (!Number.isFinite(gap) || gap <= 0) return DEDUP_WINDOW_MS;
+  return Math.min(MAX_DEDUP_WINDOW_MS, Math.max(MIN_DEDUP_WINDOW_MS, gap));
+}
 
 /**
  * Jobs drained per `runDegradedQueueOnce()` call.
@@ -93,9 +116,10 @@ function mirror(): ReturnType<typeof getSqliteFallback> {
 /**
  * Queue one due cron job.
  *
- * Idempotent within the dedup window via the accessor's pending/running guard,
- * so N instances firing the same cron produce one row, not N. A COMPLETED row
- * does not suppress a later legitimate re-fire.
+ * Idempotent within the dedup window, and the window IS the job's cadence: one
+ * row per scheduled occurrence, so N instances firing the same cron produce one
+ * row and — unlike the pre-v3.51.0 behaviour — a COMPLETED row still suppresses
+ * a re-enqueue until the schedule comes round again (BUG A).
  */
 export function enqueueDegradedTask(
   job: DegradableCronJob,
@@ -117,7 +141,7 @@ export function enqueueDegradedTask(
       cronExpression: job.cronExpression,
       config: job.config ?? null,
     },
-    dedupWindowMs: opts.dedupWindowMs ?? DEDUP_WINDOW_MS,
+    dedupWindowMs: opts.dedupWindowMs ?? cronDedupWindowMs(job.cronExpression),
   });
   if (id) {
     logger.info({

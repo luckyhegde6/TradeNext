@@ -2496,7 +2496,7 @@ describe("SQLite backup fallback", () => {
       ins("recommendations", "k-rec", t0);
       ins("alerts", "k-alert", t1);
 
-      // --- dedup: only UNDELIVERED rows inside the window suppress a re-enqueue ---
+      // --- dedup: ANY row inside the window suppresses a re-enqueue (v3.51.0) ---
       const dedupId = (key: string, since: string) =>
         db.exec(DEGRADED_DEDUP_SQL, [key, since])[0]?.values?.[0]?.[0] as string | undefined;
       expect(dedupId("k-rec", tOld)).toBe("id-k-rec");
@@ -2505,10 +2505,11 @@ describe("SQLite backup fallback", () => {
       expect(dedupId("k-rec", t1)).toBeUndefined();
       expect(dedupId("k-nope", tOld)).toBeUndefined();
 
-      // A COMPLETED row must not block a later re-fire: mark k-rec terminal, then
-      // the same dedup key must be free again.
+      // v3.51.0 (BUG A): a COMPLETED row STILL suppresses inside the window. The
+      // degraded path never advances the mirror `next_run`, so a terminal row is
+      // the only thing that stops a re-enqueue on every 5-min resync.
       db.run(DEGRADED_COMPLETE_SQL, ["completed", t1, null, t1, "id-k-rec"]);
-      expect(dedupId("k-rec", tOld)).toBeUndefined();
+      expect(dedupId("k-rec", tOld)).toBe("id-k-rec");
 
       // Bind-count guard. sql.js has TWO distinct arity behaviours and only ONE is loud:
       //   - too MANY binds (count+1) -> THROWS "Too many parameter values were provided"
@@ -2756,10 +2757,23 @@ describe("SQLite backup fallback", () => {
           oldestPendingAt: null,
         });
 
-        // A COMPLETED row must not block a legitimate later re-fire of the same
-        // key — otherwise the dedup window would silently swallow every future
-        // daily run of this job, and the queue would look healthy while doing
-        // nothing.
+        // v3.51.0 (BUG A): a COMPLETED row now STILL suppresses inside the window.
+        // The degraded path never advances the mirror `next_run`, so a terminal
+        // row is the ONLY thing that stops a re-enqueue on every 5-min resync.
+        const suppressed = fb.enqueueDegradedTask({
+          taskType: "recommendations",
+          dedupKey: "k-rec",
+          dedupWindowMs: 60_000,
+        });
+        expect(suppressed).toBe(id);
+        expect(fb.getDegradedTasks(10)).toHaveLength(1);
+
+        // …but once the completed row ages past the window, the NEXT scheduled
+        // occurrence must fire — a legitimate later re-fire is NOT swallowed.
+        raw.run("UPDATE _degraded_task SET created_at = ? WHERE id = ?", [
+          new Date(Date.now() - 120_000).toISOString(),
+          id,
+        ]);
         const later = fb.enqueueDegradedTask({
           taskType: "recommendations",
           dedupKey: "k-rec",

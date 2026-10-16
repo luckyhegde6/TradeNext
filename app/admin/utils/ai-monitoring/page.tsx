@@ -37,6 +37,16 @@ interface AiStats {
   timeframeMinutes: number;
 }
 
+/** v3.51.0 — per-UTC-day AI free-quota latch status (sibling of `stats`). */
+interface AiQuotaStatus {
+  exhausted: boolean;
+  utcDay: string | null;
+  markedAt: string | null;
+  resetAt: string | null;
+  detail: string | null;
+  model: string | null;
+}
+
 // ─── Decision Engine types (spec 17 — in-memory trace ring buffer) ────────
 
 type DecisionTraceKind = "evaluate" | "ping" | "poc-a-screener" | "poc-b-autoseed-gate";
@@ -331,6 +341,7 @@ export default function AiMonitoringPage() {
   const [actionFilter, setActionFilter] = useState("");
   const [dStats, setDStats] = useState<DecisionStats | null>(null);
   const [dTraces, setDTraces] = useState<DecisionTraceEntry[]>([]);
+  const [quota, setQuota] = useState<AiQuotaStatus | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -362,6 +373,7 @@ export default function AiMonitoringPage() {
       ]);
 
       setStats(statsData.stats);
+      setQuota(statsData.quota ?? null);
       setCalls(callsData.calls || []);
       setDataSource(statsData.stats?.source ?? callsData.source ?? null);
       setDStats(dStatsData.stats ?? null);
@@ -394,6 +406,20 @@ export default function AiMonitoringPage() {
       }
     } catch (err) {
       console.error("Failed to clear:", err);
+    }
+  };
+
+  const handleClearQuota = async () => {
+    if (!confirm("Clear the AI daily-quota latch so analysis resumes immediately?")) return;
+    try {
+      const res = await fetch("/api/admin/ai/monitoring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear-quota" }),
+      });
+      if (res.ok) fetchData();
+    } catch (err) {
+      console.error("Failed to clear quota latch:", err);
     }
   };
 
@@ -501,6 +527,34 @@ export default function AiMonitoringPage() {
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
           {error}
+        </div>
+      )}
+
+      {/* AI daily free-quota latch (v3.51.0) */}
+      {quota?.exhausted && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 px-4 py-3 rounded-lg text-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-medium">
+                AI analysis is paused for today — OpenRouter free daily quota exhausted.
+              </p>
+              <p className="mt-1 text-xs">
+                Latched {quota.utcDay ?? "today"}
+                {quota.model ? ` · ${quota.model}` : ""}
+                {quota.resetAt ? ` · auto-clears ${new Date(quota.resetAt).toLocaleString()}` : ""}.
+                No further AI requests are made until the UTC reset.
+              </p>
+              {quota.detail && (
+                <p className="mt-1 text-xs opacity-75 break-all">{quota.detail}</p>
+              )}
+            </div>
+            <button
+              onClick={handleClearQuota}
+              className="shrink-0 px-3 py-1.5 text-xs border border-amber-400 dark:border-amber-600 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            >
+              Clear latch
+            </button>
+          </div>
         </div>
       )}
 

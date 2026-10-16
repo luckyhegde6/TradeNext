@@ -53,6 +53,7 @@ import { createAuditLog } from "@/lib/audit";
 import {
   claimNextDegradedTask,
   completeDegradedTask,
+  cronDedupWindowMs,
   DEGRADED_QUEUE_LIMITS,
   enqueueDegradedTask,
   getDegradedQueueStatus,
@@ -110,10 +111,12 @@ function makeMirror(): FakeMirror {
     claims: () => claims,
     enqueueDegradedTask({ taskType, dedupKey, payload, dedupWindowMs = 90 * 60_000 }) {
       const now = iso();
+      // v3.51.0 — mirrors DEGRADED_DEDUP_SQL: ANY row (including a terminal
+      // completed/failed/skipped one) suppresses a re-enqueue inside the window,
+      // because the degraded path never advances the mirror `next_run`.
       const dup = rows.find(
         (r) =>
           r.dedupKey === dedupKey &&
-          (r.status === "pending" || r.status === "running") &&
           new Date(now).getTime() - new Date(r.createdAt).getTime() <= dedupWindowMs,
       );
       if (dup) return dup.id;
@@ -251,6 +254,33 @@ describe("degradedQueue — enqueue", () => {
     const second = enqueueDegradedTask(job(), { dedupWindowMs: 1 });
     expect(second).not.toBe(first);
     expect(mirror.rows()).toHaveLength(2);
+  });
+
+  it("suppresses a re-enqueue even after the row COMPLETED, inside the cadence window (BUG A / v3.51.0)", () => {
+    // The degraded path never advances the mirror `next_run`, so a finished run
+    // stays "due". Only the dedup stops a re-fire on every 5-min resync.
+    const first = enqueueDegradedTask(job()) as string;
+    claimNextDegradedTask("w-1");
+    completeDegradedTask(first, "completed");
+    expect(mirror.rows()[0].status).toBe("completed");
+
+    const again = enqueueDegradedTask(job());
+    expect(again).toBe(first); // sibling of the completed row, not a new row
+    expect(mirror.rows()).toHaveLength(1);
+  });
+
+  it("derives the dedup window from the job's own cron cadence, not a fixed 90 min", () => {
+    // Anchored at a scheduled instant, the window is the full cadence to the
+    // NEXT occurrence: a daily job survives ~24h, an every-5-min job only 5 min.
+    const at10 = new Date("2026-10-06T10:00:00.000Z");
+    expect(cronDedupWindowMs("0 10 * * *", at10)).toBe(24 * 60 * 60_000);
+    const at1015 = new Date("2026-10-06T10:15:00.000Z");
+    expect(cronDedupWindowMs("*/5 * * * *", at1015)).toBe(5 * 60_000);
+    // Invalid expressions fall back to the explicit default window.
+    expect(cronDedupWindowMs("", at1015)).toBe(DEGRADED_QUEUE_LIMITS.DEDUP_WINDOW_MS);
+    expect(cronDedupWindowMs("not a cron", at1015)).toBe(DEGRADED_QUEUE_LIMITS.DEDUP_WINDOW_MS);
+    // Clamped from below so a degenerate schedule cannot re-fire sub-minute.
+    expect(cronDedupWindowMs("*/1 * * * *", new Date("2026-10-06T10:15:30.000Z"))).toBeGreaterThanOrEqual(60_000);
   });
 });
 

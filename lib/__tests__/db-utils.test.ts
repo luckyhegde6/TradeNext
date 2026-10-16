@@ -196,12 +196,26 @@ describe("plan-limit circuit breaker", () => {
     expect(e.message).toMatch(/plan limit/i);
   });
 
-  it("isPlanLimitHoldError detects P6003 / hold / planLimitReached / timeout", () => {
+  it("isPlanLimitHoldError detects a genuine hold (P6003 / hold message) but NOT a bare timeout", () => {
     expect(isPlanLimitHoldError(Object.assign(new Error("There is a hold on your account. Reason: planLimitReached."), { code: "P6003" }))).toBe(true);
     expect(isPlanLimitHoldError(new Error("There is a hold on your account. Reason: planLimitReached."))).toBe(true);
-    expect(isPlanLimitHoldError(Object.assign(new Error("boom"), { name: "PrismaQueryTimeoutError" }))).toBe(true);
+    // v3.51.0: a timeout is NOT a hold — `PrismaQueryTimeoutError` fires on a
+    // HEALTHY DB when the Accelerate proxy is slow, and previously latched the
+    // 5-min global freeze. It must degrade per-query, never trip the breaker.
+    expect(isPlanLimitHoldError(Object.assign(new Error("boom"), { name: "PrismaQueryTimeoutError" }))).toBe(false);
+    expect(isPlanLimitHoldError(new Error("PrismaQueryTimeoutError: query timed out"))).toBe(false);
     expect(isPlanLimitHoldError(new Error("Something else"))).toBe(false);
     expect(isPlanLimitHoldError(null)).toBe(false);
+  });
+
+  it("a bare PrismaQueryTimeoutError degrades per-query (isDbUnavailableError) without tripping the breaker (v3.51.0)", () => {
+    const timeout = Object.assign(new Error("Query timed out after 120000ms"), {
+      name: "PrismaQueryTimeoutError",
+    });
+    // Still classified as an unavailable DB so callers fall back gracefully…
+    expect(isDbUnavailableError(timeout)).toBe(true);
+    // …but it must NOT open the 5-minute plan-limit breaker.
+    expect(isPlanLimitHoldError(timeout)).toBe(false);
   });
 
   it("isPlanLimitHoldError does NOT match transient network/connection errors (v3.26.0 breaker trip guard)", () => {

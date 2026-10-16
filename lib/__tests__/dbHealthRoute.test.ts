@@ -32,7 +32,6 @@ import {
   getTimeDiagnostics,
 } from "@/lib/services/timeCorrection";
 import { restoreSqliteBackup, flushWriteBehind } from "@/lib/sqlite";
-import { openPlanLimitBreaker, closePlanLimitBreaker } from "@/lib/db-utils";
 import {
   foldOpsCounterIntoMonthly,
   getOpsMonthlyState,
@@ -41,6 +40,7 @@ import {
 import { getDegradedState } from "@/lib/services/degradedMode";
 import { getDegradedQueueStatus } from "@/lib/services/worker/degradedQueue";
 import { getDegradedLeaderStatus } from "@/lib/services/degradedLeader";
+import { spawnRegularTask } from "@/lib/services/worker/task-orchestrator";
 
 jest.mock("@/lib/auth", () => ({ auth: jest.fn() }));
 jest.mock("@/lib/logger", () => ({
@@ -97,6 +97,13 @@ jest.mock("@/lib/services/leader", () => ({
 }));
 jest.mock("@/lib/services/readTier", () => ({ getReadMetrics: jest.fn(() => ({})) }));
 jest.mock("@/lib/cache", () => ({ getCacheMetrics: jest.fn(() => ({})) }));
+// v3.50.0 / tests updated v3.51.0 — `deploy_prep` is now QUEUED, not executed
+// in-request (the synchronous flush+mirror sequence 502'd at the Netlify
+// gateway). Mock the orchestrator so the route returns 202 without touching the
+// real task queue or SQLite.
+jest.mock("@/lib/services/worker/task-orchestrator", () => ({
+  spawnRegularTask: jest.fn(async () => ({ id: "task-deploy-prep-1" })),
+}));
 // v3.45.0 (spec 21) — the degraded block of the GET response. Mocked rather
 // than real so the assertions pin the RESPONSE SHAPE (which is the page's
 // contract) without coupling to mode thresholds, and so the Blobs-backed lease
@@ -159,6 +166,7 @@ const mockGetTimeDiagnostics = getTimeDiagnostics as jest.Mock;
 const mockRestoreSqliteBackup = restoreSqliteBackup as jest.Mock;
 const mockCreateAuditLog = createAuditLog as jest.Mock;
 const mockFlushWriteBehind = flushWriteBehind as jest.Mock;
+const mockSpawnRegularTask = spawnRegularTask as jest.Mock;
 
 function jsonPost(body: unknown): Request {
   return new Request("http://localhost/api/admin/db-health", {
@@ -416,30 +424,35 @@ describe("GET /api/admin/db-health — queryConsumption monthly ledger (v3.34.0)
   });
 });
 
-describe("POST /api/admin/db-health — deploy_prep breaker-open fast-fail (v3.39.0)", () => {
-  it("returns 503 with a concrete error/detail while the breaker is open", async () => {
-    openPlanLimitBreaker();
-    try {
-      const res = await POST(jsonPost({ action: "deploy_prep" }));
-      expect(res.status).toBe(503);
-      const body = await res.json();
-      expect(body.error).toBe("Deploy prep failed");
-      expect(body.detail).toContain("circuit breaker");
-      // Gate must short-circuit BEFORE any Prisma-work: no flush, no audit.
-      expect(mockFlushWriteBehind).not.toHaveBeenCalled();
-      expect(mockCreateAuditLog).not.toHaveBeenCalled();
-    } finally {
-      closePlanLimitBreaker();
-    }
+describe("POST /api/admin/db-health — deploy_prep queues a worker task (v3.50.0; spec updated v3.51.0)", () => {
+  it("returns 202 `queued` and does NOT run the synchronous flush/mirror sequence in-request", async () => {
+    const res = await POST(jsonPost({ action: "deploy_prep" }));
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.queued).toBe(true);
+    expect(body.taskId).toBe("task-deploy-prep-1");
+
+    expect(mockSpawnRegularTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskType: "deploy_prep",
+        payload: { reason: "admin_deploy_prep", triggeredBy: "admin" },
+      }),
+    );
+    // The entire point of the hotfix: no flush/backup work in the request that
+    // the Netlify gateway would time out on (the original 502).
+    expect(mockFlushWriteBehind).not.toHaveBeenCalled();
+    expect(mockCreateAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ADMIN_DB_DEPLOY_PREP_QUEUED", responseStatus: 202 }),
+    );
   });
 
-  it("proceeds past the gate (not short-circuited) when the breaker is closed", async () => {
+  it("returns 500 with the failure detail when the task cannot be queued", async () => {
+    mockSpawnRegularTask.mockRejectedValueOnce(new Error("queue unavailable"));
     const res = await POST(jsonPost({ action: "deploy_prep" }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toContain("SQLite backup not initialized");
-    // Fast-fail gate did not trip; the flush still ran before the mirror check.
-    expect(mockFlushWriteBehind).toHaveBeenCalledTimes(1);
+    expect(body.error).toBe("Failed to queue deploy prep");
+    expect(body.detail).toContain("queue unavailable");
   });
 });
 

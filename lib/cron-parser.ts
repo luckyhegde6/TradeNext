@@ -123,3 +123,18 @@ export function calculateNextRun(cronExpression: string, from: Date = new Date()
 
   return new Date(from.getTime() + 60_000);
 }
+
+/**
+ * Milliseconds from `from` to the expression's next occurrence, or `-1` when
+ * `cronExpression` is not a valid 5-field expression.
+ *
+ * WHY (v3.51.0): the degraded queue dedups a cron job against itself. A fixed
+ * 90-min window re-fires a daily job every 90 min; the job's OWN cadence is the
+ * only correct window. This wraps `calculateNextRun` so callers do not have to
+ * (mis)interpret its "+60s" invalid-expression fallback as a real gap.
+ */
+export function cronNextGapMs(cronExpression: string, from: Date = new Date()): number {
+  if (cronExpression.trim().split(/\s+/).length !== 5) return -1;
+  return calculateNextRun(cronExpression, from).getTime() - from.getTime();
+}
+
