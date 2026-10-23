@@ -565,6 +565,19 @@ export async function runDailyRecommendations(
     // getLatestRecommendations (uniqueStocks > 0) falls back to the last
     // good run and the API surfaces an "AI unavailable" notice.
     const successfulResults = aiResults.filter((r) => r.success);
+    // v3.52.0: `analyzeStocks()` already ranks the COMBINED batch results, but
+    // re-assert it here so ANY caller/path (circuit-breaker fallback, cached
+    // results) yields the same order: score (screener agreement) + confidence.
+    // This order drives the DB row order, Today's Picks, and the Telegram body.
+    successfulResults.sort((a, b) => {
+      if (b.aiRecommendation.confidence !== a.aiRecommendation.confidence) {
+        return b.aiRecommendation.confidence - a.aiRecommendation.confidence;
+      }
+      const scoreA = a.screenerNames?.length ?? 0;
+      const scoreB = b.screenerNames?.length ?? 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return (b.marketCap ?? 0) - (a.marketCap ?? 0);
+    });
     const aiFailed = aiResults.length - successfulResults.length;
 
     if (successfulResults.length === 0 && aiResults.length > 0) {
@@ -631,7 +644,9 @@ export async function runDailyRecommendations(
           const { broadcastToSubscribers } = await import("./telegramBotService");
           const { buildAiUnavailableNotice } = await import("./recommendationBroadcast");
           const tgMessage = buildAiUnavailableNotice();
-          const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage);
+          const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage, {
+            prependTitle: false,
+          });
           logger.info({ msg: "Telegram broadcast for AI unavailability notice", sent });
         } catch (tgErr) {
           logger.warn({ msg: "Telegram AI-unavailable broadcast failed (non-critical)", error: tgErr });
@@ -832,7 +847,9 @@ export async function runDailyRecommendations(
 
       const tgMessage = buildRecommendationBroadcast(successfulResults);
 
-      const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage);
+      const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
+        prependTitle: false,
+      });
       logger.info({ msg: "Telegram broadcast for recommendations", sent });
     } catch (tgErr) {
       // Non-critical: log but don't fail the run

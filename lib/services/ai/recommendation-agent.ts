@@ -3,7 +3,7 @@
  * and generates BUY/HOLD/SELL recommendations with AI reasoning.
  *
  * Uses directPrompt() (no tool calling needed — stock data is pre-fetched).
- * Processes in batches of 5 to stay within token limits.
+ * Processes in batches of 20 for the free model to reduce API calls.
  */
 import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
 import { markAiQuotaExhausted, isAiQuotaExhausted, isDailyFreeQuotaMessage } from "./quotaLatch";
@@ -48,13 +48,13 @@ export interface StockAnalysisResult extends StockAnalysisInput {
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
-const BATCH_SIZE = 5;
+const BATCH_SIZE = 20;
 const RETRY_MAX = 2;
 const RETRY_BASE_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 8000;
 
 /** Number of batch workers running concurrently (OpenRouter free-tier friendly). */
-const CONCURRENCY = 5;
+const CONCURRENCY = 3;
 
 /**
  * Hard per-batch wall-clock cap (5 minutes), covering ALL retry attempts for
@@ -105,13 +105,49 @@ const RESPONSE_SCHEMA_HINT = `Return a JSON array like:
 // ─── Public API ──────────────────────────────────────────────────────────
 
 /**
- * Analyze a list of stocks in batches of 5.
+ * Rank the COMBINED batch results (v3.52.0).
+ *
+ * The user-facing contract for a multi-batch run: "combine the result and then
+ * order by score and confidence". Batches complete out of order (worker pool),
+ * so the merge step is exactly where a deterministic order must be restored.
+ *
+ * Priority:
+ *   1. successful before failed (a failed stock must never outrank a real verdict)
+ *   2. confidence desc            — the AI's own conviction
+ *   3. score desc                 — `screenerCount` (how many screeners agreed)
+ *   4. marketCap desc             — liquidity tiebreak
+ *   5. symbol asc                 — total ordering (stable across runs)
+ *
+ * Pure + non-mutating so it is trivially testable.
+ */
+export function rankStockAnalysisResults(
+  results: StockAnalysisResult[],
+): StockAnalysisResult[] {
+  const score = (r: StockAnalysisResult) => r.screenerNames?.length ?? 0;
+  return [...results].sort((a, b) => {
+    if (a.success !== b.success) return a.success ? -1 : 1;
+    if (b.aiRecommendation.confidence !== a.aiRecommendation.confidence) {
+      return b.aiRecommendation.confidence - a.aiRecommendation.confidence;
+    }
+    if (score(b) !== score(a)) return score(b) - score(a);
+    const capA = a.marketCap ?? 0;
+    const capB = b.marketCap ?? 0;
+    if (capB !== capA) return capB - capA;
+    return a.symbol.localeCompare(b.symbol);
+  });
+}
+
+/**
+ * Analyze a list of stocks in batches of 20.
  * Partial failures are graceful — failed stocks get HOLD defaults.
  *
- * Batches run on a bounded-concurrency worker pool (CONCURRENCY=5): a
- * 50-stock run drops from ~10 sequential 30-90s calls to ~4 waves, keeping
- * the whole AI phase inside the 14-minute background-function safety net.
- * Results preserve input order regardless of completion order.
+ * Batches run on a bounded-concurrency worker pool (CONCURRENCY=3): a
+ * 100-stock run issues 5 calls instead of 20, keeping the whole AI phase
+ * inside the 14-minute background-function safety net.
+ *
+ * Results are COMBINED and then ordered by score + confidence via
+ * `rankStockAnalysisResults()` (v3.52.0) — batches finish out of order, so the
+ * merge is the only place a deterministic ranking can be applied.
  */
 export async function analyzeStocks(
   stocks: StockAnalysisInput[],
@@ -180,11 +216,25 @@ export async function analyzeStocks(
   logger.info({
     msg: "Stock analysis complete",
     total: stocks.length,
+    batches: totalBatches,
     succeeded: results.filter((r) => r && r.success).length,
     failed: results.filter((r) => !r || !r.success).length,
   });
 
-  return results;
+  // Combine batches → one deterministic order (score + confidence).
+  const ranked = rankStockAnalysisResults(results.filter(Boolean));
+
+  logger.info({
+    msg: "Stock analysis ranked",
+    top: ranked.slice(0, 5).map((r) => ({
+      symbol: r.symbol,
+      recommendation: r.aiRecommendation.recommendation,
+      confidence: r.aiRecommendation.confidence,
+      score: r.screenerNames?.length ?? 0,
+    })),
+  });
+
+  return ranked;
 }
 
 /**
@@ -201,7 +251,7 @@ export async function analyzeSingleStock(
 // ─── Internal ────────────────────────────────────────────────────────────
 
 /**
- * Analyze a single batch of up to 5 stocks with retry + model fallback.
+ * Analyze a single batch of up to 20 stocks with retry + model fallback.
  *
  * VERIFICATION (v3.8.0): directPrompt never throws — it converts failures
  * into strings ("AI request failed…", "No response from AI.", empty content

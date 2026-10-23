@@ -8,19 +8,23 @@ import { Analytics } from "./components/analytics";
 import { SEOTags, defaultMetadata } from "./components/seo";
 import WebVitals from "./components/analytics/WebVitals";
 import PWARegister from "./components/PWARegister";
+import type { Metadata, Viewport } from "next";
 
 // Apply default SEO metadata
 // PWA (v3.21.0): add theme-color meta, manifest link, and apple web-app
 // capability via Next's metadata system (server-rendered in <head>).
-export const metadata = {
+export const metadata: Metadata = {
   ...defaultMetadata,
   manifest: "/manifest.json",
-  themeColor: "#2563eb",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "TradeNext",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
 };
 
 /**

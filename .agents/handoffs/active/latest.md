@@ -1,6 +1,33 @@
-# Live Resume — v3.51.0 Spec 32 prod resilience (AI daily free-quota latch · breaker trips on the CAUSE · degraded-queue cadence dedup)
+# Live Resume — v3.52.0 Spec 34 (20-stock AI batches + conviction ranking · durable swing Telegram · single header · console mirror)
 
-> Updated: 2026-10-16 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-10-22 · Snapshot of the active handoff for the current session state.
+
+## Status
+
+| Field | Value |
+|-------|-------|
+| **Task** | Spec 34 — four user-reported prod defects: (1) daily AI run with `configuredModel=openrouter/free` + `stocks=100` should batch **20** per call and then be **ordered by score and confidence**; (2) "no telegram notification is triggered on swing"; (3) duplicated Telegram header (`🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis Unavailable — …`); (4) add an additional `console.log` wherever `logger.info/warn/error` is used. |
+| **Branch** | `fix/mirror-blobs-upload-race` — **COMMITTED `1b5ea4d`** (29 files, +1673/−105; also carries the Spec 33 swing-refresh work and the SQLite Blobs upload-race fix). Not pushed — push/PR/merge/deploy are user actions. |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** — **COMMITTED `1b5ea4d`** (push/PR/merge/deploy = user actions, D9). Full Jest **138/138 · 2095 pass / 4 skip / 0 fail**, `npm run quickbuild` **201/201**, tsc **46 (prod 0)**, eslint 0 errors. Playwright Swing verified live (see follow-up). |
+| **In-flight** | None |
+| **Blocked** | OpenRouter **402 Insufficient credits** — today's 04:30 UTC daily run failed (`Cron boot recommendations catch-up enqueued … reason=missed-daily-window`). Batching (5 calls/100 stocks instead of 20) lowers pressure; credits are an external action. v3.51.0 quota latch + Spec 30 dedup keep "AI unavailable" notices to ≤1/UTC-day. |
+| **Spec/Plan** | `.agents/specs/34-ai-batch-20-ranking-and-telegram-delivery.md` · `.agents/plans/34-…` · detail `.agents/changelog/versions-v3.52.md` · Lesson 165 |
+
+## What's done (v3.52.0)
+
+- **(1) Batching + ranking (`lib/services/ai/recommendation-agent.ts`).** `BATCH_SIZE 5 → 20`, `CONCURRENCY 5 → 3`; new exported pure `rankStockAnalysisResults()` (success → confidence desc → `screenerNames.length` desc → marketCap desc → symbol asc) applied **once, after `Promise.all`** (i.e. after the batches are combined) + a top-5 `msg: "Stock analysis ranked"` log. `dailyRecommendationService` re-asserts the same comparator on `successfulResults` before persisting/broadcasting; the file's `rankActionableByConfidence()` was confirmed **dead code** and left untouched.
+- **(2) Durable swing Telegram (`lib/services/swingRecommendationService.ts`).** Root cause: the broadcast lived **only** at the tail of `processSwingAnalysisJob` (the request-path processor is frozen by Netlify after the response), the stale-exhausted recovery marked jobs `failed` **silently**, and `getSwingRecommendations` served terminal jobs without broadcasting. Fix: durable `payload.tgNotifiedAt` marker (JSON on both SQLite and Prisma ⇒ **no migration**) + `notifySwingTerminal(jobId)` (`SWING_TG_WINDOW_MS` 6 h, `SWING_TG_FLUSH_MS` 1 h, `swingNotifyInFlight` guard, payload **merged**) called from the processor tail, the stale-exhausted recovery, both terminal serve paths, and a 1-h daemon sweep of the newest 5 terminal jobs. `failed` jobs send the new honest `buildSwingUnavailableNotice()`.
+- **(3) `lib/sqlite.ts`.** `getSwingAnalysisJobs({ order: "asc" | "desc" })` — `"desc"` = newest first (needed by the sweep; the query is `ORDER BY created_at ASC LIMIT ?`), default `"asc"` so every existing caller is identical.
+- **(4) Single header (`telegramBotService.ts` + `recommendationBroadcast.ts`).** `prependTitle?: boolean` on `broadcastToSubscribers` / `sendAlertToUser` (default `true` for admin announcements); the three recommendation call sites pass `false` and the builders own the `🔔` line. Broadcast log gains `failed`; zero verified subscribers logs a warn.
+- **(5) Console mirror (`lib/logger.ts`).** One sink-level change: an **additional** native `console.log/warn/error("[LEVEL]", msg, ...args)` beside the formatted file line; `LOG_CONSOLE_EXTRA=false` disables, forced off under `NODE_ENV=test`.
+- **(6) UI.** Removed the **no-op** `onSuccess` guard in `SwingTab.tsx` (SWR commits the payload before the callback fires; the race is fixed server-side by the job-aware read). The 15 s fast-poll window is kept.
+- **Tests/Gates**: `recommendation-agent.test.ts` **104/104** (batches-of-20, 40-stock failure isolation, new `rankStockAnalysisResults` describe incl. determinism/no-mutation/end-to-end order) · `swingRecommendationService.test.ts` **104/104** (new `notifySwingTerminal` describe; mirror mock honours `order`) · `recommendationBroadcast.test.ts` single-header contract pass · tsc **46 exact (prod 0)** · eslint **0 errors** (11 files). **Outstanding**: full `npm run test`, `npm run quickbuild`, Playwright `/recommendations` Swing live check.
+- **Live follow-up (Lesson 166)**: cached `skipped` payload was returned before the job-aware lookup → banner flipped back to "AI targets off" ~15–20 s after Refresh. `findFreshInFlightSwingJob` moved **before** the cache (bypass only `absent`/`skipped`/`failed`), regression test added. Live: 15× `cache-bypass poll` with `cachedStatus=skipped`, job `85b8d47e` `total=20, succeeded=20, failed=0`, terminal `Telegram broadcast … status=done` (0 = local Prisma down).
+- **Docs**: `.agents/changelog/versions-v3.52.md` (updated) + AGENTS.md v3.52.0 row + `versions-index.md` + `Primer.md` + `agent-memory.md` + **Lesson 165** + **Lesson 166** + `.agents/session-todos.md` + this file + session archive `2026-10-22-prod-defect-batch/`.
+
+## Prior — v3.51.0 Spec 32 prod resilience
+
+> Snapshot from 2026-10-16.
 
 ## Status
 

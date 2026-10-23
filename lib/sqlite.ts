@@ -672,6 +672,8 @@ export interface SqliteFallback {
   getSwingAnalysisJobs(opts?: {
     status?: string | string[];
     limit?: number;
+    /** v3.52.0: "asc" (default, oldest first) or "desc" (newest first). */
+    order?: "asc" | "desc";
   }): Array<Record<string, unknown>>;
   /** Mirror read: swing signal rows for one job (camelCase rehydrated). */
   getSwingSignals(jobId: string): Array<Record<string, unknown>>;
@@ -1060,6 +1062,10 @@ const MIRROR_SNAPSHOT_BLOBS_MAX_BYTES = 200 * 1024 * 1024; // 200 MB hard cap
 let mirrorSnapshotBytes: Uint8Array | null = null;
 let mirrorSnapshotPathOverride: string | null = null;
 let mirrorBlobsLastDigest: string | null = null; // sha-256 of last successful upload
+// In-flight upload serialization (see uploadMirrorSnapshotToBlobs): concurrent
+// fire-and-forget callers must not race the digest check-then-set, or N
+// identical callers all pass the check before the first one records success.
+let mirrorBlobsUploadChain: Promise<void> | null = null;
 
 /** Resolve the on-disk snapshot path (overrideable for tests). */
 export function getMirrorSnapshotPath(): string {
@@ -1082,6 +1088,7 @@ export function resetMirrorSnapshotOverrides(): void {
   mirrorSnapshotPathOverride = null;
   mirrorSnapshotBytes = null;
   mirrorBlobsLastDigest = null;
+  mirrorBlobsUploadChain = null;
 }
 
 /** Write bytes to the snapshot path atomically (tmp + fsync + rename). Never throws. */
@@ -1265,6 +1272,7 @@ export function resetMirrorBlobsOverrides(): void {
   (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = undefined;
   (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStoreFailedAt = 0;
   mirrorBlobsLastDigest = null;
+  mirrorBlobsUploadChain = null;
   // v3.40.1: cancel any pending deferred Blobs restore so tests (and the next
   // real init) start from a clean slate — the 30s timer must not fire across
   // test cases or late-restore a DB from a previous test scenario.
@@ -1274,21 +1282,40 @@ export function resetMirrorBlobsOverrides(): void {
 /**
  * Upload the mirror bytes to Netlify Blobs (fire-and-forget callers). Skip
  * when unchanged since the last successful upload. Fail-open — never throws.
+ *
+ * Serialized (concurrency guard): the boot hydration, sync-complete, ops
+ * persistence tick and admin predeploy-preserve callers can all fire in the
+ * SAME second (prod 2026-10-17 05:07:47 logged 3× identical
+ * "mirror snapshot uploaded to Blobs" lines from one instance — 16 MB × 3).
+ * The digest check-then-set below is only a real dedup when it is atomic, so
+ * each caller queues behind the in-flight upload: identical content collapses
+ * to ONE `store.set`, differing content uploads in call order instead of
+ * racing. A failed upload still logs a warning and leaves the digest unset,
+ * so the next trigger retries exactly as before.
  */
 export async function uploadMirrorSnapshotToBlobs(bytes: Uint8Array | null): Promise<void> {
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MIRROR_SNAPSHOT_BLOBS_MAX_BYTES) return;
+  const prev = mirrorBlobsUploadChain ?? Promise.resolve();
+  const task = prev.then(async () => {
+    try {
+      const store = await getMirrorBlobsStore();
+      if (!store) return; // disk-only mode
+      const digest = sha256Hex(bytes);
+      if (mirrorBlobsLastDigest === digest) return; // unchanged → skip
+      // Blob/BlobPart types come from lib.dom; the Blob global exists at runtime
+      // in Node 18+ (and Next.js 16 requires newer).
+      await store.set(MIRROR_SNAPSHOT_BLOBS_KEY, new Blob([bytes as unknown as BlobPart]));
+      mirrorBlobsLastDigest = digest;
+      logger.info({ msg: "SQLite: mirror snapshot uploaded to Blobs", bytes: bytes.byteLength });
+    } catch (err) {
+      logger.warn({ msg: "SQLite: mirror Blobs upload failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+  mirrorBlobsUploadChain = task;
   try {
-    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MIRROR_SNAPSHOT_BLOBS_MAX_BYTES) return;
-    const store = await getMirrorBlobsStore();
-    if (!store) return; // disk-only mode
-    const digest = sha256Hex(bytes);
-    if (mirrorBlobsLastDigest === digest) return; // unchanged → skip
-    // Blob/BlobPart types come from lib.dom; the Blob global exists at runtime
-    // in Node 18+ (and Next.js 16 requires newer).
-    await store.set(MIRROR_SNAPSHOT_BLOBS_KEY, new Blob([bytes as unknown as BlobPart]));
-    mirrorBlobsLastDigest = digest;
-    logger.info({ msg: "SQLite: mirror snapshot uploaded to Blobs", bytes: bytes.byteLength });
-  } catch (err) {
-    logger.warn({ msg: "SQLite: mirror Blobs upload failed (fail-open)", error: err instanceof Error ? err.message : String(err) });
+    await task;
+  } finally {
+    if (mirrorBlobsUploadChain === task) mirrorBlobsUploadChain = null;
   }
 }
 
@@ -7105,6 +7132,7 @@ function createFallback(db: Database): SqliteFallback {
     getSwingAnalysisJobs(opts?: {
       status?: string | string[];
       limit?: number;
+      order?: "asc" | "desc";
     }): Array<Record<string, unknown>> {
       const _start = performance.now();
       if (!db) {
@@ -7116,12 +7144,13 @@ function createFallback(db: Database): SqliteFallback {
           ? opts!.status
           : [opts?.status ?? "running"];
         const limit = opts?.limit ?? 100;
+        const order = opts?.order === "desc" ? "DESC" : "ASC";
         const statusWhere =
           statusList.length === 1
             ? "status = ?"
             : `status IN (${statusList.map(() => "?").join(", ")})`;
         const rows = db.exec(
-          `SELECT * FROM swing_analysis_job WHERE ${statusWhere} ORDER BY created_at ASC LIMIT ?`,
+          `SELECT * FROM swing_analysis_job WHERE ${statusWhere} ORDER BY created_at ${order} LIMIT ?`,
           [...statusList, limit],
         );
         if (!rows.length || !rows[0].values.length) {

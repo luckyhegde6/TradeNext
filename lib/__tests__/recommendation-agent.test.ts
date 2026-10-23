@@ -66,7 +66,9 @@ jest.mock("@/lib/services/ai/quotaLatch", () => ({
 import {
   analyzeStocks,
   analyzeSingleStock,
+  rankStockAnalysisResults,
   type StockAnalysisInput,
+  type StockAnalysisResult,
 } from "@/lib/services/ai/recommendation-agent";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -206,16 +208,16 @@ describe("recommendation-agent", () => {
       expect(results[0].executionMs).toBeGreaterThanOrEqual(0);
     });
 
-    test("analyzes multiple stocks in batches of 5", async () => {
-      const stocks = Array.from({ length: 7 }, (_, i) =>
+    test("analyzes multiple stocks in batches of 20", async () => {
+      const stocks = Array.from({ length: 25 }, (_, i) =>
         makeStock({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
-      mockDirectPrompt.mockResolvedValue(makeAIResponse(stocks.slice(0, 5)));
+      mockDirectPrompt.mockResolvedValue(makeAIResponse(stocks.slice(0, 20)));
 
       const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
-      // 7 stocks = 2 batches (5 + 2)
+      // v3.52.0: BATCH_SIZE=20 → 25 stocks = 2 batches (20 + 5)
       expect(mockDirectPrompt).toHaveBeenCalledTimes(2);
-      expect(results).toHaveLength(7);
+      expect(results).toHaveLength(25);
     });
 
     test("tracks successful AI call via monitoring", async () => {
@@ -322,10 +324,13 @@ describe("recommendation-agent", () => {
       mockDirectPrompt.mockResolvedValue(response);
 
       const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
-      expect(results[0].symbol).toBe("RELIANCE");
-      expect(results[0].aiRecommendation.recommendation).toBe("SELL");
-      expect(results[1].symbol).toBe("TCS");
-      expect(results[1].aiRecommendation.recommendation).toBe("BUY");
+      const reliance = results.find((r) => r.symbol === "RELIANCE");
+      const tcs = results.find((r) => r.symbol === "TCS");
+      expect(reliance?.aiRecommendation.recommendation).toBe("SELL");
+      expect(tcs?.aiRecommendation.recommendation).toBe("BUY");
+      // v3.52.0: batch results are combined AND ranked by confidence desc,
+      // so the AI's response order never leaks into the feed.
+      expect(results[0].symbol).toBe("TCS");
     });
   });
 
@@ -565,28 +570,34 @@ describe("recommendation-agent", () => {
 
   describe("Batch failure isolation", () => {
     test("continues processing after one batch fails", async () => {
-      const stocks = Array.from({ length: 10 }, (_, i) =>
+      const stocks = Array.from({ length: 40 }, (_, i) =>
         makeStock({ symbol: `STOCK${i + 1}`, price: 100 * (i + 1) }),
       );
 
       // Implementation-based mock keeps behavior deterministic under the
       // CONCURRENCY=3 worker pool (a sequential queue would race): batch 1
-      // (STOCK1-5) always fails both attempts; batch 2 (STOCK6-10) succeeds.
-      // NOTE: regex \bSTOCK1\b — a plain includes("STOCK1") also matches
-      // "STOCK10", which would wrongly reject batch 2.
+      // (STOCK1-20) always fails both attempts; batch 2 (STOCK21-40) succeeds.
+      // NOTE: `\bSTOCK1\b` — a plain includes("STOCK1") also matches "STOCK10",
+      // which would wrongly reject batch 2.
       mockDirectPrompt.mockImplementation((prompt: string) => {
         if (/\bSTOCK1\b/.test(prompt)) {
           return Promise.reject(new Error("Batch 1 failed"));
         }
-        return Promise.resolve(makeAIResponse(stocks.slice(5, 10)));
+        return Promise.resolve(makeAIResponse(stocks.slice(20, 40)));
       });
 
       const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
-      expect(results).toHaveLength(10);
-      // First 5 are failed
-      expect(results.slice(0, 5).every((r) => r.success === false)).toBe(true);
-      // Last 5 are successful
-      expect(results.slice(5).every((r) => r.success === true)).toBe(true);
+      expect(results).toHaveLength(40);
+      // v3.52.0 BATCH_SIZE=20 → 40 stocks = 2 batches. Failed results are
+      // ranked LAST (success before failure), so assert per-symbol.
+      const failed = results.filter((r) => !r.success).map((r) => r.symbol);
+      const succeeded = results.filter((r) => r.success).map((r) => r.symbol);
+      expect(failed).toHaveLength(20);
+      expect(succeeded).toHaveLength(20);
+      expect(failed).toEqual(expect.arrayContaining(["STOCK1", "STOCK20"]));
+      expect(succeeded).toEqual(expect.arrayContaining(["STOCK21", "STOCK40"]));
+      // A failed stock never outranks a real verdict.
+      expect(results.slice(0, 20).every((r) => r.success)).toBe(true);
     });
   });
 
@@ -600,6 +611,85 @@ describe("recommendation-agent", () => {
       const result = await analyzeSingleStock(stock, VALID_AI_CONFIG);
       expect(result.symbol).toBe("RELIANCE");
       expect(result.success).toBe(true);
+    });
+  });
+
+  // ── Combined-batch ranking (v3.52.0) ─────────────────────────────────
+
+  describe("rankStockAnalysisResults", () => {
+    const result = (overrides: Partial<StockAnalysisResult> & { symbol: string }): StockAnalysisResult => ({
+      price: 100,
+      change: 1,
+      changePercent: 1,
+      volume: 1_000,
+      screenerNames: [],
+      aiRecommendation: {
+        recommendation: "HOLD",
+        confidence: 50,
+        targetPrice: 0,
+        stopLoss: 0,
+        timeHorizon: "medium",
+        reasoning: "",
+        riskFactors: [],
+      },
+      tokensUsed: 0,
+      executionMs: 0,
+      success: true,
+      ...overrides,
+    });
+
+    test("orders by confidence desc first", () => {
+      const ranked = rankStockAnalysisResults([
+        result({ symbol: "A", aiRecommendation: { ...result({ symbol: "A" }).aiRecommendation, confidence: 60 } }),
+        result({ symbol: "B", aiRecommendation: { ...result({ symbol: "B" }).aiRecommendation, confidence: 91 } }),
+        result({ symbol: "C", aiRecommendation: { ...result({ symbol: "C" }).aiRecommendation, confidence: 75 } }),
+      ]);
+      expect(ranked.map((r) => r.symbol)).toEqual(["B", "C", "A"]);
+    });
+
+    test("breaks confidence ties by screener agreement, then market cap", () => {
+      const ranked = rankStockAnalysisResults([
+        result({ symbol: "LOWCAP", screenerNames: ["s1"], marketCap: 1e9 }),
+        result({ symbol: "BIGCAP", screenerNames: ["s1"], marketCap: 1e12 }),
+        result({ symbol: "MULTI", screenerNames: ["s1", "s2", "s3"], marketCap: 1e8 }),
+      ]);
+      expect(ranked.map((r) => r.symbol)).toEqual(["MULTI", "BIGCAP", "LOWCAP"]);
+    });
+
+    test("always puts failed analyses last, even at higher confidence", () => {
+      const ranked = rankStockAnalysisResults([
+        result({
+          symbol: "FAILED",
+          success: false,
+          error: "bad response",
+          aiRecommendation: { ...result({ symbol: "FAILED" }).aiRecommendation, confidence: 99 },
+        }),
+        result({ symbol: "OK", aiRecommendation: { ...result({ symbol: "OK" }).aiRecommendation, confidence: 40 } }),
+      ]);
+      expect(ranked.map((r) => r.symbol)).toEqual(["OK", "FAILED"]);
+    });
+
+    test("is deterministic for full ties (symbol asc) and does not mutate the input", () => {
+      const input = [result({ symbol: "ZED" }), result({ symbol: "ACME" })];
+      const ranked = rankStockAnalysisResults(input);
+      expect(ranked.map((r) => r.symbol)).toEqual(["ACME", "ZED"]);
+      expect(input.map((r) => r.symbol)).toEqual(["ZED", "ACME"]);
+    });
+
+    test("analyzeStocks returns the combined batches in ranked order", async () => {
+      const stocks = [
+        makeStock({ symbol: "LOW", price: 100 }),
+        makeStock({ symbol: "HIGH", price: 200 }),
+      ];
+      mockDirectPrompt.mockResolvedValue(
+        JSON.stringify([
+          { symbol: "LOW", recommendation: "BUY", confidence: 55, targetPrice: 110, stopLoss: 95, timeHorizon: "short", reasoning: "ok", riskFactors: [] },
+          { symbol: "HIGH", recommendation: "BUY", confidence: 90, targetPrice: 220, stopLoss: 190, timeHorizon: "short", reasoning: "best", riskFactors: [] },
+        ]),
+      );
+
+      const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
+      expect(results.map((r) => r.symbol)).toEqual(["HIGH", "LOW"]);
     });
   });
 });

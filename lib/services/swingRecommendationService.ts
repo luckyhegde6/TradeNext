@@ -650,6 +650,28 @@ export function flushSwingAnalysis(): Promise<void> {
 export const SWING_JOB_STALE_MS = 45 * 60 * 1000;
 export const SWING_JOB_MAX_ATTEMPTS = 2;
 
+/**
+ * v3.52.0: how long after completion a terminal swing job may still trigger its
+ * ONE Telegram notification. Bounded so a fresh deploy cannot resurrect week-old
+ * jobs and spam subscribers; long enough to cover a suspended instance that
+ * only wakes hours later.
+ */
+export const SWING_TG_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * v3.52.0: how far back the 15-min daemon sweep looks for a terminal job whose
+ * notification never left the process (frozen instance). Narrow on purpose — a
+ * fresh boot must never resurrect an older run and message subscribers about it.
+ */
+export const SWING_TG_FLUSH_MS = 60 * 60 * 1000;
+
+/**
+ * Per-process guard for the notification flush (the durable flag lives in the
+ * job payload; this only stops the same instance racing itself when the request
+ * path and the daemon tick observe the same job).
+ */
+const swingNotifyInFlight = new Set<string>();
+
 /** Normalize a job row into the public SwingResponse the tab renders. */
 export function jobToResponse(job: Record<string, unknown>): SwingResponse {
   const payload = (job.payload ?? {}) as Partial<SwingResponse>;
@@ -680,6 +702,132 @@ export function jobToResponse(job: Record<string, unknown>): SwingResponse {
   }
   // pending | running → the frozen screener feed; the tab polls until done.
   return base;
+}
+
+/**
+ * v3.52.0 (Spec 33 follow-up) — the newest FRESH pending/running job, or null.
+ *
+ * Extracted so `getSwingRecommendations` can consult the in-flight job BEFORE
+ * its cache short-circuit: the `analyze=false` auto-poll used to be answered
+ * from the warm-up's cached screener-only payload (`analysisStatus: "skipped"`
+ * → "AI targets off") while a manual Refresh's job was still pending, so the
+ * pending banner silently disappeared ~15 s after Refresh.
+ *
+ * A stale row (abandoned instance) is NOT in flight — it must not mask the
+ * cached/terminal feed; recovery settles it separately.
+ */
+function findFreshInFlightSwingJob(
+  sqlite: ReturnType<typeof getSqliteFallback>,
+): Record<string, unknown> | null {
+  const jobs =
+    sqlite?.getSwingAnalysisJobs({ status: ["pending", "running"], limit: 50 }) ?? [];
+  const latest = jobs.length > 0 ? jobs[jobs.length - 1] : null;
+  if (!latest) return null;
+  const status = String(latest.status ?? "");
+  const raw = status === "running" ? latest.startedAt : latest.createdAt;
+  const startedAt =
+    raw instanceof Date ? raw.getTime() : new Date(String(raw ?? "")).getTime();
+  if (!Number.isNaN(startedAt) && startedAt < Date.now() - SWING_JOB_STALE_MS) {
+    return null;
+  }
+  return latest;
+}
+
+/**
+ * v3.52.0: deliver the ONE Telegram notification for a terminal swing job.
+ *
+ * Why this exists (prod defect: "no telegram notification on swing"): the
+ * broadcast used to live at the tail of `processSwingAnalysisJob` only. On
+ * Netlify the HTTP request that kicks the analysis is frozen as soon as the
+ * response is written, so the analysis finishes (or is recovered) on a
+ * different instance/tick — and the stale-exhausted recovery path marked the
+ * job `failed` with NO broadcast at all. Notification therefore depended on
+ * which process happened to finish the work.
+ *
+ * Design: the delivery marker lives in the job payload (`tgNotifiedAt`) — the
+ * payload column is JSON on both SQLite and Prisma, so no migration is needed.
+ * Every observation point (processing tail, stale recovery, terminal serve)
+ * calls this helper; the marker makes it at-most-once per job, and the bounded
+ * window stops a fresh boot from resurrecting an old job and spamming users.
+ */
+export async function notifySwingTerminal(jobId: string): Promise<boolean> {
+  if (!jobId || swingNotifyInFlight.has(jobId)) return false;
+
+  const sqlite = getSqliteFallback();
+  if (!sqlite) return false;
+
+  const job = sqlite.getSwingAnalysisJob(jobId);
+  if (!job) return false;
+
+  const status = String(job.status ?? "");
+  if (status !== "done" && status !== "failed") return false;
+
+  const payload = (job.payload ?? {}) as Partial<SwingResponse> & {
+    tgNotifiedAt?: string;
+  };
+  if (payload.tgNotifiedAt) return false; // already delivered — never re-send
+
+  const stocks = payload.stocks ?? [];
+  if (stocks.length === 0) return false;
+
+  // Bounded window: a job completed long ago (deploy, cold boot, recovery) must
+  // not fire a stale "today's picks" message.
+  const completedRaw =
+    job.completedAt instanceof Date
+      ? job.completedAt
+      : new Date(String(job.completedAt ?? job.updatedAt ?? ""));
+  if (
+    !Number.isNaN(completedRaw.getTime()) &&
+    Date.now() - completedRaw.getTime() > SWING_TG_WINDOW_MS
+  ) {
+    return false;
+  }
+
+  swingNotifyInFlight.add(jobId);
+  try {
+    const { broadcastToSubscribers } = await import("./telegramBotService");
+    const { buildSwingBroadcast, buildSwingUnavailableNotice } = await import(
+      "./recommendationBroadcast"
+    );
+
+    const tgMessage =
+      status === "done"
+        ? buildSwingBroadcast(
+            stocks.map((s) => ({ symbol: s.symbol, price: s.price, analysis: s.analysis })),
+          )
+        : buildSwingUnavailableNotice(
+            undefined,
+            payload.analysisError ?? (job.error != null ? String(job.error) : null),
+          );
+
+    // `prependTitle: false` — the builders already carry the `🔔 <header>` line,
+    // otherwise subscribers would see two headers (v3.52.0).
+    const sent = await broadcastToSubscribers("🌊 Swing Signals", tgMessage, {
+      prependTitle: false,
+    });
+    logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId, status });
+
+    // Mark after the attempt (never before) so a crash retries on the next
+    // observation; merge into the existing payload so the stock feed survives.
+    const fresh = sqlite.getSwingAnalysisJob(jobId);
+    if (fresh) {
+      sqlite.upsertSwingAnalysisJob({
+        ...fresh,
+        payload: {
+          ...((fresh.payload ?? {}) as Record<string, unknown>),
+          tgNotifiedAt: new Date().toISOString(),
+          tgNotifiedSent: sent,
+        },
+        updatedAt: new Date(),
+      });
+    }
+    return sent > 0;
+  } catch (tgErr) {
+    logger.warn({ msg: "Swing Telegram broadcast failed (non-critical)", error: tgErr, jobId });
+    return false;
+  } finally {
+    swingNotifyInFlight.delete(jobId);
+  }
 }
 
 /**
@@ -869,24 +1017,12 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
   // (24h done-cache; the DB row remains the durable source of truth).
   staticCache.set(`${SWING_CACHE_KEY}:ai`, response, SWING_DONE_CACHE_TTL);
 
-  // v3.16.0: broadcast actionable swing signals (LONG/SHORT) to Telegram
-  // subscribers after successful analysis. Non-critical — notification
-  // failures must never affect the feed or the DB job.
-  if (analysisStatus === "done") {
-    try {
-      const { broadcastToSubscribers } = await import("./telegramBotService");
-      const { buildSwingBroadcast } = await import("./recommendationBroadcast");
-      const tgMessage = buildSwingBroadcast(stocks.map((s) => ({
-        symbol: s.symbol,
-        price: s.price,
-        analysis: s.analysis,
-      })));
-      const sent = await broadcastToSubscribers("🌊 Swing Signals", tgMessage);
-      logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId: jobId });
-    } catch (tgErr) {
-      logger.warn({ msg: "Swing Telegram broadcast failed (non-critical)", error: tgErr });
-    }
-  }
+  // v3.16.0 + Spec 33 + v3.52.0: broadcast swing signals to Telegram
+  // subscribers on terminal states. The helper owns the durable
+  // `payload.tgNotifiedAt` marker, so a job is notified exactly once even when
+  // the request-path processor is frozen and the daemon settles it later.
+  // Non-critical — notification failures must never affect the feed or the job.
+  await notifySwingTerminal(jobId);
 }
 
 /**
@@ -930,6 +1066,9 @@ export async function maybeProcessSwingAnalysis(): Promise<void> {
             updatedAt: new Date(),
           });
           exhausted++;
+          // v3.52.0: this path used to end a job silently — the user never
+          // learned the analysis died. Notify once (durable marker).
+          notifySwingTerminal(String(row.id ?? "")).catch(() => undefined);
         }
       }
       if (retried > 0 || exhausted > 0) {
@@ -940,9 +1079,35 @@ export async function maybeProcessSwingAnalysis(): Promise<void> {
         });
       }
 
+      // v3.52.0: notification flush. The broadcast at the tail of
+      // `processSwingAnalysisJob` is lost whenever Netlify freezes the instance
+      // right after it persisted the terminal status (or the job was settled by
+      // a recovery path). Every daemon tick sweeps recent terminal jobs that
+      // still lack the durable `tgNotifiedAt` marker, so a subscriber always
+      // gets exactly one message. Bounded to the last hour: a fresh boot must
+      // not resurrect yesterday's run and spam users.
       const pending = sqlite.getSwingAnalysisJobs({ status: "pending", limit: 1 })[0];
-      if (!pending) return;
-      await processSwingAnalysisJob(pending);
+      if (pending) await processSwingAnalysisJob(pending);
+
+      // v3.52.0: notification flush. The broadcast at the tail of
+      // `processSwingAnalysisJob` is lost whenever Netlify freezes the instance
+      // right after it persisted the terminal status (or the job was settled by
+      // a recovery path). Every daemon tick sweeps recent terminal jobs that
+      // still lack the durable `tgNotifiedAt` marker, so a subscriber always
+      // gets exactly one message. Bounded to the last hour: a fresh boot must
+      // not resurrect yesterday's run and spam users. Runs AFTER the pending
+      // job so a real analysis is never delayed by notification work.
+      const flushAfter = Date.now() - SWING_TG_FLUSH_MS;
+      const recentTerminal =
+        sqlite.getSwingAnalysisJobs({ status: ["done", "failed"], limit: 5, order: "desc" }) ?? [];
+      for (const row of recentTerminal) {
+        const completed =
+          row.completedAt instanceof Date
+            ? row.completedAt
+            : new Date(String(row.completedAt ?? ""));
+        if (Number.isNaN(completed.getTime()) || completed.getTime() < flushAfter) continue;
+        await notifySwingTerminal(String(row.id ?? ""));
+      }
     } catch (e) {
       logger.error({
         msg: "Swing analysis processor crashed — job stays pending for next tick",
@@ -970,17 +1135,8 @@ export async function getSwingRecommendations(
 ): Promise<SwingResponse> {
   const { forceRefresh = false, analyze = true } = options;
 
-  // The analyze flag changes the cached payload (AI-analyzed vs screener-only):
-  // an `analyze=false` warm-up must never serve its no-AI result to the tab's
-  // `analyze=true` request (and vice versa) — keep separate cache entries.
-  const cacheKey = `${SWING_CACHE_KEY}:${analyze ? "ai" : "noai"}`;
-  if (!forceRefresh) {
-    const cached = staticCache.get<SwingResponse>(cacheKey);
-    if (cached) return cached;
-  }
-
   // v3.23.x: during a plan-limit hold the Prisma account is unavailable —
-  // the cached payload above is served on steady-state polls; below we avoid
+  // the cached payload below is served on steady-state polls; below we avoid
   // EVERY Prisma read/write (job lookup, supersede, job create, signal
   // persistence, processor kick) and fall through to a screener-only feed.
   // The tab degrades gracefully (honest "pending" analysis) and Prisma is
@@ -988,6 +1144,42 @@ export async function getSwingRecommendations(
   const breakerOpen = isPlanLimitBreakerOpen();
   const templateIds = getSwingTemplateIds();
   const sqlite = getSqliteFallback();
+
+  // The analyze flag changes the cached payload (AI-analyzed vs screener-only):
+  // an `analyze=false` warm-up must never serve its no-AI result to the tab's
+  // `analyze=true` request (and vice versa) — keep separate cache entries.
+  const cacheKey = `${SWING_CACHE_KEY}:${analyze ? "ai" : "noai"}`;
+
+  // v3.52.0 (Spec 33 follow-up): job-awareness runs BEFORE the cache
+  // short-circuit. Spec 33 put it after, so the `analyze=false` auto-poll was
+  // answered from the warm-up's cached screener-only payload
+  // (`analysisStatus: "skipped"` → "AI targets off") ~15 s after a manual
+  // Refresh — the exact reported symptom, still live in dev. An absent /
+  // skipped / failed cached payload must never mask a fresh pending/running
+  // job; a cached `done` payload still wins (it is strictly richer).
+  if (!forceRefresh) {
+    const cached = staticCache.get<SwingResponse>(cacheKey);
+    const cacheHidesJob =
+      !cached ||
+      cached.analysisStatus === "skipped" ||
+      cached.analysisStatus === "failed";
+    if (cacheHidesJob && !breakerOpen) {
+      const inFlight = findFreshInFlightSwingJob(sqlite);
+      if (inFlight) {
+        maybeProcessSwingAnalysis().catch(() => undefined);
+        logger.info({
+          msg: "Swing served from in-flight job (cache-bypass poll)",
+          status: String(inFlight.status ?? ""),
+          jobId: String(inFlight.id ?? ""),
+          analyze,
+          forceRefresh,
+          cachedStatus: cached?.analysisStatus ?? "none",
+        });
+        return jobToResponse(inFlight);
+      }
+    }
+    if (cached) return cached;
+  }
 
   // Analyze=true fast path: a completed/pending DB job serves the response
   // WITHOUT re-running the screener — the job row is the durable source of
@@ -1037,6 +1229,9 @@ export async function getSwingRecommendations(
         // Prior run's AI verdicts — cache 24h as a steady-state accelerator.
         const served = jobToResponse(latestJob);
         staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        // v3.52.0: if the terminal broadcast never left the processing instance,
+        // this observation point delivers it (durable marker → exactly once).
+        notifySwingTerminal(String(latestJob.id ?? "")).catch(() => undefined);
         logger.info({
           msg: "Swing served from DB job",
           status,
@@ -1066,6 +1261,7 @@ export async function getSwingRecommendations(
         // keep the drain ticking so recovery settles the stale row.
         const served = jobToResponse(terminal);
         staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        notifySwingTerminal(String(terminal.id ?? "")).catch(() => undefined);
         maybeProcessSwingAnalysis().catch(() => undefined);
         logger.warn({
           msg: "Swing stale pending/running job — serving newest terminal result",

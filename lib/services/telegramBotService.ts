@@ -852,11 +852,20 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
  * Send a proactive alert to a specific user by their Telegram chat ID.
  * Used for pushing alerts when they trigger, not in response to a command.
  */
-export async function sendAlertToUser(chatId: string, title: string, message: string, link?: string): Promise<boolean> {
+export async function sendAlertToUser(
+  chatId: string,
+  title: string,
+  message: string,
+  link?: string,
+  opts: { prependTitle?: boolean } = {},
+): Promise<boolean> {
   const envConfig = getTelegramEnvConfig();
   if (!envConfig?.configured) return false;
 
-  const text = `🔔 *${title}*\n${message}`;
+  // v3.52.0: broadcast bodies already carry their own `🔔 <header>` line, so
+  // prepending `🔔 *title*` produced a duplicated header in subscribers'
+  // Telegram. Callers that want the title inline pass prependTitle:false.
+  const text = opts.prependTitle === false ? message : `🔔 *${title}*\n${message}`;
 
   try {
     const tgConfig = {
@@ -875,8 +884,16 @@ export async function sendAlertToUser(chatId: string, title: string, message: st
 /**
  * Send a broadcast message to all subscribed users.
  * Used for admin announcements.
+ *
+ * @param opts.prependTitle Prefix `🔔 *title*` (default true). Pass `false` when
+ *   the message body already starts with its own `🔔 ...` header — otherwise
+ *   subscribers see two headers (v3.52.0).
  */
-export async function broadcastToSubscribers(title: string, message: string): Promise<number> {
+export async function broadcastToSubscribers(
+  title: string,
+  message: string,
+  opts: { prependTitle?: boolean } = {},
+): Promise<number> {
   try {
     // v3.16.0: surface a clear warning when Telegram env vars are missing so
     // admins can diagnose silent broadcast failures from logs.
@@ -898,18 +915,34 @@ export async function broadcastToSubscribers(title: string, message: string): Pr
       select: { telegramChatId: true },
     });
 
+    if (subscribers.length === 0) {
+      logger.warn({
+        msg: "Telegram broadcast skipped — no verified subscribers",
+        title,
+      });
+      return 0;
+    }
+
     let sent = 0;
     for (const sub of subscribers) {
       if (sub.telegramChatId) {
-        const ok = await sendAlertToUser(sub.telegramChatId, title, message);
+        const ok = await sendAlertToUser(sub.telegramChatId, title, message, undefined, opts);
         if (ok) sent++;
       }
     }
 
-    logger.info({ msg: "Telegram broadcast sent", total: subscribers.length, sent });
+    // v3.52.0: log failures too — `sent < total` is the only signal that a
+    // partial delivery (bad Markdown, blocked bot) happened, and it was silent.
+    logger.info({
+      msg: "Telegram broadcast sent",
+      title,
+      total: subscribers.length,
+      sent,
+      failed: subscribers.length - sent,
+    });
     return sent;
   } catch (err) {
-    logger.error({ msg: "Telegram broadcast failed", error: err });
+    logger.error({ msg: "Telegram broadcast failed", title, error: err });
     return 0;
   }
 }

@@ -302,6 +302,37 @@ describe("durable mirror snapshot (golden, real sql.js)", () => {
     expect(blobs.setCalls.length).toBe(setsAfterBoot + 1);
   });
 
+  it("concurrent identical uploads collapse to ONE store.set (race guard; prod 2026-10-17 05:07:47)", async () => {
+    await boot();
+    const setsAfterBoot = blobs.setCalls.length;
+    const diskBytes = new Uint8Array(fs.readFileSync(mirrorFile));
+
+    // Changed content so the digest gate alone cannot absorb the burst: three
+    // simultaneous fire-and-forget callers — the exact prod shape where boot
+    // hydration + sync-complete + predeploy preserve fired in the same second
+    // and each one passed the digest check before the first recorded success,
+    // uploading 16 MB × 3.
+    const fresh = new Uint8Array([...Buffer.from(diskBytes), 0x0a, 0x0b]);
+    await Promise.all([
+      uploadMirrorSnapshotToBlobs(fresh),
+      uploadMirrorSnapshotToBlobs(fresh),
+      uploadMirrorSnapshotToBlobs(fresh),
+    ]);
+    expect(blobs.setCalls.length).toBe(setsAfterBoot + 1);
+
+    // Differing payloads in one burst are serialized, never dropped: each
+    // unique payload uploads exactly once and the LAST caller's bytes win the
+    // stored snapshot (no stale overwrite from a racing earlier caller).
+    const a = new Uint8Array([...Buffer.from(diskBytes), 0x0c]);
+    const b = new Uint8Array([...Buffer.from(diskBytes), 0x0c, 0x0d]);
+    await Promise.all([uploadMirrorSnapshotToBlobs(a), uploadMirrorSnapshotToBlobs(b)]);
+    expect(blobs.setCalls.length).toBe(setsAfterBoot + 3);
+
+    const final = await blobs.get(MIRROR_BLOBS_KEY);
+    expect(final).not.toBeNull();
+    expect(new Uint8Array(final as ArrayBuffer)).toEqual(b);
+  });
+
   it("fresh boot (no snapshot anywhere) creates a real mirror file", async () => {
     await boot();
     expect(fs.existsSync(mirrorFile)).toBe(true);

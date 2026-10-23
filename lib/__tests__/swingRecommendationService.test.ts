@@ -21,6 +21,13 @@ jest.mock("@/lib/services/ai/swing-agent", () => ({
   analyzeSwingStocks: jest.fn(),
 }));
 
+// v3.52.0 — durable terminal notification. Mocked so the notification tests
+// assert the broadcast contract without touching the Bot API/prisma.user.
+jest.mock("@/lib/services/telegramBotService", () => ({
+  __esModule: true,
+  broadcastToSubscribers: jest.fn().mockResolvedValue(1),
+}));
+
 jest.mock("@/lib/services/ai/config", () => ({
   loadConfig: jest.fn(),
 }));
@@ -66,10 +73,16 @@ jest.mock("@/lib/sqlite", () => {
 
   const fallback = {
     getSwingAnalysisJobs: jest.fn(
-      ({ status, limit }: { status?: string | string[]; limit?: number } = {}) => {
+      ({
+        status,
+        limit,
+        order,
+      }: { status?: string | string[]; limit?: number; order?: "asc" | "desc" } = {}) => {
         const rows = swingJobs
           .filter((j) => statusMatch(j.status, status))
           .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0));
+        // v3.52.0: the service's notification sweep asks for the NEWEST jobs.
+        if (order === "desc") rows.reverse();
         return limit !== undefined ? rows.slice(0, limit) : rows;
       },
     ),
@@ -666,6 +679,34 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingJobs).toHaveLength(0); // no job for analyze=false
   });
 
+  it("serves the in-flight job to an analyze=false poll even when a skipped payload is cached (Spec 33 follow-up)", async () => {
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+
+    // 1. Auto warm-up caches the screener-only feed → header "AI targets off".
+    const warm = await getSwingRecommendations({ analyze: false, forceRefresh: true });
+    expect(warm.analysisStatus).toBe("skipped");
+    expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
+
+    // 2. A manual Refresh started a durable job that is still pending.
+    swingJobs.push({
+      ...makeJobInput(),
+      id: "job-inflight",
+      createdAt: new Date(Date.now() - 5_000),
+    });
+    runChartinkUnifiedScreeners.mockRejectedValue(new Error("poll must not scan"));
+
+    // 3. Regression: the cached `skipped` payload must NOT answer the poll —
+    //    the pending banner silently flipped to "AI targets off" ~15 s after
+    //    Refresh because the cache short-circuit ran before the job lookup.
+    const polled = await getSwingRecommendations({ analyze: false });
+    expect(polled.analysisStatus).toBe("pending");
+    expect(polled.stocks).toHaveLength(1);
+    expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1); // no re-scan
+    expect(swingJobs).toHaveLength(1); // no second job created
+  });
+
   it("creates a durable pending job and settles it to failed with a readable error", async () => {
     analyzeSwingStocks.mockResolvedValue([
       {
@@ -1092,6 +1133,160 @@ describe("getSwingRecommendations audit logging", () => {
     expect(staticCache.get("swing:recommendations:ai")).toBeUndefined();
   });
 });
+
+// ─── Durable swing Telegram notification (v3.52.0) ────────────────────────
+// The broadcast used to live only at the tail of processSwingAnalysisJob, so a
+// frozen instance (or the stale-exhausted recovery path) dropped it entirely —
+// the prod symptom was "no telegram notification on swing". Delivery is now
+// marker-driven (`payload.tgNotifiedAt`) and observed from every terminal path.
+
+describe("notifySwingTerminal", () => {
+  const { broadcastToSubscribers } = jest.requireMock(
+    "@/lib/services/telegramBotService",
+  ) as { broadcastToSubscribers: jest.Mock };
+
+  const makeJob = (overrides: Record<string, any> = {}) => ({
+    id: "job-tg",
+    status: "done",
+    createdAt: new Date(Date.now() - 60_000),
+    completedAt: new Date(Date.now() - 30_000),
+    error: null,
+    templateCount: 1,
+    totalRaw: 1,
+    payload: {
+      stocks: [
+        {
+          symbol: "RELIANCE",
+          price: 2500,
+          changePercent: 0.5,
+          volume: 1_000_000,
+          screenerNames: ["Swing Breakout"],
+          screenerCount: 1,
+          families: ["breakout"],
+          templateIds: ["swing.breakout"],
+          source: "chartink_db",
+          momentumScore: 60,
+          indicators: { momentum10: 5, momentum20: 12, volatility20: 3, distanceFrom20dHigh: 2 },
+          analysis: {
+            direction: "LONG",
+            confidence: 80,
+            targetPrice: 2650,
+            stopLoss: 2400,
+            reasoning: "Breakout continuation.",
+          },
+          analysisError: null,
+        },
+      ],
+    },
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    swingJobs.length = 0;
+    broadcastToSubscribers.mockResolvedValue(1);
+  });
+
+  it("broadcasts a done job once, with a single header (prependTitle: false)", async () => {
+    const { notifySwingTerminal } = await import("@/lib/services/swingRecommendationService");
+    swingJobs.push(makeJob());
+
+    const ok = await notifySwingTerminal("job-tg");
+
+    expect(ok).toBe(true);
+    expect(broadcastToSubscribers).toHaveBeenCalledTimes(1);
+    const [title, message, opts] = broadcastToSubscribers.mock.calls[0];
+    expect(title).toBe("🌊 Swing Signals");
+    expect(opts).toEqual({ prependTitle: false });
+    expect(message.startsWith("🔔 ")).toBe(true);
+    expect(message).toContain("Swing Signals —");
+
+    // Durable marker persisted in the job payload.
+    const stored = swingJobs[0];
+    expect(stored.payload.tgNotifiedAt).toBeTruthy();
+    expect(stored.payload.stocks).toHaveLength(1); // payload merged, not replaced
+  });
+
+  it("never re-sends for the same job", async () => {
+    const { notifySwingTerminal } = await import("@/lib/services/swingRecommendationService");
+    swingJobs.push(makeJob());
+
+    await notifySwingTerminal("job-tg");
+    await notifySwingTerminal("job-tg");
+    await notifySwingTerminal("job-tg");
+
+    expect(broadcastToSubscribers).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips non-terminal jobs", async () => {
+    const { notifySwingTerminal } = await import("@/lib/services/swingRecommendationService");
+    swingJobs.push(makeJob({ status: "pending", completedAt: null }));
+
+    await expect(notifySwingTerminal("job-tg")).resolves.toBe(false);
+    expect(broadcastToSubscribers).not.toHaveBeenCalled();
+  });
+
+  it("skips a job completed outside the notification window", async () => {
+    const { notifySwingTerminal, SWING_TG_WINDOW_MS } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    swingJobs.push(
+      makeJob({ completedAt: new Date(Date.now() - SWING_TG_WINDOW_MS - 60_000) }),
+    );
+
+    await expect(notifySwingTerminal("job-tg")).resolves.toBe(false);
+    expect(broadcastToSubscribers).not.toHaveBeenCalled();
+  });
+
+  it("sends an honest failure notice for a failed job (no 'no signals' claim)", async () => {
+    const { notifySwingTerminal } = await import("@/lib/services/swingRecommendationService");
+    swingJobs.push(
+      makeJob({
+        status: "failed",
+        error: "Swing AI analysis timed out after 2 attempt(s)",
+        payload: {
+          stocks: [{ symbol: "RELIANCE", price: 2500, analysis: null, analysisError: "boom" }],
+          analysisError: "boom",
+        },
+      }),
+    );
+
+    await notifySwingTerminal("job-tg");
+
+    expect(broadcastToSubscribers).toHaveBeenCalledTimes(1);
+    const [, message] = broadcastToSubscribers.mock.calls[0];
+    expect(message).toContain("Swing Analysis Unavailable");
+    expect(message).not.toContain("No actionable swing signals");
+  });
+
+  it("is invoked by the processor tail (fresh completion path)", async () => {
+    const { analyzeSwingStocks } = jest.requireMock("@/lib/services/ai/swing-agent") as {
+      analyzeSwingStocks: jest.Mock;
+    };
+    const { processSwingAnalysisJob } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    analyzeSwingStocks.mockResolvedValue([
+      {
+        symbol: "RELIANCE",
+        price: 2500,
+        changePercent: 0.5,
+        volume: 1_000_000,
+        screenerNames: ["Swing Breakout"],
+        families: ["breakout"],
+        success: true,
+        analysis: { direction: "LONG", confidence: 82, targetPrice: 2700, stopLoss: 2400 },
+      },
+    ]);
+    swingJobs.push(makeJob({ status: "pending", completedAt: null, analysisError: null }));
+
+    await processSwingAnalysisJob(swingJobs[0]);
+
+    expect(swingJobs[0].status).toBe("done");
+    expect(broadcastToSubscribers).toHaveBeenCalledTimes(1);
+  });
+});
+
 
 // ─── swingSignalDraft (v3.14.0 — posting snapshot) ─────────────────────────
 
