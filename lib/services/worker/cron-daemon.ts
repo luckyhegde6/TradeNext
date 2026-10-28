@@ -97,8 +97,26 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
 
   logger.info({ msg: "Starting cron daemon", daemonId: DAEMON_ID, timezone: DEFAULT_TIMEZONE });
 
+  // Spec 24: recover jobs whose node-cron tick was missed while the instance
+  // was suspended/recycled. Run BEFORE ensureRecommendationCrons so that
+  // overdue jobs are spawned before nextRun is advanced to the future.
+  // Run on boot (a fresh Netlify instance picks up jobs that ticked moments
+  // before the recycle) AND on every 5-min resync tick.
+  try {
+    const res = await catchUpMissedCronJobs();
+    if (res.recovered > 0 || res.skipped > 0) {
+      logger.info({ msg: "Cron boot catch-up", recovered: res.recovered, skipped: res.skipped });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Cron boot catch-up deferred (DB unavailable)",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // Self-heal: ensure the SYSTEM-managed recommendation cron rows exist
-  // before scheduling anything.
+  // before scheduling anything. Runs AFTER catch-up so overdue jobs are
+  // spawned first; nextRun is only advanced for jobs that aren't overdue.
   try {
     const { ensureRecommendationCrons } = await import("@/lib/services/recommendationCronService");
     const res = await ensureRecommendationCrons();
@@ -116,21 +134,6 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
   } catch (error) {
     logger.warn({
       msg: "Cron daemon initial sync deferred (DB unavailable)",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  // Spec 24: recover jobs whose node-cron tick was missed while the instance
-  // was suspended/recycled. Run on boot (a fresh Netlify instance picks up jobs
-  // that ticked moments before the recycle) AND on every 5-min resync tick.
-  try {
-    const res = await catchUpMissedCronJobs();
-    if (res.recovered > 0 || res.skipped > 0) {
-      logger.info({ msg: "Cron boot catch-up", recovered: res.recovered, skipped: res.skipped });
-    }
-  } catch (error) {
-    logger.warn({
-      msg: "Cron boot catch-up deferred (DB unavailable)",
       error: error instanceof Error ? error.message : String(error),
     });
   }

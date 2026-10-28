@@ -192,16 +192,19 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
         where: { name: def.name },
       });
 
+      // Compute the next future occurrence. Only used when the existing
+      // nextRun is null or already in the future — overdue jobs (nextRun in
+      // the past) are deliberately left untouched so catchUpMissedCronJobs()
+      // can find and spawn them. Advancing nextRun for an overdue job would
+      // silently drop it (the job fires once per day, so a missed tick means
+      // waiting until the next day).
       const nextRun = calculateNextRun(def.cronExpression, getCronFrom());
 
       if (existing) {
-        // Self-heal: keep the job active + fix schedule if drifted. nextRun
-        // is ALWAYS recomputed (v3.10.1 UTC semantics) so rows anchored by the
-        // old local-timezone parser (e.g. an IST dev machine computing
-        // "30 4 * * 1-5" as 04:30 IST = 23:00 UTC) self-correct on the next
-        // worker/Netlify startup. ensureRecommendationCrons runs once per
-        // start, never inside the 5s poll loop, so re-anchoring to the next
-        // future occurrence is safe (strictly-future; no immediate fire).
+        // Self-heal: keep the job active + fix schedule if drifted.
+        // ensureRecommendationCrons runs once per start (on boot), never inside
+        // the 5s poll loop. Do NOT advance nextRun for overdue jobs — leave
+        // them for catchUpMissedCronJobs() to spawn.
         const existingConfig = (existing.config ?? {}) as Record<string, unknown>;
         // Spec 25: a system row persisted with the old `timezone: "Asia/Kolkata"`
         // (or missing the systemManaged flag) must be rewritten, else the daemon
@@ -215,7 +218,16 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
           existing.cronExpression !== def.cronExpression ||
           configDrifted;
 
-        const data: Parameters<typeof prisma.cronJob.update>[0]["data"] = { nextRun };
+        // Only advance nextRun if it's null or already in the future. An
+        // overdue nextRun (past) must be preserved so catchUpMissedCronJobs
+        // can find and spawn the missed job.
+        const existingNextRun = existing.nextRun;
+        const nextRunIsOverdue =
+          existingNextRun instanceof Date && existingNextRun.getTime() <= Date.now();
+        const data: Parameters<typeof prisma.cronJob.update>[0]["data"] = {};
+        if (!nextRunIsOverdue) {
+          data.nextRun = nextRun;
+        }
         if (changed) {
           data.taskType = def.taskType;
           data.cronExpression = def.cronExpression;
@@ -224,7 +236,10 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
           data.config = { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE };
         }
 
-        await prisma.cronJob.update({ where: { id: existing.id }, data });
+        // Only update if there's something to change
+        if (changed || Object.keys(data).length > 0) {
+          await prisma.cronJob.update({ where: { id: existing.id }, data });
+        }
         logger.info({
           msg: changed ? "Self-healed recommendation cron job" : "Recomputed recommendation cron job nextRun",
           name: def.name,
