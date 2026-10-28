@@ -16,6 +16,7 @@
 import {
   buildRecommendationBroadcast,
   buildSwingBroadcast,
+  buildSwingUnavailableNotice,
   buildAiUnavailableNotice,
   MAX_BROADCAST_PICKS,
   MAX_SWING_BROADCAST_PICKS,
@@ -227,5 +228,52 @@ describe("buildAiUnavailableNotice", () => {
 
     expect(text).toContain("AI Analysis Unavailable —");
     expect(text).toContain("next scan at 10:00 AM IST tomorrow");
+  });
+});
+
+// ─── Single header (v3.52.0) ───────────────────────────────────────────────
+
+/**
+ * The broadcast used to prepend `🔔 *title*` in `broadcastToSubscribers` while
+ * every builder already carried its own `⚠️/📈/🌊 *… — date*` line, so
+ * subscribers saw two headers (`🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis
+ * Unavailable — 20 Oct 2026`). Every builder now owns the 🔔 prefix and the
+ * caller passes `{ prependTitle: false }`.
+ */
+describe("single-header contract (v3.52.0)", () => {
+  const bellPrefixed = (text: string) => text.split("\n")[0].startsWith("🔔 ");
+
+  it("AI-unavailable notice starts with one 🔔 header line", () => {
+    const text = buildAiUnavailableNotice(DATE);
+    const [header] = text.split("\n");
+
+    expect(bellPrefixed(text)).toBe(true);
+    expect(header).toContain("AI Analysis Unavailable");
+    // Exactly one header line in the whole message.
+    expect(text.split("\n").filter((l) => l.includes("AI Analysis Unavailable"))).toHaveLength(1);
+  });
+
+  it("daily broadcast starts with one 🔔 header line", () => {
+    const text = buildRecommendationBroadcast([stock("RELIANCE", "BUY")], DATE);
+
+    expect(bellPrefixed(text)).toBe(true);
+    expect(text.split("\n").filter((l) => l.includes("Daily Recommendations"))).toHaveLength(1);
+  });
+
+  it("swing broadcast starts with one 🔔 header line", () => {
+    const text = buildSwingBroadcast([swingStock("TATASTEEL", "LONG")], DATE);
+
+    expect(bellPrefixed(text)).toBe(true);
+    expect(text.split("\n").filter((l) => l.includes("Swing Signals"))).toHaveLength(1);
+  });
+
+  it("swing failure notice is honest about missing AI targets", () => {
+    const text = buildSwingUnavailableNotice(DATE, "AI provider timeout");
+
+    expect(bellPrefixed(text)).toBe(true);
+    expect(text).toContain("Swing Analysis Unavailable");
+    expect(text).toContain("AI provider timeout");
+    // A failed job must NOT claim "no actionable signals".
+    expect(text).not.toContain("No actionable swing signals");
   });
 });

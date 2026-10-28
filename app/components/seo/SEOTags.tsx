@@ -9,7 +9,7 @@
  * - No user-generated content is included
  */
 
-import { Metadata } from "next";
+import { Metadata, Viewport } from "next";
 import OrganizationSchema from "./OrganizationSchema";
 import WebSiteSchema from "./WebSiteSchema";
 import WebPageSchema from "./WebPageSchema";
@@ -117,6 +117,10 @@ export const defaultMetadata: Metadata = {
   },
   manifest: "/manifest.json",
   category: "Finance",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
 };
 
 /**

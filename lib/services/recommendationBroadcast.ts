@@ -62,8 +62,11 @@ function defaultDateLabel(): string {
 export function buildAiUnavailableNotice(
   dateLabel: string = defaultDateLabel(),
 ): string {
+  // v3.52.0: the header carries the 🔔 that `broadcastToSubscribers` used to
+  // prepend. Callers pass `{ prependTitle: false }` so subscribers see ONE
+  // header instead of `🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis Unavailable — …`.
   return (
-    `⚠️ *AI Analysis Unavailable — ${dateLabel}*\n\n` +
+    `🔔 ⚠️ *AI Analysis Unavailable — ${dateLabel}*\n\n` +
     `The AI provider could not complete analysis today. No daily picks generated.\n\n` +
     `The system is operating normally — next scan at 10:00 AM IST tomorrow.\n` +
     `View TradeNext → /recommendations`
@@ -85,7 +88,7 @@ export function buildRecommendationBroadcast(
   if (nonHold.length === 0) {
     const count = stocks.length;
     return (
-      `📈 *Daily Recommendations — ${dateLabel}*\n\n` +
+      `🔔 📈 *Daily Recommendations — ${dateLabel}*\n\n` +
       `No BUY/SELL picks today — all ${count} analyzed stock${count === 1 ? "" : "s"} rated HOLD.\n\n` +
       `View the full analysis on TradeNext → /recommendations`
     );
@@ -110,7 +113,7 @@ export function buildRecommendationBroadcast(
   const sellCount = nonHold.length - buyCount;
   const holdCount = stocks.length - nonHold.length;
 
-  let text = `📈 *Daily Recommendations — ${dateLabel}*\n\n${lines.join("\n\n")}`;
+  let text = `🔔 📈 *Daily Recommendations — ${dateLabel}*\n\n${lines.join("\n\n")}`;
   text +=
     `\n\n_🟢 ${buyCount} BUY · 🔴 ${sellCount} SELL` +
     (holdCount > 0 ? ` · ⚪ ${holdCount} HOLD not shown` : "") +
@@ -120,6 +123,25 @@ export function buildRecommendationBroadcast(
     text = text.slice(0, 4000 - "\n\n*(truncated)*".length) + "\n\n*(truncated)*";
   }
   return text;
+}
+
+/**
+ * v3.52.0: honest notice for a swing job that ended in `failed`.
+ *
+ * A failed job has NO AI verdicts, so `buildSwingBroadcast` would render its
+ * no-signals branch ("No actionable swing signals today") — misleading when the
+ * truth is "the AI never ran". Subscribers get the real reason instead.
+ */
+export function buildSwingUnavailableNotice(
+  dateLabel: string = defaultDateLabel(),
+  error?: string | null,
+): string {
+  const reason = error ? `\n\n_Reason: ${error}_` : "";
+  return (
+    `🔔 ⚠️ *Swing Analysis Unavailable — ${dateLabel}*\n\n` +
+    `The AI could not complete swing analysis, so no targets were generated.${reason}\n\n` +
+    `The screener feed is still available on TradeNext → /recommendations`
+  );
 }
 
 /**
@@ -144,7 +166,7 @@ export function buildSwingBroadcast(
 
   if (actionable.length === 0) {
     return (
-      `🌊 *Swing Signals — ${dateLabel}*\n\n` +
+      `🔔 🌊 *Swing Signals — ${dateLabel}*\n\n` +
       `No actionable swing signals today — ${stocks.length} stock${stocks.length === 1 ? "" : "s"} scanned.\n\n` +
       `View the full analysis on TradeNext → /recommendations`
     );
@@ -166,7 +188,7 @@ export function buildSwingBroadcast(
   const longCount = actionable.filter((s) => getDir(s.analysis!) === "LONG").length;
   const shortCount = actionable.length - longCount;
 
-  let text = `🌊 *Swing Signals — ${dateLabel}*\n\n${lines.join("\n\n")}`;
+  let text = `🔔 🌊 *Swing Signals — ${dateLabel}*\n\n${lines.join("\n\n")}`;
   text +=
     `\n\n_📈 ${longCount} LONG · 📉 ${shortCount} SHORT` +
     ` — view all on TradeNext → /recommendations_`;

@@ -4,6 +4,21 @@
 // Check if we're on the server side - always true for API routes and server components
 const isServer = typeof window === 'undefined';
 
+/**
+ * v3.52.0: mirror every logger call to an ADDITIONAL native console line.
+ * Default ON (user requirement: "wherever logger.info/warn/error exists add an
+ * additional console.log"); opt out with LOG_CONSOLE_EXTRA=false. Silent under
+ * NODE_ENV=test so Jest output stays readable.
+ */
+const extraConsoleEnabled = (() => {
+  try {
+    if (process.env.NODE_ENV === 'test') return false;
+    return process.env.LOG_CONSOLE_EXTRA !== 'false';
+  } catch {
+    return true;
+  }
+})();
+
 // Only import fs and path on the server
 let fs: any = null;
 let pathModule: any = null;
@@ -262,7 +277,12 @@ function formatLogEntry(level: LogLevel, message: string | object, ...args: any[
 }
 
 // Write to file - but ALWAYS log to console first
-function writeToFile(entry: string, level: LogLevel = 'info') {
+function writeToFile(
+  entry: string,
+  level: LogLevel = 'info',
+  message?: string | object,
+  args: any[] = [],
+) {
   // ALWAYS log to console - this is critical for debugging
   if (level === 'error' || level === 'warn') {
     console.error(entry);
@@ -270,6 +290,24 @@ function writeToFile(entry: string, level: LogLevel = 'info') {
     console.debug(entry);
   } else {
     console.log(entry);
+  }
+
+  // v3.52.0: ADDITIONAL structured console line for every logger call.
+  // The formatted line above is excellent for the log FILES but hard to filter
+  // in Netlify's function log viewer (one opaque string). This second native
+  // call keeps the level tag as a separate first argument and the raw message
+  // object as the second, so the platform renders an expandable object and
+  // `[WARN]`/`[ERROR]` greps work. One central place covers every call site.
+  // Disable with LOG_CONSOLE_EXTRA=false; skipped under NODE_ENV=test.
+  if (extraConsoleEnabled) {
+    try {
+      const tag = `[${level.toUpperCase()}]`;
+      if (level === 'error') console.error(tag, message, ...args);
+      else if (level === 'warn') console.warn(tag, message, ...args);
+      else console.log(tag, message, ...args);
+    } catch {
+      // console is always available in practice — never let mirroring throw.
+    }
   }
 
   // Then try to write to file
@@ -389,12 +427,12 @@ const createLogger = (): Logger => {
   return {
     info: (message, ...args) => {
       const entry = formatLogEntry('info', message, ...args);
-      writeToFile(entry, 'info');
+      writeToFile(entry, 'info', message, args);
     },
 
     warn: (message, ...args) => {
       const entry = formatLogEntry('warn', message, ...args);
-      writeToFile(entry, 'warn');
+      writeToFile(entry, 'warn', message, args);
     },
 
     error: (message: unknown, ...args: unknown[]) => {
@@ -408,14 +446,14 @@ const createLogger = (): Logger => {
       }
 
       const entry = formatLogEntry('error', msgObj, ...args);
-      writeToFile(entry, 'error');
+      writeToFile(entry, 'error', msgObj, args);
     },
 
     // Skip DEBUG logs unless in local/development
     debug: (message, ...args) => {
       if (!enableDebug) return; // Skip debug in production
       const entry = formatLogEntry('debug', message, ...args);
-      writeToFile(entry, 'debug');
+      writeToFile(entry, 'debug', message, args);
     },
 
     // NSE API tracking helper

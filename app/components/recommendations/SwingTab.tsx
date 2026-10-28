@@ -36,6 +36,7 @@ const ANALYSIS_STATUS_META: Record<SwingResponse["analysisStatus"], { label: str
 
 export default function SwingTab() {
   const [familyFilter, setFamilyFilter] = useState<SignalFamily | "all">("all");
+  const [lastRefreshAt, setLastRefreshAt] = useState<number>(0);
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<SwingResponse>(
     AUTO_FEED_URL,
@@ -43,13 +44,25 @@ export default function SwingTab() {
     {
       // Poll fast while AI targets are generating in the background, then
       // settle back to the standard 60s refresh once done/failed/skipped.
-      refreshInterval: (latestData) =>
-        latestData?.analysisStatus === "pending" ? 10_000 : 60_000,
+      refreshInterval: (latestData) => {
+        if (latestData?.analysisStatus === "pending") return 10_000;
+        // After a manual refresh, poll a bit more aggressively for a short window
+        // to pick up job completion even if backend timing is tight.
+        if (Date.now() - lastRefreshAt < 5 * 60_000) return 15_000;
+        return 60_000;
+      },
       revalidateOnFocus: false,
+      // NOTE (v3.52.0): an `onSuccess` guard used to live here to "ignore" a
+      // `skipped` response during a manual refresh — a no-op, because SWR has
+      // already committed the payload to cache before the callback runs. The
+      // race is fixed in the API instead: `getSwingRecommendations` is
+      // job-aware, so a `force=1` Refresh (and every poll after it) serves the
+      // in-flight job as `pending` until it reaches a terminal state.
     },
   );
 
   const refresh = () => {
+    setLastRefreshAt(Date.now());
     mutate(
       fetch(REFRESH_FEED_URL).then((r) => r.json()),
       { revalidate: false },
