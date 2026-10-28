@@ -7,8 +7,15 @@
 // swing-agent, ipoAnalysisService) tries the primary first, then these
 // fallback routes, so one dead model no longer kills a whole batch.
 
-/** Fallback routes probed in order when the configured model fails. */
-export const AI_FALLBACK_MODELS = ["openrouter/free", "openrouter/auto"] as const;
+/** Fallback routes probed in order when the configured model fails. The first two
+ * are OpenRouter auto-router routes (may 402 on credit-exhausted accounts); the
+ * specific free model below is a known-working daily-free route that does not
+ * require credits, so it is tried last as a final fallback. */
+export const AI_FALLBACK_MODELS = [
+  "openrouter/free",
+  "openrouter/auto",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+] as const;
 
 /**
  * Primary + fallbacks as a deduped chain (empty primary dropped). The primary

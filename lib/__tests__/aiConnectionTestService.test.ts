@@ -310,6 +310,10 @@ describe("getLastAiConnectionTests", () => {
 
 describe("imports", () => {
   it("exposes the expected fallback chain", () => {
-    expect(AI_FALLBACK_MODELS).toEqual(["openrouter/free", "openrouter/auto"]);
+    expect(AI_FALLBACK_MODELS).toEqual([
+      "openrouter/free",
+      "openrouter/auto",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+    ]);
   });
 });

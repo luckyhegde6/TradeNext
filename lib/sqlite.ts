@@ -2439,11 +2439,12 @@ export async function initSqliteBackup(): Promise<void> {
 // a leader can re-sync the mirror, AND (b) run the periodic SQLite→Prisma
 // control-plane reconcile (`reconcileControlToPrisma`) so the SQLite-only
 // daemon writes (heartbeats, cron advances, completed/failed task status) reach
-// Prisma every 6h — per the user's "write to prisma only during the sync job"
-// directive. The 6h cadence is the compromise between keeping the mirror fresh
-// and reining in the (leader-gated) reconcile cost. This removed the ~2 ops/min
-// the old 5-min probe cost across instances (2880/day).
-const PROBE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+// Prisma every 15 minutes — per the user's "write to prisma only during the sync job"
+// directive. The 15min cadence is the compromise between keeping the mirror fresh
+// and reining in the (leader-gated) reconcile cost. This is short enough to
+// survive Netlify's ~2h idle suspension: at least one probe tick fires before
+// the instance is recycled, draining the SQLite→Prisma outbox.
+const PROBE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * Start a background timer that probes Prisma every 6 hours (was 12h in
@@ -2483,9 +2484,9 @@ function startRecoveryProbe(): void {
       state.prismaAvailable = true;
 
       // v3.26.0: run a periodic full reconcile on EVERY tick when Prisma is
-      // available — this is the "6h Prisma sync/reconcile" (was 12h). Not gated
+      // available — this is the "15min Prisma sync/reconcile". Not gated
       // on the down→up transition, so pending SQLite→Prisma control writes
-      // reach Prisma every 6h even on a healthy DB. syncFromPrisma() is
+      // reach Prisma every 15min even on a healthy DB. syncFromPrisma() is
       // leader + breaker + syncing guarded internally.
       if (wasUnavailable) {
         logger.info({ msg: "SQLite: Prisma recovered, triggering re-sync" });

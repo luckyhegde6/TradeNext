@@ -151,7 +151,7 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
-  resyncInterval = setInterval(() => {
+  resyncInterval = setInterval(async () => {
     syncCronJobs().catch((error) => {
       if (isDbUnavailableError(error)) {
         // DB down — expected while on a plan-limit hold; keep noise low.
@@ -184,12 +184,17 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     // process lifetime (audit / api logs / events) sat unsynced for days. The
     // push is breaker-aware (short-circuits while a plan-limit hold is open),
     // re-entrancy-guarded, and leader-gated, so a tick that cannot drain is a
-    // safe no-op rather than a duplicate writer.
-    import("@/lib/sqlite")
-      .then((m) => m.pushSqliteToPrisma())
-      .catch((error) =>
-        logger.warn({ msg: "Outbox drain failed", error: error instanceof Error ? error.message : String(error) }),
-      );
+    // safe no-op rather than a duplicate writer. Awaited so failures surface;
+    // the 15-min recovery probe is the backstop for any missed tick.
+    try {
+      const { pushSqliteToPrisma } = await import("@/lib/sqlite");
+      const result = await pushSqliteToPrisma();
+      if (result && result.synced > 0) {
+        logger.info({ msg: "Outbox drained on resync tick", synced: result.synced, failed: result.failed });
+      }
+    } catch (error) {
+      logger.warn({ msg: "Outbox drain failed", error: error instanceof Error ? error.message : String(error) });
+    }
     // v3.13.0: drain the swing analysis job queue (throttled to 1/15min since
     // v3.30.x). The DB-backed job survives instance recycle — when the process
     // that created it dies mid-analysis, the stale-running recovery + claim
