@@ -82,7 +82,7 @@
     "fetch-cookie": "^3.1.0",
     "googleapis": "^182.0.0",
     "morgan": "^1.12.1",
-    "next": "^16.3.8",
+    "next": "^16.4.0",
     "next-auth": "5.0.0-beta.32",
     "node-cache": "^5.1.2",
     "node-cron": "^4.6.0",
@@ -97,14 +97,14 @@
     "react-dom": "^19.2.4",
     "react-is": "^19.2.7",
     "recharts": "^3.6.0",
-    "sanitize-html": "^2.17.7",
+    "sanitize-html": "^2.18.1",
     "sql.js": "^1.14.2",
     "swr": "^2.3.7",
     "tailwindcss": "^4.1.17",
     "tough-cookie": "^6.0.0",
     "typescript": "^5.9.3",
     "unzipper": "^0.12.3",
-    "zod": "^4.3.4"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
