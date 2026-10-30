@@ -15,6 +15,26 @@ The post-commit hook has been created automatically as part of the Handoff File 
 
 ---
 
+### 2026-10-30 | Server log triage (29Oct.log), Background Workers UI timestamp column, server-log-analysis agent skill
+
+**Request (user)**:
+1. Diagnose why Daily Recommendations Engine showed `Next scheduled run: 30/10/2026, 10:00:00 am • last successful run is older than 48h`, why runs appeared "not firing" on Oct 29, and why Oct 29 was absent from Run History while the cron job showed `Last: 29/10/2026, 10:00:13 am`.
+2. Add a `Timestamp` column before the `Status` column in Background Workers table (`/admin/utils/workers`).
+3. Triage, clean and format `29Oct.log` to make it agent-readable, and add a skill for server log analysis leveraging Netlify MCP.
+
+**Findings & Implementations**:
+- **Diagnosis**:
+  - The cron daemon **did** fire on Oct 29 at 10:00:14 AM IST (04:30:14 UTC), spawning task `16ad98ff-40ea-4310-94a9-e0a1e1bb7f95`.
+  - Worker `169.254.44.197-9` picked it up at 10:01:09 AM IST and started running 117 screeners (`Chartink unified screeners run, templates=117`).
+  - Daily recommendations take 15–25 min. Under Netlify's serverless model, the container was suspended before completion / Prisma push-sync. Because `/api/admin/recommendations` reads directly from `prisma.dailyRecommendationRun`, in-flight or suspended runs that didn't sync to Prisma do not appear in the Run History table.
+  - The cron job is **active** and next scheduled run is today, **30 Oct 2026 at 10:00:00 AM IST**.
+  - All prerequisites for successful runs (OpenRouter free fallback model `nvidia/nemotron-3-ultra-550b-a55b:free`, Accelerate resilience, and 15-min push sync) are implemented on branch `fix/openrouter-credits-accelerate-6hr-sync` (PR #137) pending user merge and deploy.
+- **UI Update**: In `app/admin/utils/workers/page.tsx`, moved the task creation timestamp to the very first column (`Timestamp`) before `Status`, formatted as `en-IN` (DD/MM/YYYY, hh:mm:ss am/pm), and removed the redundant `Created` column.
+- **Agent Skill**: Created `.agents/skills/server-log-analysis/SKILL.md` (and `.opencode/skills/server-log-analysis/SKILL.md`) detailing log line taxonomy, Netlify MCP integration, noise stripping, and symptom triage playbooks.
+- **Cleaned Log Artifact**: Updated `logs/2026-10/2026-10-29-agent-clean.md` with structured event timelines, task IDs, and failure root causes.
+
+---
+
 ### 2026-10-22 | v3.52.0 — Spec 34: 20-stock batches + conviction ranking, durable swing Telegram delivery, single-header Telegram, structured console mirror; COMMIT PENDING USER — D9
 
 **Request (user)**: fix four production issues — (a) daily recommendations with `configuredModel=openrouter/free` + `stocks=100` should batch **20** at a time and then be ordered **by score and confidence**; (b) "no telegram notification is triggered on swing"; (c) remove the duplicated header in the Telegram "AI Unavailable" notice (`🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis Unavailable — 20 Oct 2026`); (d) "wherever the logger.log or logger.info or warn or error exist add an additional console.log". Spec/plan: `.agents/specs/34-ai-batch-20-ranking-and-telegram-delivery.md` + `.agents/plans/34-…`.
