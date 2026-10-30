@@ -47,6 +47,7 @@ export type TaskEventType =
     | "task_failed"
     | "task_cancelled"
     | "task_retried"
+    | "task_progress"
     | "alert_triggered"
     | "csv_row_processed"
     | "notification_sent"

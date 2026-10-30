@@ -437,21 +437,36 @@ export async function executeDeployPrep(taskId: string, payload?: Record<string,
   const logger = await import("@/lib/logger").then((m) => m.default);
 
   logger.info({ msg: "Starting deploy prep (async)", taskId, payload });
+  await logTaskEvent(taskId, "task_progress", "Starting deploy prep: checking DB health");
 
   if (isPlanLimitBreakerOpen()) {
     throw new Error("Plan-limit circuit breaker is open (recent DB query timeouts/hold) — try again in a few minutes");
   }
 
+  await logTaskEvent(taskId, "task_progress", "Flushing write-behind logs to Prisma");
   const flushed = await flushWriteBehind();
+
+  await logTaskEvent(taskId, "task_progress", "Ensuring SQLite backup exists");
   const sqlite = await ensureSqliteBackup();
   if (!sqlite) {
     throw new Error("SQLite backup not initialized (logs flushed, mirror sync skipped)");
   }
-  await sqlite.syncFromPrisma({ force: true, reason: "admin" });
+
+  await logTaskEvent(taskId, "task_progress", "Refreshing SQLite mirror from Prisma");
+  const SYNC_TIMEOUT_MS = 120_000;
+  await Promise.race([
+    sqlite.syncFromPrisma({ force: true, reason: "admin" }),
+    new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error("Deploy prep mirror sync timed out after 2 minutes")), SYNC_TIMEOUT_MS)
+    ),
+  ]);
+
   sqlite.persistOpsCounter();
   sqlite.persistDbErrorCounts();
   const health = sqlite.getHealthStatus();
   const rowsFlushed = Object.values(flushed.flushed).reduce((a, b) => a + b, 0);
+
+  await logTaskEvent(taskId, "task_progress", `Deploy prep complete: ${rowsFlushed} rows flushed`);
 
   return {
     flushed: flushed.flushed,
