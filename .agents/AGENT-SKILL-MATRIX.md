@@ -43,6 +43,7 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | nse-integration | `.opencode/skills/nse-integration/` | `.agents/skills/nse-integration.md` | NSE API integration (nseFetch, caching, cookies) |
 | playwright-e2e | `.opencode/skills/playwright-e2e/` | `.agents/skills/playwright-e2e/` | committed e2e suite (`e2e/`, `npm run test:e2e`) — regression guards, cross-browser + mobile |
 | playwright-cli | `.opencode/skills/playwright-cli/` | — | exploratory browser testing via Playwright MCP (not committed) |
+| server-log-analysis | `.opencode/skills/server-log-analysis/` | `.agents/skills/server-log-analysis.md` | server log triage/clean/format workflow (Netlify raw logs, DB layers, cleaning protocol, incident triage playbook) |
 
 ## Command inventory
 

@@ -51,6 +51,13 @@ export const BUILTIN_MODELS: ModelInfo[] = [
     contextLength: 200_000,
     billingPeriod: "auto",
   },
+  {
+    id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+    name: "Nemotron 3 Ultra 550B (Daily Free)",
+    description: "Known-working daily-free model; final fallback when auto-router routes 402 or return empty.",
+    contextLength: 1_000_000,
+    billingPeriod: "daily",
+  },
 ];
 
 /** Builtin model IDs — non-removable in the admin model manager. */
@@ -69,13 +76,8 @@ export const BUILTIN_MODEL_IDS: ReadonlyArray<string> = BUILTIN_MODELS.map((m) =
  */
 export const AVAILABLE_MODELS: ModelInfo[] = [
   // ── Daily Free Models (best quality first) ─────────────────────────────
-  {
-    id: "nvidia/nemotron-3-ultra-550b-a55b:free",
-    name: "Nemotron 3 Ultra 550B (Daily)",
-    description: "Highest quality free model, 1M context, best benchmarks",
-    contextLength: 1_000_000,
-    billingPeriod: "daily",
-  },
+  // NOTE: nvidia/nemotron-3-ultra-550b-a55b:free moved to BUILTIN_MODELS
+  // (final AI fallback). It is no longer in the editable catalog.
   {
     id: "nvidia/nemotron-3-super-120b-a12b:free",
     name: "Nemotron 3 Super 120B (Daily)",

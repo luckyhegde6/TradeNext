@@ -87,7 +87,7 @@ jest.mock("@/lib/services/ai/llm-provider", () => ({ resetLLM: jest.fn() }));
 const mockAuth = jest.mocked(auth);
 const mockResetLLM = jest.mocked(resetLLM);
 
-const CATALOG_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const CATALOG_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
 const jsonRequest = (path: string, method: string, payload: unknown) =>
   new Request(`http://localhost${path}`, {
@@ -117,7 +117,11 @@ describe("Admin AI model management (config + custom-models routes)", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.builtinModelIds).toEqual(["openrouter/free", "openrouter/auto"]);
+    expect(body.builtinModelIds).toEqual([
+      "openrouter/free",
+      "openrouter/auto",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+    ]);
     expect(body.availableModels[0].id).toBe("openrouter/free");
     expect(body.availableModels[1].id).toBe("openrouter/auto");
     expect(body.availableModels).toHaveLength(10); // 2 builtins + 8 catalog

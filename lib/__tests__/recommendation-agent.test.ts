@@ -283,13 +283,14 @@ describe("recommendation-agent", () => {
       // v3.8.0: unusable responses are retried, NOT silently accepted as
       // HOLD-success. v3.10.1 adds the model fallback chain: primary gets
       // 2 attempts, then each fallback model ("openrouter/free",
-      // "openrouter/auto") gets one — 4 calls total. The batch is marked
-      // failed so monitoring and admins see the truth.
+      // "openrouter/auto", "nvidia/nemotron-3-ultra-550b-a55b:free") gets
+      // one — 5 calls total. The batch is marked failed so monitoring and
+      // admins see the truth.
       expect(results[0].success).toBe(false);
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
       expect(results[0].aiRecommendation.confidence).toBe(50);
       expect(results[0].error).toContain("Unusable AI response");
-      expect(mockDirectPrompt).toHaveBeenCalledTimes(4);
+      expect(mockDirectPrompt).toHaveBeenCalledTimes(5);
     });
 
     test("falls back to the shared fallback models when the primary fails", async () => {

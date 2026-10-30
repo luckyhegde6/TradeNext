@@ -23,6 +23,7 @@ import logger from "@/lib/logger";
 import { createAuditLog } from "@/lib/audit";
 import { recordSystemEvent } from "./unifiedEventService";
 import { recordMetric } from "./systemHealthService";
+import { isDbUnavailableError } from "@/lib/db-utils";
 
 // ---------------------------------------------------------------------------
 // Constants & types
@@ -171,9 +172,21 @@ export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResu
   const startTime = Date.now();
   logger.info({ msg: "Swing performance check starting" });
 
-  const active = await prisma.swingSignal.findMany({
-    where: { status: "active" },
-  });
+  let active: Array<{ id: string; symbol: string; postedAt: Date; status: string; jobId: string | null; aiRecommendation: string | null; targetPrice: number | null; stopLoss: number | null; price: number }>;
+  try {
+    active = await prisma.swingSignal.findMany({
+      where: { status: "active" },
+    });
+  } catch (err) {
+    if (isDbUnavailableError(err)) {
+      logger.warn({
+        msg: "Swing performance check: Accelerate unreachable, skipping — signals will be retried next cycle",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { checked: 0, targetAchieved: 0, stopLossHit: 0, expired: 0, updated: 0, executionTimeMs: Date.now() - startTime };
+    }
+    throw err;
+  }
 
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -208,12 +221,24 @@ export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResu
   const symbols = active.map((s) => s.symbol);
 
   // Batch fetch latest closes for ALL signals in ONE query.
-  const latestPrices = await prisma.$queryRaw<{ ticker: string; close: number | null }[]>`
-    SELECT DISTINCT ON (ticker) ticker, close
-    FROM daily_prices
-    WHERE ticker = ANY(${symbols})
-    ORDER BY ticker, "tradeDate" DESC
-  `;
+  let latestPrices: Array<{ ticker: string; close: number | null }> = [];
+  try {
+    latestPrices = await prisma.$queryRaw<{ ticker: string; close: number | null }[]>`
+      SELECT DISTINCT ON (ticker) ticker, close
+      FROM daily_prices
+      WHERE ticker = ANY(${symbols})
+      ORDER BY ticker, "tradeDate" DESC
+    `;
+  } catch (err) {
+    if (isDbUnavailableError(err)) {
+      logger.warn({
+        msg: "Swing performance check: Accelerate unreachable for price query — using empty price map",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } else {
+      throw err;
+    }
+  }
   const priceMap = new Map(
     latestPrices.filter((p) => p.close !== null).map((p) => [p.ticker, Number(p.close)]),
   );
@@ -227,14 +252,26 @@ export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResu
     (min, s) => Math.min(min, s.postedAt.getTime()),
     active[0]?.postedAt.getTime() ?? Date.now(),
   );
-  const windowBars = await prisma.$queryRaw<
-    { ticker: string; tradeDate: Date; high: number | null; low: number | null }[]
-  >`
-    SELECT ticker, "tradeDate", high, low
-    FROM daily_prices
-    WHERE ticker = ANY(${symbols}) AND "tradeDate" >= ${new Date(minPostedAt)}
-    ORDER BY ticker, "tradeDate" ASC
-  `;
+  let windowBars: Array<{ ticker: string; tradeDate: Date; high: number | null; low: number | null }> = [];
+  try {
+    windowBars = await prisma.$queryRaw<
+      { ticker: string; tradeDate: Date; high: number | null; low: number | null }[]
+    >`
+      SELECT ticker, "tradeDate", high, low
+      FROM daily_prices
+      WHERE ticker = ANY(${symbols}) AND "tradeDate" >= ${new Date(minPostedAt)}
+      ORDER BY ticker, "tradeDate" ASC
+    `;
+  } catch (err) {
+    if (isDbUnavailableError(err)) {
+      logger.warn({
+        msg: "Swing performance check: Accelerate unreachable for window query — using empty window map",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } else {
+      throw err;
+    }
+  }
   const windowByTicker = new Map<string, { tradeDate: Date; high: number; low: number }[]>();
   for (const row of windowBars) {
     if (!row.tradeDate) continue;
@@ -381,15 +418,30 @@ export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResu
 
     // Refresh price + return for EVERY checked signal (status flips included).
     updates.push(
-      prisma.swingSignal.update({
-        where: { id: signal.id },
-        data: {
-          ...(evaluated.status !== "active" ? { status: evaluated.status } : {}),
-          currentPrice,
-          returnPercent,
-          lastCheckedAt: new Date(),
-        },
-      }),
+      (async () => {
+        try {
+          await prisma.swingSignal.update({
+            where: { id: signal.id },
+            data: {
+              ...(evaluated.status !== "active" ? { status: evaluated.status } : {}),
+              currentPrice,
+              returnPercent,
+              lastCheckedAt: new Date(),
+            },
+          });
+        } catch (err) {
+          if (isDbUnavailableError(err)) {
+            logger.warn({
+              msg: "Swing performance check: Accelerate unreachable on signal update — skipped",
+              symbol: signal.symbol,
+              signalId: signal.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          } else {
+            throw err;
+          }
+        }
+      })(),
     );
   }
 

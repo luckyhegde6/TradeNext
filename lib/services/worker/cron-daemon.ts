@@ -97,8 +97,26 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
 
   logger.info({ msg: "Starting cron daemon", daemonId: DAEMON_ID, timezone: DEFAULT_TIMEZONE });
 
+  // Spec 24: recover jobs whose node-cron tick was missed while the instance
+  // was suspended/recycled. Run BEFORE ensureRecommendationCrons so that
+  // overdue jobs are spawned before nextRun is advanced to the future.
+  // Run on boot (a fresh Netlify instance picks up jobs that ticked moments
+  // before the recycle) AND on every 5-min resync tick.
+  try {
+    const res = await catchUpMissedCronJobs();
+    if (res.recovered > 0 || res.skipped > 0) {
+      logger.info({ msg: "Cron boot catch-up", recovered: res.recovered, skipped: res.skipped });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Cron boot catch-up deferred (DB unavailable)",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // Self-heal: ensure the SYSTEM-managed recommendation cron rows exist
-  // before scheduling anything.
+  // before scheduling anything. Runs AFTER catch-up so overdue jobs are
+  // spawned first; nextRun is only advanced for jobs that aren't overdue.
   try {
     const { ensureRecommendationCrons } = await import("@/lib/services/recommendationCronService");
     const res = await ensureRecommendationCrons();
@@ -120,21 +138,6 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
-  // Spec 24: recover jobs whose node-cron tick was missed while the instance
-  // was suspended/recycled. Run on boot (a fresh Netlify instance picks up jobs
-  // that ticked moments before the recycle) AND on every 5-min resync tick.
-  try {
-    const res = await catchUpMissedCronJobs();
-    if (res.recovered > 0 || res.skipped > 0) {
-      logger.info({ msg: "Cron boot catch-up", recovered: res.recovered, skipped: res.skipped });
-    }
-  } catch (error) {
-    logger.warn({
-      msg: "Cron boot catch-up deferred (DB unavailable)",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
   // Spec 30: day-level recommendations catch-up on boot. A failed weekday run
   // (or an instance cold across the whole 04:30 UTC window) would otherwise
   // leave `nextRun` advanced with nothing to re-fire. Guards inside keep this a
@@ -151,7 +154,7 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     });
   }
 
-  resyncInterval = setInterval(() => {
+  resyncInterval = setInterval(async () => {
     syncCronJobs().catch((error) => {
       if (isDbUnavailableError(error)) {
         // DB down — expected while on a plan-limit hold; keep noise low.
@@ -184,12 +187,17 @@ export async function startCronDaemon(): Promise<{ alreadyRunning: boolean; regi
     // process lifetime (audit / api logs / events) sat unsynced for days. The
     // push is breaker-aware (short-circuits while a plan-limit hold is open),
     // re-entrancy-guarded, and leader-gated, so a tick that cannot drain is a
-    // safe no-op rather than a duplicate writer.
-    import("@/lib/sqlite")
-      .then((m) => m.pushSqliteToPrisma())
-      .catch((error) =>
-        logger.warn({ msg: "Outbox drain failed", error: error instanceof Error ? error.message : String(error) }),
-      );
+    // safe no-op rather than a duplicate writer. Awaited so failures surface;
+    // the 15-min recovery probe is the backstop for any missed tick.
+    try {
+      const { pushSqliteToPrisma } = await import("@/lib/sqlite");
+      const result = await pushSqliteToPrisma();
+      if (result && result.synced > 0) {
+        logger.info({ msg: "Outbox drained on resync tick", synced: result.synced, failed: result.failed });
+      }
+    } catch (error) {
+      logger.warn({ msg: "Outbox drain failed", error: error instanceof Error ? error.message : String(error) });
+    }
     // v3.13.0: drain the swing analysis job queue (throttled to 1/15min since
     // v3.30.x). The DB-backed job survives instance recycle — when the process
     // that created it dies mid-analysis, the stale-running recovery + claim

@@ -162,7 +162,7 @@
         "-y",
         "@netlify/mcp"
       ],
-      "enabled": false
+      "enabled": true
     },
      "chrome-devtools": {
       "type": "local",
@@ -437,6 +437,11 @@
     "nse-integration": {
       "description": "NSE API integration patterns and debugging",
       "template": ".opencode/skills/nse-integration/SKILL.md"
+    },
+    "server-log": {
+      "description": "Triage, clean, and format TradeNext server logs (raw Netlify/function logs, DB layers, cleaning protocol, incident playbook)",
+      "template": "./.agents/commands/server-log.md",
+      "agent": "observability"
     }
   },
   "permission": {
