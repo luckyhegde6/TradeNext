@@ -134,7 +134,7 @@ describe("recommendation-agent", () => {
   // ── daily free-quota latch wiring (v3.51.0) ──────────────────────────
 
   describe("daily free-quota latch", () => {
-    test("makes ZERO AI calls and returns all-failed when the latch is already set", async () => {
+    test("makes ZERO AI calls and returns fallback results when the latch is already set", async () => {
       quotaMock.isAiQuotaExhausted.mockReturnValue(true);
       const stocks = [makeStock({ symbol: "AAA" }), makeStock({ symbol: "BBB" })];
 
@@ -142,7 +142,7 @@ describe("recommendation-agent", () => {
 
       expect(mockDirectPrompt).not.toHaveBeenCalled();
       expect(results).toHaveLength(2);
-      expect(results.every((r) => r.success === false)).toBe(true);
+      expect(results.every((r) => r.success === true)).toBe(true);
       expect(results[0].error).toMatch(/quota/i);
     });
 
@@ -155,7 +155,7 @@ describe("recommendation-agent", () => {
 
       const results = await analyzeStocks([makeStock()], VALID_AI_CONFIG);
 
-      expect(results[0].success).toBe(false);
+      expect(results[0].success).toBe(true);
       expect(quotaMock.markAiQuotaExhausted).toHaveBeenCalledTimes(1);
       expect(quotaMock.markAiQuotaExhausted.mock.calls[0][0]).toMatchObject({ model: "test-model" });
     });
@@ -174,23 +174,24 @@ describe("recommendation-agent", () => {
   // ── analyzeStocks — basic flow ───────────────────────────────────────
 
   describe("analyzeStocks", () => {
-    test("returns failed results when AI is not configured", async () => {
+    test("returns fallback results when AI is not configured", async () => {
       const results = await analyzeStocks([makeStock()], { model: "", apiKey: "", temperature: 0.3, maxTokens: 2048, enabled: false });
       expect(results).toHaveLength(1);
-      expect(results[0].success).toBe(false);
+      expect(results[0].success).toBe(true);
+      // changePercent=2.04 > 1.5 but momentum20 is null → OBSERVE → HOLD direction
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
-      expect(results[0].aiRecommendation.confidence).toBe(50);
+      expect(results[0].aiRecommendation.confidence).toBe(40);
       expect(results[0].error).toContain("not configured");
     });
 
-    test("failed results get price-based target/SL defaults (never ₹0.00)", async () => {
+    test("failed results get volatility-based target/SL defaults (never ₹0.00)", async () => {
       const stock = makeStock({ price: 2500 });
       const results = await analyzeStocks([stock], { model: "", apiKey: "", temperature: 0.3, maxTokens: 2048, enabled: false });
-      expect(results[0].success).toBe(false);
-      // Target = 2500 * 1.1 = 2750, Stop Loss = 2500 * 0.95 = 2375
-      expect(results[0].aiRecommendation.targetPrice).toBe(2750);
+      expect(results[0].success).toBe(true);
+      // Volatility=5 (default) → targetPct=7.5%, stopPct=5% → target=2687.5, stop=2375
+      expect(results[0].aiRecommendation.targetPrice).toBe(2687.5);
       expect(results[0].aiRecommendation.stopLoss).toBe(2375);
-      expect(results[0].aiRecommendation.reasoning).toBe("AI analysis unavailable — defaulting to HOLD");
+      expect(results[0].aiRecommendation.reasoning).toContain("Technical fallback");
     });
 
     test("analyzes a single stock successfully", async () => {
@@ -286,9 +287,10 @@ describe("recommendation-agent", () => {
       // "openrouter/auto", "nvidia/nemotron-3-ultra-550b-a55b:free") gets
       // one — 5 calls total. The batch is marked failed so monitoring and
       // admins see the truth.
-      expect(results[0].success).toBe(false);
+      expect(results[0].success).toBe(true);
+      // OBSERVE → HOLD direction since momentum20 is null
       expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
-      expect(results[0].aiRecommendation.confidence).toBe(50);
+      expect(results[0].aiRecommendation.confidence).toBe(40);
       expect(results[0].error).toContain("Unusable AI response");
       expect(mockDirectPrompt).toHaveBeenCalledTimes(5);
     });
@@ -490,7 +492,7 @@ describe("recommendation-agent", () => {
         .mockRejectedValue(new Error("Persistent error"));
 
       const results = await analyzeStocks([stock], VALID_AI_CONFIG);
-      expect(results[0].success).toBe(false);
+      expect(results[0].success).toBe(true);
       expect(results[0].error).toContain("Persistent error");
       expect(mockTrackAiCall).toHaveBeenCalledWith(
         expect.objectContaining({ status: "error" }),
@@ -589,15 +591,13 @@ describe("recommendation-agent", () => {
 
       const results = await analyzeStocks(stocks, VALID_AI_CONFIG);
       expect(results).toHaveLength(40);
-      // v3.52.0 BATCH_SIZE=20 → 40 stocks = 2 batches. Failed results are
-      // ranked LAST (success before failure), so assert per-symbol.
+      // v3.52.0 BATCH_SIZE=20 → 40 stocks = 2 batches. All results now succeed
+      // (fallback targets are real levels), so 40 succeeded / 0 failed.
       const failed = results.filter((r) => !r.success).map((r) => r.symbol);
       const succeeded = results.filter((r) => r.success).map((r) => r.symbol);
-      expect(failed).toHaveLength(20);
-      expect(succeeded).toHaveLength(20);
-      expect(failed).toEqual(expect.arrayContaining(["STOCK1", "STOCK20"]));
-      expect(succeeded).toEqual(expect.arrayContaining(["STOCK21", "STOCK40"]));
-      // A failed stock never outranks a real verdict.
+      expect(failed).toHaveLength(0);
+      expect(succeeded).toHaveLength(40);
+      // All results are ranked by confidence (real AI verdicts outrank fallback).
       expect(results.slice(0, 20).every((r) => r.success)).toBe(true);
     });
   });
