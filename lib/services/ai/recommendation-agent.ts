@@ -12,6 +12,7 @@ import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { formatStockContext, type StockContext } from "./recommendation-context";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
+import { calculateFallbackRecommendation } from "./fallbackAnalysis";
 import logger from "@/lib/logger";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -34,6 +35,10 @@ export interface StockAnalysisInput {
   volume: number;
   screenerNames: string[]; // which screeners flagged this stock
   marketCap?: number; // ₹ market cap (used for ranking, included in prompt)
+  /** Momentum over ~20 sessions (used by fallback analysis). */
+  momentum20?: number | null;
+  /** Volatility over ~20 sessions (used by fallback analysis). */
+  volatility20?: number | null;
   /** Fundamental context (corp actions, announcements, results) — optional, batched once per run. */
   context?: StockContext;
 }
@@ -56,14 +61,6 @@ const MAX_RETRY_DELAY_MS = 8000;
 /** Number of batch workers running concurrently (OpenRouter free-tier friendly). */
 const CONCURRENCY = 3;
 
-/**
- * Hard per-batch wall-clock cap (5 minutes), covering ALL retry attempts for
- * one batch — never exceeded even if the per-request timeout is raised.
- * A dead/saturated model must fail fast, not hold the pipeline past the
- * Netlify 14-minute background-function safety net.
- */
-const BATCH_TIMEOUT_MS = 5 * 60_000;
-
 function retryDelay(attempt: number): number {
   return Math.min(
     RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1),
@@ -71,9 +68,13 @@ function retryDelay(attempt: number): number {
   );
 }
 
-/** Fallback target/SL multipliers used when AI cannot determine a target (mirrors dailyRecommendationService). */
-const DEFAULT_TARGET_MULTIPLIER = 1.1;
-const DEFAULT_STOP_LOSS_MULTIPLIER = 0.95;
+/**
+ * Hard per-batch wall-clock cap (5 minutes), covering ALL retry attempts for
+ * one batch — never exceeded even if the per-request timeout is raised.
+ * A dead/saturated model must fail fast, not hold the pipeline past the
+ * Netlify 14-minute background-function safety net.
+ */
+const BATCH_TIMEOUT_MS = 5 * 60_000;
 
 const SYSTEM_PROMPT = `You are a senior Indian stock market analyst for NSE-listed stocks. You analyze stocks based on price data, momentum, volume, and screener signals to produce actionable recommendations.
 
@@ -650,33 +651,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Price-based default recommendation used when AI analysis is unavailable
- * (unconfigured provider, circuit breaker open, parse failure, or per-stock error).
- * Target/SL are derived from the stock price so the Performance tab and trackers
- * never display ₹0.00 — matching the service-level fallback multipliers.
- */
-function getDefaultRecommendation(stock?: Pick<StockAnalysisInput, "price">): AIRecommendation {
-  const price = stock?.price ?? 0;
-  const round = (n: number) => Math.round(n * 100) / 100;
-  return {
-    recommendation: "HOLD",
-    confidence: 50,
-    targetPrice: price > 0 ? round(price * DEFAULT_TARGET_MULTIPLIER) : 0,
-    stopLoss: price > 0 ? round(price * DEFAULT_STOP_LOSS_MULTIPLIER) : 0,
-    timeHorizon: "medium",
-    reasoning: "AI analysis unavailable — defaulting to HOLD",
-    riskFactors: ["Analysis failed"],
-  };
-}
-
 function failedResult(stock: StockAnalysisInput, error: string): StockAnalysisResult {
   return {
     ...stock,
-    aiRecommendation: getDefaultRecommendation(stock),
+    // Fallback targets are real, actionable levels — mark success so the daily
+    // pipeline persists them (targets survive, performance-checkable). The
+    // error is retained for logging but the stock is not discarded.
+    aiRecommendation: calculateFallbackRecommendation(stock),
     tokensUsed: 0,
     executionMs: 0,
-    success: false,
+    success: true,
     error,
   };
 }

@@ -227,12 +227,13 @@ describe("parseSwingResponse + normalizeSwingAnalysis", () => {
 // ─── analyzeSwingStocks (black box) ──────────────────────────────────────
 
 describe("analyzeSwingStocks", () => {
-  it("returns OBSERVE fallbacks when AI is not configured", async () => {
+  it("returns fallback targets when AI is not configured", async () => {
     const results = await analyzeSwingStocks([makeStock()]);
     expect(results).toHaveLength(1);
-    expect(results[0].success).toBe(false);
+    expect(results[0].success).toBe(true);
     expect(results[0].error).toBe("AI is not configured");
-    expect(results[0].analysis!.action).toBe("OBSERVE");
+    // Momentum20=12.4 > 5 and changePercent=2.04 > 1.5 → directional LONG
+    expect(results[0].analysis!.action).toBe("LONG");
     expect(results[0].analysis!.entryPrice).toBe(2500);
     expect(mockedDirectPrompt).not.toHaveBeenCalled();
   });
@@ -263,8 +264,8 @@ describe("analyzeSwingStocks", () => {
 
     expect(mockedDirectPrompt).toHaveBeenCalledTimes(5); // RETRY_MAX + 3 fallback models (v3.10.1)
     expect(results).toHaveLength(2);
-    expect(results.every((r) => r.success)).toBe(false);
-    expect(results.every((r) => r.analysis!.action === "OBSERVE")).toBe(true);
+    expect(results.every((r) => r.success)).toBe(true);
+    expect(results.every((r) => r.analysis!.action === "LONG")).toBe(true);
     expect(results[0].analysis!.entryPrice).toBe(2500);
   });
 
@@ -278,8 +279,8 @@ describe("analyzeSwingStocks", () => {
 
     const results = await analyzeSwingStocks(stocks, VALID_AI_CONFIG);
 
-    expect(results.every((r) => r.success)).toBe(false);
-    expect(results[0].analysis!.action).toBe("OBSERVE");
+    expect(results.every((r) => r.success)).toBe(true);
+    expect(results[0].analysis!.action).toBe("LONG");
   });
 
   it("preserves input order with bounded concurrency across many stocks", async () => {

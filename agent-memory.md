@@ -4,6 +4,34 @@
 
 ---
 
+### 2026-10-30 | AI fallback targets for Swing + Daily Recommendations
+
+**Request (user)**: when AI credits are unavailable (OpenRouter free tier 429), Swing Trading Signals and Daily Recommendations should still show actionable targets using technical-analysis calculations instead of showing "AI analysis pending — screener signals only" or discarding the entire run. Performance checks should work on these fallback targets.
+
+**Root cause**: Both agents returned `success: false` with blank defaults (OBSERVE/HOLD with 3% band) when AI failed. `processSwingAnalysisJob` only sets `s.analysis` for `a.success && a.analysis`, so failed stocks had no analysis → `analysisStatus` = "failed" → UI showed "AI analysis pending". `dailyRecommendationService` discarded the entire run when zero stocks succeeded (`successfulResults.length === 0`).
+
+**Fix**:
+- NEW `lib/services/ai/fallbackAnalysis.ts` — pure technical-analysis fallback: direction inferred from changePercent + momentum20; target/stop sized by volatility20 (clamped 5–15% target, 3–8% stop); distanceFrom20dHigh adjusts confidence; levels validated via `evaluateRecommendationLevels`; confidence capped at 65 so real AI verdicts always outrank.
+- `lib/services/ai/swing-agent.ts` — `failedSwingResult` now uses `calculateFallbackSwingAnalysis` with `success: true` so targets show and analysisStatus → "done".
+- `lib/services/ai/recommendation-agent.ts` — `failedResult` now uses `calculateFallbackRecommendation` with `success: true` so daily picks persist with targets.
+- `lib/services/dailyRecommendationService.ts` — `holdFallback` now uses `calculateFallbackRecommendation` with `success: true` so the run completes normally instead of being discarded.
+
+**Gates**: 113 tests pass (recommendation-agent + swing-agent + dailyRecommendationService) · tsc prod 0 · eslint 0 on changed files. No schema change, no migration, no new packages.
+
+---
+### 2026-10-30 | Google Sheets sync/update fix — `touchLastSync()` stamped after drain
+
+**Request (user)**: solve the Google Sheets update and sync issues on `/admin/google-sheets` — the console's "Last sync" field always showed "never" even after successful sync drains.
+
+**Root cause**: `lib/services/googleSheets/configService.ts` defines `touchLastSync()` (stamps `lastSyncAt` on the `google_sheets_config` singleton) but it was **never called anywhere** — dead code. `syncTabs()` in `lib/services/googleSheets/syncService.ts` advanced each tab's drain cursor via `setTabMark()` after a successful append, but never stamped `lastSyncAt`, so the config page's "Last sync: never" was permanently stuck.
+
+**Fix**:
+- `lib/services/googleSheets/syncService.ts`: imported `touchLastSync` from `./configService`; after the per-tab drain loop, calls `touchLastSync()` when ≥1 tab drains rows (`status === "drained" && rows > 0`). Safe when the SQLite mirror isn't ready — `touchLastSync` is a no-op then.
+- `lib/__tests__/googleSheetsSync.test.ts`: added `touchLastSync` to the configService mock + 4 tests (stamps on drain, not when all empty, not when all fail, once even across multiple tabs).
+
+**Gates**: Google Sheets suites **10/10 · 268 pass / 0 fail** · `npx tsc --noEmit` **46 baseline, all in `__tests__`, prod 0** · ESLint **0 on changed files** · `npm run quickbuild` **201/201 pages**. No schema change, no migration, no new packages.
+
+---
 ## Git Hook Setup (v1.15.0)
 
 The post-commit hook has been created automatically as part of the Handoff File System:

@@ -47,6 +47,7 @@ jest.mock("@/lib/services/googleSheets/configService", () => ({
   isTrackingActive: jest.fn(() => true),
   getConfig: jest.fn(() => ({ tabMarks: {} })),
   setTabMark: jest.fn(),
+  touchLastSync: jest.fn(),
 }));
 
 /** The live shape of the mocked mirror, so a test can retarget a single call. */
@@ -60,12 +61,13 @@ const mockSqlite = {
 
 import { getSqliteFallback } from "@/lib/sqlite";
 import { exportRowsFromSync } from "@/lib/services/googleSheets/exporter";
-import { isTrackingActive, setTabMark, getConfig } from "@/lib/services/googleSheets/configService";
+import { isTrackingActive, setTabMark, getConfig, touchLastSync } from "@/lib/services/googleSheets/configService";
 
 const mockExport = exportRowsFromSync as jest.Mock;
 const mockActive = isTrackingActive as jest.Mock;
 const mockSetTabMark = setTabMark as jest.Mock;
 const mockGetConfig = getConfig as jest.Mock;
+const mockTouchLastSync = touchLastSync as jest.Mock;
 
 /** Build ledger entries with strictly increasing seq, as the real table does. */
 function ledger(tab: string, start: number, count: number) {
@@ -514,6 +516,36 @@ describe("syncTabs", () => {
     const r = await syncTabs(["swing"]);
     expect(new Date(r.startedAt).toISOString()).toBe(r.startedAt);
     expect(new Date(r.finishedAt).toISOString()).toBe(r.finishedAt);
+  });
+
+  it("stamps lastSyncAt when at least one tab drains rows", async () => {
+    mockSqlite.getGoogleSheetsLedgerBacklog.mockReturnValue(ledger("swing", 1, 2));
+    const r = await syncTabs(["swing"]);
+    expect(r.tabs[0].status).toBe("drained");
+    expect(mockTouchLastSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT stamp lastSyncAt when no tab drains rows (all empty)", async () => {
+    mockSqlite.getGoogleSheetsLedgerBacklog.mockReturnValue([]);
+    const r = await syncTabs(["swing", "screener"]);
+    expect(r.status).toBe("ok");
+    expect(mockTouchLastSync).not.toHaveBeenCalled();
+  });
+
+  it("does NOT stamp lastSyncAt when all tabs fail", async () => {
+    mockSqlite.getGoogleSheetsLedgerBacklog.mockImplementation(() => {
+      throw new Error("sqlite exploded");
+    });
+    const r = await syncTabs(["swing", "screener"]);
+    expect(r.status).toBe("partial");
+    expect(mockTouchLastSync).not.toHaveBeenCalled();
+  });
+
+  it("stamps lastSyncAt once even when multiple tabs drain", async () => {
+    mockSqlite.getGoogleSheetsLedgerBacklog.mockImplementation((tab: string) => ledger(tab, 1, 1));
+    const r = await syncTabs(["swing", "screener", "custom"]);
+    expect(r.status).toBe("ok");
+    expect(mockTouchLastSync).toHaveBeenCalledTimes(1);
   });
 });
 

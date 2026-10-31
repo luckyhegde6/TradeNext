@@ -39,7 +39,7 @@ import logger from "@/lib/logger";
 import { TRACKER_TABS, isTrackerTab, type TrackerTab } from "./tabs";
 import { exportRowsFromSync } from "./exporter";
 import { ledgerRowIsUnreadable } from "./rows";
-import { getConfig, setTabMark, isTrackingActive } from "./configService";
+import { getConfig, setTabMark, touchLastSync, isTrackingActive } from "./configService";
 
 /** Rows per tab per drain. Bounded so one click cannot blow past the Sheets quota. */
 export const SYNC_ROW_CAP = 200;
@@ -368,6 +368,14 @@ export async function syncTabs(
     : anyFail
       ? "partial"
       : "ok";
+
+  // Stamp lastSyncAt when at least one tab actually appended rows, so the
+  // console's "Last sync" reflects a real drain rather than just a click.
+  // Safe when the mirror isn't ready — `touchLastSync` is a no-op then.
+  const anyDrained = results.some((r) => r.status === "drained" && (r.rows ?? 0) > 0);
+  if (anyDrained) {
+    touchLastSync();
+  }
 
   const finishedAt = new Date().toISOString();
 

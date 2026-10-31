@@ -12,6 +12,7 @@ import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
+import { calculateFallbackSwingAnalysis } from "./fallbackAnalysis";
 import type {
   SwingAction,
   SwingAnalysis,
@@ -532,30 +533,16 @@ function clampEntry(action: SwingAction, entry: number, price: number): number {
   }
 }
 
-/** Price-based OBSERVE default used when AI analysis is unavailable. */
-function getDefaultSwingAnalysis(stock?: Pick<SwingAnalysisInput, "price">): SwingAnalysis {
-  const price = stock?.price ?? 0;
-  const band = (n: number) => Math.round(n * 100) / 100;
-  return {
-    action: "OBSERVE",
-    confidence: 40,
-    entryPrice: band(price),
-    targetPrice: price > 0 ? band(price * 1.03) : 0,
-    stopLoss: price > 0 ? band(price * 0.97) : 0,
-    timeHorizon: "medium",
-    logic: "AI analysis unavailable — observing price action.",
-    momentumScore: 0,
-    riskFactors: ["Analysis failed"],
-  };
-}
-
 function failedSwingResult(stock: SwingAnalysisInput, error: string): SwingAnalysisResult {
   return {
     ...stock,
-    analysis: getDefaultSwingAnalysis(stock),
+    // Fallback targets are real, actionable levels — mark success so the swing
+    // processor treats them as analyzed (analysisStatus → "done", targets
+    // persisted, performance-checkable). The error is retained for logging.
+    analysis: calculateFallbackSwingAnalysis(stock),
     tokensUsed: 0,
     executionMs: 0,
-    success: false,
+    success: true,
     error,
   };
 }

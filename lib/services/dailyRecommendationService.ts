@@ -17,6 +17,7 @@ import {
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
+import { calculateFallbackRecommendation } from "./ai/fallbackAnalysis";
 import { loadConfig, hasValidConfig } from "./ai/config";
 import { runAiConnectionTest } from "./ai/connectionTestService";
 import { getRecommendationContext } from "./ai/recommendation-context";
@@ -469,24 +470,17 @@ export async function runDailyRecommendations(
     }
 
     // Zero-verdict sentinel for the catch path and the pre-flight skip.
-    // NOTE (v3.11.1): these rows are NEVER persisted — they exist so the
-    // partition below can detect "no real AI verdicts" and mark the run
-    // failed with no picks (Today's Picks keeps the last good run).
+    // NOTE (v3.11.1): these rows used to be NEVER persisted (success:false),
+    // which discarded the entire run when AI failed. Now they carry real
+    // technical-analysis fallback targets (success:true) so the run completes
+    // normally and the performance check can evaluate target/SL hits.
     const holdFallback = (reason: string, errorMsg: string): StockAnalysisResult[] =>
       aiInput.map((s) => ({
         ...s,
-        aiRecommendation: {
-          recommendation: "HOLD" as const,
-          confidence: 50,
-          targetPrice: s.price * DEFAULT_TARGET_MULTIPLIER,
-          stopLoss: s.price * DEFAULT_STOP_LOSS_MULTIPLIER,
-          timeHorizon: "medium" as const,
-          reasoning: reason,
-          riskFactors: ["AI analysis unavailable"],
-        },
+        aiRecommendation: calculateFallbackRecommendation(s),
         tokensUsed: 0,
         executionMs: 0,
-        success: false,
+        success: true,
         error: errorMsg,
       }));
 

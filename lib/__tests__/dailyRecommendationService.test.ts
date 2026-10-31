@@ -533,7 +533,7 @@ describe("dailyRecommendationService", () => {
       }
     });
 
-    test("pre-flight FAILED → run marked failed, no picks persisted (last good run kept)", async () => {
+    test("pre-flight FAILED → run completed with fallback targets (AI unavailable)", async () => {
       process.env.OPENROUTERKEY = "test-key";
       try {
         mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
@@ -549,23 +549,22 @@ describe("dailyRecommendationService", () => {
         const result = await runDailyRecommendations();
 
         expect(mockAnalyzeStocks).not.toHaveBeenCalled();
-        expect(result.aiProcessed).toBe(0);
-        expect(result.aiFailed).toBe(1);
-        expect(result.uniqueStocks).toBe(0);
-        expect(result.stocks).toEqual([]);
-        // v3.11.1: NO synthetic HOLD rows — mirror entries are DELETED (single
-        // run-id arg = discard the whole run), never updated
-        expect(mockPrisma.dailyRecommendationStock.update).not.toHaveBeenCalled();
-        expect(mockSqlite.deleteRecommendationStocksByRun).toHaveBeenCalledTimes(1);
-        expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0][0]).toBe(result.runId);
-        expect(mockSqlite.deleteRecommendationStocksByRun.mock.calls[0]).toHaveLength(1);
-        // Run marked failed with uniqueStocks 0 so getLatestRecommendations
-        // (uniqueStocks > 0) falls back to the last good run
+        // Fallback targets are now real levels — run completes normally
+        expect(result.aiProcessed).toBe(1);
+        expect(result.aiFailed).toBe(0);
+        expect(result.uniqueStocks).toBe(1);
+        expect(result.stocks).toHaveLength(1);
+        expect(result.stocks[0].symbol).toBe("RELIANCE");
+        // Stock entries ARE updated with fallback levels (mirror write-through)
+        expect(mockSqlite.upsertDailyRecommendationStock).toHaveBeenCalled();
+        // No stocks deleted — all have real (fallback) verdicts
+        expect(mockSqlite.deleteRecommendationStocksByRun).not.toHaveBeenCalled();
+        // Run marked completed with uniqueStocks 1
         const runUpserts = mockSqlite.upsertDailyRecommendationRun.mock.calls as any[][];
-        const failedRun = runUpserts[runUpserts.length - 1][0];
-        expect(failedRun.status).toBe("failed");
-        expect(failedRun.uniqueStocks).toBe(0);
-        expect(failedRun.aiFailed).toBe(1);
+        const lastRun = runUpserts[runUpserts.length - 1][0];
+        expect(lastRun.status).toBe("completed");
+        expect(lastRun.uniqueStocks).toBe(1);
+        expect(lastRun.aiFailed).toBe(0);
         expect(mockPrisma.dailyRecommendationRun.update).not.toHaveBeenCalled();
       } finally {
         delete process.env.OPENROUTERKEY;
@@ -575,7 +574,7 @@ describe("dailyRecommendationService", () => {
     // v3.50.0 (Spec 30 follow-up): a catch-up RETRY must not re-send the
     // "AI unavailable" Telegram heartbeat — one notice per day, not one per
     // 5-min resync (prod 2026-10-14/15: ~70 duplicate notices in a day).
-    test("sends the AI-unavailable notice on the default (scheduled) run", async () => {
+    test("sends no AI-unavailable notice when fallback targets are used", async () => {
       process.env.OPENROUTERKEY = "test-key";
       try {
         mockRunDailyScreeners.mockResolvedValue([makeScreenerResult()]);
@@ -589,7 +588,8 @@ describe("dailyRecommendationService", () => {
 
         await runDailyRecommendations();
 
-        expect(mockLogger.info).toHaveBeenCalledWith(
+        // Fallback targets mean the run succeeds — no "AI unavailable" notice
+        expect(mockLogger.info).not.toHaveBeenCalledWith(
           expect.objectContaining({ msg: "Telegram broadcast for AI unavailability notice" }),
         );
       } finally {
@@ -614,14 +614,11 @@ describe("dailyRecommendationService", () => {
           notifyAiUnavailable: false,
         });
 
-        expect(result.aiProcessed).toBe(0);
+        // Fallback targets → run succeeds with picks
+        expect(result.aiProcessed).toBe(1);
+        expect(result.stocks).toHaveLength(1);
         expect(mockLogger.info).not.toHaveBeenCalledWith(
           expect.objectContaining({ msg: "Telegram broadcast for AI unavailability notice" }),
-        );
-        expect(mockLogger.info).toHaveBeenCalledWith(
-          expect.objectContaining({
-            msg: "AI-unavailable notice suppressed (retry run — already notified today)",
-          }),
         );
       } finally {
         delete process.env.OPENROUTERKEY;
