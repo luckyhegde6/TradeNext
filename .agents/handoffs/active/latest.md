@@ -1,19 +1,30 @@
-# Live Resume — v3.52.0 Spec 34 (20-stock AI batches + conviction ranking · durable swing Telegram · single header · console mirror)
+# Live Resume — v3.54.0 Spec 35 (scheduled historical price sync · Swing indicator gap · mirror-bar fallback)
 
-> Updated: 2026-10-22 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-11-03 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | Spec 34 — four user-reported prod defects: (1) daily AI run with `configuredModel=openrouter/free` + `stocks=100` should batch **20** per call and then be **ordered by score and confidence**; (2) "no telegram notification is triggered on swing"; (3) duplicated Telegram header (`🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis Unavailable — …`); (4) add an additional `console.log` wherever `logger.info/warn/error` is used. |
-| **Branch** | `fix/mirror-blobs-upload-race` — **COMMITTED `1b5ea4d`** (29 files, +1673/−105; also carries the Spec 33 swing-refresh work and the SQLite Blobs upload-race fix). Not pushed — push/PR/merge/deploy are user actions. |
-| **State** | CODE + TESTS + GATES + DOCS **DONE** — **COMMITTED `1b5ea4d`** (push/PR/merge/deploy = user actions, D9). Full Jest **138/138 · 2095 pass / 4 skip / 0 fail**, `npm run quickbuild` **201/201**, tsc **46 (prod 0)**, eslint 0 errors. Playwright Swing verified live (see follow-up). |
+| **Task** | Spec 35 — every Swing card rendered `20d Mom — / 10d Mom — / 20d Vol — / vs 20d High —`. Root cause: the v3.10.0 `historical_price_sync` worker task was **never scheduled** (no `cron_jobs` row), so `daily_prices` was never backfilled. |
+| **Branch** | `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **UNCOMMITTED**: 8 modified source/test files + 2 new docs. Commit pending user; push/PR/merge/deploy are user actions (D9). |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** — targeted Jest **4 suites / 117 pass**, full Jest **138/138 · 2110 pass / 4 skip / 0 fail**, tsc **46 exact (prod 0, delta +0)**, ESLint **0 errors** on the 8 changed files. Live end-to-end verify **deferred** (no local Postgres/Timescale). |
 | **In-flight** | None |
-| **Blocked** | OpenRouter **402 Insufficient credits** — today's 04:30 UTC daily run failed (`Cron boot recommendations catch-up enqueued … reason=missed-daily-window`). Batching (5 calls/100 stocks instead of 20) lowers pressure; credits are an external action. v3.51.0 quota latch + Spec 30 dedup keep "AI unavailable" notices to ≤1/UTC-day. |
-| **Spec/Plan** | `.agents/specs/34-ai-batch-20-ranking-and-telegram-delivery.md` · `.agents/plans/34-…` · detail `.agents/changelog/versions-v3.52.md` · Lesson 165 |
+| **Blocked** | (1) **Tredye dashboards** — `tredye.com/pulse/` + `/strength/` are auth-gated; need screenshots or credentials before Spec 37 can be written. (2) OpenRouter 402 "Insufficient credits" — external, user action. |
+| **Spec/Plan** | `.agents/specs/35-scheduled-historical-price-sync.md` · `.agents/plans/35-scheduled-historical-price-sync.md` · detail `.agents/changelog/versions-v3.54.md` · Lesson 167 |
 
-## What's done (v3.52.0)
+## What's done (v3.54.0)
+
+- **(1) 5th system cron (`lib/services/recommendationCronService.ts`).** `HISTORICAL_PRICE_SYNC_CRON_NAME` + `HISTORICAL_PRICE_SYNC_CRON_EXPR = "45 10 * * 1-5"` (16:15 IST Mon–Fri, after NSE publishes EOD bars) + `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry + the definition appended to `ensureRecommendationCrons()`. The persisted config is now built **per definition** (`defConfig = { systemManaged, timezone, ...(def.config ?? {}) }`) and written on create **and** on self-heal, with drift comparison covering **every** key — the other four crons keep `{ systemManaged, timezone }` unchanged. `dryRun:false` is load-bearing: `spawnDueCronJob` passes `job.config` as the task payload and `executeHistoricalPriceSync` reads `payload.dryRun` (manual admin runs still default to dry-run).
+- **(2) Scope + defaults (`lib/services/historicalPriceSyncService.ts`).** `resolveSyncScope` default = NIFTY 50 (1 Prisma read) ∪ `getSwingSignalSymbols()` (zero Prisma), deduped + capped; `DEFAULT_MAX_SYMBOLS 50 → 200`, `DEFAULT_DAYS 180 → 60` (≈41 bars ≥ the 20-bar indicators; ~42 chunked upsert statements/day at the cap). Explicit `symbols` still wins.
+- **(3) New mirror read (`lib/sqlite.ts`).** `getSwingSignalSymbols(limit = 300)` — `SELECT DISTINCT UPPER(symbol) FROM swing_signal … LIMIT`, synchronous, never throws (`[]` on a cold mirror), `recordSqliteRead`-instrumented, limit clamped 1…2000, declared on the `SqliteFallback` interface. The caller applies the sync cap.
+- **(4) Indicator fallback (`lib/services/swingRecommendationService.ts`).** `fetchRecentCloses` keeps the Prisma `$queryRaw` batch but its catch now **falls through** instead of returning an empty map; symbols with `< 2` bars are filled from `getSqlitePriceRange` + `computeIndicatorsFromSeries` (last 25 closes). Prisma data still wins → zero extra SQLite work on the happy path. **Defect caught pre-commit (Lesson 167):** the draft read the bare symbol while every mirror OHLCV write is keyed `NSE:<SYMBOL>` (`cacheDailyPriceBars` in `historicalPriceSyncService` + `backtestDataService`) → zero bars for every symbol; now reads `` `NSE:${symbol.toUpperCase()}` `` with a regression test asserting the exact key.
+- **Tests/Gates**: `recommendationCronService.test.ts` (5 crons, `dryRun:false`, drift self-heal, idempotence) · `historicalPriceSyncService.test.ts` (scope union/dedup/cap, NIFTY-failure tolerance, null mirror, `DEFAULT_DAYS=60`, explicit wins) · `sqliteMirror.test.ts` (real sql.js: distinct/upper/limit/cold) · `swingRecommendationService.test.ts` (Prisma full → mirror never read; Prisma throws → mirror serves; Prisma miss → mirror serves) → **117 pass**.
+- **Docs**: `.agents/changelog/versions-v3.54.md` + `.agents/CHANGELOG.md` index row + `versions-index.md` + `Primer.md` + `agent-memory.md` + **Lesson 167** + `.agents/session-todos.md` + this file + `HANDOFF.md`. **AGENTS.md row DEFERRED** (Lesson 142 — the v3.53.0 row on the Spec 36 branch consumes the per-file budget).
+
+## Prior — v3.52.0 Spec 34
+
+> Snapshot from 2026-10-22.
 
 - **(1) Batching + ranking (`lib/services/ai/recommendation-agent.ts`).** `BATCH_SIZE 5 → 20`, `CONCURRENCY 5 → 3`; new exported pure `rankStockAnalysisResults()` (success → confidence desc → `screenerNames.length` desc → marketCap desc → symbol asc) applied **once, after `Promise.all`** (i.e. after the batches are combined) + a top-5 `msg: "Stock analysis ranked"` log. `dailyRecommendationService` re-asserts the same comparator on `successfulResults` before persisting/broadcasting; the file's `rankActionableByConfidence()` was confirmed **dead code** and left untouched.
 - **(2) Durable swing Telegram (`lib/services/swingRecommendationService.ts`).** Root cause: the broadcast lived **only** at the tail of `processSwingAnalysisJob` (the request-path processor is frozen by Netlify after the response), the stale-exhausted recovery marked jobs `failed` **silently**, and `getSwingRecommendations` served terminal jobs without broadcasting. Fix: durable `payload.tgNotifiedAt` marker (JSON on both SQLite and Prisma ⇒ **no migration**) + `notifySwingTerminal(jobId)` (`SWING_TG_WINDOW_MS` 6 h, `SWING_TG_FLUSH_MS` 1 h, `swingNotifyInFlight` guard, payload **merged**) called from the processor tail, the stale-exhausted recovery, both terminal serve paths, and a 1-h daemon sweep of the newest 5 terminal jobs. `failed` jobs send the new honest `buildSwingUnavailableNotice()`.

@@ -1,4 +1,19 @@
-## Current (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
+## Current (2026-11-03 — v3.54.0 Spec 35 scheduled historical price sync)
+
+Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COMMIT PENDING USER; merge/deploy are user-only actions (D9)**.
+
+- [x] **Spec + Plan 35** authored and approved (`.agents/specs/35-scheduled-historical-price-sync.md`, `.agents/plans/35-scheduled-historical-price-sync.md` — all boxes checked, deviations noted)
+- [x] **5th system cron** — `Historical Price Sync (System)` `45 10 * * 1-5` (16:15 IST Mon–Fri) in `ensureRecommendationCrons()`, `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry, per-def `defConfig` with `dryRun:false` on create + drift self-heal
+- [x] **Scope + defaults** — `resolveSyncScope` = NIFTY 50 ∪ `getSwingSignalSymbols()` (mirror, zero Prisma), `DEFAULT_MAX_SYMBOLS 50→200`, `DEFAULT_DAYS 180→60`
+- [x] **New mirror read** — `sqlite.getSwingSignalSymbols(limit)` (interface + impl, never throws, clamp 1…2000)
+- [x] **Swing indicator fallback** — `fetchRecentCloses` Prisma → per-symbol SQLite gap fill; **`NSE:<SYMBOL>` key bug caught pre-commit** (Lesson 167) + regression test
+- [x] **Tests** — 4 suites touched / **117 targeted pass**
+- [x] **Gates** — `check-tsc-baseline` 46 exact (prod 0, delta +0) · full Jest **138/138 · 2110 pass / 4 skip / 0 fail** · ESLint 0 errors
+- [x] **Docs** — `versions-v3.54.md` + CHANGELOG index + versions-index + Primer + agent-memory + Lesson 167 + HANDOFF + latest.md (AGENTS.md row DEFERRED, Lesson 142)
+- [ ] **Commit + push + PR** — pending explicit user request
+- [ ] **Live verify** — deferred (no local Postgres/Timescale this session); prod: one manual wide-scope `historical_price_sync` run, then the 16:15 IST cron
+
+## Previous (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
 
 - [x] **Create `lib/services/ai/fallbackAnalysis.ts`** — pure technical-analysis fallback target/SL calculation using momentum20, volatility20, distanceFrom20dHigh, changePercent; direction-aware via `evaluateRecommendationLevels`
 - [x] **Modify `lib/services/ai/swing-agent.ts`** — replace `getDefaultSwingAnalysis` (OBSERVE, success:false) with `calculateFallbackSwingAnalysis` (directional, success:true) so targets show and analysisStatus becomes "done"
