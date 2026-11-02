@@ -10,7 +10,7 @@
 | **Branch** | `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **UNCOMMITTED**: 8 modified source/test files + 2 new docs. Commit pending user; push/PR/merge/deploy are user actions (D9). |
 | **State** | CODE + TESTS + GATES + DOCS **DONE** — targeted Jest **4 suites / 117 pass**, full Jest **138/138 · 2110 pass / 4 skip / 0 fail**, tsc **46 exact (prod 0, delta +0)**, ESLint **0 errors** on the 8 changed files. Live end-to-end verify **deferred** (no local Postgres/Timescale). |
 | **In-flight** | None |
-| **Blocked** | (1) **Tredye dashboards** — `tredye.com/pulse/` + `/strength/` are auth-gated; need screenshots or credentials before Spec 37 can be written. (2) OpenRouter 402 "Insufficient credits" — external, user action. |
+| **Blocked** | (1) **RefSite dashboards** — `refsite.com/pulse/` + `/strength/` are auth-gated; need screenshots or credentials before Spec 37 can be written. (2) OpenRouter 402 "Insufficient credits" — external, user action. |
 | **Spec/Plan** | `.agents/specs/35-scheduled-historical-price-sync.md` · `.agents/plans/35-scheduled-historical-price-sync.md` · detail `.agents/changelog/versions-v3.54.md` · Lesson 167 |
 
 ## What's done (v3.54.0)

@@ -73,6 +73,7 @@
 | DB migration ledger (what/why/decisions) | `.agents/docs/db-migrations.md` |
 | Playwright e2e / debug | `.agents/docs/playwright-e2e.md`, `.agents/docs/playwright-debug.md` |
 | Backtest history prod gap plan | `.agents/docs/plan-backtest-history-prod-gap.md` |
+| **RefSite reference (screenshots + data contracts + design tokens + UI behavior)** | `.agents/docs/refsite-reference/README.md`, `.agents/docs/refsite-reference/screenshots/` |
 
 ## 6. Skills, Agents & Commands
 
