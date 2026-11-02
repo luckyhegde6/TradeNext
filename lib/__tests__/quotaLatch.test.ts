@@ -36,6 +36,7 @@ import { persistBackupMeta, restoreBackupMeta, deleteBackupMeta } from "@/lib/sq
 import {
   clearAiQuotaExhausted,
   getAiQuotaStatus,
+  isAiCreditExhaustionMessage,
   isAiQuotaExhausted,
   isDailyFreeQuotaMessage,
   markAiQuotaExhausted,
@@ -61,6 +62,21 @@ describe("quotaLatch — detection", () => {
     expect(isDailyFreeQuotaMessage("Rate limit exceeded: requests per minute")).toBe(false);
     expect(isDailyFreeQuotaMessage("AI request failed (HTTP 402). Insufficient credits")).toBe(false);
     expect(isDailyFreeQuotaMessage("")).toBe(false);
+  });
+
+  it("matches the account-credit-exhaustion failure mode (HTTP 402 / insufficient credits)", () => {
+    expect(
+      isAiCreditExhaustionMessage(
+        'AI request failed (HTTP 402). {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits","code":402}}',
+      ),
+    ).toBe(true);
+    expect(isAiCreditExhaustionMessage("Insufficient credits")).toBe(true);
+    expect(isAiCreditExhaustionMessage("AI request failed (HTTP 402). Never purchased credits.")).toBe(true);
+  });
+
+  it("does NOT match an empty-response / non-quota failure", () => {
+    expect(isAiCreditExhaustionMessage("Empty model response")).toBe(false);
+    expect(isAiCreditExhaustionMessage("")).toBe(false);
   });
 
   it("todayUtc returns the UTC calendar day", () => {

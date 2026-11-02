@@ -6,7 +6,7 @@
  * Processes in batches of 20 for the free model to reduce API calls.
  */
 import { directPrompt, getPromptTimeoutMs, isQuotaExhausted, QUOTA_EXHAUSTED_MESSAGE } from "./llm-provider";
-import { markAiQuotaExhausted, isAiQuotaExhausted, isDailyFreeQuotaMessage } from "./quotaLatch";
+import { markAiQuotaExhausted, isAiQuotaExhausted, isDailyFreeQuotaMessage, isAiCreditExhaustionMessage } from "./quotaLatch";
 import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
@@ -333,7 +333,11 @@ async function analyzeBatch(
         // v3.51.0: latch the UTC day ONLY for the account-wide free DAILY budget
         // (`free-models-per-day`). A transient per-minute 429 must not disable
         // the AI for a whole day, so it is intentionally not latched.
-        if (isDailyFreeQuotaMessage(raw)) {
+        // v3.36 (Spec 36): the SAME latch now also covers account credit exhaustion
+        // (HTTP 402 / "Insufficient credits" / "never purchased credits") — a
+        // distinct AI-unavailable failure mode observed in prod (2026-11-02) that is
+        // not the daily-quota 429 the daily predicate keys on.
+        if (isDailyFreeQuotaMessage(raw) || isAiCreditExhaustionMessage(raw)) {
           markAiQuotaExhausted({ model, detail: raw.slice(0, 300) });
         }
         logger.warn({

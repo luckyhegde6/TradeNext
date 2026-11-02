@@ -4,6 +4,26 @@
 
 ---
 
+### 2026-11-02 | AI-down actionable picks + duplicate daily-notice fix (v3.53.0 / Spec 36)
+
+**Request (user)**: fix the prod defect cluster from `2Nov.log` — duplicate daily-run/Telegram notices, and when AI is down the daily broadcast should send screener-only BUY/SELL picks instead of the flat all-HOLD notice; also handle the AI analysis failure modes and make sure swing targets + stock AI analysis still generate.
+
+**Root cause**: (1) AI was entirely down with **three distinct signatures** — `openrouter/free` "Empty model response" (tokens=0), `openrouter/auto` **HTTP 402 "Insufficient credits. This account never purchased credits"**, nvidia free 503 — but only the daily free-quota 429 had a latch predicate, so credit exhaustion was re-probed on every attempt. (2) The duplicate notice was **two legitimate triggers**, not a broken run guard: the 10:00 cron tick was MISSED → recovery task `5f6eb4ad` (10:04) → notice at 10:15; then catch-up task `c24955fe` (10:19) → second notice at 10:27. (3) With `skipAi`, the run completed on the technical fallback and the broadcast had no way to express "AI down" — it collapsed to the all-HOLD notice.
+
+**Fix**:
+- NEW `isAiCreditExhaustionMessage()` in `lib/services/ai/quotaLatch.ts` (HTTP 402 / `Insufficient credits` / `never purchased credits`), kept **separate** from `isDailyFreeQuotaMessage()` (429 `free-models-per-day`) so each failure keeps its own identity.
+- `lib/services/ai/recommendation-agent.ts`: batch early-exit latches the UTC day on `isDailyFreeQuotaMessage(raw) || isAiCreditExhaustionMessage(raw)`; a generic/transient 429 still does **not** latch.
+- `lib/services/ai/connectionTestService.ts`: `runAiConnectionTest` computes `quotaExhausted` (any model HTTP 402 or credit-exhaustion text) and surfaces it in the report + audit metadata.
+- `lib/services/dailyRecommendationService.ts`: module-level `lastDailyRecNoticeDay` guard at the **completion broadcast** → at most one notice per UTC day per process (documented as in-process only; the DB run guards remain the cross-instance protection); wires `aiDown: skipAi === true`.
+- `lib/services/recommendationBroadcast.ts`: `buildRecommendationBroadcast(stocks, dateLabel, { aiDown })` — AI-down ranks actionable BUY/SELL fallback picks by screener confluence desc (cap `MAX_BROADCAST_PICKS`) instead of falling to all-HOLD; a genuine all-HOLD day keeps the all-HOLD notice.
+- Swing targets + stock AI analysis: verified only — the v3.30 `calculateFallbackSwingAnalysis` / `calculateFallbackRecommendation` paths already return directional levels with `success:true`.
+
+**Gates**: `npx tsc --noEmit` **46 = exact baseline, 0 errors in touched files** · targeted Jest **8 suites / 286 pass** (incl. 3 new AI-down broadcast tests) · eslint **0 errors** on changed files · doc-budget gate PASS. No Prisma schema change, no migration, no new packages, no new API routes.
+
+**External blocker (user action)**: OpenRouter account credits (HTTP 402) — must top up or switch key.
+
+---
+
 ### 2026-10-30 | AI fallback targets for Swing + Daily Recommendations
 
 **Request (user)**: when AI credits are unavailable (OpenRouter free tier 429), Swing Trading Signals and Daily Recommendations should still show actionable targets using technical-analysis calculations instead of showing "AI analysis pending — screener signals only" or discarding the entire run. Performance checks should work on these fallback targets.

@@ -136,6 +136,13 @@ const MAX_AI_STOCKS = 100;
  */
 const MAX_RECOMMENDED_STOCKS = 50;
 
+/**
+ * v3.36 / Spec 36 — last UTC day a daily-recommendations Telegram broadcast was
+ * sent. Guards the completion-path broadcast against a same-day double fire
+ * (missed-tick recovery run + catch-up retry of the same logical run).
+ */
+let lastDailyRecNoticeDay: string | null = null;
+
 // ─── Main Orchestration ─────────────────────────────────────────────────
 
 /**
@@ -835,16 +842,31 @@ export async function runDailyRecommendations(
     // Suggestions = actionable picks only (BUY/SELL). HOLDs are never listed
     // as suggestions — an all-HOLD day sends a short notice instead (see
     // buildRecommendationBroadcast in recommendationBroadcast.ts).
+    // v3.53 / Spec 36: per-UTC-day dedup so a single logical daily run (or a
+    // missed-tick recovery + catch-up double-fire) can never send two daily
+    // recommendations notices for the same day.
     try {
       const { broadcastToSubscribers } = await import("./telegramBotService");
       const { buildRecommendationBroadcast } = await import("./recommendationBroadcast");
 
-      const tgMessage = buildRecommendationBroadcast(successfulResults);
+      const noticeDay = new Date().toISOString().slice(0, 10);
+      const alreadyNotifiedToday = lastDailyRecNoticeDay === noticeDay;
+      if (!alreadyNotifiedToday) {
+        lastDailyRecNoticeDay = noticeDay;
+      }
 
-      const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
-        prependTitle: false,
-      });
-      logger.info({ msg: "Telegram broadcast for recommendations", sent });
+      if (!alreadyNotifiedToday) {
+        const tgMessage = buildRecommendationBroadcast(successfulResults, undefined, {
+          aiDown: skipAi === true,
+        });
+
+        const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
+          prependTitle: false,
+        });
+        logger.info({ msg: "Telegram broadcast for recommendations", sent });
+      } else {
+        logger.info({ msg: "Daily recommendations Telegram broadcast suppressed (already sent today)" });
+      }
     } catch (tgErr) {
       // Non-critical: log but don't fail the run
       logger.warn({ msg: "Telegram broadcast failed (non-critical)", error: tgErr });
