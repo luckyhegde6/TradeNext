@@ -1,17 +1,34 @@
-# Live Resume — v3.52.0 Spec 34 (20-stock AI batches + conviction ranking · durable swing Telegram · single header · console mirror)
+# Live Resume — v3.53.0 Spec 36 (AI-down actionable picks + duplicate daily-notice fix)
 
-> Updated: 2026-10-22 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-11-02 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | Spec 34 — four user-reported prod defects: (1) daily AI run with `configuredModel=openrouter/free` + `stocks=100` should batch **20** per call and then be **ordered by score and confidence**; (2) "no telegram notification is triggered on swing"; (3) duplicated Telegram header (`🔔 ⚠️ AI Unavailable` + `⚠️ AI Analysis Unavailable — …`); (4) add an additional `console.log` wherever `logger.info/warn/error` is used. |
-| **Branch** | `fix/mirror-blobs-upload-race` — **COMMITTED `1b5ea4d`** (29 files, +1673/−105; also carries the Spec 33 swing-refresh work and the SQLite Blobs upload-race fix). Not pushed — push/PR/merge/deploy are user actions. |
-| **State** | CODE + TESTS + GATES + DOCS **DONE** — **COMMITTED `1b5ea4d`** (push/PR/merge/deploy = user actions, D9). Full Jest **138/138 · 2095 pass / 4 skip / 0 fail**, `npm run quickbuild` **201/201**, tsc **46 (prod 0)**, eslint 0 errors. Playwright Swing verified live (see follow-up). |
+| **Task** | Spec 36 — user-reported prod defect cluster on 2026-11-02: (1) daily recommendations AI fully down (OpenRouter `openrouter/free` "Empty model response" / `openrouter/auto` HTTP 402 Insufficient credits / nvidia empty+503) → pre-flight FAILED → skipAi → fallback → all-HOLD Telegram notice; (2) duplicate run/notice — missed-tick recovery task `5f6eb4ad` @10:04 + catch-up task `c24955fe` @19 → two identical Telegram notices @10:15 + @10:27. |
+| **Branch** | On top of `main` @ `9a44878` (v3.52.0). Spec-35 WIP files (`historicalPriceSyncService*`, `recommendationCronService*`, `swingRecommendationService*`, `sqlite.ts` + tests) uncommitted — NOT part of v3.53.0. |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** (this pass) — **COMMIT PENDING USER** (D9). Not committed yet. |
 | **In-flight** | None |
-| **Blocked** | OpenRouter **402 Insufficient credits** — today's 04:30 UTC daily run failed (`Cron boot recommendations catch-up enqueued … reason=missed-daily-window`). Batching (5 calls/100 stocks instead of 20) lowers pressure; credits are an external action. v3.51.0 quota latch + Spec 30 dedup keep "AI unavailable" notices to ≤1/UTC-day. |
-| **Spec/Plan** | `.agents/specs/34-ai-batch-20-ranking-and-telegram-delivery.md` · `.agents/plans/34-…` · detail `.agents/changelog/versions-v3.52.md` · Lesson 165 |
+| **Blocked** | OpenRouter **402 Insufficient credits** (user action: top up credits / restore key) — external. |
+| **Spec/Plan** | `.agents/specs/36-ai-down-actionable-picks-dedup.md` · `.agents/plans/36-ai-down-actionable-picks-dedup.md` · detail `.agents/changelog/versions-v3.53.md` |
+
+## What's done (v3.53.0)
+
+- **(1) Duplicate-run / Telegram-notice fix.** Run-level guards verified green (Spec 30 catch-up dedup `workerTask` `triggeredBy:"catchup"` ≥ UTC-day-start; `hasSuccessfulRunToday`; in-flight guard; worker-engine tests green). NEW in-process per-UTC-day notice suppression (`lastDailyRecNoticeDay`) at the completion broadcast in `dailyRecommendationService.runDailyRecommendations` → ≤1 daily recommendations Telegram notice per UTC day even on a same-day double-fire.
+- **(2) AI-down actionable BUY/SELL broadcast.** `buildRecommendationBroadcast(stocks, dateLabel, opts?: {aiDown?: boolean})` — AI-down branch broadcasts actionable (BUY/SELL) fallback/screener-backed picks (screener confluence desc, `MAX_BROADCAST_PICKS` cap) instead of the unconditional all-HOLD notice; genuine all-HOLD days keep it. Wired `aiDown: skipAi === true`.
+- **(3) AI failure modes.** NEW `isAiCreditExhaustionMessage` (HTTP 402 / "Insufficient credits" / "never purchased credits") in `lib/services/ai/quotaLatch.ts`; agent batch early-exit latches on `isDailyFreeQuotaMessage || isAiCreditExhaustionMessage`; `connectionTestService.runAiConnectionTest` surfaces `quotaExhausted` in report + audit.
+- **(4) Swing/stock AI fallbacks.** Verified existing v3.30 fallbacks: `calculateFallbackSwingAnalysis` (swing, `success:true`, directional LONG/SHORT/OBSERVE) + `calculateFallbackRecommendation` (stock, `success:true`, BUY/HOLD/SELL).
+
+## Gates (this pass, v3.53.0)
+
+- tsc: **46 = exact baseline (prod 0; 0 new errors on touched files)**.
+- Jest: **8 suites / 286 tests green** — `quotaLatch`+`recommendation-agent`, `recommendationBroadcast`, `dailyRecommendationService`, `aiConnectionTestService`, `swing-agent`, `swingRecommendationService`, `worker-engine`.
+- ESLint on changed files: **0 errors**.
+- Doc-context budget gate: **PASS**.
+- Not run this pass: full `npm run test`, `npm run quickbuild`, Playwright (no UI change; service/broadcast level only).
+
+## Prior — v3.52.0 Spec 34 (20-stock AI batches + conviction ranking · durable swing Telegram · single header · console mirror)
 
 ## What's done (v3.52.0)
 

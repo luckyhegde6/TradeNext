@@ -29,6 +29,7 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
  */
 import { AI_FALLBACK_MODELS } from "./modelChain";
 export { AI_FALLBACK_MODELS } from "./modelChain";
+import { isAiCreditExhaustionMessage } from "./quotaLatch";
 
 /** Action tag recorded via trackAiCall for every probe attempt. */
 export const CONNECTION_TEST_ACTION = "connection_test";
@@ -241,6 +242,12 @@ export async function runAiConnectionTest(
 
   const working = fallbacks.find((r) => r.ok);
   const status: AiConnectionTestStatus = working ? "fallback" : "failed";
+  // v3.36 (Spec 36): credit exhaustion (HTTP 402 / "Insufficient credits") is an
+  // AI-unavailable failure mode distinct from the daily-quota-429 path — surface it
+  // in the report + audit so operators/admins see WHY all models failed.
+  const quotaExhausted = [primary, ...fallbacks].some(
+    (r) => r.httpStatus === 402 || isAiCreditExhaustionMessage(r.error ?? ""),
+  );
   const report: AiConnectionTestReport = {
     testedAt,
     status,
@@ -268,6 +275,7 @@ export async function runAiConnectionTest(
       ...(working ? { recommendedModel: working.model } : {}),
       primaryError: primary.error,
       fallbackResults: fallbacks.map((f) => ({ model: f.model, ok: f.ok, error: f.error })),
+      ...(quotaExhausted ? { quotaExhausted: true } : {}),
     },
     errorMessage: working
       ? undefined

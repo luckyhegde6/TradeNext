@@ -106,6 +106,33 @@ describe("buildRecommendationBroadcast", () => {
     expect(text).toContain("all 1 analyzed stock rated HOLD");
   });
 
+  it("AI-down emits actionable BUY/SELL picks backed by fallback verdicts, not the all-HOLD notice", () => {
+    const text = buildRecommendationBroadcast([BUY, SELL, HOLD], DATE, { aiDown: true });
+
+    expect(text).toContain("*RELIANCE* — BUY");
+    expect(text).toContain("*ITC* — SELL");
+    expect(text).not.toContain("No BUY/SELL picks today");
+    expect(text).toContain("🟢 1 BUY · 🔴 1 SELL");
+  });
+
+  it("AI-down ranks actionable picks by screener confluence (screenerNames desc)", () => {
+    const a = stock("AAA", "BUY", { screenerNames: ["X"] });
+    const b = stock("BBB", "BUY", { screenerNames: ["X", "Y", "Z", "W"] });
+
+    const text = buildRecommendationBroadcast([a, b], DATE, { aiDown: true });
+
+    expect(text).toContain("*BBB* — BUY");
+    expect(text).toContain("*AAA* — BUY");
+    // ranked by screener confluence desc → BBB (4 tags) before AAA (1 tag)
+    expect(text.indexOf("*BBB* — BUY")).toBeLessThan(text.indexOf("*AAA* — BUY"));
+  });
+
+  it("AI-down with no actionable fallback verdicts still shows the all-HOLD notice", () => {
+    const text = buildRecommendationBroadcast([HOLD, HOLD], DATE, { aiDown: true });
+
+    expect(text).toContain("No BUY/SELL picks today — all 2 analyzed stocks rated HOLD");
+  });
+
   it("caps suggestions at MAX_BROADCAST_PICKS", () => {
     const many = Array.from({ length: 20 }, (_, i) =>
       stock(`STK${i}`, i % 2 === 0 ? "BUY" : "SELL"),

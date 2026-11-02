@@ -23,6 +23,19 @@ export interface BroadcastStock {
     targetPrice: number;
     stopLoss: number;
   };
+  /** Screener confluence tags that flagged this stock (fallback/AI-down ranking signal). */
+  screenerNames?: string[];
+}
+
+/** Options for the daily recommendations broadcast builder. */
+export interface RecommendationBroadcastOptions {
+  /**
+   * True when the AI provider was unavailable and the picks being broadcast are
+   * fallback / screener-backed (AI-down path). In this mode the builder emits
+   * actionable BUY/SELL picks backed by screener confluence + fallback technical
+   * levels instead of falling straight through to the all-HOLD notice.
+   */
+  aiDown?: boolean;
 }
 
 /** Minimal stock shape for the swing broadcast (subset of SwingStock). */
@@ -77,15 +90,31 @@ export function buildAiUnavailableNotice(
  * Build the Telegram broadcast message for a daily recommendations run.
  * @param stocks All analyzed stocks from the run (BUY/SELL/HOLD).
  * @param dateLabel Optional fixed date label (tests pass one for determinism).
+ * @param opts Optional flags (v3.36 / Spec 36) — `aiDown` marks an AI-unavailable
+ *   run whose verdicts are fallback/screener-backed, in which case actionable
+ *   BUY/SELL picks are emitted instead of a flat all-HOLD notice.
  */
 export function buildRecommendationBroadcast(
   stocks: BroadcastStock[],
   dateLabel: string = defaultDateLabel(),
+  opts: RecommendationBroadcastOptions = {},
 ): string {
+  const { aiDown = false } = opts;
+
+  const actionable = stocks.filter(
+    (r) => r.aiRecommendation.recommendation === "BUY" || r.aiRecommendation.recommendation === "SELL",
+  );
   const nonHold = stocks.filter((r) => r.aiRecommendation.recommendation !== "HOLD");
+  // AI-down: actionable picks should be screener-backed (fallback technical levels)
+  // rather than an unconditional all-HOLD notice. Same BUY/SELL-only contract.
+  const picks = aiDown
+    ? [...actionable]
+        .sort((a, b) => (b.screenerNames?.length ?? 0) - (a.screenerNames?.length ?? 0))
+        .slice(0, MAX_BROADCAST_PICKS)
+    : nonHold;
 
   // All-HOLD day: notice only — no HOLD suggestions.
-  if (nonHold.length === 0) {
+  if (picks.length === 0) {
     const count = stocks.length;
     return (
       `🔔 📈 *Daily Recommendations — ${dateLabel}*\n\n` +
@@ -94,7 +123,7 @@ export function buildRecommendationBroadcast(
     );
   }
 
-  const topStocks = nonHold.slice(0, MAX_BROADCAST_PICKS);
+  const topStocks = picks.slice(0, MAX_BROADCAST_PICKS);
   const lines = topStocks.map((r) => {
     const icon = REC_ICONS[r.aiRecommendation.recommendation] || "⚪";
     const conf = `${r.aiRecommendation.confidence}%`;
@@ -109,14 +138,13 @@ export function buildRecommendationBroadcast(
     return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
   });
 
-  const buyCount = nonHold.filter((r) => r.aiRecommendation.recommendation === "BUY").length;
-  const sellCount = nonHold.length - buyCount;
-  const holdCount = stocks.length - nonHold.length;
+  const buyCount = picks.filter((r) => r.aiRecommendation.recommendation === "BUY").length;
+  const sellCount = picks.length - buyCount;
 
   let text = `🔔 📈 *Daily Recommendations — ${dateLabel}*\n\n${lines.join("\n\n")}`;
   text +=
     `\n\n_🟢 ${buyCount} BUY · 🔴 ${sellCount} SELL` +
-    (holdCount > 0 ? ` · ⚪ ${holdCount} HOLD not shown` : "") +
+    (stocks.length - picks.length > 0 ? ` · ⚪ ${stocks.length - picks.length} HOLD not shown` : "") +
     ` — view all on TradeNext → /recommendations_`;
 
   if (text.length > 4000) {
