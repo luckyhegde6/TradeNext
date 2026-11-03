@@ -214,6 +214,7 @@ interface DbHealthData {
 interface RuntimeActivityData {
   timestamp: string;
   activeWindowMs: number;
+  excludedInstanceCount: number;
   instances: Array<{
     workerId: string; workerName: string | null; role: string; status: string;
     currentTaskId: string | null; firstSeenAt: string | null; lastHeartbeatAt: string | null;
@@ -1949,7 +1950,7 @@ export default function DbHealthPage() {
         </div>
         <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
           Instance heartbeat window: 15 minutes. First seen is the WorkerStatus record creation time (not guaranteed process boot time).
-          Idle workers may have stale shared heartbeats because idle pings are local SQLite-only; leader/daemon and busy-worker heartbeats are the reliable active signals. Task history spans 7 days.
+          Idle and stale worker records are excluded from this live list (persisted diagnostics are retained, not deleted). Task history spans 7 days.
           Activity refreshes every 2 minutes separately from the zero-Prisma DB Health poll.
         </p>
         {runtimeError && <p role="alert" className="mb-3 text-sm text-amber-700 dark:text-amber-400">Runtime activity unavailable: {runtimeError}</p>}
@@ -1959,9 +1960,9 @@ export default function DbHealthPage() {
           <>
             <div className="mb-5">
               <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-2">
-                Instances ({runtimeActivity.instances.filter((x) => x.active).length} active / {runtimeActivity.instances.length} seen in 24h)
+                Live instances ({runtimeActivity.instances.length}; idle/stale excluded: {runtimeActivity.excludedInstanceCount})
               </h4>
-              {runtimeActivity.instances.length === 0 ? <p className="text-sm text-gray-500">No worker/daemon heartbeat records in the last 24 hours.</p> : (
+              {runtimeActivity.instances.length === 0 ? <p className="text-sm text-gray-500">No active non-idle worker/daemon instances. Idle and stale records are excluded.</p> : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead><tr className="text-left border-b border-gray-200 dark:border-slate-700 text-gray-500">
