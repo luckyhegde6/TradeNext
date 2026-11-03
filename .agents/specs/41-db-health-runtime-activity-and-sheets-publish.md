@@ -14,7 +14,7 @@ Operators cannot easily determine which serverless instances are alive, when eac
 
 ## Requirements
 1. Add admin-authenticated runtime/activity data without adding Prisma queries to the existing DB Health GET path. Use a separate runtime endpoint and bounded queries.
-2. Active instances list recent worker/daemon/leader records with identity, role, status, first-seen timestamp, last heartbeat, and computed heartbeat age/state. Do not call stale rows active; do not delete history.
+2. Active instances list only fresh non-idle worker/daemon/leader records with identity, role, status, first-seen timestamp, last heartbeat, and heartbeat age. Exclude idle and stale records from the live list; retain persisted WorkerStatus rows for diagnostics (do not delete history).
 3. Show cron expression, timezone where known, next scheduled timestamp, last run timestamp, counts, and active state.
 4. Show worker task trigger source/status and created/started/completed timestamps plus duration when both start/end exist. Include recent recommendation, recommendation performance, swing performance and historical price sync activity.
 5. Make scheduled task execution traceable using existing task/cron ledger/event records. Avoid creating duplicate swing-performance execution; represent the existing companion execution distinctly under the performance task if supported by task events/logging.
