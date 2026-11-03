@@ -6,6 +6,8 @@
 - **Spec / Plan:** Spec 41 / Plan 41; also continues Spec 40 SQLite sync amplification investigation.
 
 ## Changes
+- **Run-triggered Sheets publishing:** daily-rec and Swing producer appends are awaited (best-effort) before their worker-owned operation completes and log row count/outcome. Performance cycles append a KPI snapshot to `metrics`; combined recommendation+Swing checks emit one snapshot, standalone Swing performance emits one. KPI publish result is recorded as a task progress event.
+- **Empty-run diagnosis:** all-AI-failed daily runs now log an explicit skipped-publish reason; no synthetic fallback picks are written.
 0. **Idle worker cleanup in live view** — runtime endpoint excludes idle-status and stale-heartbeat WorkerStatus records from the Active Instances list and reports an excluded count. Persisted records are retained; no DB deletion is performed because a status row is not the worker process itself.
 1. **Runtime activity endpoint** — NEW `app/api/admin/db-health/runtime/route.ts`, admin-only and bounded. Returns recent WorkerStatus records (24h window, max 50), cron definitions (max 30), and tracked worker tasks (7d, max 40) with TaskEvent timestamps. Active/stale derives from a 15-minute heartbeat window. First-seen is WorkerStatus.createdAt, not guaranteed process boot time.
 2. **DB Health UI** — NEW Active Instances & Scheduled Activity section in `app/admin/utils/db-health/page.tsx`. Displays worker/daemon/leader identity, state, first-seen, last heartbeat/age; cron expression, exact last/next timestamps and outcomes; task trigger source, status, created/started/completed timestamps, duration and event timeline. Runtime polling is separate (2 min) from the existing zero-Prisma DB Health polling.
