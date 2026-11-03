@@ -142,13 +142,19 @@ export async function GET() {
         createdAt: iso(c.createdAt),
         updatedAt: iso(c.updatedAt),
       })),
-      tasks: tasks.map((t) => ({
+      tasks: tasks.map((t) => {
+        const cronName = t.cronJobId ? crons.find((c) => c.id === t.cronJobId)?.name : null;
+        const triggerLabel = cronName?.includes("(System)")
+          ? "system cron"
+          : t.triggeredBy ?? "unknown";
+        return {
         id: t.id,
         name: t.name,
         taskType: t.taskType,
         taskCategory: t.taskCategory,
         status: t.status,
         triggeredBy: t.triggeredBy,
+        triggerLabel,
         cronJobId: t.cronJobId,
         assignedTo: t.assignedTo,
         createdAt: iso(t.createdAt),
@@ -163,7 +169,8 @@ export async function GET() {
           message: e.message,
           at: iso(e.createdAt),
         })),
-      })),
+      };
+      }),
     });
   } catch (error) {
     logger.error({
