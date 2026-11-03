@@ -22,6 +22,13 @@
 - **Tests/Gates**: `recommendationCronService.test.ts` (5 crons, `dryRun:false`, drift self-heal, idempotence) · `historicalPriceSyncService.test.ts` (scope union/dedup/cap, NIFTY-failure tolerance, null mirror, `DEFAULT_DAYS=60`, explicit wins) · `sqliteMirror.test.ts` (real sql.js: distinct/upper/limit/cold) · `swingRecommendationService.test.ts` (Prisma full → mirror never read; Prisma throws → mirror serves; Prisma miss → mirror serves) → **117 pass**.
 - **Docs**: `.agents/changelog/versions-v3.54.md` + `.agents/CHANGELOG.md` index row + `versions-index.md` + `Primer.md` + `agent-memory.md` + **Lesson 167** + `.agents/session-todos.md` + this file + `HANDOFF.md`. **AGENTS.md row DEFERRED** (Lesson 142 — the v3.53.0 row on the Spec 36 branch consumes the per-file budget).
 
+## Prior — v3.53.0 Spec 36 (AI-down actionable picks + duplicate daily-notice fix; 2026-11-02)
+
+- **Problem:** OpenRouter free model returned empty responses; auto model returned HTTP 402 Insufficient credits; Nvidia provider returned 503. The daily recommendation run fell back to all-HOLD notices. Two missed-tick/catch-up tasks emitted duplicate notices.
+- **Fixes completed on main:** classify HTTP 402/credit exhaustion as AI unavailable and latch quota exhaustion; suppress duplicate daily notices per UTC day; AI-down broadcasts use screener/fallback-backed actionable BUY/SELL picks when valid, while genuine all-HOLD remains unchanged; verify existing swing and stock technical fallbacks return directional levels with success:true.
+- **Verification recorded:** tsc 46 exact baseline (0 production errors); targeted Jest 8 suites / 286 tests; full Jest 138 suites / 2113 passed / 4 skipped / 0 failed; lint 0 errors; quickbuild 201/201. OpenRouter credit exhaustion remains an external user-action blocker.
+- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md, .agents/plans/36-ai-down-actionable-picks-dedup.md; version detail: .agents/changelog/versions-v3.53.md.
+
 ## Prior — v3.52.0 Spec 34
 
 > Snapshot from 2026-10-22.
