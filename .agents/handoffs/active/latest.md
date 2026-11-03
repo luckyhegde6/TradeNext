@@ -11,6 +11,9 @@
 - **Deployment:** not performed. User controls PR/merge/deploy.
 
 ## Implemented
+- **Why tabs can remain empty:** daily recommendation export is gated on `successfulResults` (real AI verdicts only); the all-AI-failed path exits before export. Swing export occurs after background AI analysis; the ordinary feed poll is screener-only (`analyze=0`) and does not export. Performance checks previously updated tracker data/audit only and did not publish a Sheet row.
+- **Code fix:** daily-rec and Swing producer exports are now awaited (best-effort) before their owning worker operation finishes, with row count + exporter outcome logs. All-AI-failed daily run logs an explicit skipped-publish reason. Combined recommendation + Swing performance appends one KPI snapshot to `metrics`; standalone Swing performance appends one snapshot. Publish outcome is included in task progress.
+- **Live verification still needed:** no live Sheet contents or provider append tested because Drive connector access is disabled. Tests/build checks pending.
 - **Idle workers:** runtime endpoint and DB Health live list now exclude `status=idle` and heartbeat-stale rows; an excluded count is shown. Persisted WorkerStatus rows are retained, not deleted (they are status records, not process controls). Focused regression test added; verification still pending.
 - **Google Sheet link:** user supplied spreadsheet ID matches the masked ID shown in the previous admin screenshot (`1mRD…DXzQ`), so it appears already configured. Google Drive connector is disabled by admin and public URL fetch failed; sheet tab/header contents have not been inspected. Do not invent a schema mapping. Need authorized live sheet access to verify headers and publish behavior.
 1. New admin-only bounded endpoint: app/api/admin/db-health/runtime/route.ts; returns recent WorkerStatus, CronJob and tracked WorkerTask/TaskEvent data.
