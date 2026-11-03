@@ -8,6 +8,9 @@ Branch fix/sqlite-sync-startup-amplification, created from latest main after PR 
 - [x] Persist recommendation-performance and Swing companion progress as task events without double execution.
 - [x] Surface sanitized Google Sheets header diagnostics; fix direct publish timestamp and explicit metrics publish outcome/feedback.
 - [x] Add focused runtime, Sheets status, exporter and publish-route regression tests.
+- [x] Await daily-rec/Swing producer publishes and add performance KPI snapshots to metrics tab with task progress outcome.
+- [x] Log explicitly when all AI verdicts fail and daily-rec rows are intentionally skipped.
+- [ ] Run targeted Jest suites and full checks; validate a live run against the configured Google Sheet after authorized access/deployment.
 - [ ] Run targeted Jest suites and full required checks individually: npm run test, npx tsc --noEmit, npm run lint, npm run quickbuild.
 - [ ] Review branch diff/status and resolve any failures. No commit/push/PR/merge/deploy beyond documentation commits already made through the branch API; deployment remains user-controlled.
 
