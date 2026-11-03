@@ -2,7 +2,7 @@
  * Tests for lib/services/historicalPriceSyncService.ts (v3.10.0):
  *   - formatNseDate / buildDateRange: window derivation + validation.
  *   - dedupeSymbols / resolveSyncScope: scope resolution (explicit + default
- *     NIFTY 50 ∪ trackers ∪ live screener captures, deduped, capped).
+ *     NIFTY 50 ∪ SQLite-mirror swing symbols (Spec 35), deduped, capped).
  *   - buildUpsertSql: multi-row idempotent upsert SQL shape.
  *   - syncHistoricalPrices: dry-run (no writes), apply (writes), error
  *     tolerance, empty-scope short-circuit, maxDurationMs guard.
@@ -42,6 +42,9 @@ jest.mock("@/lib/sqlite", () => {
     __esModule: true,
     cacheDailyPriceBars: jest.fn(),
     flushNseToPrisma: jest.fn().mockResolvedValue({}),
+    // Spec 35: resolveSyncScope reads swing flaggers via getSqliteFallback().
+    getSqliteFallback: jest.fn(),
+    getSqlitePriceRange: jest.fn(),
   };
 });
 
@@ -56,12 +59,21 @@ import {
 import type { SecurityWiseHistoricalBar } from "@/lib/nse-api";
 import { fetchSecurityWiseHistoricalData } from "@/lib/nse-api";
 import { getIndexStocks } from "@/lib/index-service";
+import { getSqliteFallback } from "@/lib/sqlite";
 import prisma from "@/lib/prisma";
 
 const fetchMock = fetchSecurityWiseHistoricalData as jest.MockedFunction<typeof fetchSecurityWiseHistoricalData>;
 const indexMock = getIndexStocks as jest.MockedFunction<typeof getIndexStocks>;
 const trackerFindMany = prisma.recommendationTracker.findMany as jest.Mock;
 const capturedFindMany = prisma.chartinkScreenerResult.findMany as jest.Mock;
+const getSqliteFallbackMock = getSqliteFallback as jest.Mock;
+
+/** Install a mirror stub by default so getSqliteFallback() isn't undefined. */
+function stubMirror(symbols: string[] | null): void {
+  getSqliteFallbackMock.mockReturnValue(
+    symbols === null ? null : { getSwingSignalSymbols: () => symbols },
+  );
+}
 
 const bar = (symbol: string, date: string, close = 100): SecurityWiseHistoricalBar => ({
   symbol,
@@ -83,6 +95,7 @@ const bar = (symbol: string, date: string, close = 100): SecurityWiseHistoricalB
 
 beforeEach(() => {
   jest.resetAllMocks(); // reset implementations too — mockResolvedValue leaks across tests otherwise
+  stubMirror([]); // default: mirror has no swing symbols — keeps the old NIFTY-50-only tests intact
 });
 
 // ─── formatNseDate / buildDateRange ────────────────────────────────────────
@@ -95,12 +108,12 @@ describe("formatNseDate", () => {
 });
 
 describe("buildDateRange", () => {
-  it("defaults to 180 days back from today", () => {
+  it("defaults to 60 days back from today (Spec 35: was 180)", () => {
     const { from, to } = buildDateRange({});
     expect(to).toBe(formatNseDate(new Date()));
     const fromMs = new Date(from.split("-").reverse().join("-")).getTime();
     const todayMs = new Date(to.split("-").reverse().join("-")).getTime();
-    expect(Math.round((todayMs - fromMs) / 86400000)).toBeCloseTo(180, 0);
+    expect(Math.round((todayMs - fromMs) / 86400000)).toBeCloseTo(60, 0);
   });
 
   it("honors explicit from/to and days override", () => {
@@ -139,29 +152,48 @@ describe("resolveSyncScope", () => {
     expect(trackerFindMany).not.toHaveBeenCalled();
   });
 
-  it("returns NIFTY 50 constituents only (v3.19.0 scope reduction)", async () => {
+  it("unions NIFTY 50 with SQLite-mirror swing symbols, deduped (Spec 35)", async () => {
     indexMock.mockResolvedValue([{ symbol: "NIFTY50A" }, { symbol: "nifty50b" }]);
     trackerFindMany.mockResolvedValue([{ symbol: "TRACKED" }]); // no longer queried
     capturedFindMany.mockResolvedValue([{ symbol: "CAPTURED" }]); // no longer queried
+    stubMirror(["nifty50b", "SWINGX"]); // mirror swing flagger (one overlaps NIFTY 50)
 
     const scope = await resolveSyncScope(undefined, 10);
-    // v3.19.0: scope reduced to NIFTY 50 only — no trackers/screener captures
-    expect(scope).toEqual(["NIFTY50A", "NIFTY50B"]);
+    expect(scope).toEqual(["NIFTY50A", "NIFTY50B", "SWINGX"]);
     // Tracker and screener DB queries are no longer made
     expect(trackerFindMany).not.toHaveBeenCalled();
     expect(capturedFindMany).not.toHaveBeenCalled();
   });
 
+  it("caps the union at maxSymbols (explicit beats mirror order)", async () => {
+    indexMock.mockResolvedValue([{ symbol: "NIFTY50A" }, { symbol: "NIFTY50B" }]);
+    stubMirror(["SWINGA", "SWINGB", "SWINGC"]);
+    const scope = await resolveSyncScope(undefined, 4);
+    expect(scope).toEqual(["NIFTY50A", "NIFTY50B", "SWINGA", "SWINGB"]);
+  });
+
   it("caps the scope and degrades gracefully when NIFTY 50 fetch fails", async () => {
     indexMock.mockRejectedValue(new Error("NSE down"));
     trackerFindMany.mockRejectedValue(new Error("db down"));
-    capturedFindMany.mockResolvedValue(
-      Array.from({ length: 50 }, (_, i) => ({ symbol: `SYM${i}` })),
-    );
+    stubMirror([]); // no swing symbols either (default stub)
 
     const scope = await resolveSyncScope(undefined, 10);
-    // NIFTY 50 failed → empty scope (trackers/screener no longer in default scope)
+    // Both sources empty → empty scope
     expect(scope).toHaveLength(0);
+  });
+
+  it("still syncs swing symbols when the NIFTY 50 read fails (Spec 35)", async () => {
+    indexMock.mockRejectedValue(new Error("NSE down"));
+    stubMirror(["SWINGA", "SWINGB"]);
+    const scope = await resolveSyncScope(undefined, 10);
+    expect(scope).toEqual(["SWINGA", "SWINGB"]);
+  });
+
+  it("tolerates a missing/failed SQLite mirror (null getSqliteFallback)", async () => {
+    indexMock.mockResolvedValue([{ symbol: "NIFTY50A" }]);
+    getSqliteFallbackMock.mockReturnValue(null); // mirror not ready
+    const scope = await resolveSyncScope(undefined, 10);
+    expect(scope).toEqual(["NIFTY50A"]);
   });
 });
 

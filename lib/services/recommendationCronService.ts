@@ -8,7 +8,7 @@ import { getCronFrom } from "@/lib/services/timeCorrection";
  * Self-healing cron jobs for the Daily Recommendations engine (v3.5.0)
  * plus the Daily Market Sync (v3.5.8) and the AI Connection Test (v3.7.1).
  *
- * Ensures the four SYSTEM-managed jobs exist and are active:
+ * Ensures the five SYSTEM-managed jobs exist and are active:
  *   - Daily Recommendations          `30 4 * * 1-5`    = 10:00 AM IST (Mon-Fri)
  *   - Recommendation Performance     `30 10 * * 1-5`   = 04:00 PM IST (Mon-Fri)
  *   - Daily Market Sync              `1 1 * * 1-5`     = 06:31 AM IST (Mon-Fri)
@@ -16,15 +16,18 @@ import { getCronFrom } from "@/lib/services/timeCorrection";
  *     (Mon-Fri, every 30 min) — probes the configured AI model + fallback
  *     routes BEFORE the 10:00 AM IST recommendations run so a dead model is
  *     caught early instead of producing an all-HOLD run.
+ *   - Historical Price Sync          `45 10 * * 1-5`   = 04:15 PM IST (Mon-Fri)
+ *     (Spec 35) — daily EOD NSE backfill into daily_prices so Swing momentum
+ *     indicators (momentum20 / volatility20 / distanceFrom20dHigh) have bars.
  *
- * The four jobs are executed by the in-process cron daemon (v3.11.0):
+ * The five jobs are executed by the in-process cron daemon (v3.11.0):
  * lib/services/worker/cron-daemon.ts registers each active CronJob row on
  * the node-cron scheduler (timezone UTC — see `SYSTEM_CRON_TIMEZONE`) and
  * spawns a WorkerTask via spawnDueCronJob → spawnCronTask. The daemon replaced
  * the old Netlify scheduled functions (cron-recommendations /
  * cron-performance / cron-market-sync / cron-ai-connection-test →
  * run-cron-background.ts, deleted in v3.11.0). WorkerTask execution still flows
- * through executeTask, which handles all four taskTypes (plus
+ * through executeTask, which handles historical_price_sync too (plus
  * `ai_connection_test` for local/admin-triggered runs).
  *
  * Times are UTC: IST = UTC + 5:30. The worker scheduler (worker-engine.ts)
@@ -39,10 +42,14 @@ export const RECOMMENDATION_CRON_NAME = "Daily Recommendations (System)";
 export const RECOMMENDATION_PERFORMANCE_CRON_NAME = "Recommendation Performance Check (System)";
 export const MARKET_SYNC_CRON_NAME = "Daily Market Sync (System)";
 export const AI_CONNECTION_TEST_CRON_NAME = "AI Connection Test (System)";
+export const HISTORICAL_PRICE_SYNC_CRON_NAME = "Historical Price Sync (System)";
 export const RECOMMENDATION_CRON_EXPR = "30 4 * * 1-5"; // 10:00 AM IST Mon-Fri
 export const RECOMMENDATION_PERFORMANCE_CRON_EXPR = "30 10 * * 1-5"; // 04:00 PM IST Mon-Fri
 export const MARKET_SYNC_CRON_EXPR = "1 1 * * 1-5"; // 06:31 AM IST Mon-Fri (UTC 01:01)
 export const AI_CONNECTION_TEST_CRON_EXPR = "*/30 3-10 * * 1-5"; // 08:30–15:30 IST Mon-Fri
+// Spec 35: NSE publishes EOD bars after market close — 16:15 IST is safely
+// after the close AND after the 16:00 IST recommendation-performance run.
+export const HISTORICAL_PRICE_SYNC_CRON_EXPR = "45 10 * * 1-5"; // 4:15 PM IST Mon-Fri (UTC 10:45)
 
 /**
  * Timezone every SYSTEM cron row is persisted with. MUST equal the daemon's
@@ -55,13 +62,14 @@ export const SYSTEM_CRON_TIMEZONE = "UTC";
 /**
  * Maps every SYSTEM cron task type to its CronJob name so worker outcome
  * recording (recordSystemRunOutcome) can update successCount / failureCount
- * for all four system jobs, not just the recommendation pair.
+ * for all five system jobs, not just the recommendation pair.
  */
 export const SYSTEM_JOB_NAME_BY_TASK_TYPE: Record<string, string> = {
   recommendations: RECOMMENDATION_CRON_NAME,
   recommendation_performance: RECOMMENDATION_PERFORMANCE_CRON_NAME,
   market_data: MARKET_SYNC_CRON_NAME,
   ai_connection_test: AI_CONNECTION_TEST_CRON_NAME,
+  historical_price_sync: HISTORICAL_PRICE_SYNC_CRON_NAME,
 };
 
 export interface EnsureRecommendationCronsResult {
@@ -156,7 +164,14 @@ export async function recordCronRun(jobName: string, success: boolean, options?:
 }
 
 export async function ensureRecommendationCrons(): Promise<EnsureRecommendationCronsResult> {
-  const definitions = [
+  const definitions: Array<{
+    name: string;
+    description: string;
+    taskType: string;
+    cronExpression: string;
+    /** Extra config keys merged over the standard {systemManaged, timezone} pair. */
+    config?: Record<string, unknown>;
+  }> = [
     {
       name: RECOMMENDATION_CRON_NAME,
       description: "System-managed daily recommendation generation (10:00 AM IST, Mon-Fri)",
@@ -181,6 +196,19 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       taskType: "ai_connection_test",
       cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
     },
+    {
+      // Spec 35: the v3.10.0 sync task existed only as a manual worker type —
+      // it was never scheduled, so daily_prices went stale and every Swing
+      // momentum indicator rendered as a dash. Scheduled WRITES (dryRun:false):
+      // spawnDueCronJob passes job.config → task payload and
+      // executeHistoricalPriceSync reads payload.dryRun (manual admin runs
+      // without config still default to dry-run there).
+      name: HISTORICAL_PRICE_SYNC_CRON_NAME,
+      description: "System-managed daily NSE EOD backfill into daily_prices — swing momentum indicators source (4:15 PM IST, Mon-Fri)",
+      taskType: "historical_price_sync",
+      cronExpression: HISTORICAL_PRICE_SYNC_CRON_EXPR,
+      config: { dryRun: false },
+    },
   ];
 
   const jobs: EnsureRecommendationCronsResult["jobs"] = [];
@@ -200,6 +228,15 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
       // waiting until the next day).
       const nextRun = calculateNextRun(def.cronExpression, getCronFrom());
 
+      // The persisted config for this def: standard system pair + optional
+      // per-def extras (Spec 35: historical_price_sync dryRun:false). Compared
+      // against the existing row so drift rewrites, and written on create.
+      const defConfig = {
+        systemManaged: true,
+        timezone: SYSTEM_CRON_TIMEZONE,
+        ...(def.config ?? {}),
+      } as Record<string, unknown>;
+
       if (existing) {
         // Self-heal: keep the job active + fix schedule if drifted.
         // ensureRecommendationCrons runs once per start (on boot), never inside
@@ -208,10 +245,12 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
         const existingConfig = (existing.config ?? {}) as Record<string, unknown>;
         // Spec 25: a system row persisted with the old `timezone: "Asia/Kolkata"`
         // (or missing the systemManaged flag) must be rewritten, else the daemon
-        // keeps registering it 5.5h off its UTC nextRun.
-        const configDrifted =
-          existingConfig.systemManaged !== true ||
-          existingConfig.timezone !== SYSTEM_CRON_TIMEZONE;
+        // keeps registering it 5.5h off its UTC nextRun. Spec 35: per-def extra
+        // config keys (e.g. historical_price_sync dryRun:false) are compared too.
+        const configDrifted = Object.entries(defConfig).some(
+          ([key, value]) =>
+            JSON.stringify(existingConfig[key]) !== JSON.stringify(value),
+        );
         const changed =
           existing.isActive !== true ||
           existing.taskType !== def.taskType ||
@@ -233,7 +272,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
           data.cronExpression = def.cronExpression;
           data.description = def.description;
           data.isActive = true;
-          data.config = { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE };
+          data.config = defConfig as never;
         }
 
         // Only update if there's something to change
@@ -255,7 +294,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
             cronExpression: def.cronExpression,
             isActive: true,
             nextRun,
-            config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE },
+            config: defConfig as never,
           },
         });
         logger.info({ msg: "Created system recommendation cron job", name: def.name, nextRun });
@@ -272,7 +311,7 @@ export async function ensureRecommendationCrons(): Promise<EnsureRecommendationC
   // Netlify instances racing the findFirst-then-create above can leave
   // duplicate rows for the same system job. Migration-free fix: keep the
   // EARLIEST row per system name and delete the rest. Scoped strictly to the
-  // four system names — user-created crons are never touched.
+  // five system names — user-created crons are never touched.
   const systemNames = definitions.map((d) => d.name);
   const systemCrons = await prisma.cronJob.findMany({
     where: { name: { in: systemNames } },

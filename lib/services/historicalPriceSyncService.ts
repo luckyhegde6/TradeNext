@@ -24,7 +24,7 @@ import { fetchSecurityWiseHistoricalData } from "@/lib/nse-api";
 import type { SecurityWiseHistoricalBar } from "@/lib/nse-api";
 
 export interface HistoricalPriceSyncOptions {
-  /** Explicit symbol scope. Default: resolveSyncScope() (NIFTY 50 ∪ recent trackers ∪ captured screeners). */
+  /** Explicit symbol scope. Default: resolveSyncScope() (NIFTY 50 ∪ recent swing signals, via the SQLite mirror). */
   symbols?: string[];
   /** Calendar days of history to fetch (default 180). */
   days?: number;
@@ -56,8 +56,12 @@ export interface HistoricalPriceSyncResult {
   durationMs: number;
 }
 
-const DEFAULT_DAYS = 180;
-const DEFAULT_MAX_SYMBOLS = 50; // NIFTY 50 only (was 300 — too many DB ops for plan limit)
+const DEFAULT_DAYS = 60;
+// Spec 35: default scope = NIFTY 50 ∪ recent Swing-flagged symbols (capped).
+// The old 50 = "NIFTY 50 only" note — the sync now also covers the swing
+// flaggers so momentum indicators stop rendering as a dash. Ops math at cap:
+// ~200 symbols × ~41 bars ÷ 200-row chunk ≈ 42 write statements/day.
+const DEFAULT_MAX_SYMBOLS = 200;
 const DEFAULT_FETCH_DELAY_MS = 200;
 const UPSERT_CHUNK_SIZE = 200;
 
@@ -109,12 +113,13 @@ export function dedupeSymbols(symbols: string[]): string[] {
 /**
  * Resolve the symbol scope to sync.
  * - Explicit list → deduped + capped.
- * - Default → NIFTY 50 constituents only. The previous scope included
- *   RecommendationTracker + ChartinkScreenerResult symbols (capped 300)
- *   but those extra DB queries + the larger symbol count consumed 3K-6K
- *   ops/day — exceeding the Prisma Postgres plan limit. Reducing to
- *   NIFTY 50 only brings the sync to ~500 ops/day. Callers can pass
- *   explicit symbols for wider coverage when needed.
+ * - Default → NIFTY 50 ∪ distinct symbols from the SQLite-mirror swing
+ *   signals (zero Prisma reads — `getSwingSignalSymbols`). Previously NIFTY 50
+ *   only (the pre-v3.35 scope — RecommendationTracker + ChartinkScreenerResult
+ *   sources, capped 300 — consumed 3K-6K ops/day). The swing-signal source
+ *   targets exactly the symbols whose daily bars the platform actually
+ *   serves (Swing tab indicators), and a 60-day window instead of 180 keeps
+ *   the write volume ≈ 42 chunked statements/day at the 200-symbol cap.
  *
  * Every scope source degrades to [] on failure so a scope problem never
  * throws the whole job.
@@ -125,8 +130,8 @@ export async function resolveSyncScope(explicit: string[] | undefined, maxSymbol
     return dedupeSymbols(explicit).slice(0, maxSymbols);
   }
 
-  // NIFTY 50 only — avoids 2 DB queries (trackers + screener results) and
-  // caps the sync at ~50 symbols instead of 300.
+  // NIFTY 50 from the index listing (1 Prisma read) + swing flaggers from the
+  // SQLite mirror (zero Prisma). Both degrade to [] on failure.
   const indexStocks = await (await import("@/lib/index-service"))
     .getIndexStocks("NIFTY 50")
     .then((stocks: Array<{ symbol?: string }>) => stocks.map((s) => s.symbol ?? ""))
@@ -135,7 +140,17 @@ export async function resolveSyncScope(explicit: string[] | undefined, maxSymbol
       return [];
     });
 
-  return dedupeSymbols(indexStocks).slice(0, maxSymbols);
+  const swingSymbols = (await (async () => {
+    try {
+      const sqlite = await import("@/lib/sqlite");
+      return sqlite.getSqliteFallback()?.getSwingSignalSymbols(maxSymbols) ?? [];
+    } catch (e: unknown) {
+      logger.warn({ msg: "Historical price sync: swing scope fetch failed", error: e });
+      return [];
+    }
+  })());
+
+  return dedupeSymbols([...indexStocks, ...swingSymbols]).slice(0, maxSymbols);
 }
 
 /**

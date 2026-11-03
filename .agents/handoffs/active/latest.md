@@ -1,36 +1,37 @@
-# Live Resume — v3.53.0 Spec 36 (AI-down actionable picks + duplicate daily-notice fix)
+# Live Resume — v3.54.0 Spec 35 (scheduled historical price sync · Swing indicator gap · mirror-bar fallback)
 
-> Updated: 2026-11-02 · Snapshot of the active handoff for the current session state.
+> Updated: 2026-11-03 · Snapshot of the active handoff for the current session state.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| **Task** | Spec 36 — user-reported prod defect cluster on 2026-11-02: (1) daily recommendations AI fully down (OpenRouter `openrouter/free` "Empty model response" / `openrouter/auto` HTTP 402 Insufficient credits / nvidia empty+503) → pre-flight FAILED → skipAi → fallback → all-HOLD Telegram notice; (2) duplicate run/notice — missed-tick recovery task `5f6eb4ad` @10:04 + catch-up task `c24955fe` @19 → two identical Telegram notices @10:15 + @10:27. |
-| **Branch** | On top of `main` @ `9a44878` (v3.52.0). Spec-35 WIP files (`historicalPriceSyncService*`, `recommendationCronService*`, `swingRecommendationService*`, `sqlite.ts` + tests) uncommitted — NOT part of v3.53.0. |
-| **State** | CODE + TESTS + GATES + DOCS **DONE** (this pass) — **COMMIT PENDING USER** (D9). Not committed yet. |
+| **Task** | Spec 35 — every Swing card rendered `20d Mom — / 10d Mom — / 20d Vol — / vs 20d High —`. Root cause: the v3.10.0 `historical_price_sync` worker task was **never scheduled** (no `cron_jobs` row), so `daily_prices` was never backfilled. |
+| **Branch** | `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **UNCOMMITTED**: 8 modified source/test files + 2 new docs. Commit pending user; push/PR/merge/deploy are user actions (D9). |
+| **State** | CODE + TESTS + GATES + DOCS **DONE** — targeted Jest **4 suites / 117 pass**, full Jest **138/138 · 2110 pass / 4 skip / 0 fail**, tsc **46 exact (prod 0, delta +0)**, ESLint **0 errors** on the 8 changed files. Live end-to-end verify **deferred** (no local Postgres/Timescale). |
 | **In-flight** | None |
-| **Blocked** | OpenRouter **402 Insufficient credits** (user action: top up credits / restore key) — external. |
-| **Spec/Plan** | `.agents/specs/36-ai-down-actionable-picks-dedup.md` · `.agents/plans/36-ai-down-actionable-picks-dedup.md` · detail `.agents/changelog/versions-v3.53.md` |
+| **Blocked** | (1) **RefSite dashboards** — `refsite.com/pulse/` + `/strength/` are auth-gated; need screenshots or credentials before Spec 37 can be written. (2) OpenRouter 402 "Insufficient credits" — external, user action. |
+| **Spec/Plan** | `.agents/specs/35-scheduled-historical-price-sync.md` · `.agents/plans/35-scheduled-historical-price-sync.md` · detail `.agents/changelog/versions-v3.54.md` · Lesson 167 |
 
-## What's done (v3.53.0)
+## What's done (v3.54.0)
 
-- **(1) Duplicate-run / Telegram-notice fix.** Run-level guards verified green (Spec 30 catch-up dedup `workerTask` `triggeredBy:"catchup"` ≥ UTC-day-start; `hasSuccessfulRunToday`; in-flight guard; worker-engine tests green). NEW in-process per-UTC-day notice suppression (`lastDailyRecNoticeDay`) at the completion broadcast in `dailyRecommendationService.runDailyRecommendations` → ≤1 daily recommendations Telegram notice per UTC day even on a same-day double-fire.
-- **(2) AI-down actionable BUY/SELL broadcast.** `buildRecommendationBroadcast(stocks, dateLabel, opts?: {aiDown?: boolean})` — AI-down branch broadcasts actionable (BUY/SELL) fallback/screener-backed picks (screener confluence desc, `MAX_BROADCAST_PICKS` cap) instead of the unconditional all-HOLD notice; genuine all-HOLD days keep it. Wired `aiDown: skipAi === true`.
-- **(3) AI failure modes.** NEW `isAiCreditExhaustionMessage` (HTTP 402 / "Insufficient credits" / "never purchased credits") in `lib/services/ai/quotaLatch.ts`; agent batch early-exit latches on `isDailyFreeQuotaMessage || isAiCreditExhaustionMessage`; `connectionTestService.runAiConnectionTest` surfaces `quotaExhausted` in report + audit.
-- **(4) Swing/stock AI fallbacks.** Verified existing v3.30 fallbacks: `calculateFallbackSwingAnalysis` (swing, `success:true`, directional LONG/SHORT/OBSERVE) + `calculateFallbackRecommendation` (stock, `success:true`, BUY/HOLD/SELL).
+- **(1) 5th system cron (`lib/services/recommendationCronService.ts`).** `HISTORICAL_PRICE_SYNC_CRON_NAME` + `HISTORICAL_PRICE_SYNC_CRON_EXPR = "45 10 * * 1-5"` (16:15 IST Mon–Fri, after NSE publishes EOD bars) + `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry + the definition appended to `ensureRecommendationCrons()`. The persisted config is now built **per definition** (`defConfig = { systemManaged, timezone, ...(def.config ?? {}) }`) and written on create **and** on self-heal, with drift comparison covering **every** key — the other four crons keep `{ systemManaged, timezone }` unchanged. `dryRun:false` is load-bearing: `spawnDueCronJob` passes `job.config` as the task payload and `executeHistoricalPriceSync` reads `payload.dryRun` (manual admin runs still default to dry-run).
+- **(2) Scope + defaults (`lib/services/historicalPriceSyncService.ts`).** `resolveSyncScope` default = NIFTY 50 (1 Prisma read) ∪ `getSwingSignalSymbols()` (zero Prisma), deduped + capped; `DEFAULT_MAX_SYMBOLS 50 → 200`, `DEFAULT_DAYS 180 → 60` (≈41 bars ≥ the 20-bar indicators; ~42 chunked upsert statements/day at the cap). Explicit `symbols` still wins.
+- **(3) New mirror read (`lib/sqlite.ts`).** `getSwingSignalSymbols(limit = 300)` — `SELECT DISTINCT UPPER(symbol) FROM swing_signal … LIMIT`, synchronous, never throws (`[]` on a cold mirror), `recordSqliteRead`-instrumented, limit clamped 1…2000, declared on the `SqliteFallback` interface. The caller applies the sync cap.
+- **(4) Indicator fallback (`lib/services/swingRecommendationService.ts`).** `fetchRecentCloses` keeps the Prisma `$queryRaw` batch but its catch now **falls through** instead of returning an empty map; symbols with `< 2` bars are filled from `getSqlitePriceRange` + `computeIndicatorsFromSeries` (last 25 closes). Prisma data still wins → zero extra SQLite work on the happy path. **Defect caught pre-commit (Lesson 167):** the draft read the bare symbol while every mirror OHLCV write is keyed `NSE:<SYMBOL>` (`cacheDailyPriceBars` in `historicalPriceSyncService` + `backtestDataService`) → zero bars for every symbol; now reads `` `NSE:${symbol.toUpperCase()}` `` with a regression test asserting the exact key.
+- **Tests/Gates**: `recommendationCronService.test.ts` (5 crons, `dryRun:false`, drift self-heal, idempotence) · `historicalPriceSyncService.test.ts` (scope union/dedup/cap, NIFTY-failure tolerance, null mirror, `DEFAULT_DAYS=60`, explicit wins) · `sqliteMirror.test.ts` (real sql.js: distinct/upper/limit/cold) · `swingRecommendationService.test.ts` (Prisma full → mirror never read; Prisma throws → mirror serves; Prisma miss → mirror serves) → **117 pass**.
+- **Docs**: `.agents/changelog/versions-v3.54.md` + `.agents/CHANGELOG.md` index row + `versions-index.md` + `Primer.md` + `agent-memory.md` + **Lesson 167** + `.agents/session-todos.md` + this file + `HANDOFF.md`. **AGENTS.md row DEFERRED** (Lesson 142 — the v3.53.0 row on the Spec 36 branch consumes the per-file budget).
 
-## Gates (this pass, v3.53.0)
+## Prior — v3.53.0 Spec 36 (AI-down actionable picks + duplicate daily-notice fix; 2026-11-02)
 
-- tsc: **46 = exact baseline (prod 0; 0 new errors on touched files)**.
-- Jest: **8 suites / 286 tests green** — `quotaLatch`+`recommendation-agent`, `recommendationBroadcast`, `dailyRecommendationService`, `aiConnectionTestService`, `swing-agent`, `swingRecommendationService`, `worker-engine`.
-- ESLint on changed files: **0 errors**.
-- Doc-context budget gate: **PASS**.
-- Not run this pass: full `npm run test`, `npm run quickbuild`, Playwright (no UI change; service/broadcast level only).
+- **Problem:** OpenRouter free model returned empty responses; auto model returned HTTP 402 Insufficient credits; Nvidia provider returned 503. The daily recommendation run fell back to all-HOLD notices. Two missed-tick/catch-up tasks emitted duplicate notices.
+- **Fixes completed on main:** classify HTTP 402/credit exhaustion as AI unavailable and latch quota exhaustion; suppress duplicate daily notices per UTC day; AI-down broadcasts use screener/fallback-backed actionable BUY/SELL picks when valid, while genuine all-HOLD remains unchanged; verify existing swing and stock technical fallbacks return directional levels with success:true.
+- **Verification recorded:** tsc 46 exact baseline (0 production errors); targeted Jest 8 suites / 286 tests; full Jest 138 suites / 2113 passed / 4 skipped / 0 failed; lint 0 errors; quickbuild 201/201. OpenRouter credit exhaustion remains an external user-action blocker.
+- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md, .agents/plans/36-ai-down-actionable-picks-dedup.md; version detail: .agents/changelog/versions-v3.53.md.
 
-## Prior — v3.52.0 Spec 34 (20-stock AI batches + conviction ranking · durable swing Telegram · single header · console mirror)
+## Prior — v3.52.0 Spec 34
 
-## What's done (v3.52.0)
+> Snapshot from 2026-10-22.
 
 - **(1) Batching + ranking (`lib/services/ai/recommendation-agent.ts`).** `BATCH_SIZE 5 → 20`, `CONCURRENCY 5 → 3`; new exported pure `rankStockAnalysisResults()` (success → confidence desc → `screenerNames.length` desc → marketCap desc → symbol asc) applied **once, after `Promise.all`** (i.e. after the batches are combined) + a top-5 `msg: "Stock analysis ranked"` log. `dailyRecommendationService` re-asserts the same comparator on `successfulResults` before persisting/broadcasting; the file's `rankActionableByConfidence()` was confirmed **dead code** and left untouched.
 - **(2) Durable swing Telegram (`lib/services/swingRecommendationService.ts`).** Root cause: the broadcast lived **only** at the tail of `processSwingAnalysisJob` (the request-path processor is frozen by Netlify after the response), the stale-exhausted recovery marked jobs `failed` **silently**, and `getSwingRecommendations` served terminal jobs without broadcasting. Fix: durable `payload.tgNotifiedAt` marker (JSON on both SQLite and Prisma ⇒ **no migration**) + `notifySwingTerminal(jobId)` (`SWING_TG_WINDOW_MS` 6 h, `SWING_TG_FLUSH_MS` 1 h, `swingNotifyInFlight` guard, payload **merged**) called from the processor tail, the stale-exhausted recovery, both terminal serve paths, and a 1-h daemon sweep of the newest 5 terminal jobs. `failed` jobs send the new honest `buildSwingUnavailableNotice()`.

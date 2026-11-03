@@ -145,6 +145,9 @@ jest.mock("@/lib/sqlite", () => {
   return {
     __esModule: true,
     getSqliteFallback: jest.fn(() => fallback),
+    // Spec 35: OHLCV mirror bars for the indicator fallback. Default [] so the
+    // pre-Spec-35 orchestration tests keep their "Prisma only" behaviour.
+    getSqlitePriceRange: jest.fn(() => [] as Array<Record<string, unknown>>),
     swingJobs,
     swingSignals,
     trackers,
@@ -1131,6 +1134,70 @@ describe("getSwingRecommendations audit logging", () => {
     expect(fresh!.status).toBe("failed");
     expect(fresh!.error).toBe("Superseded by a newer force refresh");
     expect(staticCache.get("swing:recommendations:ai")).toBeUndefined();
+  });
+
+  // ─── Spec 35: indicator source chain (daily_prices → SQLite mirror) ──────
+
+  it("computes indicators from daily_prices and never falls back to the mirror", async () => {
+    const { getSqlitePriceRange } = jest.requireMock("@/lib/sqlite") as {
+      getSqlitePriceRange: jest.Mock;
+    };
+    getSqlitePriceRange.mockReturnValue([{ close: 999 }, { close: 999 }]);
+    prisma.$queryRaw.mockResolvedValue(
+      Array.from({ length: 25 }, (_, i) => ({ ticker: "RELIANCE", close: 100 + i })),
+    );
+
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: false, forceRefresh: true });
+
+    const ind = res.stocks[0].indicators;
+    expect(ind.momentum20).not.toBeNull();
+    expect(ind.volatility20).not.toBeNull();
+    // Full Prisma coverage → the mirror is never read (zero extra SQLite work).
+    expect(getSqlitePriceRange).not.toHaveBeenCalled();
+  });
+
+  it("serves mirror bars (NSE:<SYMBOL> key) when the daily_prices read throws", async () => {
+    const { getSqlitePriceRange } = jest.requireMock("@/lib/sqlite") as {
+      getSqlitePriceRange: jest.Mock;
+    };
+    prisma.$queryRaw.mockRejectedValue(new Error("db down"));
+    getSqlitePriceRange.mockImplementation((ticker: string) =>
+      ticker === "NSE:RELIANCE"
+        ? Array.from({ length: 25 }, (_, i) => ({ close: 200 + i }))
+        : [],
+    );
+
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: false, forceRefresh: true });
+
+    expect(res.stocks[0].indicators.momentum20).not.toBeNull();
+    // Mirror OHLCV rows are keyed NSE:<SYMBOL> — a bare symbol read matches nothing.
+    expect(getSqlitePriceRange).toHaveBeenCalledWith("NSE:RELIANCE");
+  });
+
+  it("serves mirror bars when Prisma returns no rows for a symbol", async () => {
+    const { getSqlitePriceRange } = jest.requireMock("@/lib/sqlite") as {
+      getSqlitePriceRange: jest.Mock;
+    };
+    prisma.$queryRaw.mockResolvedValue([]); // DB reachable, symbol missing
+    getSqlitePriceRange.mockReturnValue(
+      Array.from({ length: 25 }, (_, i) => ({ close: 300 + i })),
+    );
+
+    const { getSwingRecommendations } = await import(
+      "@/lib/services/swingRecommendationService"
+    );
+    const res = await getSwingRecommendations({ analyze: false, forceRefresh: true });
+
+    const ind = res.stocks[0].indicators;
+    expect(ind.momentum10).not.toBeNull();
+    expect(ind.momentum20).not.toBeNull();
+    expect(getSqlitePriceRange).toHaveBeenCalledWith("NSE:RELIANCE");
   });
 });
 

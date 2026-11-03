@@ -677,6 +677,8 @@ export interface SqliteFallback {
   }): Array<Record<string, unknown>>;
   /** Mirror read: swing signal rows for one job (camelCase rehydrated). */
   getSwingSignals(jobId: string): Array<Record<string, unknown>>;
+  /** Spec 35 mirror read: DISTINCT swing-signal symbols (uptime-capped scope source; never throws). */
+  getSwingSignalSymbols(limit: number): string[];
   /** Mirror delete: stock rows for a run (optional symbol whitelist) + outbox. */
   deleteRecommendationStocksByRun(runId: string, keepSymbols?: string[]): void;
   /** Mirror delete: one tracker + its status-history rows + outbox. */
@@ -7237,6 +7239,40 @@ function createFallback(db: Database): SqliteFallback {
           error: err instanceof Error ? err.message : String(err),
         });
         recordSqliteRead("getSwingSignals", _start, 0, false);
+        return [];
+      }
+    },
+
+    /**
+     * Spec 35: DISTINCT swing-signal symbols for the historical-price-sync
+     * scope (zero Prisma — the sync's default scope = NIFTY 50 ∪ these).
+     * Synchronous, never throws ([]) so a scope problem can't break a job.
+     */
+    getSwingSignalSymbols(limit: number): string[] {
+      const _start = performance.now();
+      const cap = Math.max(1, Math.min(limit || 0, 2000));
+      if (!db) {
+        recordSqliteRead("getSwingSignalSymbols", _start, 0, false);
+        return [];
+      }
+      try {
+        const rows = db.exec(
+          `SELECT DISTINCT UPPER(symbol) AS symbol FROM swing_signal
+           ORDER BY symbol ASC LIMIT ${cap}`,
+          [],
+        );
+        const out: string[] =
+          rows.length && rows[0].values.length
+            ? rows[0].values.map((row) => String(row[0] ?? "").trim()).filter(Boolean)
+            : [];
+        recordSqliteRead("getSwingSignalSymbols", _start, out.length, true);
+        return out;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getSwingSignalSymbols failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        recordSqliteRead("getSwingSignalSymbols", _start, 0, false);
         return [];
       }
     },

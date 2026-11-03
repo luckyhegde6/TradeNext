@@ -6,7 +6,8 @@
 //      volume/range) derived from the flagging screeners' names.
 //   3. Dedupe by symbol (union families + screener tags).
 //   4. Rank and cap at SWING_TOP_N (market cap + screener agreement + momentum).
-//   5. Enrich with momentum indicators from daily_prices (~20 sessions).
+//   5. Enrich with momentum indicators — daily_prices (~20 sessions) with a
+//      SQLite-mirror bar fallback (Spec 35).
 //   6. Optional AI target analysis (lib/services/ai/swing-agent.ts).
 //
 // REQUEST-TIME SPLIT + DB-BACKED JOB (prod fixes): the AI analysis takes
@@ -26,7 +27,7 @@
 // re-scans/re-analyzes.
 
 import { randomUUID } from "crypto";
-import { getSqliteFallback } from "@/lib/sqlite";
+import { getSqliteFallback, getSqlitePriceRange } from "@/lib/sqlite";
 import logger from "@/lib/logger";
 import { staticCache } from "@/lib/cache";
 import { createAuditLog } from "@/lib/audit";
@@ -575,29 +576,64 @@ export function computeIndicatorsFromSeries(closes: number[]): SwingIndicators {
   return { momentum10, momentum20, volatility20, distanceFrom20dHigh };
 }
 
-/** Batch-fetch up to 25 latest daily closes per symbol → computed indicators. */
+/**
+ * Batch-fetch up to 25 latest daily closes per symbol → computed indicators.
+ * Spec 35 fallback: the Prisma read over `daily_prices` is preferred, but any
+ * symbol missing there (or a full DB failure) is filled from the SQLite mirror
+ * bar store (`getSqlitePriceRange`) — the same bars the scheduled historical
+ * price sync writes via `cacheDailyPriceBars`. Zero Prisma ops in the
+ * fallback path.
+ */
 async function fetchRecentCloses(
   symbols: string[],
 ): Promise<Map<string, SwingIndicators>> {
   if (symbols.length === 0) return new Map();
-  const prisma = (await import("@/lib/prisma")).default;
-  const rows = await prisma.$queryRaw<{ ticker: string; close: number }[]>`
-    SELECT ticker, close::float8 AS close
-    FROM (
-      SELECT ticker, close, "tradeDate",
-             ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY "tradeDate" DESC) AS rn
-      FROM daily_prices
-      WHERE ticker = ANY(${symbols.map((s) => s.toUpperCase())}::text[])
-    ) t
-    WHERE t.rn <= 25
-    ORDER BY t.ticker, t."tradeDate" ASC
-  `;
 
   const bySymbol = new Map<string, number[]>();
-  for (const row of rows) {
-    const list = bySymbol.get(row.ticker) ?? [];
-    list.push(Number(row.close));
-    bySymbol.set(row.ticker, list);
+  try {
+    const prisma = (await import("@/lib/prisma")).default;
+    const rows = await prisma.$queryRaw<{ ticker: string; close: number }[]>`
+      SELECT ticker, close::float8 AS close
+      FROM (
+        SELECT ticker, close, "tradeDate",
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY "tradeDate" DESC) AS rn
+        FROM daily_prices
+        WHERE ticker = ANY(${symbols.map((s) => s.toUpperCase())}::text[])
+      ) t
+      WHERE t.rn <= 25
+      ORDER BY t.ticker, t."tradeDate" ASC
+    `;
+
+    for (const row of rows) {
+      const list = bySymbol.get(row.ticker) ?? [];
+      list.push(Number(row.close));
+      bySymbol.set(row.ticker, list);
+    }
+  } catch (e) {
+    logger.warn({
+      msg: "Swing indicators: daily_prices read failed — falling back to the SQLite mirror",
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  // Fill gaps (full DB failure → the Prisma map is empty; partial row sets →
+  // per-symbol) from the SQLite mirror bar store. Mirror OHLCV rows are keyed
+  // `NSE:<SYMBOL>` (the shape cacheDailyPriceBars callers write) — a bare
+  // symbol read matches nothing.
+  const missing = symbols.filter(
+    (s) => (bySymbol.get(s.toUpperCase())?.length ?? 0) < 2,
+  );
+  for (const symbol of missing) {
+    try {
+      const bars = getSqlitePriceRange(`NSE:${symbol.toUpperCase()}`);
+      const closes = bars
+        .map((b) => Number(b.close))
+        .filter((c) => Number.isFinite(c))
+        .slice(-25);
+      if (closes.length >= 2) bySymbol.set(symbol.toUpperCase(), closes);
+    } catch {
+      // Mirror not ready — indicator stays absent for this symbol.
+    }
   }
 
   const out = new Map<string, SwingIndicators>();
@@ -1392,7 +1428,8 @@ export async function getSwingRecommendations(
   const deduped = segregateAndDedupe(unified, nameById);
   const ranked = rankSwingStocks(deduped);
 
-  // Momentum indicators from daily_prices — batch, never blocks the feed.
+  // Momentum indicators — daily_prices first, SQLite mirror bars as fallback
+  // (Spec 35). Batch, never blocks the feed.
   let indicatorMap = new Map<string, SwingIndicators>();
   try {
     indicatorMap = await fetchRecentCloses(ranked.map((s) => s.symbol));

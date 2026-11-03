@@ -507,3 +507,60 @@ describe("getRecommendationRuns (Spec 01 — History fallback read)", () => {
     expect(getSqliteFallback()).toBeNull();
   });
 });
+
+describe("getSwingSignalSymbols (Spec 35, real sql.js)", () => {
+  let tmpRoot: string;
+  let mirrorFile: string;
+  let blobs: FakeBlobsStore;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tn-sqlite-swing-symbols-"));
+    mirrorFile = path.join(tmpRoot, "sqlite-mirror.sqlite");
+    resetSqliteStateForTests();
+    setMirrorSnapshotPathForTests(mirrorFile);
+    blobs = new FakeBlobsStore();
+    (globalThis as Record<string, unknown>).__sqliteMirrorBlobsStore = blobs;
+  });
+
+  afterEach(() => {
+    resetSqliteStateForTests();
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  });
+
+  it("returns DISTINCT upper-cased symbols across swing jobs", async () => {
+    await ensureSqliteBackup();
+    const fb = getSqliteFallback();
+    const sw = (id: string, jobId: string, symbol: string) =>
+      fb?.upsertSwingSignal({ id, jobId, symbol, price: 10 });
+    // Same symbol re-flagged in two jobs → deduped; lower-case input → upper-cased.
+    sw("s1", "job-a", "reliance");
+    sw("s2", "job-b", "RELIANCE");
+    sw("s3", "job-a", "tcs");
+    sw("s4", "job-b", "VEDPOWER");
+
+    const symbols = fb?.getSwingSignalSymbols(100) ?? [];
+    expect(symbols).toEqual(["RELIANCE", "TCS", "VEDPOWER"]);
+  });
+
+  it("respects the limit bound and tolerates a missing signal", async () => {
+    await ensureSqliteBackup();
+    const fb = getSqliteFallback();
+    fb?.upsertSwingSignal({ id: "s1", jobId: "job-a", symbol: "AAA" });
+    fb?.upsertSwingSignal({ id: "s2", jobId: "job-a", symbol: "BBB" });
+    fb?.upsertSwingSignal({ id: "s3", jobId: "job-a", symbol: "CCC" });
+
+    expect(fb?.getSwingSignalSymbols(2)).toEqual(["AAA", "BBB"]);
+    expect(fb?.getSwingSignalSymbols(0)).toEqual(["AAA"]); // cap clamps 0 → 1 (never a runaway unbounded query)
+  });
+
+  it("returns [] when the mirror is not ready (never throws)", () => {
+    resetSqliteStateForTests();
+    // Uninitialized layer → getSqliteFallback() is null; resolveSyncScope
+    // guards with ?. and `?? []` so a cold mirror degrades to NIFTY-50-only.
+    expect(getSqliteFallback()).toBeNull();
+  });
+});

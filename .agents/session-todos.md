@@ -1,12 +1,28 @@
-## Current (2026-11-02 — Spec 36: AI-down actionable picks + duplicate daily-notice fix)
+## Current (2026-11-03 — v3.54.0 Spec 35 scheduled historical price sync)
 
-- [x] **Spec 36 created** — `.agents/specs/36-ai-down-actionable-picks-dedup.md` + plan `.agents/plans/36-ai-down-actionable-picks-dedup.md` (approved by user; Phase D added per follow-up directive "also fix for the SWING target generation and Stock ai analysis").
-- [x] **Phase A** — AI failure-mode handling: NEW `isAiCreditExhaustionMessage` in `lib/services/ai/quotaLatch.ts`; agent latches day on `isDailyFreeQuotaMessage || isAiCreditExhaustionMessage`; connection-test surfaces `quotaExhausted`. Jest `quotaLatch` + `recommendation-agent` green (53 tests).
-- [x] **Phase B** — Duplicate-notice dedup: NEW in-process per-UTC-day suppression (`lastDailyRecNoticeDay`) at daily-recommendations completion broadcast; worker-engine catch-up dedup (Spec 30) verified green.
-- [x] **Phase C** — AI-down actionable BUY/SELL broadcast: `buildRecommendationBroadcast(..., {aiDown})` + wiring in `dailyRecommendationService` (`aiDown: skipAi === true`). Jest `recommendationBroadcast` green (new AI-down tests).
-- [x] **Phase D** — Swing/stock AI fallbacks verified: `calculateFallbackSwingAnalysis` / `calculateFallbackRecommendation` with `success:true` (tests green).
-- [x] **Gates** — tsc 46 exact (0 new) on touched files · targeted Jest (8 suites / 286 tests) green · eslint 0 errors on changed files · doc-size gate PASS.
-- [ ] **External**: OpenRouter credits/AI availability (user action) — remaining prod blocker; deploy pending user (D9).
+Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COMMIT PENDING USER; merge/deploy are user-only actions (D9)**.
+
+- [x] **Spec + Plan 35** authored and approved (`.agents/specs/35-scheduled-historical-price-sync.md`, `.agents/plans/35-scheduled-historical-price-sync.md` — all boxes checked, deviations noted)
+- [x] **5th system cron** — `Historical Price Sync (System)` `45 10 * * 1-5` (16:15 IST Mon–Fri) in `ensureRecommendationCrons()`, `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry, per-def `defConfig` with `dryRun:false` on create + drift self-heal
+- [x] **Scope + defaults** — `resolveSyncScope` = NIFTY 50 ∪ `getSwingSignalSymbols()` (mirror, zero Prisma), `DEFAULT_MAX_SYMBOLS 50→200`, `DEFAULT_DAYS 180→60`
+- [x] **New mirror read** — `sqlite.getSwingSignalSymbols(limit)` (interface + impl, never throws, clamp 1…2000)
+- [x] **Swing indicator fallback** — `fetchRecentCloses` Prisma → per-symbol SQLite gap fill; **`NSE:<SYMBOL>` key bug caught pre-commit** (Lesson 167) + regression test
+- [x] **Tests** — 4 suites touched / **117 targeted pass**
+- [x] **Gates** — `check-tsc-baseline` 46 exact (prod 0, delta +0) · full Jest **138/138 · 2110 pass / 4 skip / 0 fail** · ESLint 0 errors
+- [x] **Docs** — `versions-v3.54.md` + CHANGELOG index + versions-index + Primer + agent-memory + Lesson 167 + HANDOFF + latest.md (AGENTS.md row DEFERRED, Lesson 142)
+- [ ] **Commit + push + PR** — pending explicit user request
+- [ ] **Live verify** — deferred (no local Postgres/Timescale this session); prod: one manual wide-scope `historical_price_sync` run, then the 16:15 IST cron
+
+## Previous (2026-11-02 — Spec 36: AI-down actionable picks + duplicate daily-notice fix)
+
+- [x] Spec 36 specification and plan authored/approved.
+- [x] AI failure handling: HTTP 402/credit exhaustion recognized and quota latch + connection-test status wired.
+- [x] Duplicate daily-notice suppression per UTC day; worker catch-up dedup verified.
+- [x] AI-down broadcast uses screener/fallback-backed BUY/SELL picks when actionable; genuine all-HOLD preserved.
+- [x] Swing and stock fallback paths verified to return technical target/stop levels with success:true.
+- [x] Gates recorded: tsc 46 exact; targeted Jest 8 suites / 286 tests; lint 0 errors; doc-size gate pass.
+- [ ] External blocker: OpenRouter credits/AI availability; deployment remains user-controlled.
+- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md and .agents/plans/36-ai-down-actionable-picks-dedup.md.
 
 ## Previous (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
 

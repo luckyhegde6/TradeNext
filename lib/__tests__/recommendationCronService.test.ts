@@ -46,6 +46,8 @@ import {
   MARKET_SYNC_CRON_EXPR,
   AI_CONNECTION_TEST_CRON_NAME,
   AI_CONNECTION_TEST_CRON_EXPR,
+  HISTORICAL_PRICE_SYNC_CRON_NAME,
+  HISTORICAL_PRICE_SYNC_CRON_EXPR,
   SYSTEM_CRON_TIMEZONE,
   SYSTEM_JOB_NAME_BY_TASK_TYPE,
 } from "@/lib/services/recommendationCronService";
@@ -194,12 +196,12 @@ describe("ensureRecommendationCrons", () => {
     prisma.cronJob.deleteMany.mockResolvedValue({ count: 0 });
   });
 
-  it("creates the AI Connection Test job (taskType ai_connection_test, step-30 expr) alongside the other three system jobs", async () => {
+  it("creates all five system jobs; Historical Price Sync carries dryRun:false (Spec 35)", async () => {
     prisma.cronJob.findFirst.mockResolvedValue(null);
 
     const result = await ensureRecommendationCrons();
 
-    expect(prisma.cronJob.create).toHaveBeenCalledTimes(4);
+    expect(prisma.cronJob.create).toHaveBeenCalledTimes(5);
     const aiCall = prisma.cronJob.create.mock.calls.find(
       (args: unknown[]) => (args[0] as { data?: { name?: string } }).data?.name === AI_CONNECTION_TEST_CRON_NAME,
     );
@@ -210,7 +212,19 @@ describe("ensureRecommendationCrons", () => {
     expect(aiData.data.isActive).toBe(true);
     expect(aiData.data.config).toEqual({ systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE });
 
-    expect(result.ensured).toBe(4);
+    const syncCall = prisma.cronJob.create.mock.calls.find(
+      (args: unknown[]) => (args[0] as { data?: { name?: string } }).data?.name === HISTORICAL_PRICE_SYNC_CRON_NAME,
+    );
+    expect(syncCall).toBeDefined();
+    const syncData = (syncCall as unknown[])[0] as { data: { taskType: string; cronExpression: string; isActive: boolean; config: Record<string, unknown> } };
+    expect(syncData.data.taskType).toBe("historical_price_sync");
+    expect(syncData.data.cronExpression).toBe(HISTORICAL_PRICE_SYNC_CRON_EXPR);
+    expect(syncData.data.isActive).toBe(true);
+    // WRITES: spawnDueCronJob passes job.config into
+    // executeHistoricalPriceSync's payload (payload.dryRun read there).
+    expect(syncData.data.config).toEqual({ systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE, dryRun: false });
+
+    expect(result.ensured).toBe(5);
     expect(result.jobs).toEqual(
       expect.arrayContaining([
         {
@@ -218,23 +232,80 @@ describe("ensureRecommendationCrons", () => {
           taskType: "ai_connection_test",
           cronExpression: AI_CONNECTION_TEST_CRON_EXPR,
         },
+        {
+          name: HISTORICAL_PRICE_SYNC_CRON_NAME,
+          taskType: "historical_price_sync",
+          cronExpression: HISTORICAL_PRICE_SYNC_CRON_EXPR,
+        },
       ]),
     );
   });
 
-  it("recomputes nextRun (no create) when all four jobs exist unchanged", async () => {
+  it("self-heals a Historical Price Sync row whose config lost dryRun:false (Spec 35)", async () => {
+    prisma.cronJob.findFirst.mockResolvedValue({
+      id: "r5",
+      name: HISTORICAL_PRICE_SYNC_CRON_NAME,
+      taskType: "historical_price_sync",
+      cronExpression: HISTORICAL_PRICE_SYNC_CRON_EXPR,
+      isActive: true,
+      config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE }, // dryRun lost
+    });
+    prisma.cronJob.update.mockResolvedValue({});
+
+    const result = await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.update).toHaveBeenCalledWith({
+      where: { id: "r5" },
+      data: expect.objectContaining({
+        taskType: "historical_price_sync",
+        config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE, dryRun: false },
+      }),
+    });
+    expect(prisma.cronJob.create).not.toHaveBeenCalled();
+    expect(result.ensured).toBe(5);
+  });
+
+  it("creates the Historical Price Sync job when absent while the other four exist unchanged (Spec 35)", async () => {
+    const BASE_CONFIG = { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE };
     const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean; config: Record<string, unknown> }> = {
-      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
-      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
-      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
-      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true, config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE } },
+      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      // r5 absent — the pre-Spec-35 deployment state everywhere
     };
     prisma.cronJob.findFirst.mockImplementation(
       async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
     );
-    // clearAllMocks() does NOT clear implementations â€” recordCronRun tests
-    // earlier in this file set update to reject with "db down", which would
-    // poison this test. Set an explicit resolved implementation.
+    prisma.cronJob.create.mockResolvedValue({});
+    prisma.cronJob.update.mockResolvedValue({});
+
+    await ensureRecommendationCrons();
+
+    expect(prisma.cronJob.create).toHaveBeenCalledTimes(1);
+    const created = (prisma.cronJob.create.mock.calls[0][0] as { data: { name: string; taskType: string; cronExpression: string; config: Record<string, unknown> } }).data;
+    expect(created.name).toBe(HISTORICAL_PRICE_SYNC_CRON_NAME);
+    expect(created.taskType).toBe("historical_price_sync");
+    expect(created.cronExpression).toBe(HISTORICAL_PRICE_SYNC_CRON_EXPR);
+    expect(created.config).toEqual({ ...BASE_CONFIG, dryRun: false });
+    // The 4 existing rows only get their nextRun recomputed (no config rewrite).
+    expect(prisma.cronJob.update).toHaveBeenCalledTimes(4);
+  });
+
+  it("recomputes nextRun (no create) when all five jobs exist unchanged", async () => {
+    const BASE_CONFIG = { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE };
+    const existingByDef: Record<string, { id: string; name: string; taskType: string; cronExpression: string; isActive: boolean; config: Record<string, unknown> }> = {
+      [RECOMMENDATION_CRON_NAME]: { id: "r1", name: RECOMMENDATION_CRON_NAME, taskType: "recommendations", cronExpression: RECOMMENDATION_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [RECOMMENDATION_PERFORMANCE_CRON_NAME]: { id: "r2", name: RECOMMENDATION_PERFORMANCE_CRON_NAME, taskType: "recommendation_performance", cronExpression: RECOMMENDATION_PERFORMANCE_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [MARKET_SYNC_CRON_NAME]: { id: "r3", name: MARKET_SYNC_CRON_NAME, taskType: "market_data", cronExpression: MARKET_SYNC_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [AI_CONNECTION_TEST_CRON_NAME]: { id: "r4", name: AI_CONNECTION_TEST_CRON_NAME, taskType: "ai_connection_test", cronExpression: AI_CONNECTION_TEST_CRON_EXPR, isActive: true, config: BASE_CONFIG },
+      [HISTORICAL_PRICE_SYNC_CRON_NAME]: { id: "r5", name: HISTORICAL_PRICE_SYNC_CRON_NAME, taskType: "historical_price_sync", cronExpression: HISTORICAL_PRICE_SYNC_CRON_EXPR, isActive: true, config: { ...BASE_CONFIG, dryRun: false } },
+    };
+    prisma.cronJob.findFirst.mockImplementation(
+      async ({ where }: { where: { name: string } }) => existingByDef[where.name] ?? null,
+    );
+    // clearAllMocks() does NOT clear implementations
+    // (see recordCronRun tests). Set an explicit resolved implementation.
     prisma.cronJob.update.mockResolvedValue({});
 
     const result = await ensureRecommendationCrons();
@@ -242,15 +313,15 @@ describe("ensureRecommendationCrons", () => {
     // v3.10.1: nextRun is ALWAYS recomputed with UTC semantics so rows
     // anchored by the old local-timezone parser self-correct. No create.
     expect(prisma.cronJob.create).not.toHaveBeenCalled();
-    expect(prisma.cronJob.update).toHaveBeenCalledTimes(4);
+    expect(prisma.cronJob.update).toHaveBeenCalledTimes(5);
     for (const call of prisma.cronJob.update.mock.calls) {
       const { data, where } = call[0] as { data: Record<string, unknown>; where: { id: string } };
-      expect(where.id).toMatch(/^r[1-4]$/);
+      expect(where.id).toMatch(/^r[1-5]$/);
       // Only nextRun changes when the definition hasn't drifted.
       expect(Object.keys(data)).toEqual(["nextRun"]);
       expect(data.nextRun).toBeInstanceOf(Date);
     }
-    expect(result.ensured).toBe(4);
+    expect(result.ensured).toBe(5);
   });
 
   it("self-heals a drifted AI Connection Test job (inactive/old expr) via update", async () => {
@@ -275,7 +346,7 @@ describe("ensureRecommendationCrons", () => {
       }),
     });
     expect(prisma.cronJob.create).not.toHaveBeenCalled();
-    expect(result.ensured).toBe(4);
+    expect(result.ensured).toBe(5);
   });
 
   it("self-heals a row whose config drifted to the old IST timezone (spec 25)", async () => {
@@ -300,11 +371,11 @@ describe("ensureRecommendationCrons", () => {
         config: { systemManaged: true, timezone: SYSTEM_CRON_TIMEZONE },
       }),
     });
-    expect(result.ensured).toBe(4);
+    expect(result.ensured).toBe(5);
   });
 
   it("deletes duplicate system jobs keeping the earliest row (v3.8.0)", async () => {
-    prisma.cronJob.findFirst.mockResolvedValue(null); // all four would be created fresh
+    prisma.cronJob.findFirst.mockResolvedValue(null); // all five would be created fresh
     // â€¦but the DB already holds duplicates from a past findFirst-then-create race
     prisma.cronJob.findMany.mockResolvedValue([
       { id: "r1", name: RECOMMENDATION_CRON_NAME, createdAt: new Date("2026-08-01T00:00:00Z") },
@@ -321,17 +392,18 @@ describe("ensureRecommendationCrons", () => {
     expect(prisma.cronJob.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["r1-dup"] } },
     });
-    expect(result.ensured).toBe(4);
+    expect(result.ensured).toBe(5);
   });
 });
 
 describe("SYSTEM_JOB_NAME_BY_TASK_TYPE", () => {
-  it("maps all four system task types to their job names", () => {
+  it("maps all five system task types to their job names", () => {
     expect(SYSTEM_JOB_NAME_BY_TASK_TYPE).toEqual({
       recommendations: RECOMMENDATION_CRON_NAME,
       recommendation_performance: RECOMMENDATION_PERFORMANCE_CRON_NAME,
       market_data: MARKET_SYNC_CRON_NAME,
       ai_connection_test: AI_CONNECTION_TEST_CRON_NAME,
+      historical_price_sync: HISTORICAL_PRICE_SYNC_CRON_NAME,
     });
   });
 
