@@ -43,7 +43,7 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
         result = await executeRecommendations(payload);
         break;
       case "recommendation_performance":
-        result = await executeRecommendationPerformance(payload);
+        result = await executeRecommendationPerformance(payload, taskId);
         break;
       case "swing_performance":
         result = await executeSwingPerformance(payload);
@@ -703,19 +703,36 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
 /**
  * Recommendation Performance - Track active recommendations against targets/stop-losses
  */
-async function executeRecommendationPerformance(payload?: Record<string, unknown>): Promise<unknown> {
+async function executeRecommendationPerformance(payload?: Record<string, unknown>, taskId?: string): Promise<unknown> {
   logger.info({ msg: "Starting recommendation performance tracking" });
 
   try {
     const { checkRecommendationPerformance } = await import("@/lib/services/dailyRecommendationService");
     const result = await checkRecommendationPerformance();
     logger.info({ msg: "Performance tracking completed", checked: result.checked, success: true });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Recommendation performance check completed", {
+        checked: result.checked,
+        success: true,
+      });
+    }
     // v3.14.0: swing signal performance rides the same 15:30 IST check but is
     // NON-FATAL — a swing check failure must never fail (or retry) the daily
     // recommendations performance task.
     try {
       const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion started");
+      }
       const swing = await checkSwingPerformance();
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion completed", {
+          checked: swing.checked,
+          targetAchieved: swing.targetAchieved,
+          stopLossHit: swing.stopLossHit,
+          expired: swing.expired,
+        });
+      }
       logger.info({
         msg: "Swing performance tracking completed",
         checked: swing.checked,
@@ -725,6 +742,11 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
       });
     } catch (swingError) {
       const swingErrMsg = swingError instanceof Error ? swingError.message : String(swingError);
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion failed (non-fatal)", {
+          error: swingErrMsg,
+        });
+      }
       logger.error({ msg: "Swing performance tracking failed (non-fatal)", error: swingErrMsg });
     }
     return result;
