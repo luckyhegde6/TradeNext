@@ -13,6 +13,17 @@ Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COM
 - [ ] **Commit + push + PR** — pending explicit user request
 - [ ] **Live verify** — deferred (no local Postgres/Timescale this session); prod: one manual wide-scope `historical_price_sync` run, then the 16:15 IST cron
 
+## Previous (2026-11-02 — Spec 36: AI-down actionable picks + duplicate daily-notice fix)
+
+- [x] Spec 36 specification and plan authored/approved.
+- [x] AI failure handling: HTTP 402/credit exhaustion recognized and quota latch + connection-test status wired.
+- [x] Duplicate daily-notice suppression per UTC day; worker catch-up dedup verified.
+- [x] AI-down broadcast uses screener/fallback-backed BUY/SELL picks when actionable; genuine all-HOLD preserved.
+- [x] Swing and stock fallback paths verified to return technical target/stop levels with success:true.
+- [x] Gates recorded: tsc 46 exact; targeted Jest 8 suites / 286 tests; lint 0 errors; doc-size gate pass.
+- [ ] External blocker: OpenRouter credits/AI availability; deployment remains user-controlled.
+- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md and .agents/plans/36-ai-down-actionable-picks-dedup.md.
+
 ## Previous (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
 
 - [x] **Create `lib/services/ai/fallbackAnalysis.ts`** — pure technical-analysis fallback target/SL calculation using momentum20, volatility20, distanceFrom20dHigh, changePercent; direction-aware via `evaluateRecommendationLevels`
