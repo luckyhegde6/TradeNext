@@ -55,6 +55,13 @@ jest.mock("@/lib/services/worker/task-orchestrator", () => ({
 
 // Record the outcome only — recordCronRun is mocked; the fixture map mirrors
 // recommendationCronService.ts L52-57.
+jest.mock("@/lib/services/dailyRecommendationService", () => ({
+  checkRecommendationPerformance: jest.fn(async () => ({ checked: 12 })),
+}));
+jest.mock("@/lib/services/swingPerformanceService", () => ({
+  checkSwingPerformance: jest.fn(async () => ({ checked: 5, targetAchieved: 2, stopLossHit: 1, expired: 0, updated: 3 })),
+}));
+
 jest.mock("@/lib/services/recommendationCronService", () => ({
   __esModule: true,
   SYSTEM_JOB_NAME_BY_TASK_TYPE: {
@@ -68,7 +75,8 @@ jest.mock("@/lib/services/recommendationCronService", () => ({
 
 // ─── Imports ──────────────────────────────────────────────────────────────
 
-import { recordSystemRunOutcome } from "@/lib/services/worker/worker-service";
+import { executeTask, recordSystemRunOutcome } from "@/lib/services/worker/worker-service";
+import { logTaskEvent } from "@/lib/services/worker/task-orchestrator";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const prisma = require("@/lib/prisma").default as Record<string, any>;
@@ -142,5 +150,42 @@ describe("recordSystemRunOutcome (v3.37.0 Fix 4 guards)", () => {
     prisma.workerTask.findUnique.mockRejectedValue(new Error("db boom"));
     await expect(recordSystemRunOutcome("task-1", "market_data", false)).resolves.toBeUndefined();
     expect(mockRecordCronRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("recommendation performance task event timeline", () => {
+  test("records main performance and Swing companion progress under the same task", async () => {
+    const result = await executeTask("task-performance-1", "recommendation_performance");
+    expect(result.success).toBe(true);
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-performance-1",
+      "task_progress",
+      "Recommendation performance check completed",
+      { checked: 12, success: true },
+    );
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-performance-1",
+      "task_progress",
+      "Swing performance companion started",
+    );
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-performance-1",
+      "task_progress",
+      "Swing performance companion completed",
+      { checked: 5, targetAchieved: 2, stopLossHit: 1, expired: 0 },
+    );
+  });
+
+  test("Swing companion failure is logged as a non-fatal task progress event", async () => {
+    const swing = jest.requireMock("@/lib/services/swingPerformanceService").checkSwingPerformance as jest.Mock;
+    swing.mockRejectedValueOnce(new Error("private provider details"));
+    const result = await executeTask("task-performance-2", "recommendation_performance");
+    expect(result.success).toBe(true);
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-performance-2",
+      "task_progress",
+      "Swing performance companion failed (non-fatal)",
+      { errorType: "Error" },
+    );
   });
 });
