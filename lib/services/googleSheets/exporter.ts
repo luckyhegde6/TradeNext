@@ -25,7 +25,7 @@
 import logger from "@/lib/logger";
 import { getSqliteFallback } from "@/lib/sqlite";
 import { getSheetsClient } from "./auth";
-import { isTrackingActive, resolveSheetId } from "./configService";
+import { isTrackingActive, resolveSheetId, touchLastSync } from "./configService";
 import { ensureHeaders, isTrackerTab, type TrackerTab } from "./tabs";
 import {
   cell,
@@ -215,6 +215,9 @@ async function exportRowsInternal(
       await attempt();
     }
 
+    // Update the operator-facing last-publish timestamp for DIRECT producer
+    // appends too (not only manual ledger drains). This is a local mirror write.
+    touchLastSync();
     logger.info({ msg: "Google Sheets rows appended", tab, rows: rows.length });
     // See header note: skip the success audit for the high-frequency `decisions` tab.
     if (tab !== "decisions") {
