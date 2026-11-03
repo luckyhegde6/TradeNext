@@ -226,7 +226,7 @@ interface RuntimeActivityData {
   }>;
   tasks: Array<{
     id: string; name: string; taskType: string; taskCategory: string; status: string;
-    triggeredBy: string | null; cronJobId: string | null; assignedTo: string | null;
+    triggeredBy: string | null; triggerLabel: string; cronJobId: string | null; assignedTo: string | null;
     createdAt: string | null; startedAt: string | null; completedAt: string | null;
     durationMs: number | null; error: string | null;
     events: Array<{ eventType: string; message: string | null; at: string | null }>;
@@ -2011,7 +2011,7 @@ export default function DbHealthPage() {
                     <tbody>{runtimeActivity.tasks.map((x) => (
                       <tr key={x.id} className="border-b border-gray-100 dark:border-slate-800 align-top">
                         <td className="py-2 pr-3"><div className="font-medium">{x.name}</div><div className="text-gray-500">{x.taskType} · {x.id.slice(0, 8)}</div>{x.error && <div className="text-red-600 dark:text-red-400 max-w-xs break-words">{x.error}</div>}{x.events.map((ev, i) => <div key={i} className="text-gray-500">{ev.at ? new Date(ev.at).toLocaleString() : ""} · {ev.eventType}{ev.message ? ` — ${ev.message}` : ""}</div>)}</td>
-                        <td className="py-2 pr-3">{x.triggeredBy ?? "unknown"}<div className="text-gray-500">{x.status}</div></td>
+                        <td className="py-2 pr-3">{x.triggerLabel ?? x.triggeredBy ?? "unknown"}<div className="text-gray-500">{x.status}</div></td>
                         <td className="py-2 pr-3 whitespace-nowrap">{x.createdAt ? new Date(x.createdAt).toLocaleString() : "—"}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{x.startedAt ? new Date(x.startedAt).toLocaleString() : "—"}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{x.completedAt ? new Date(x.completedAt).toLocaleString() : "—"}</td>
