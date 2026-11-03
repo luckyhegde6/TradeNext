@@ -47,6 +47,15 @@ beforeEach(() => {
       createdAt: new Date("2026-11-03T00:00:00.000Z"),
       updatedAt: new Date(),
     },
+    {
+      workerId: "worker-idle-live",
+      workerName: "node-idle",
+      status: "idle",
+      currentTaskId: null,
+      lastHeartbeat: new Date(),
+      createdAt: new Date("2026-11-04T00:00:00.000Z"),
+      updatedAt: new Date(),
+    },
   ]);
   mockPrisma.cronJob.findMany.mockResolvedValue([
     {
@@ -79,9 +88,11 @@ describe("GET /api/admin/db-health/runtime", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.instances).toHaveLength(1);
     expect(body.instances[0].active).toBe(true);
     expect(body.instances[0].firstSeenAt).toBe("2026-11-04T00:00:00.000Z");
-    expect(body.instances[1].active).toBe(false);
+    expect(body.excludedInstanceCount).toBe(2);
+    expect(body.instances.some((x: { status: string }) => x.status === "idle")).toBe(false);
     expect(body.crons[0].nextRunAt).toBe("2026-11-04T04:30:00.000Z");
     expect(body.tasks[0].triggerLabel).toBe("system cron");
     expect(body.tasks[0].durationMs).toBe(5 * 60_000);
