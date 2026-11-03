@@ -582,6 +582,15 @@ export async function runDailyRecommendations(
     const aiFailed = aiResults.length - successfulResults.length;
 
     if (successfulResults.length === 0 && aiResults.length > 0) {
+      // No real AI verdicts means there are intentionally no daily-rec rows
+      // to publish. Make the reason explicit in operational logs rather than
+      // leaving the sheet's empty state ambiguous.
+      logger.warn({
+        msg: "Google Sheets daily-recs publish skipped: no successful AI verdicts",
+        runId: run.id,
+        attempted: aiResults.length,
+        aiFailed: aiResults.length,
+      });
       // Total AI failure — discard this run's picks entirely. The previous
       // good run remains the latest shown; no broadcast (nothing to say).
       const executionTimeMs = Date.now() - startTime;
