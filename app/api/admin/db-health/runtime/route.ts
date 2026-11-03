@@ -106,11 +106,19 @@ export async function GET() {
       activeWindowMs: ACTIVE_WINDOW_MS,
       historyWindowMs: HISTORY_WINDOW_MS,
       taskHistoryWindowMs: TASK_HISTORY_WINDOW_MS,
-      instances: workers.map((w) => {
+      // This is a live-instance view, not a worker-status archive. Idle or
+      // stale records are omitted; their persisted rows remain for diagnostics.
+      excludedInstanceCount: workers.filter((w) => {
+        const heartbeatAt = iso(w.lastHeartbeat);
+        const ageMs = heartbeatAt ? Math.max(0, now - new Date(heartbeatAt).getTime()) : null;
+        return ageMs === null || ageMs > ACTIVE_WINDOW_MS || String(w.status).toLowerCase() === "idle";
+      }).length,
+      instances: workers.flatMap((w) => {
         const heartbeatAt = iso(w.lastHeartbeat);
         const ageMs = heartbeatAt ? Math.max(0, now - new Date(heartbeatAt).getTime()) : null;
         const active = ageMs !== null && ageMs <= ACTIVE_WINDOW_MS;
-        return {
+        if (!active || String(w.status).toLowerCase() === "idle") return [];
+        return [{
           workerId: w.workerId,
           workerName: w.workerName,
           role: w.workerId.startsWith("leader-")
@@ -125,7 +133,7 @@ export async function GET() {
           heartbeatAgeMs: ageMs,
           active,
           updatedAt: iso(w.updatedAt),
-        };
+        }];
       }),
       crons: crons.map((c) => ({
         id: c.id,
