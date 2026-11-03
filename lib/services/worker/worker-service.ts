@@ -744,7 +744,7 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
       const swingErrMsg = swingError instanceof Error ? swingError.message : String(swingError);
       if (taskId) {
         await logTaskEvent(taskId, "task_progress", "Swing performance companion failed (non-fatal)", {
-          error: swingErrMsg,
+          errorType: swingError instanceof Error ? swingError.name : "unknown",
         });
       }
       logger.error({ msg: "Swing performance tracking failed (non-fatal)", error: swingErrMsg });
