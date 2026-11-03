@@ -16,6 +16,9 @@
 7. Add regression tests for task event names/metadata and outcome timestamps.
 
 ## Phase 3 — Google Sheets status and publish
+- Await daily-rec and Swing producer append completion inside their worker-owned service path; log row count and `enabled|disabled|failed` outcome without failing recommendation generation.
+- After combined recommendation+Swing performance, publish one KPI snapshot; standalone Swing performance publishes one snapshot. Record outcomes in task events and test both paths.
+- Make the all-AI-failed daily run explicitly log why it emits no `daily-rec` rows.
 8. Trace readHeaderState, OAuth client acquisition and exporter failure status. Return sanitized diagnostic codes/messages in status.
 9. Separate UI actions and copy: producer publish/export versus ledger Sync now. Keep queue drain semantics unchanged.
 10. Repair the supported publish path (metrics snapshot append is already an explicit operation); ensure status refresh and accurate success/error feedback.
