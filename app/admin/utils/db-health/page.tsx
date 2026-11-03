@@ -210,6 +210,29 @@ interface DbHealthData {
   };
 }
 
+
+interface RuntimeActivityData {
+  timestamp: string;
+  activeWindowMs: number;
+  instances: Array<{
+    workerId: string; workerName: string | null; role: string; status: string;
+    currentTaskId: string | null; firstSeenAt: string | null; lastHeartbeatAt: string | null;
+    heartbeatAgeMs: number | null; active: boolean; updatedAt: string | null;
+  }>;
+  crons: Array<{
+    id: string; name: string; taskType: string; cronExpression: string; timezone: string;
+    isActive: boolean; lastRunAt: string | null; nextRunAt: string | null;
+    runCount: number; successCount: number; failureCount: number; createdAt: string | null; updatedAt: string | null;
+  }>;
+  tasks: Array<{
+    id: string; name: string; taskType: string; taskCategory: string; status: string;
+    triggeredBy: string | null; cronJobId: string | null; assignedTo: string | null;
+    createdAt: string | null; startedAt: string | null; completedAt: string | null;
+    durationMs: number | null; error: string | null;
+    events: Array<{ eventType: string; message: string | null; at: string | null }>;
+  }>;
+}
+
 type DbErrorKey = keyof DbHealthData["dbErrorSummary"]["counts"];
 
 const DB_ERROR_META: Record<DbErrorKey, { label: string; chip: string }> = {
@@ -313,6 +336,8 @@ function StatCard({
 export default function DbHealthPage() {
   const { status } = useSession();
   const [data, setData] = useState<DbHealthData | null>(null);
+  const [runtimeActivity, setRuntimeActivity] = useState<RuntimeActivityData | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -340,6 +365,18 @@ export default function DbHealthPage() {
   const [savingMode, setSavingMode] = useState(false);
   const [modeMsg, setModeMsg] = useState<string | null>(null);
 
+  const fetchRuntimeActivity = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/db-health/runtime");
+      const body = await parseJsonBody(res);
+      if (!res.ok) throw new Error(body.error ?? `runtime ${res.status}`);
+      setRuntimeActivity(body as RuntimeActivityData);
+      setRuntimeError(null);
+    } catch (e) {
+      setRuntimeError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/db-health");
@@ -359,10 +396,12 @@ export default function DbHealthPage() {
   useEffect(() => {
     if (status === "authenticated") {
       fetchHealth();
+      fetchRuntimeActivity();
       const interval = setInterval(fetchHealth, 30_000);
-      return () => clearInterval(interval);
+      const runtimeInterval = setInterval(fetchRuntimeActivity, 120_000);
+      return () => { clearInterval(interval); clearInterval(runtimeInterval); };
     }
-  }, [status, fetchHealth]);
+  }, [status, fetchHealth, fetchRuntimeActivity]);
 
   const triggerSync = async () => {
     setSyncing(true);
@@ -1901,6 +1940,91 @@ export default function DbHealthPage() {
           </div>
         )}
       </div>
+
+      {/* Runtime visibility — bounded Prisma read via separate endpoint */}
+      <section className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">Active Instances &amp; Scheduled Activity</h3>
+          <button onClick={fetchRuntimeActivity} className="text-xs rounded border border-gray-300 dark:border-slate-700 px-3 py-1.5">Refresh runtime</button>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+          Instance heartbeat window: 15 minutes. First seen is the WorkerStatus record creation time (not guaranteed process boot time).
+          Activity refreshes every 2 minutes separately from the zero-Prisma DB Health poll.
+        </p>
+        {runtimeError && <p role="alert" className="mb-3 text-sm text-amber-700 dark:text-amber-400">Runtime activity unavailable: {runtimeError}</p>}
+        {!runtimeActivity ? (
+          <p className="text-sm text-gray-500 dark:text-slate-400">Loading runtime activity…</p>
+        ) : (
+          <>
+            <div className="mb-5">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-2">
+                Instances ({runtimeActivity.instances.filter((x) => x.active).length} active / {runtimeActivity.instances.length} seen in 24h)
+              </h4>
+              {runtimeActivity.instances.length === 0 ? <p className="text-sm text-gray-500">No worker/daemon heartbeat records in the last 24 hours.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left border-b border-gray-200 dark:border-slate-700 text-gray-500">
+                      <th className="py-2 pr-3">Instance / role</th><th className="py-2 pr-3">State</th><th className="py-2 pr-3">First seen</th><th className="py-2 pr-3">Last heartbeat</th><th className="py-2">Age</th>
+                    </tr></thead>
+                    <tbody>{runtimeActivity.instances.map((x) => (
+                      <tr key={x.workerId} className="border-b border-gray-100 dark:border-slate-800">
+                        <td className="py-2 pr-3"><div className="font-mono break-all">{x.workerId}</div><div className="text-gray-500">{x.workerName ?? x.role}</div></td>
+                        <td className="py-2 pr-3"><span className={x.active ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500"}>{x.active ? "ACTIVE" : "STALE"} · {x.status}</span></td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.firstSeenAt ? new Date(x.firstSeenAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.lastHeartbeatAt ? new Date(x.lastHeartbeatAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 whitespace-nowrap">{x.heartbeatAgeMs == null ? "—" : formatTimeAgo(x.lastHeartbeatAt)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="mb-5">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-2">System &amp; Cron schedules</h4>
+              {runtimeActivity.crons.length === 0 ? <p className="text-sm text-gray-500">No cron definitions found.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left border-b border-gray-200 dark:border-slate-700 text-gray-500">
+                      <th className="py-2 pr-3">Job</th><th className="py-2 pr-3">Schedule (UTC)</th><th className="py-2 pr-3">Last run</th><th className="py-2 pr-3">Next run</th><th className="py-2">Outcomes</th>
+                    </tr></thead>
+                    <tbody>{runtimeActivity.crons.map((x) => (
+                      <tr key={x.id} className="border-b border-gray-100 dark:border-slate-800">
+                        <td className="py-2 pr-3"><div className="font-medium">{x.name}</div><div className="text-gray-500">{x.taskType} · {x.isActive ? "active" : "disabled"}</div></td>
+                        <td className="py-2 pr-3 font-mono whitespace-nowrap">{x.cronExpression} · {x.timezone}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.lastRunAt ? new Date(x.lastRunAt).toLocaleString() : "Never"}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.nextRunAt ? new Date(x.nextRunAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 whitespace-nowrap">{x.runCount} runs · {x.successCount} ok · {x.failureCount} failed</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-2">Recent scheduled worker tasks</h4>
+              {runtimeActivity.tasks.length === 0 ? <p className="text-sm text-gray-500">No tracked task runs in the last 24 hours.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left border-b border-gray-200 dark:border-slate-700 text-gray-500">
+                      <th className="py-2 pr-3">Task</th><th className="py-2 pr-3">Trigger / status</th><th className="py-2 pr-3">Created</th><th className="py-2 pr-3">Started</th><th className="py-2 pr-3">Completed</th><th className="py-2">Duration</th>
+                    </tr></thead>
+                    <tbody>{runtimeActivity.tasks.map((x) => (
+                      <tr key={x.id} className="border-b border-gray-100 dark:border-slate-800 align-top">
+                        <td className="py-2 pr-3"><div className="font-medium">{x.name}</div><div className="text-gray-500">{x.taskType} · {x.id.slice(0, 8)}</div>{x.error && <div className="text-red-600 dark:text-red-400 max-w-xs break-words">{x.error}</div>}{x.events.map((ev, i) => <div key={i} className="text-gray-500">{ev.at ? new Date(ev.at).toLocaleString() : ""} · {ev.eventType}{ev.message ? ` — ${ev.message}` : ""}</div>)}</td>
+                        <td className="py-2 pr-3">{x.triggeredBy ?? "unknown"}<div className="text-gray-500">{x.status}</div></td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.createdAt ? new Date(x.createdAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.startedAt ? new Date(x.startedAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{x.completedAt ? new Date(x.completedAt).toLocaleString() : "—"}</td>
+                        <td className="py-2 whitespace-nowrap">{x.durationMs == null ? "—" : `${Math.round(x.durationMs / 1000)}s`}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Recent sync history */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 p-5">
