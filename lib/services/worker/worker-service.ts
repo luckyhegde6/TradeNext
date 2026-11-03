@@ -703,6 +703,45 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
 /**
  * Recommendation Performance - Track active recommendations against targets/stop-losses
  */
+/**
+ * Publish one KPI snapshot after a performance run. This is intentionally
+ * best-effort: tracking results remain authoritative if Sheets is unavailable.
+ */
+async function publishPerformanceMetricsSnapshot(taskId?: string, source = "performance_run"): Promise<void> {
+  try {
+    const [{ getMetrics }, { exportMetricsSnapshot }] = await Promise.all([
+      import("@/lib/services/googleSheets/metricsService"),
+      import("@/lib/services/googleSheets/exporter"),
+    ]);
+    const metrics = await getMetrics();
+    if (!metrics.ok) {
+      logger.warn({ msg: "Google Sheets performance snapshot skipped", source, reason: metrics.reason });
+      if (taskId) await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot skipped", { reason: metrics.reason });
+      return;
+    }
+    const outcome = await exportMetricsSnapshot(metrics.snapshot);
+    logger.info({ msg: "Google Sheets performance KPI snapshot finished", source, outcome });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot publish finished", {
+        outcome,
+        snapshotAt: metrics.snapshot.snapshotAt,
+        totalTracked: metrics.snapshot.totalTracked,
+      });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Google Sheets performance KPI snapshot failed (non-fatal)",
+      source,
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot failed (non-fatal)", {
+        errorType: error instanceof Error ? error.name : "unknown",
+      }).catch(() => undefined);
+    }
+  }
+}
+
 async function executeRecommendationPerformance(payload?: Record<string, unknown>, taskId?: string): Promise<unknown> {
   logger.info({ msg: "Starting recommendation performance tracking" });
 
@@ -749,6 +788,8 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
       }
       logger.error({ msg: "Swing performance tracking failed (non-fatal)", error: swingErrMsg });
     }
+    // One snapshot per combined recommendation + Swing performance cycle.
+    await publishPerformanceMetricsSnapshot(taskId, "recommendation_performance");
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -769,6 +810,7 @@ export async function executeSwingPerformance(payload?: Record<string, unknown>)
   try {
     const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
     const result = await checkSwingPerformance();
+    await publishPerformanceMetricsSnapshot(undefined, "swing_performance");
     logger.info({
       msg: "Swing performance tracking completed",
       checked: result.checked,
