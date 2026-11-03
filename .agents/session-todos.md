@@ -2,7 +2,8 @@
 
 Branch fix/sqlite-sync-startup-amplification, created from latest main after PR #153 merge. Specs/plans 40/41 are present.
 
-- [x] Add bounded admin runtime endpoint for WorkerStatus/CronJob/WorkerTask timestamps.
+- [x] Add bounded admin runtime endpoint for WorkerStatus/CronJob/WorkerTask timestamps; exclude idle/stale instances from the live list while retaining stored diagnostics.
+- [ ] Inspect the linked Google Sheet's actual tabs/headers and validate mapping when Google Drive access is available (connector is currently disabled by admin; public URL fetch failed).
 - [x] Add DB Health Active Instances, cron schedule timestamps, task timeline and trigger labels.
 - [x] Persist recommendation-performance and Swing companion progress as task events without double execution.
 - [x] Surface sanitized Google Sheets header diagnostics; fix direct publish timestamp and explicit metrics publish outcome/feedback.
