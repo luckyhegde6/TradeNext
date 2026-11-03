@@ -58,6 +58,12 @@ jest.mock("@/lib/services/worker/task-orchestrator", () => ({
 jest.mock("@/lib/services/dailyRecommendationService", () => ({
   checkRecommendationPerformance: jest.fn(async () => ({ checked: 12 })),
 }));
+jest.mock("@/lib/services/googleSheets/metricsService", () => ({
+  getMetrics: jest.fn(async () => ({ ok: true, snapshot: { snapshotAt: "2026-11-04T10:00:00.000Z", totalTracked: 10 } })),
+}));
+jest.mock("@/lib/services/googleSheets/exporter", () => ({
+  exportMetricsSnapshot: jest.fn(async () => "enabled"),
+}));
 jest.mock("@/lib/services/swingPerformanceService", () => ({
   checkSwingPerformance: jest.fn(async () => ({ checked: 5, targetAchieved: 2, stopLossHit: 1, expired: 0, updated: 3 })),
 }));
@@ -173,6 +179,12 @@ describe("recommendation performance task event timeline", () => {
       "task_progress",
       "Swing performance companion completed",
       { checked: 5, targetAchieved: 2, stopLossHit: 1, expired: 0 },
+    );
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-performance-1",
+      "task_progress",
+      "Google Sheets KPI snapshot publish finished",
+      { outcome: "enabled", snapshotAt: "2026-11-04T10:00:00.000Z", totalTracked: 10 },
     );
   });
 
