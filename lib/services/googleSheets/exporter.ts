@@ -216,8 +216,17 @@ async function exportRowsInternal(
     }
 
     // Update the operator-facing last-publish timestamp for DIRECT producer
-    // appends too (not only manual ledger drains). This is a local mirror write.
-    touchLastSync();
+    // appends too (not only manual ledger drains). A metadata failure must not
+    // turn a successful external append into a retry (which could duplicate it).
+    try {
+      touchLastSync();
+    } catch (timestampError) {
+      logger.warn({
+        msg: "Google Sheets publish timestamp update failed (non-fatal)",
+        tab,
+        error: timestampError instanceof Error ? timestampError.name : "unknown",
+      });
+    }
     logger.info({ msg: "Google Sheets rows appended", tab, rows: rows.length });
     // See header note: skip the success audit for the high-frequency `decisions` tab.
     if (tab !== "decisions") {
