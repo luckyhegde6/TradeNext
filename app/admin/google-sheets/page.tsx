@@ -105,7 +105,6 @@ interface MetricsResponse {
   ok: boolean;
   reason?: string;
   snapshot: MetricsSnapshot | null;
-  appended?: number;
   error?: string;
 }
 interface RescanResponse {
