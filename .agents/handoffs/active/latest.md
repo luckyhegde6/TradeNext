@@ -11,6 +11,8 @@
 - **Deployment:** not performed. User controls PR/merge/deploy.
 
 ## Implemented
+- **Idle workers:** runtime endpoint and DB Health live list now exclude `status=idle` and heartbeat-stale rows; an excluded count is shown. Persisted WorkerStatus rows are retained, not deleted (they are status records, not process controls). Focused regression test added; verification still pending.
+- **Google Sheet link:** user supplied spreadsheet ID matches the masked ID shown in the previous admin screenshot (`1mRD…DXzQ`), so it appears already configured. Google Drive connector is disabled by admin and public URL fetch failed; sheet tab/header contents have not been inspected. Do not invent a schema mapping. Need authorized live sheet access to verify headers and publish behavior.
 1. New admin-only bounded endpoint: app/api/admin/db-health/runtime/route.ts; returns recent WorkerStatus, CronJob and tracked WorkerTask/TaskEvent data.
 2. DB Health UI now displays worker/daemon/leader records with active/stale state, first-seen, heartbeat timestamp/age; cron schedule + last/next run timestamps and outcomes; task created/started/completed/duration/event timeline.
 3. System cron tasks are labeled system cron; recommendation performance task records durable progress events for its Swing performance companion without scheduling or running a duplicate task.
