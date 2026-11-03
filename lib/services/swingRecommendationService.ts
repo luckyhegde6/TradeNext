@@ -923,13 +923,16 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
     // the job, and `exportSwing` never throws.
     // `jobId` is the run identifier recorded in the ledger, so an undelivered
     // swing row can be traced back to the job that produced it.
-    exportSwing(stocks, jobId).catch((err) =>
-      logger.error({
-        msg: "Google Sheets swing export dispatch failed",
-        jobId,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    );
+    // Await best-effort publish so the background swing job cannot finish
+    // before its sheet append has completed. The exporter returns an outcome
+    // and never throws into the recommendation flow.
+    const sheetExport = await exportSwing(stocks, jobId);
+    logger.info({
+      msg: "Google Sheets swing publish finished",
+      jobId,
+      rows: stocks.length,
+      outcome: sheetExport,
+    });
 
     if (analysisStatus === "failed") {
       analysisError =
