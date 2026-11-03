@@ -7,7 +7,7 @@
 ## Phase 1 — Runtime endpoint + DB Health UI
 1. Add admin-only /api/admin/db-health/runtime route using bounded Prisma reads for recent WorkerStatus, CronJob, and WorkerTask rows.
 2. Derive active/stale state from a documented heartbeat threshold; expose createdAt as first-seen (not guaranteed process boot time) and exact ISO timestamps.
-3. Extend DB Health UI with Active Instances and Scheduled/Worker Activity sections; keep existing GET zero-Prisma.
+3. Extend DB Health UI with Active Instances and Scheduled/Worker Activity sections; exclude idle/stale workers from the live list while retaining their stored records; keep existing GET zero-Prisma.
 4. Add route/UI tests for auth, filters, timestamps, stale states, errors and loading/empty states.
 
 ## Phase 2 — Scheduled job visibility / performance trace
