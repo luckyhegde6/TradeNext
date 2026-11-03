@@ -1949,6 +1949,7 @@ export default function DbHealthPage() {
         </div>
         <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
           Instance heartbeat window: 15 minutes. First seen is the WorkerStatus record creation time (not guaranteed process boot time).
+          Idle workers may have stale shared heartbeats because idle pings are local SQLite-only; leader/daemon and busy-worker heartbeats are the reliable active signals. Task history spans 7 days.
           Activity refreshes every 2 minutes separately from the zero-Prisma DB Health poll.
         </p>
         {runtimeError && <p role="alert" className="mb-3 text-sm text-amber-700 dark:text-amber-400">Runtime activity unavailable: {runtimeError}</p>}
