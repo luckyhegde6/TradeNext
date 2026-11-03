@@ -76,6 +76,17 @@
 
 ## Current Project Status
 
+### v3.53.0 — Spec 36: AI-down actionable picks + duplicate daily-notice fix (Nov 2 2026; completed on main)
+
+**Production issue:** OpenRouter free returned empty responses, OpenRouter auto returned HTTP 402 Insufficient credits, and Nvidia free returned 503. AI preflight failed, producing fallback all-HOLD notices; missed-tick recovery and catch-up also emitted duplicate daily notices.
+
+- **AI failure classification:** `isAiCreditExhaustionMessage` recognizes HTTP 402 / Insufficient credits / never-purchased-credit messages separately from daily-free-model 429. The recommendation agent latches quota exhaustion for the UTC day; connection tests surface `quotaExhausted`.
+- **Duplicate notice protection:** per-UTC-day in-process suppression at the daily recommendation completion broadcast, alongside existing worker catch-up/run guards.
+- **AI-down broadcast:** screener/fallback-backed actionable BUY/SELL picks are broadcast when available; genuine all-HOLD days retain the all-HOLD notice.
+- **Swing/stock fallbacks:** existing technical fallback paths were verified to produce directional targets/stop levels with `success:true`.
+- **Verification recorded:** tsc 46 exact baseline; targeted Jest 8 suites / 286 tests; full Jest 138 suites / 2113 passed / 4 skipped / 0 failed; lint 0 errors; quickbuild 201/201. OpenRouter credits remain an external user-action blocker.
+- Spec/plan: `.agents/specs/36-ai-down-actionable-picks-dedup.md` and `.agents/plans/36-ai-down-actionable-picks-dedup.md`; version detail `.agents/changelog/versions-v3.53.md`.
+
 ### v3.52.0 — Spec 34: 20-stock AI batches + conviction ranking · durable swing Telegram delivery · single-message header · structured console mirror (Oct 22 2026, branch `fix/mirror-blobs-upload-race`) — **CODE + TESTS + GATES + DOCS DONE; COMMIT PENDING USER (D9)**
 
 **Why** (four user reports + one prod-log finding): (1) a daily run with `configuredModel=openrouter/free`, `stocks=100` burned the free-tier quota and the result order depended on which batch finished first; (2) "no telegram notification is triggered on swing"; (3) the AI-unavailable Telegram message showed **two** headers; (4) "wherever logger.info/warn/error exists add an additional console.log"; and, found while diagnosing (2), today's 04:30 UTC daily run did not succeed at all (`Cron boot recommendations catch-up enqueued, reason=missed-daily-window`) with OpenRouter returning **402 Insufficient credits**. Spec/plan: `.agents/specs/34-ai-batch-20-ranking-and-telegram-delivery.md` / `.agents/plans/34-ai-batch-20-ranking-and-telegram-delivery.md`.
