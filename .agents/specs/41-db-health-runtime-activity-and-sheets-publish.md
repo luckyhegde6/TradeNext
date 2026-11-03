@@ -13,6 +13,9 @@ Operators cannot easily determine which serverless instances are alive, when eac
 - Sheets: app/api/admin/google-sheets/status/route.ts, sync/route.ts, metrics/route.ts, and googleSheets status/sync/exporter/tabs/config services plus existing ledger/tests.
 
 ## Requirements
+- Recommendation/swing producer appends are awaited inside the owning background operation (best-effort) so the worker cannot complete before Sheets append finishes.
+- Performance runs append one KPI snapshot to the `metrics` tab: combined recommendation + Swing performance emits one snapshot; standalone Swing performance emits one. Record sanitized publish outcome in task progress.
+- If daily recommendation AI yields no successful verdicts, log explicitly that the `daily-rec` export was skipped rather than leaving the empty sheet ambiguous.
 1. Add admin-authenticated runtime/activity data without adding Prisma queries to the existing DB Health GET path. Use a separate runtime endpoint and bounded queries.
 2. Active instances list only fresh non-idle worker/daemon/leader records with identity, role, status, first-seen timestamp, last heartbeat, and heartbeat age. Exclude idle and stale records from the live list; retain persisted WorkerStatus rows for diagnostics (do not delete history).
 3. Show cron expression, timezone where known, next scheduled timestamp, last run timestamp, counts, and active state.
