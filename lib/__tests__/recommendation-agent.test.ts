@@ -59,6 +59,7 @@ jest.mock("@/lib/services/ai/quotaLatch", () => ({
   isAiQuotaExhausted: jest.fn(() => false),
   markAiQuotaExhausted: jest.fn(),
   isDailyFreeQuotaMessage: jest.fn(() => false),
+  isAiCreditExhaustionMessage: jest.fn(() => false),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ describe("recommendation-agent", () => {
     isAiQuotaExhausted: jest.Mock;
     markAiQuotaExhausted: jest.Mock;
     isDailyFreeQuotaMessage: jest.Mock;
+    isAiCreditExhaustionMessage: jest.Mock;
   };
 
   beforeEach(() => {
@@ -129,6 +131,7 @@ describe("recommendation-agent", () => {
     quotaMock.isAiQuotaExhausted.mockReturnValue(false);
     quotaMock.markAiQuotaExhausted.mockReset();
     quotaMock.isDailyFreeQuotaMessage.mockReturnValue(false);
+    quotaMock.isAiCreditExhaustionMessage.mockReturnValue(false);
   });
 
   // ── daily free-quota latch wiring (v3.51.0) ──────────────────────────
@@ -163,11 +166,27 @@ describe("recommendation-agent", () => {
     test("does NOT latch a generic 429 (transient per-minute rate limit)", async () => {
       llmMock.isQuotaExhausted.mockReturnValue(true);
       quotaMock.isDailyFreeQuotaMessage.mockReturnValue(false);
+      quotaMock.isAiCreditExhaustionMessage.mockReturnValue(false);
       mockDirectPrompt.mockResolvedValue("AI request failed (HTTP 429). Please check your OpenRouter API key.");
 
       await analyzeStocks([makeStock()], VALID_AI_CONFIG);
 
       expect(quotaMock.markAiQuotaExhausted).not.toHaveBeenCalled();
+    });
+
+    test("latches the UTC day on account credit exhaustion (HTTP 402 / insufficient credits) — Spec 36", async () => {
+      llmMock.isQuotaExhausted.mockReturnValue(true);
+      quotaMock.isDailyFreeQuotaMessage.mockReturnValue(false);
+      quotaMock.isAiCreditExhaustionMessage.mockReturnValue(true);
+      mockDirectPrompt.mockResolvedValue(
+        'AI request failed (HTTP 402). {"error":{"message":"Insufficient credits. This account never purchased credits.","code":402}}',
+      );
+
+      const results = await analyzeStocks([makeStock()], VALID_AI_CONFIG);
+
+      expect(results[0].success).toBe(true);
+      expect(quotaMock.markAiQuotaExhausted).toHaveBeenCalledTimes(1);
+      expect(quotaMock.markAiQuotaExhausted.mock.calls[0][0]).toMatchObject({ model: "test-model" });
     });
   });
 

@@ -80,6 +80,20 @@ export function isDailyFreeQuotaMessage(raw: string): boolean {
   );
 }
 
+/**
+ * True for *account credit exhaustion* (HTTP 402 / "Insufficient credits" /
+ * "never purchased credits") — a distinct AI-unavailable failure mode observed
+ * in prod logs (2026-11-02: OpenRouter free models returning empty responses and
+ * the auto-router answering 402). Unlike a transient per-minute 429, an exhausted
+ * credit balance means the AI cannot serve further requests this UTC day, so it
+ * is latched the same way the daily free-quota latch is.
+ */
+export function isAiCreditExhaustionMessage(raw: string): boolean {
+  if (!raw) return false;
+  const s = raw.toLowerCase();
+  return s.includes("insufficient credits") || s.includes("never purchased credits");
+}
+
 function isRecord(v: unknown): v is AiQuotaRecord {
   if (!v || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
