@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
 const HISTORY_WINDOW_MS = 24 * 60 * 60_000;
+const TASK_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const MAX_INSTANCES = 50;
 const MAX_CRONS = 30;
 const MAX_TASKS = 40;
@@ -34,6 +35,7 @@ export async function GET() {
 
   const now = Date.now();
   const historyCutoff = new Date(now - HISTORY_WINDOW_MS);
+  const taskHistoryCutoff = new Date(now - TASK_HISTORY_WINDOW_MS);
 
   try {
     const [workers, crons, tasks] = await Promise.all([
@@ -73,7 +75,7 @@ export async function GET() {
       prisma.workerTask.findMany({
         where: {
           taskType: { in: TRACKED_TASK_TYPES },
-          createdAt: { gte: historyCutoff },
+          createdAt: { gte: taskHistoryCutoff },
         },
         orderBy: { createdAt: "desc" },
         take: MAX_TASKS,
@@ -103,6 +105,7 @@ export async function GET() {
       timestamp: new Date(now).toISOString(),
       activeWindowMs: ACTIVE_WINDOW_MS,
       historyWindowMs: HISTORY_WINDOW_MS,
+      taskHistoryWindowMs: TASK_HISTORY_WINDOW_MS,
       instances: workers.map((w) => {
         const heartbeatAt = iso(w.lastHeartbeat);
         const ageMs = heartbeatAt ? Math.max(0, now - new Date(heartbeatAt).getTime()) : null;
