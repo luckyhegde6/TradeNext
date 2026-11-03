@@ -33,7 +33,6 @@ export async function GET() {
   }
 
   const now = Date.now();
-  const activeCutoff = new Date(now - ACTIVE_WINDOW_MS);
   const historyCutoff = new Date(now - HISTORY_WINDOW_MS);
 
   try {
