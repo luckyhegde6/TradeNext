@@ -809,16 +809,20 @@ export async function runDailyRecommendations(
     // Append the picks to the Tracker `daily-rec` tab. Only stocks with a REAL
     // AI verdict are exported — synthetic fallback HOLDs are deliberately not
     // persisted (v3.11.1) and must not pollute the sheet either. Fire-and-forget.
-    exportDailyRecs(
+    // Await the best-effort publish before the worker task completes. In
+    // serverless/short-lived worker contexts, fire-and-forget can be cut off
+    // after the recommendation run reports success, leaving the sheet empty.
+    // ExportResult is non-throwing; publish failure never fails the run.
+    const sheetExport = await exportDailyRecs(
       { runId: run.id, runDate: new Date(startTime).toISOString() },
       successfulResults
-    ).catch((err) =>
-      logger.error({
-        msg: "Google Sheets daily-recs export dispatch failed",
-        runId: run.id,
-        error: err instanceof Error ? err.message : String(err),
-      })
     );
+    logger.info({
+      msg: "Google Sheets daily-recs publish finished",
+      runId: run.id,
+      rows: successfulResults.length,
+      outcome: sheetExport,
+    });
 
     // Record health metrics
     await recordMetric({
