@@ -401,6 +401,12 @@ describe("exportRows", () => {
     expect(touchLastSync).toHaveBeenCalledTimes(1);
   });
 
+  test("timestamp metadata failure does not turn a successful append into a retry", async () => {
+    (touchLastSync as jest.Mock).mockImplementationOnce(() => { throw new Error("local mirror unavailable"); });
+    await expect(exportRows("swing", [["a"]])).resolves.toBe("enabled");
+    expect(valuesAppend).toHaveBeenCalledTimes(1);
+  });
+
   test("batches every row into ONE append with the USER_ENTERED option", async () => {
     const rows = [["a", "b"], ["c", "d"], ["e", "f"]];
     await expect(exportRows("screener", rows)).resolves.toBe("enabled");
