@@ -4,6 +4,7 @@
 > Base: latest main after PR #153 merge, SHA 7934335793a0773b39ecbc01ccbb59742dfdcfc5.
 
 ## Status
+- Follow-up scope added from production screenshots: CI parser/test failures fixed; recurring 15-minute recovery probe no longer performs full Prisma→SQLite pull (boot hydration remains); Swing Sheets export now runs after AI try/catch so failed analysis still publishes screener rows. Daily worker task timeline now records runOutcome/AI counts. Focused regression tests added; CI reruns queued as of 2026-11-05. Production runtime remains unverified without Netlify logs/admin access.
 - **PR #153:** merged and deployed per user confirmation.
 - **Branch:** fix/sqlite-sync-startup-amplification, created from latest main. No application-code changes on main.
 - **Spec/Plan:** Spec 40/Plan 40 (sync amplification); Spec 41/Plan 41 (runtime observability + Sheets publish recovery).
