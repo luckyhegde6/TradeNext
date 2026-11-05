@@ -56,7 +56,7 @@ jest.mock("@/lib/services/worker/task-orchestrator", () => ({
 // Record the outcome only — recordCronRun is mocked; the fixture map mirrors
 // recommendationCronService.ts L52-57.
 jest.mock("@/lib/services/dailyRecommendationService", () => ({
-  checkRecommendationPerformance: jest.fn(async () => ({ checked: 12 })),
+  checkRecommendationPerformance: jest.fn(async () => ({ checked: 12, updated: 10, skippedNoPrice: 2, targetAchieved: 3, stopLossHit: 1 })),
   runDailyRecommendations: jest.fn(async () => ({
     runId: "run-ai-down",
     totalScreeners: 7,
@@ -200,7 +200,7 @@ describe("recommendation performance task event timeline", () => {
       "task-performance-1",
       "task_progress",
       "Recommendation performance check completed",
-      { checked: 12, success: true },
+      { checked: 12, updated: 10, skippedNoPrice: 2, targetAchieved: 3, stopLossHit: 1, success: true },
     );
     expect(logTaskEvent).toHaveBeenCalledWith(
       "task-performance-1",
