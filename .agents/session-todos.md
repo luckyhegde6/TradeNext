@@ -10,6 +10,9 @@ Branch fix/sqlite-sync-startup-amplification, created from latest main after PR 
 - [x] Add focused runtime, Sheets status, exporter and publish-route regression tests.
 - [x] Await daily-rec/Swing producer publishes and add performance KPI snapshots to metrics tab with task progress outcome.
 - [x] Log explicitly when all AI verdicts fail and daily-rec rows are intentionally skipped.
+- [x] Remove recurring full Prisma→SQLite pull from recovery probe; add regression test for no collection reads.
+- [x] Fix Google Sheets admin JSX parse error and update exporter test mocks to effective config gate.
+- [x] Publish Swing screener rows to Sheets even when AI analysis fails; add regression assertion.
 - [ ] Run targeted Jest suites and full checks; validate a live run against the configured Google Sheet after authorized access/deployment.
 - [ ] Run targeted Jest suites and full required checks individually: npm run test, npx tsc --noEmit, npm run lint, npm run quickbuild.
 - [ ] Review branch diff/status and resolve any failures. No commit/push/PR/merge/deploy beyond documentation commits already made through the branch API; deployment remains user-controlled.
