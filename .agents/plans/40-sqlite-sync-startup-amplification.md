@@ -5,6 +5,12 @@
 > Base: `main` / `7934335793a0773b39ecbc01ccbb59742dfdcfc5`
 > Tier: B — sequential, one subsystem at a time.
 
+## Follow-up implementation (PR #154)
+- [x] Extract a leader-gated recovery-probe operation that performs a lightweight liveness read + outbox push only.
+- [x] Remove recurring `syncFromPrisma()`; preserve boot hydration and explicit admin pull paths.
+- [x] Add regression test asserting no recurring recommendation/run/tracker collection reads occur during a probe.
+- [ ] Verify targeted Jest and CI gates; confirm production query volume after user-controlled deployment.
+
 ## Phase 1 — Reproduce and lock contracts
 1. Add tests describing current boot hydration contract: every instance pulls, `skipReconcile:true`, no outbox push at boot.
 2. Add tests for `startRecoveryProbe` cadence and actions: currently declared 15 minutes; establish whether it triggers full pull and outbox push.
