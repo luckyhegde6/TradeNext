@@ -8,6 +8,7 @@
 ## Changes
 - **SQLite query amplification fix:** recurring 15-minute recovery probes now perform a lightweight Prisma liveness read and SQLite→Prisma outbox push only; they no longer run a full Prisma→SQLite mirror pull. Boot hydration and explicit admin pulls remain intact. Regression test guards against recurring collection reads.
 - **Swing failure publishing:** Swing screener rows are appended to the `swing` tab even when AI analysis throws or all stock analyses fail; the job remains honestly marked failed and does not fabricate target levels.
+- **Performance diagnosis:** recommendation performance results/task timeline include checked, updated and skipped-for-missing-price counts, making a successful run with no refreshed rows distinguishable from an empty tracker set.
 - **CI fixes:** corrected malformed Google Sheets admin JSX and updated tracking tests to mock the effective config gate.
 - **Run-triggered Sheets publishing:** daily-rec and Swing producer appends are awaited (best-effort) before their worker-owned operation completes and log row count/outcome. Performance cycles append a KPI snapshot to `metrics`; combined recommendation+Swing checks emit one snapshot, standalone Swing performance emits one. KPI publish result is recorded as a task progress event.
 - **Empty-run diagnosis:** all-AI-failed daily runs now log an explicit skipped-publish reason; no synthetic fallback picks are written.
