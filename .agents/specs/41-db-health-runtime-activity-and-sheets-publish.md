@@ -14,6 +14,7 @@ Operators cannot easily determine which serverless instances are alive, when eac
 
 ## Requirements
 - Recommendation/swing producer appends are awaited inside the owning background operation (best-effort) so the worker cannot complete before Sheets append finishes.
+- Swing terminal jobs publish their screener rows to the `swing` tab even when AI analysis throws or every per-stock analysis fails; the job remains marked failed and no AI target levels are fabricated.
 - Performance runs append one KPI snapshot to the `metrics` tab: combined recommendation + Swing performance emits one snapshot; standalone Swing performance emits one. Record sanitized publish outcome in task progress.
 - If daily recommendation AI yields no successful verdicts, log explicitly that the `daily-rec` export was skipped rather than leaving the empty sheet ambiguous.
 1. Add admin-authenticated runtime/activity data without adding Prisma queries to the existing DB Health GET path. Use a separate runtime endpoint and bounded queries.
