@@ -70,9 +70,14 @@ function httpError(status: number): Error & { response: { status: number } } {
   return Object.assign(new Error(`HTTP ${status}`), { response: { status } });
 }
 
+const mockConfig = jest.requireMock("@/lib/services/googleSheets/configService") as {
+  isTrackingActive: jest.Mock<boolean, []>;
+  resolveSheetId: jest.Mock<string | null, []>;
+};
+
 function arm(enabled: boolean, sheetId: string | null = SHEET_ID): void {
-  mockAuth.isTrackingEnabled.mockReturnValue(enabled);
-  mockAuth.trackerSheetId.mockReturnValue(sheetId);
+  mockConfig.isTrackingActive.mockReturnValue(enabled);
+  mockConfig.resolveSheetId.mockReturnValue(sheetId);
 }
 
 beforeEach(() => {
