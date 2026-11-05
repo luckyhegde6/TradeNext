@@ -316,6 +316,7 @@ import {
   getSqliteFallback,
   syncFromPrisma,
   pushSqliteToPrisma,
+  runRecoveryProbeOnce,
   hasSyncHistoryTable,
   getOutboxPending,
   getSqliteDerivedCounts,
@@ -2214,6 +2215,21 @@ describe("SQLite backup fallback", () => {
       expect(row!.rowsSynced).toBe(0);
 
       mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("15-minute recovery probe pushes the outbox without a full Prisma→SQLite pull", async () => {
+      await resetAndInit();
+      jest.clearAllMocks();
+      mockLeader.isLeader.mockResolvedValue(true);
+
+      await runRecoveryProbeOnce();
+
+      // One lightweight liveness read is expected; recurring full hydration
+      // would issue these collection reads and recreate the query spike.
+      expect(mockPrisma.cronJob.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.dailyRecommendationRun.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyRecommendationStock.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.recommendationTracker.findMany).not.toHaveBeenCalled();
     });
 
     it("pushSqliteToPrisma default opts (no opts) uses trigger 'probe' and leaderGate true", async () => {
