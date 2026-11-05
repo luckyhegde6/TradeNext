@@ -23,6 +23,12 @@ Production logs show repeated per-instance mirror restores, Prisma→SQLite hydr
 - `lib/services/priceCache.ts`: daily price accumulator and timer; make no write-path change without tests proving single-writer behavior.
 - Existing tests: `sqlite.test.ts`, `sqliteMirror.test.ts`, `instrumentation.test.ts`, `daemon-sqlite-first.test.ts`, `cron-daemon.test.ts`.
 
+## 3A. Confirmed implementation defect (PR #154 follow-up)
+- The recurring 15-minute recovery probe called `syncFromPrisma()` on every healthy tick before draining the SQLite→Prisma outbox.
+- This performs a full mirror pull repeatedly, contrary to the boot-hydration-only pull invariant, and is a credible source of recurring Prisma query spikes.
+- The probe should perform one lightweight liveness read and drain the outbox only. Full pulls remain limited to boot hydration and explicit admin recovery actions.
+- Regression coverage must assert the recurring probe does not issue recommendation/run/tracker collection reads.
+
 ## 4. Core architectural invariant
 Spec 09 states:
 - Boot hydration is the only Prisma→SQLite pull and runs on every instance because SQLite is instance-local.
