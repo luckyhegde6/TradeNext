@@ -665,7 +665,7 @@ export default function AdminGoogleSheetsPage() {
                       <td className="py-2 pr-3 font-mono">{t.tab}</td>
                       <td className="py-2 pr-3">
                         <span className={`rounded px-2 py-0.5 text-xs ${badge.cls}`}>{badge.label}</span>
-                        {t.detail && <span className="ml-2 text-xs text-gray-500 dark:text-slate-400">{t.detail}</span>
+                        {t.detail && <span className="ml-2 text-xs text-gray-500 dark:text-slate-400">{t.detail}</span>}
                         {t.headerState === "unknown" && t.diagnostic && <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">{t.diagnostic.replaceAll("_", " ")}</span>}
                       </td>
                       {/* Retained is shown separately from queued on purpose: the
