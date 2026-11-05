@@ -773,6 +773,10 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
     if (taskId) {
       await logTaskEvent(taskId, "task_progress", "Recommendation performance check completed", {
         checked: result.checked,
+        updated: result.updated ?? 0,
+        skippedNoPrice: result.skippedNoPrice ?? 0,
+        targetAchieved: result.targetAchieved,
+        stopLossHit: result.stopLossHit,
         success: true,
       });
     }
