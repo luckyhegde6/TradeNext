@@ -71,6 +71,10 @@ export interface PerformanceCheckResult {
   stopLossHit: number;
   archived: number;
   executionTimeMs: number;
+  /** Trackers with a fresh price written to the SQLite mirror. */
+  updated?: number;
+  /** Active trackers skipped because neither daily nor live price was available. */
+  skippedNoPrice?: number;
 }
 
 /** The latest run with its stocks. */
@@ -1022,6 +1026,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       stopLossHit: 0,
       archived: archive.archived,
       executionTimeMs: 0,
+      updated: 0,
+      skippedNoPrice: 0,
     };
   }
 
@@ -1090,6 +1096,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   }
 
   let checked = 0;
+  let updated = 0;
+  let skippedNoPrice = 0;
   let targetAchieved = 0;
   let stopLossHit = 0;
 
@@ -1102,6 +1110,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
     const currentPrice = priceMap.get(tracker.symbol);
     if (currentPrice === undefined) {
+      skippedNoPrice++;
       logger.warn({ msg: "No price data found for tracker symbol", symbol: tracker.symbol, trackerId: tracker.id });
       continue;
     }
@@ -1141,6 +1150,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       currentPrice,
       lastCheckedAt: new Date(),
     });
+    updated++;
 
     if (newStatus) {
       const previousStatus = tracker.status;
@@ -1218,6 +1228,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // entry per run so monitoring tabs show the sweep ran even with zero status changes.
   const runMeta = {
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,
@@ -1249,6 +1261,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   logger.info({
     msg: "Performance check completed",
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,
@@ -1257,6 +1271,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
   return {
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,
