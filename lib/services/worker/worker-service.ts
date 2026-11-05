@@ -40,7 +40,7 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
         result = await executeScreener(payload);
         break;
       case "recommendations":
-        result = await executeRecommendations(payload);
+        result = await executeRecommendations(taskId, payload);
         break;
       case "recommendation_performance":
         result = await executeRecommendationPerformance(payload, taskId);
@@ -679,7 +679,7 @@ async function executeScreener(payload?: Record<string, unknown>): Promise<unkno
 /**
  * Recommendations - Generate daily stock recommendations via Chartink screeners + AI analysis
  */
-async function executeRecommendations(payload?: Record<string, unknown>): Promise<unknown> {
+async function executeRecommendations(taskId: string, payload?: Record<string, unknown>): Promise<unknown> {
   logger.info({ msg: "Starting daily recommendations generation" });
 
   try {
@@ -691,7 +691,28 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
     // here is what spammed Telegram on 2026-10-14/15.
     const notifyAiUnavailable = payload?.source !== "catchup";
     const result = await runDailyRecommendations({ triggeredBy, notifyAiUnavailable });
-    logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId, triggeredBy });
+    const runOutcome =
+      result.aiProcessed > 0 ? "completed" :
+      result.aiFailed > 0 ? "ai_unavailable" : "empty";
+    await logTaskEvent(taskId, "task_progress", "Daily recommendations pipeline finished", {
+      runId: result.runId,
+      runOutcome,
+      totalStocks: result.totalStocks,
+      aiProcessed: result.aiProcessed,
+      aiFailed: result.aiFailed,
+      successfulScreeners: result.successfulScreeners,
+      executionTimeMs: result.executionTimeMs,
+      triggeredBy,
+    });
+    logger.info({
+      msg: "Daily recommendations completed",
+      stockCount: result.totalStocks,
+      runId: result.runId,
+      triggeredBy,
+      runOutcome,
+      aiProcessed: result.aiProcessed,
+      aiFailed: result.aiFailed,
+    });
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
