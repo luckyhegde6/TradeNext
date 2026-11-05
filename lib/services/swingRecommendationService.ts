@@ -918,22 +918,6 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
     analysisStatus = analysisStatusAfterBatch(stocks) as "done" | "failed";
     const succeeded = stocks.filter((s) => s.analysis).length;
 
-    // Append every pick (analyzed OR analysisError) to the Tracker `swing` tab.
-    // Fire-and-forget per the ingestion rule: a Google outage must never affect
-    // the job, and `exportSwing` never throws.
-    // `jobId` is the run identifier recorded in the ledger, so an undelivered
-    // swing row can be traced back to the job that produced it.
-    // Await best-effort publish so the background swing job cannot finish
-    // before its sheet append has completed. The exporter returns an outcome
-    // and never throws into the recommendation flow.
-    const sheetExport = await exportSwing(stocks, jobId);
-    logger.info({
-      msg: "Google Sheets swing publish finished",
-      jobId,
-      rows: stocks.length,
-      outcome: sheetExport,
-    });
-
     if (analysisStatus === "failed") {
       analysisError =
         stocks.find((s) => s.analysisError)?.analysisError ?? "AI analysis failed";
@@ -971,6 +955,19 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
       metadata: { stocks: stocks.length, jobId: jobId },
     }).catch(() => undefined);
   }
+
+  // Publish the terminal screener feed even when AI analysis throws or
+  // every stock fails. Previously this lived inside the AI try block, so
+  // provider failure skipped the sheet append entirely. Export is best-effort
+  // and never changes the job outcome.
+  const sheetExport = await exportSwing(stocks, jobId);
+  logger.info({
+    msg: "Google Sheets swing publish finished",
+    jobId,
+    rows: stocks.length,
+    outcome: sheetExport,
+    analysisStatus,
+  });
 
   // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
   // (timeHorizon "swing") so they surface in the Performance tab's Swing
