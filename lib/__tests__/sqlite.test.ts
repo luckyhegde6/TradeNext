@@ -249,7 +249,11 @@ jest.mock("@/lib/prisma", () => ({
     serverLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     auditLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     aPIRequestLog: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
-    cronJob: { findMany: jest.fn().mockResolvedValue([]) },
+    cronJob: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue({ id: "cron-probe" }),
+    },
+    recommendationTracker: { findMany: jest.fn().mockResolvedValue([]) },
     workerTask: { findMany: jest.fn().mockResolvedValue([]) },
     // Plan 09 Phase 4: SQLite→Prisma push sink targets
     symbol: {
