@@ -57,6 +57,17 @@ jest.mock("@/lib/services/worker/task-orchestrator", () => ({
 // recommendationCronService.ts L52-57.
 jest.mock("@/lib/services/dailyRecommendationService", () => ({
   checkRecommendationPerformance: jest.fn(async () => ({ checked: 12 })),
+  runDailyRecommendations: jest.fn(async () => ({
+    runId: "run-ai-down",
+    totalScreeners: 7,
+    successfulScreeners: 7,
+    totalStocks: 100,
+    uniqueStocks: 0,
+    aiProcessed: 0,
+    aiFailed: 100,
+    executionTimeMs: 1234,
+    stocks: [],
+  })),
 }));
 jest.mock("@/lib/services/googleSheets/metricsService", () => ({
   getMetrics: jest.fn(async () => ({ ok: true, snapshot: { snapshotAt: "2026-11-04T10:00:00.000Z", totalTracked: 10 } })),
@@ -156,6 +167,28 @@ describe("recordSystemRunOutcome (v3.37.0 Fix 4 guards)", () => {
     prisma.workerTask.findUnique.mockRejectedValue(new Error("db boom"));
     await expect(recordSystemRunOutcome("task-1", "market_data", false)).resolves.toBeUndefined();
     expect(mockRecordCronRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("daily recommendation task outcome timeline", () => {
+  test("records AI-unavailable run outcome and counts under the worker task", async () => {
+    const result = await executeTask("task-daily-1", "recommendations", { source: "admin_manual" });
+    expect(result.success).toBe(true);
+    expect(logTaskEvent).toHaveBeenCalledWith(
+      "task-daily-1",
+      "task_progress",
+      "Daily recommendations pipeline finished",
+      {
+        runId: "run-ai-down",
+        runOutcome: "ai_unavailable",
+        totalStocks: 100,
+        aiProcessed: 0,
+        aiFailed: 100,
+        successfulScreeners: 7,
+        executionTimeMs: 1234,
+        triggeredBy: "admin",
+      },
+    );
   });
 });
 
