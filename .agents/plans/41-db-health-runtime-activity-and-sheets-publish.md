@@ -17,6 +17,7 @@
 
 ## Phase 3 — Google Sheets status and publish
 - Await daily-rec and Swing producer append completion inside their worker-owned service path; log row count and `enabled|disabled|failed` outcome without failing recommendation generation.
+- [x] Move Swing Sheets export after the AI try/catch so failed AI runs still publish the screener feed with explicit terminal status; add regression coverage.
 - After combined recommendation+Swing performance, publish one KPI snapshot; standalone Swing performance publishes one snapshot. Record outcomes in task events and test both paths.
 - Make the all-AI-failed daily run explicitly log why it emits no `daily-rec` rows.
 8. Trace readHeaderState, OAuth client acquisition and exporter failure status. Return sanitized diagnostic codes/messages in status.
