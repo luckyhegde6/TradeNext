@@ -21,6 +21,7 @@ interface TabStatus {
   tab: TabName;
   headerState: HeaderState;
   detail?: string;
+  diagnostic?: string | null;
 }
 interface SheetsStatus {
   envEnabled: boolean;
@@ -98,11 +99,12 @@ interface MetricsSnapshot {
 }
 interface MetricsResponse {
   success: boolean;
+  outcome?: "enabled" | "disabled" | "failed";
+  appended?: number;
   /** false when the snapshot could not be computed (e.g. DB held). */
   ok: boolean;
   reason?: string;
   snapshot: MetricsSnapshot | null;
-  appended?: number;
   error?: string;
 }
 interface RescanResponse {
@@ -457,7 +459,7 @@ export default function AdminGoogleSheetsPage() {
       });
       const body = (await res.json()) as MetricsResponse;
       if (!res.ok || !body.success) throw new Error(body.error ?? `metrics ${res.status}`);
-      setNotice(body.appended ? "Metrics snapshot appended to the sheet queue." : "Nothing appended.");
+      setNotice(body.outcome === "enabled" ? "Metrics snapshot published to the sheet." : body.outcome === "failed" ? "Publish failed; the row is retained in the retry queue. Check the tab diagnostic and Sync now." : "Publishing is disabled; no row was appended.");
       await Promise.all([load(), loadMetrics()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -616,7 +618,7 @@ export default function AdminGoogleSheetsPage() {
 
       <section className="rounded border border-gray-200 dark:border-slate-800 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Tabs &amp; queue</h2>
+          <div><h2 className="text-lg font-semibold">Tabs &amp; queue</h2><p className="text-xs text-gray-500 dark:text-slate-400">Sync now drains only undelivered rows. Producer exports publish new rows; delivered history is not replayed.</p></div>
           <div className="flex gap-2">
             <button
               onClick={() => sync(false)}
@@ -664,6 +666,7 @@ export default function AdminGoogleSheetsPage() {
                       <td className="py-2 pr-3">
                         <span className={`rounded px-2 py-0.5 text-xs ${badge.cls}`}>{badge.label}</span>
                         {t.detail && <span className="ml-2 text-xs text-gray-500 dark:text-slate-400">{t.detail}</span>}
+                        {t.headerState === "unknown" && t.diagnostic && <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">{t.diagnostic.replaceAll("_", " ")}</span>}
                       </td>
                       {/* Retained is shown separately from queued on purpose: the
                           two differ by the drained-but-kept audit window, and
@@ -777,7 +780,7 @@ export default function AdminGoogleSheetsPage() {
               }
               className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             >
-              Append snapshot
+              Publish metrics snapshot
             </button>
           </div>
         </div>
@@ -795,8 +798,8 @@ export default function AdminGoogleSheetsPage() {
         )}
 
         <p className="mt-3 text-xs text-gray-500 dark:text-slate-400">
-          A snapshot is appended as a single row so the sheet keeps a history of how the tracker
-          performs over time. Appends are queued like any other run — Sync writes them.
+          Publishing appends one fresh KPI row directly to the metrics tab. If the append fails,
+          the exporter retains it in the retry ledger; Sync now drains only rows still awaiting delivery.
         </p>
       </section>
     </main>

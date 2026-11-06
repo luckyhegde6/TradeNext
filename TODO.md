@@ -4,6 +4,8 @@
 
 ## Quick Reference
 
+Current branch — Spec 40/41 (fix/sqlite-sync-startup-amplification): investigate SQLite sync amplification; DB Health active-instance/scheduled-task timestamp visibility; system Daily Recommendations/Recommendation Performance/Swing companion tracing; Google Sheets publish/status diagnostics. Specs: .agents/specs/40-sqlite-sync-startup-amplification.md and .agents/specs/41-db-health-runtime-activity-and-sheets-publish.md. Implementation in progress; verification pending.
+
 > Live / in-progress work is tracked in **`.agents/session-todos.md`**.
 > The completed-feature Quick Reference archive moved to
 > **`.agents/changelog/todo-quick-reference-archive.md`** (read on demand; not auto-injected).

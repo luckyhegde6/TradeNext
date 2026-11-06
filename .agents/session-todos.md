@@ -1,3 +1,26 @@
+## Current (2026-11-04 — Spec 40/41: SQLite sync amplification + DB Health runtime visibility + Sheets publish diagnostics)
+
+Branch fix/sqlite-sync-startup-amplification, created from latest main after PR #153 merge. Specs/plans 40/41 are present.
+
+- [x] Add bounded admin runtime endpoint for WorkerStatus/CronJob/WorkerTask timestamps; exclude idle/stale instances from the live list while retaining stored diagnostics.
+- [ ] Inspect the linked Google Sheet's actual tabs/headers and validate mapping when Google Drive access is available (connector is currently disabled by admin; public URL fetch failed).
+- [x] Add DB Health Active Instances, cron schedule timestamps, task timeline and trigger labels.
+- [x] Persist recommendation-performance and Swing companion progress as task events without double execution.
+- [x] Surface sanitized Google Sheets header diagnostics; fix direct publish timestamp and explicit metrics publish outcome/feedback.
+- [x] Add focused runtime, Sheets status, exporter and publish-route regression tests.
+- [x] Await daily-rec/Swing producer publishes and add performance KPI snapshots to metrics tab with task progress outcome.
+- [x] Log explicitly when all AI verdicts fail and daily-rec rows are intentionally skipped.
+- [x] Remove recurring full Prisma→SQLite pull from recovery probe; add regression test for no collection reads.
+- [x] Fix Google Sheets admin JSX parse error and update exporter test mocks to effective config gate.
+- [x] Publish Swing screener rows to Sheets even when AI analysis fails; add regression assertion.
+- [x] Record daily recommendation runOutcome/AI counts and performance updated/skipped-no-price counts in worker task timelines.
+- [ ] Run targeted Jest suites and full checks; validate a live run against the configured Google Sheet after authorized access/deployment.
+- [ ] Run targeted Jest suites and full required checks individually: npm run test, npx tsc --noEmit, npm run lint, npm run quickbuild.
+- [ ] Review branch diff/status and resolve any failures. No commit/push/PR/merge/deploy beyond documentation commits already made through the branch API; deployment remains user-controlled.
+
+Important limits: Active/stale classification uses WorkerStatus heartbeat freshness (15 min); idle worker processes may not refresh shared Prisma heartbeats continuously. First-seen is WorkerStatus.createdAt, not guaranteed process boot time. Runtime endpoint is bounded and separately polled to preserve the existing zero-Prisma DB Health GET. Sheets Sync now drains undelivered retry-ledger rows only; it does not replay delivered rows.
+
+## Previous session context
 ## Current (2026-11-03 — v3.54.0 Spec 35 scheduled historical price sync)
 
 Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COMMIT PENDING USER; merge/deploy are user-only actions (D9)**.

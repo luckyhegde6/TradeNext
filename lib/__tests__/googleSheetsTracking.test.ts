@@ -11,6 +11,12 @@ jest.mock("@/lib/services/googleSheets/auth", () => ({
 }));
 
 jest.mock("@/lib/audit", () => ({ createAuditLog: jest.fn(async () => ({ id: 1 })) }));
+jest.mock("@/lib/services/googleSheets/configService", () => ({
+  isTrackingActive: jest.fn(() => true),
+  resolveSheetId: jest.fn(() => "1mRDK40yv2_RAgRitEZZutF1UmMJEBy9ccrjxeDYDXzQ"),
+  touchLastSync: jest.fn(),
+}));
+
 
 jest.mock("@/lib/logger", () => ({
   __esModule: true,
@@ -36,6 +42,7 @@ import {
   exportScreeners,
   exportSwing,
 } from "@/lib/services/googleSheets/exporter";
+import { touchLastSync } from "@/lib/services/googleSheets/configService";
 import type { DecisionTraceEntry } from "@/lib/services/decision/monitoring";
 import type { SwingStock } from "@/lib/services/swing-types";
 
@@ -63,9 +70,14 @@ function httpError(status: number): Error & { response: { status: number } } {
   return Object.assign(new Error(`HTTP ${status}`), { response: { status } });
 }
 
+const mockConfig = jest.requireMock("@/lib/services/googleSheets/configService") as {
+  isTrackingActive: jest.Mock<boolean, []>;
+  resolveSheetId: jest.Mock<string | null, []>;
+};
+
 function arm(enabled: boolean, sheetId: string | null = SHEET_ID): void {
-  mockAuth.isTrackingEnabled.mockReturnValue(enabled);
-  mockAuth.trackerSheetId.mockReturnValue(sheetId);
+  mockConfig.isTrackingActive.mockReturnValue(enabled);
+  mockConfig.resolveSheetId.mockReturnValue(sheetId);
 }
 
 beforeEach(() => {
@@ -387,6 +399,17 @@ describe("exportRows", () => {
     await expect(exportRows("swing", [])).resolves.toBe("enabled");
     expect(mockAuth.getSheetsClient).not.toHaveBeenCalled();
     expect(valuesAppend).not.toHaveBeenCalled();
+  });
+
+  test("updates last-publish timestamp after a successful direct append", async () => {
+    await expect(exportRows("swing", [["a"]])).resolves.toBe("enabled");
+    expect(touchLastSync).toHaveBeenCalledTimes(1);
+  });
+
+  test("timestamp metadata failure does not turn a successful append into a retry", async () => {
+    (touchLastSync as jest.Mock).mockImplementationOnce(() => { throw new Error("local mirror unavailable"); });
+    await expect(exportRows("swing", [["a"]])).resolves.toBe("enabled");
+    expect(valuesAppend).toHaveBeenCalledTimes(1);
   });
 
   test("batches every row into ONE append with the USER_ENTERED option", async () => {

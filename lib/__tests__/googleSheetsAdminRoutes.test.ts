@@ -444,10 +444,24 @@ describe("GET/POST /api/admin/google-sheets/metrics", () => {
     expect(await res.json()).toMatchObject({ success: true, tab: "metrics", outcome: "enabled" });
   });
 
-  it("reports success:false when the export fails, so the console can say so", async () => {
+  it("returns an actionable failure and marks the row retained for retry", async () => {
     (exportMetricsSnapshot as jest.Mock).mockResolvedValueOnce("failed");
     const res = await metricsRoute.POST(metricsPost());
-    expect(await res.json()).toMatchObject({ success: false, outcome: "failed" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      outcome: "failed",
+      appended: 0,
+      queuedForRetry: true,
+      error: expect.stringContaining("retry ledger"),
+    });
+  });
+
+  it("reports disabled publishing as a conflict without claiming an append", async () => {
+    (exportMetricsSnapshot as jest.Mock).mockResolvedValueOnce("disabled");
+    const res = await metricsRoute.POST(metricsPost());
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ success: false, outcome: "disabled", appended: 0 });
   });
 
   it("refuses to append an empty snapshot rather than writing a blank row", async () => {

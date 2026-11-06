@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test';
  *    "queued" (screener, delegated to the producer) from "appended" (custom).
  *  - Remove-unreadable is confirmed inline with the exact count AND seqs, and
  *    the destructive DELETE is the one request a test must be careful with.
- *  - Metrics renders nullable KPIs as "—", never as 0, and the Append button
+ *  - Metrics renders nullable KPIs as "—", never as 0, and the Publish metrics snapshot button
  *    stays disabled when there is no snapshot to append.
  *
  * The admin APIs are ROUTE-MOCKED with `page.route()` rather than driven against
@@ -193,9 +193,9 @@ test('console renders the six-tab queue and the metrics contract', async ({ page
   await expect(swing.getByText('412, 413')).toBeVisible();
 
   // Metrics is opt-in: nothing is computed until Preview is pressed, and the
-  // Append button is disabled until there is a snapshot.
+  // Publish metrics snapshot button is disabled until there is a snapshot.
   await expect(page.getByText('Preview to compute the current projection.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Append snapshot' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Publish metrics snapshot' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Preview' })).toBeEnabled();
 });
 
@@ -394,7 +394,7 @@ test('a held database disables Append and says no row was queued', async ({ page
 
   await expect(page.getByText(/database is held \(plan limit\)/i)).toBeVisible();
   await expect(page.getByText('No row is queued.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Append snapshot' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Publish metrics snapshot' })).toBeDisabled();
 });
 
 /**

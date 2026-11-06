@@ -2171,3 +2171,18 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 - "AI unavailable" must not degrade silently into "market is flat": the fallback path is exactly where actionable picks come from, so the broadcast has to distinguish *no signals* from *no AI* — and the test must cover both branches.
 
 **Verified after fix**: `npx tsc --noEmit` **46 = exact baseline, 0 in touched files** · targeted Jest **8 suites / 286 pass** (`recommendationBroadcast` 26 incl. 3 new AI-down tests, `dailyRecommendationService`, `swingRecommendationService`, `recommendation-agent`, `quotaLatch`, `aiConnectionTestService`, `swing-agent`, `worker-engine`) · eslint **0 errors** on changed files (11 pre-existing warnings) · doc-budget gate PASS. No schema change / migration / package / route. External blocker: OpenRouter account credits (user action).
+
+
+### 168. Distinguish Google Sheets producer publish from queue drain
+**Issue**: Admin UI can show an empty retry queue and "Last sync: never" even when producer exports have appended directly to the sheet.
+**Cause**: Direct exporter success did not update the config last-publish timestamp; the UI described KPI append as queued even though the metrics exporter appends directly. Header diagnostics also collapsed provider errors to an opaque `unknown`.
+**Rule**: Keep append-only semantics; update last-publish metadata after successful direct append, return explicit publish outcomes, and distinguish producer publication from draining undelivered retry-ledger rows. Never replay delivered audit rows to make the UI appear synced.
+
+
+### 168. SQLite-first recurring probe must not hydrate Prisma into each mirror
+**Issue:** the 15-minute recovery probe called `syncFromPrisma()` on every healthy tick, causing repeated full collection reads and potentially overwriting local mirror state.
+**Rule:** boot hydration is the automatic Prisma→SQLite pull. Recurring recovery probes should do one lightweight liveness read and drain SQLite→Prisma outbox only; explicit admin pulls remain separate. Add a regression test asserting no collection reads occur during the recurring probe.
+
+### 169. Google Sheets exporter tests must mock the effective config gate
+**Issue:** exporter moved from the legacy auth-level enable flag to `configService.isTrackingActive()` (env + DB gate), but tests only changed the old auth mock and reported enabled unexpectedly.
+**Rule:** mock `isTrackingActive` and `resolveSheetId` in exporter tests; keep test setup aligned with the service contract actually used by the exporter.

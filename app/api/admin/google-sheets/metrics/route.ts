@@ -85,10 +85,36 @@ export async function POST(request: Request) {
   const outcome = await exportMetricsSnapshot(result.snapshot);
   logger.info({ msg: "Google Sheets metrics snapshot appended", outcome });
 
+  if (outcome === "failed") {
+    return NextResponse.json({
+      success: false,
+      tab: "metrics",
+      outcome,
+      appended: 0,
+      queuedForRetry: true,
+      error: "Google Sheets append failed. The row was retained in the retry ledger; check the status diagnostics and use Sync now after resolving the connection.",
+      snapshot: result.snapshot,
+    }, { status: 502 });
+  }
+
+  if (outcome === "disabled") {
+    return NextResponse.json({
+      success: false,
+      tab: "metrics",
+      outcome,
+      appended: 0,
+      queuedForRetry: false,
+      error: "Google Sheets publishing is disabled.",
+      snapshot: result.snapshot,
+    }, { status: 409 });
+  }
+
   return NextResponse.json({
-    success: outcome !== "failed",
+    success: true,
     tab: "metrics",
     outcome,
+    appended: 1,
+    queuedForRetry: false,
     snapshot: result.snapshot,
   });
 }

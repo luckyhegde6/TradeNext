@@ -40,10 +40,10 @@ export async function executeTask(taskId: string, taskType: string, payload?: Re
         result = await executeScreener(payload);
         break;
       case "recommendations":
-        result = await executeRecommendations(payload);
+        result = await executeRecommendations(taskId, payload);
         break;
       case "recommendation_performance":
-        result = await executeRecommendationPerformance(payload);
+        result = await executeRecommendationPerformance(payload, taskId);
         break;
       case "swing_performance":
         result = await executeSwingPerformance(payload);
@@ -679,7 +679,7 @@ async function executeScreener(payload?: Record<string, unknown>): Promise<unkno
 /**
  * Recommendations - Generate daily stock recommendations via Chartink screeners + AI analysis
  */
-async function executeRecommendations(payload?: Record<string, unknown>): Promise<unknown> {
+async function executeRecommendations(taskId: string, payload?: Record<string, unknown>): Promise<unknown> {
   logger.info({ msg: "Starting daily recommendations generation" });
 
   try {
@@ -691,7 +691,28 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
     // here is what spammed Telegram on 2026-10-14/15.
     const notifyAiUnavailable = payload?.source !== "catchup";
     const result = await runDailyRecommendations({ triggeredBy, notifyAiUnavailable });
-    logger.info({ msg: "Daily recommendations completed", stockCount: result.totalStocks, runId: result.runId, triggeredBy });
+    const runOutcome =
+      result.aiProcessed > 0 ? "completed" :
+      result.aiFailed > 0 ? "ai_unavailable" : "empty";
+    await logTaskEvent(taskId, "task_progress", "Daily recommendations pipeline finished", {
+      runId: result.runId,
+      runOutcome,
+      totalStocks: result.totalStocks,
+      aiProcessed: result.aiProcessed,
+      aiFailed: result.aiFailed,
+      successfulScreeners: result.successfulScreeners,
+      executionTimeMs: result.executionTimeMs,
+      triggeredBy,
+    });
+    logger.info({
+      msg: "Daily recommendations completed",
+      stockCount: result.totalStocks,
+      runId: result.runId,
+      triggeredBy,
+      runOutcome,
+      aiProcessed: result.aiProcessed,
+      aiFailed: result.aiFailed,
+    });
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -703,19 +724,79 @@ async function executeRecommendations(payload?: Record<string, unknown>): Promis
 /**
  * Recommendation Performance - Track active recommendations against targets/stop-losses
  */
-async function executeRecommendationPerformance(payload?: Record<string, unknown>): Promise<unknown> {
+/**
+ * Publish one KPI snapshot after a performance run. This is intentionally
+ * best-effort: tracking results remain authoritative if Sheets is unavailable.
+ */
+async function publishPerformanceMetricsSnapshot(taskId?: string, source = "performance_run"): Promise<void> {
+  try {
+    const [{ getMetrics }, { exportMetricsSnapshot }] = await Promise.all([
+      import("@/lib/services/googleSheets/metricsService"),
+      import("@/lib/services/googleSheets/exporter"),
+    ]);
+    const metrics = await getMetrics();
+    if (!metrics.ok) {
+      logger.warn({ msg: "Google Sheets performance snapshot skipped", source, reason: metrics.reason });
+      if (taskId) await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot skipped", { reason: metrics.reason });
+      return;
+    }
+    const outcome = await exportMetricsSnapshot(metrics.snapshot);
+    logger.info({ msg: "Google Sheets performance KPI snapshot finished", source, outcome });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot publish finished", {
+        outcome,
+        snapshotAt: metrics.snapshot.snapshotAt,
+        totalTracked: metrics.snapshot.totalTracked,
+      });
+    }
+  } catch (error) {
+    logger.warn({
+      msg: "Google Sheets performance KPI snapshot failed (non-fatal)",
+      source,
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Google Sheets KPI snapshot failed (non-fatal)", {
+        errorType: error instanceof Error ? error.name : "unknown",
+      }).catch(() => undefined);
+    }
+  }
+}
+
+async function executeRecommendationPerformance(payload?: Record<string, unknown>, taskId?: string): Promise<unknown> {
   logger.info({ msg: "Starting recommendation performance tracking" });
 
   try {
     const { checkRecommendationPerformance } = await import("@/lib/services/dailyRecommendationService");
     const result = await checkRecommendationPerformance();
     logger.info({ msg: "Performance tracking completed", checked: result.checked, success: true });
+    if (taskId) {
+      await logTaskEvent(taskId, "task_progress", "Recommendation performance check completed", {
+        checked: result.checked,
+        updated: result.updated ?? 0,
+        skippedNoPrice: result.skippedNoPrice ?? 0,
+        targetAchieved: result.targetAchieved,
+        stopLossHit: result.stopLossHit,
+        success: true,
+      });
+    }
     // v3.14.0: swing signal performance rides the same 15:30 IST check but is
     // NON-FATAL — a swing check failure must never fail (or retry) the daily
     // recommendations performance task.
     try {
       const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion started");
+      }
       const swing = await checkSwingPerformance();
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion completed", {
+          checked: swing.checked,
+          targetAchieved: swing.targetAchieved,
+          stopLossHit: swing.stopLossHit,
+          expired: swing.expired,
+        });
+      }
       logger.info({
         msg: "Swing performance tracking completed",
         checked: swing.checked,
@@ -725,8 +806,15 @@ async function executeRecommendationPerformance(payload?: Record<string, unknown
       });
     } catch (swingError) {
       const swingErrMsg = swingError instanceof Error ? swingError.message : String(swingError);
+      if (taskId) {
+        await logTaskEvent(taskId, "task_progress", "Swing performance companion failed (non-fatal)", {
+          errorType: swingError instanceof Error ? swingError.name : "unknown",
+        });
+      }
       logger.error({ msg: "Swing performance tracking failed (non-fatal)", error: swingErrMsg });
     }
+    // One snapshot per combined recommendation + Swing performance cycle.
+    await publishPerformanceMetricsSnapshot(taskId, "recommendation_performance");
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -747,6 +835,7 @@ export async function executeSwingPerformance(payload?: Record<string, unknown>)
   try {
     const { checkSwingPerformance } = await import("@/lib/services/swingPerformanceService");
     const result = await checkSwingPerformance();
+    await publishPerformanceMetricsSnapshot(undefined, "swing_performance");
     logger.info({
       msg: "Swing performance tracking completed",
       checked: result.checked,

@@ -249,7 +249,11 @@ jest.mock("@/lib/prisma", () => ({
     serverLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     auditLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     aPIRequestLog: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
-    cronJob: { findMany: jest.fn().mockResolvedValue([]) },
+    cronJob: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue({ id: "cron-probe" }),
+    },
+    recommendationTracker: { findMany: jest.fn().mockResolvedValue([]) },
     workerTask: { findMany: jest.fn().mockResolvedValue([]) },
     // Plan 09 Phase 4: SQLite→Prisma push sink targets
     symbol: {
@@ -316,6 +320,7 @@ import {
   getSqliteFallback,
   syncFromPrisma,
   pushSqliteToPrisma,
+  runRecoveryProbeOnce,
   hasSyncHistoryTable,
   getOutboxPending,
   getSqliteDerivedCounts,
@@ -2214,6 +2219,21 @@ describe("SQLite backup fallback", () => {
       expect(row!.rowsSynced).toBe(0);
 
       mockLeader.isLeader.mockResolvedValue(true);
+    });
+
+    it("15-minute recovery probe pushes the outbox without a full Prisma→SQLite pull", async () => {
+      await resetAndInit();
+      jest.clearAllMocks();
+      mockLeader.isLeader.mockResolvedValue(true);
+
+      await runRecoveryProbeOnce();
+
+      // One lightweight liveness read is expected; recurring full hydration
+      // would issue these collection reads and recreate the query spike.
+      expect(mockPrisma.cronJob.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.dailyRecommendationRun.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.dailyRecommendationStock.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.recommendationTracker.findMany).not.toHaveBeenCalled();
     });
 
     it("pushSqliteToPrisma default opts (no opts) uses trigger 'probe' and leaderGate true", async () => {
