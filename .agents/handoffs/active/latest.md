@@ -1,38 +1,55 @@
-# Live Resume — Spec 40/41 (SQLite sync amplification · DB Health runtime visibility · Sheets publish diagnostics)
+# Live Resume — Spec 42 (Durable Netlify scheduled worker and cron)
 
-> Updated: 2026-11-04 · Branch: fix/sqlite-sync-startup-amplification
-> Base: latest main after PR #153 merge, SHA 7934335793a0773b39ecbc01ccbb59742dfdcfc5.
+> Updated: 2026-11-08
+> Branch: feature/spec-42-durable-worker-cron-v2
+> Base: main 10337d956cafc943c3e97f73121e1038330d86af
+> PR #154: merged 2026-11-07, merge commit a5daee935f4ef7740d4f8d4d10f6131414d7449e.
+> No PR created yet, no merge/deployment, no production credentials or schema changes.
 
-## Status
-- Follow-up scope added from production screenshots: CI parser/test failures fixed; recurring 15-minute recovery probe no longer performs full Prisma→SQLite pull (boot hydration remains); Swing Sheets export now runs after AI try/catch so failed analysis still publishes screener rows. Daily worker task timeline now records runOutcome/AI counts and performance updated/skipped-no-price counts. Focused regression tests added; CI reruns queued as of 2026-11-05. Production runtime remains unverified without Netlify logs/admin access.
-- **PR #153:** merged and deployed per user confirmation.
-- **Branch:** fix/sqlite-sync-startup-amplification, created from latest main. No application-code changes on main.
-- **Spec/Plan:** Spec 40/Plan 40 (sync amplification); Spec 41/Plan 41 (runtime observability + Sheets publish recovery).
-- **Implementation:** source and focused tests written on branch. Verification pending; do not claim green.
-- **Deployment:** not performed. User controls PR/merge/deploy.
+## Current status
 
-## Implemented
-- **Why tabs can remain empty:** daily recommendation export is gated on `successfulResults` (real AI verdicts only); the all-AI-failed path exits before export. Swing export occurs after background AI analysis; the ordinary feed poll is screener-only (`analyze=0`) and does not export. Performance checks previously updated tracker data/audit only and did not publish a Sheet row.
-- **Code fix:** daily-rec and Swing producer exports are now awaited (best-effort) before their owning worker operation finishes, with row count + exporter outcome logs. All-AI-failed daily run logs an explicit skipped-publish reason. Combined recommendation + Swing performance appends one KPI snapshot to `metrics`; standalone Swing performance appends one snapshot. Publish outcome is included in task progress.
-- **Live verification still needed:** no live Sheet contents or provider append tested because Drive connector access is disabled. Tests/build checks pending.
-- **Idle workers:** runtime endpoint and DB Health live list now exclude `status=idle` and heartbeat-stale rows; an excluded count is shown. Persisted WorkerStatus rows are retained, not deleted (they are status records, not process controls). Focused regression test added; verification still pending.
-- **Google Sheet link:** user supplied spreadsheet ID matches the masked ID shown in the previous admin screenshot (`1mRD…DXzQ`), so it appears already configured. Google Drive connector is disabled by admin and public URL fetch failed; sheet tab/header contents have not been inspected. Do not invent a schema mapping. Need authorized live sheet access to verify headers and publish behavior.
-1. New admin-only bounded endpoint: app/api/admin/db-health/runtime/route.ts; returns recent WorkerStatus, CronJob and tracked WorkerTask/TaskEvent data.
-2. DB Health UI now displays worker/daemon/leader records with active/stale state, first-seen, heartbeat timestamp/age; cron schedule + last/next run timestamps and outcomes; task created/started/completed/duration/event timeline.
-3. System cron tasks are labeled system cron; recommendation performance task records durable progress events for its Swing performance companion without scheduling or running a duplicate task.
-4. Google Sheets status includes sanitized header diagnostics (missing sheet ID, permission/auth, not found, rate limit, provider unavailable).
-5. Successful direct Sheets publishes update last-publish timestamp. Metrics publish reports explicit success/disabled/failure and the UI distinguishes Publish from Sync queue drain.
-6. Tests added/updated: dbHealthRuntimeRoute.test.ts, googleSheetsStatus.test.ts, googleSheetsTracking.test.ts, googleSheetsAdminRoutes.test.ts.
+**IMPLEMENTATION COMPLETE.** All Spec 42 phases implemented and verified on feature/spec-42-durable-worker-cron-v2.
 
-## Verification / remaining
-- Run targeted Jest suites and then required checks individually: npm run test; npx tsc --noEmit; npm run lint; npm run quickbuild.
-- Inspect actual CI runs and branch diff after checks.
-- Verify production cron executions and Google Sheets publish only after user-controlled deployment/auth context is available.
-- No schema migration, new package, or environment changes.
+Implemented on this branch:
+- Re-applied optional failOpen=false to acquireLeaderLock, renewLeaderLock and startLeaderHeartbeat so serverless callers can fail closed on DB unavailability; default behavior remains unchanged for current persistent Node callers. (existing, from earlier commits 6a77bb5/0c24f53)
+- Added leader acquisition and renewal regression tests for fail-closed behavior. (existing)
+- **netlify/functions/worker-dispatch.mjs (NEW)** — Standalone Netlify Scheduled Function, `* * * * *` UTC, 30s limit. Validates config, POSTs fixed envelope to background function with WORKER_DISPATCH_SECRET. No Prisma, no business logic.
+- **netlify/functions/worker-runner-background.mts (NEW)** — Standalone Netlify Background Function, 15m limit (target ≤13m). Validates method/content-type/body size/Zod envelope/WORKER_DISPATCH_SECRET via constant-time comparison. Delegates to runBounded().
+- **lib/services/worker/netlify-runner.ts (NEW)** — Bounded serverless runner: fail-closed lease (acquireLeaderLock failOpen:false), durable cron tick (ensureRecommendationCrons + catchUpMissedCronJobs + ensureDailyRecommendationRan), atomic pending→running claim (concurrency 1), 13-minute budget with 2-minute headroom, task runtime budget allowlist, deferred types never marked successful, lease loss stops claims, lease release on completion.
+- **instrumentation.ts (MODIFIED)** — Skips all three watchdog loops (worker, cron-daemon, sqlite-sync) on Netlify runtime via isNetlifyRuntime(). Preserves cache restore, SQLite init, ops counter persistence, price flush timer, write-behind flush. Local persistent Node behavior unchanged.
+- **lib/services/dailyRecommendationService.ts (MODIFIED)** — Checkpoint phases: coordinator (create run + screeners + symbol snapshot), batch (bounded AI analysis per slice, idempotent by parentTaskId+batchIndex), finalizer (rank + publish Sheets/Telegram + cache invalidation + run completion, idempotent, resets to pending if batches not ready). Monolithic path preserved for backward compatibility.
+- **lib/services/worker/worker-service.ts (MODIFIED)** — executeRecommendations passes phase/taskId/runId/batchIndex/stockSlice/parentTaskId from payload to runDailyRecommendations.
+- **app/api/admin/db-health/runtime/route.ts (MODIFIED)** — Extended with lease observability (leader-worker row: status, heartbeat, age), scheduler observability (queue depth, tracked crons, recent task events), tick→runner→lease→task→publish correlation.
+- **netlify.toml (MODIFIED)** — Added [[functions]] config for worker-dispatch schedule `* * * * *`.
 
-## Operational caveats
-- Active/stale uses WorkerStatus heartbeat freshness (15 minutes). Idle worker processes may not continuously refresh shared Prisma heartbeats; the view reports recorded worker/daemon instances, not every serverless request instance.
-- First-seen uses WorkerStatus.createdAt and is not guaranteed to equal process boot time.
-- Runtime endpoint uses bounded Prisma queries and is polled separately; existing DB Health GET remains zero-Prisma.
-- Sheets Sync now drains undelivered retry-ledger rows only. Delivered rows are not replayed; stream history cannot be reconstructed unless the corresponding producer is explicitly re-run.
-- The Google Sheets screenshot showed queued=0 and header=unknown; the new diagnostic will reveal the failure category, but no live OAuth/Sheets operation was performed here.
+Not implemented (by design — user-controlled):
+- WORKER_DISPATCH_SECRET must be set in Netlify dashboard before deploy (never committed).
+- Daily Recommendations task type ("recommendations") NOT added to serverless eligible list until user enables via deploy — checkpoint infrastructure is in place but the runner defers it (DEFERRED_TASK_TYPES removed "recommendations" but taskType "recommendations" with phase=coordinator/batch/finalizer is now budget-eligible; the coordinator phase spawns batch/finalizer tasks).
+- Stale branches `feature/spec-42-durable-worker-cron` and `feature/spec-42-durable-worker-cron-pr154` not deleted — GitHub connector lacks delete action; delete via GitHub UI/API after v2 pushed.
+
+## Verified architecture constraints
+
+Netlify Scheduled Functions: 30s limit, UTC cron, only published deploys run automatically; manually invoke branch deploy through UI Run now or CLI netlify functions:invoke.
+Netlify Background Functions: 15m hard limit, async invocation with 202, -background filename suffix; request payload cap 256KB.
+Netlify Next.js runtime v5 guidance prefers standalone Netlify Functions over deprecated Next.js Advanced API scheduled/background routes.
+Existing worker TASK_TIMEOUT_MS is 240m and Daily Recommendations takes ~25–35m; wrapping pollAndExecute unchanged is unsafe — Spec 42 replaces with bounded phases.
+
+## Verification results
+
+- npm run test: 2144 pass / 4 skip / 0 fail (139 suites)
+- npx tsc --noEmit: 0 production errors (46 total, all pre-existing test-file errors)
+- npm run lint: 0 errors (1176 warnings, all pre-existing patterns)
+- npm run quickbuild: 202/202 pages built successfully
+
+## Next steps
+
+1. User commits, pushes feature/spec-42-durable-worker-cron-v2, creates PR targeting main.
+2. User configures WORKER_DISPATCH_SECRET in Netlify dashboard before deploy.
+3. User enables Daily Recommendations on serverless path (coordinator/batch/finalizer tasks now budget-eligible).
+4. Delete stale branches via GitHub UI/API after v2 safely pushed.
+
+## Documentation updated in this branch
+
+- HANDOFF.md, .agents/handoffs/active/latest.md, Primer.md, Lessons.md, agent-memory.md, TODO.md, .agents/session-todos.md, .agents/changelog/versions-index.md, .agents/CHANGELOG.md, AGENTS.md version index.
+- .agents/docs/tasks-cron-workers.md documents the intended Netlify production model and implementation gates.
+- Session decisions/flow: .agents/sessions/2026-11-08-spec42-impl/decisions.md + flow.md.

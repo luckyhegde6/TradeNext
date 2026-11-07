@@ -12,17 +12,19 @@ jest.mock("@/lib/logger", () => ({
 jest.mock("@/lib/prisma", () => ({
   __esModule: true,
   default: {
-    workerStatus: { findMany: jest.fn() },
+    workerStatus: { findMany: jest.fn(), findUnique: jest.fn() },
     cronJob: { findMany: jest.fn() },
-    workerTask: { findMany: jest.fn() },
+    workerTask: { findMany: jest.fn(), count: jest.fn() },
+    taskEvent: { findMany: jest.fn() },
   },
 }));
 
 const mockAuth = auth as jest.Mock;
 const mockPrisma = prisma as unknown as {
-  workerStatus: { findMany: jest.Mock };
+  workerStatus: { findMany: jest.Mock; findUnique: jest.Mock };
   cronJob: { findMany: jest.Mock };
-  workerTask: { findMany: jest.Mock };
+  workerTask: { findMany: jest.Mock; count: jest.Mock };
+  taskEvent: { findMany: jest.Mock };
 };
 
 beforeEach(() => {
@@ -74,6 +76,17 @@ beforeEach(() => {
       error: null, events: [{ eventType: "task_completed", message: "done", createdAt: new Date() }],
     },
   ]);
+  mockPrisma.workerStatus.findUnique.mockResolvedValue({
+    workerId: "leader-worker",
+    workerName: "node-a",
+    status: "busy",
+    currentTaskId: "task-a",
+    lastHeartbeat: new Date(),
+    createdAt: new Date("2026-11-04T00:00:00.000Z"),
+    updatedAt: new Date(),
+  });
+  mockPrisma.workerTask.count.mockResolvedValue(0);
+  mockPrisma.taskEvent.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/admin/db-health/runtime", () => {

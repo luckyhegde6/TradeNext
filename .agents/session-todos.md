@@ -1,58 +1,28 @@
-## Current (2026-11-04 — Spec 40/41: SQLite sync amplification + DB Health runtime visibility + Sheets publish diagnostics)
+## Current (2026-11-08 — Spec 42: Durable Netlify worker / cron, post-PR #154 baseline — IMPLEMENTATION COMPLETE)
 
-Branch fix/sqlite-sync-startup-amplification, created from latest main after PR #153 merge. Specs/plans 40/41 are present.
+Branch: feature/spec-42-durable-worker-cron-v2
+Base: main 10337d956cafc943c3e97f73121e1038330d86af
+Merged dependency: PR #154, merge commit a5daee935f4ef7740d4f8d4d10f6131414d7449e.
 
-- [x] Add bounded admin runtime endpoint for WorkerStatus/CronJob/WorkerTask timestamps; exclude idle/stale instances from the live list while retaining stored diagnostics.
-- [ ] Inspect the linked Google Sheet's actual tabs/headers and validate mapping when Google Drive access is available (connector is currently disabled by admin; public URL fetch failed).
-- [x] Add DB Health Active Instances, cron schedule timestamps, task timeline and trigger labels.
-- [x] Persist recommendation-performance and Swing companion progress as task events without double execution.
-- [x] Surface sanitized Google Sheets header diagnostics; fix direct publish timestamp and explicit metrics publish outcome/feedback.
-- [x] Add focused runtime, Sheets status, exporter and publish-route regression tests.
-- [x] Await daily-rec/Swing producer publishes and add performance KPI snapshots to metrics tab with task progress outcome.
-- [x] Log explicitly when all AI verdicts fail and daily-rec rows are intentionally skipped.
-- [x] Remove recurring full Prisma→SQLite pull from recovery probe; add regression test for no collection reads.
-- [x] Fix Google Sheets admin JSX parse error and update exporter test mocks to effective config gate.
-- [x] Publish Swing screener rows to Sheets even when AI analysis fails; add regression assertion.
-- [x] Record daily recommendation runOutcome/AI counts and performance updated/skipped-no-price counts in worker task timelines.
-- [ ] Run targeted Jest suites and full checks; validate a live run against the configured Google Sheet after authorized access/deployment.
-- [ ] Run targeted Jest suites and full required checks individually: npm run test, npx tsc --noEmit, npm run lint, npm run quickbuild.
-- [ ] Review branch diff/status and resolve any failures. No commit/push/PR/merge/deploy beyond documentation commits already made through the branch API; deployment remains user-controlled.
+- [x] Verify PR #154 is merged and latest main head at branch creation.
+- [x] Create clean feature/spec-42-durable-worker-cron-v2 directly from latest main.
+- [x] Re-read current main HANDOFF, active handoff, Primer, Lessons, session TODOs, RULES, worker docs, Spec/Plan 40/41 and relevant source/tests.
+- [x] Add revised .agents/specs/42-durable-netlify-worker-cron.md and .agents/plans/42-durable-netlify-worker-cron.md.
+- [x] Document production symptoms/findings: ephemeral serverless lifecycle vs in-process timers, DB fail-open leader election, 240m task timeout vs 15m Background Function cap, 25–35m Daily Recommendations, stale task/heartbeat assumptions, SQLite boot hydration/outbox invariant from PR #154, Sheets publish and external auth issues.
+- [x] Verify current Netlify docs: scheduled 30s, Background 15m, scheduled functions only run on published deploys, use standalone Netlify Functions rather than deprecated Next.js Advanced API routes; branch verification is manual/CLI.
+- [x] Identify schema constraints: WorkerStatus has no fencing token or lease expiry; WorkerTask has no unique idempotency/checkpoint identity; CronJob.name is not unique. Record schema/migration approval gate.
+- [x] Obtain explicit approval for no-schema-change approach (user approved): worker lease fencing/expiry/owner token NOT added — reuse `worker_status` row with lease staleness for fencing; durable task checkpoint/batch uniqueness/idempotency encoded in `WorkerTask.parentTaskId` + `triggeredBy` + `payload`; scheduler dispatch idempotency via `CronJob.nextRun` + existing dedup + lease.
+- [x] Implement standalone Netlify Scheduled Function + -background handler using WORKER_DISPATCH_SECRET; strict envelope validation, constant-time auth and safe URL/dispatch.
+- [x] Implement serverless runner only after lease/fencing design; bounded cron dispatch and worker claim/execute with per-task budget allowlist.
+- [x] Implement Daily Recommendations coordinator/batches/finalizer before enabling recommendations on serverless path.
+- [x] Audit each other worker task runtime and side-effects; defer any task that cannot fit 13m (swing_performance, csv_processing, data_sync, historical_sync, news_fetch, screener_sync deferred).
+- [x] Modify instrumentation so Netlify does not start the in-process cron/worker timers; preserve local persistent Node and unrelated initialization.
+- [x] Extend PR #154 DB Health runtime endpoint/page with scheduled tick→runner→lease→task→publish timeline.
+- [x] Add targeted tests and run required checks individually: npm run test; npx tsc --noEmit; npm run lint; npm run quickbuild. Results: test **2144 pass / 4 skip / 0 fail**, tsc **0 production errors**, lint **0 errors**, quickbuild **202/202 pages**.
+- [x] Update docs, changelog/version history, TODO, handoff and run final diff/status and secret scan.
+- [ ] Commit/push and create PR only after implementation + checks pass. (user-controlled)
+- [ ] Delete old refs feature/spec-42-durable-worker-cron and feature/spec-42-durable-worker-cron-pr154 after v2 is safely pushed. GitHub connector currently lacks branch-delete action; cleanup must use GitHub UI/API, not force-update.
 
-Important limits: Active/stale classification uses WorkerStatus heartbeat freshness (15 min); idle worker processes may not refresh shared Prisma heartbeats continuously. First-seen is WorkerStatus.createdAt, not guaranteed process boot time. Runtime endpoint is bounded and separately polled to preserve the existing zero-Prisma DB Health GET. Sheets Sync now drains undelivered retry-ledger rows only; it does not replay delivered rows.
+All checks passed: npm run test **2144 pass / 4 skip / 0 fail**, npx tsc --noEmit **0 production errors**, npm run lint **0 errors**, npm run quickbuild **202/202 pages**. No schema change; no env change; no production secret configured (WORKER_DISPATCH_SECRET must be set in Netlify dashboard before deploy); no deploy or merge yet.
 
-## Previous session context
-## Current (2026-11-03 — v3.54.0 Spec 35 scheduled historical price sync)
-
-Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COMMIT PENDING USER; merge/deploy are user-only actions (D9)**.
-
-- [x] **Spec + Plan 35** authored and approved (`.agents/specs/35-scheduled-historical-price-sync.md`, `.agents/plans/35-scheduled-historical-price-sync.md` — all boxes checked, deviations noted)
-- [x] **5th system cron** — `Historical Price Sync (System)` `45 10 * * 1-5` (16:15 IST Mon–Fri) in `ensureRecommendationCrons()`, `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry, per-def `defConfig` with `dryRun:false` on create + drift self-heal
-- [x] **Scope + defaults** — `resolveSyncScope` = NIFTY 50 ∪ `getSwingSignalSymbols()` (mirror, zero Prisma), `DEFAULT_MAX_SYMBOLS 50→200`, `DEFAULT_DAYS 180→60`
-- [x] **New mirror read** — `sqlite.getSwingSignalSymbols(limit)` (interface + impl, never throws, clamp 1…2000)
-- [x] **Swing indicator fallback** — `fetchRecentCloses` Prisma → per-symbol SQLite gap fill; **`NSE:<SYMBOL>` key bug caught pre-commit** (Lesson 167) + regression test
-- [x] **Tests** — 4 suites touched / **117 targeted pass**
-- [x] **Gates** — `check-tsc-baseline` 46 exact (prod 0, delta +0) · full Jest **138/138 · 2110 pass / 4 skip / 0 fail** · ESLint 0 errors
-- [x] **Docs** — `versions-v3.54.md` + CHANGELOG index + versions-index + Primer + agent-memory + Lesson 167 + HANDOFF + latest.md (AGENTS.md row DEFERRED, Lesson 142)
-- [ ] **Commit + push + PR** — pending explicit user request
-- [ ] **Live verify** — deferred (no local Postgres/Timescale this session); prod: one manual wide-scope `historical_price_sync` run, then the 16:15 IST cron
-
-## Previous (2026-11-02 — Spec 36: AI-down actionable picks + duplicate daily-notice fix)
-
-- [x] Spec 36 specification and plan authored/approved.
-- [x] AI failure handling: HTTP 402/credit exhaustion recognized and quota latch + connection-test status wired.
-- [x] Duplicate daily-notice suppression per UTC day; worker catch-up dedup verified.
-- [x] AI-down broadcast uses screener/fallback-backed BUY/SELL picks when actionable; genuine all-HOLD preserved.
-- [x] Swing and stock fallback paths verified to return technical target/stop levels with success:true.
-- [x] Gates recorded: tsc 46 exact; targeted Jest 8 suites / 286 tests; lint 0 errors; doc-size gate pass.
-- [ ] External blocker: OpenRouter credits/AI availability; deployment remains user-controlled.
-- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md and .agents/plans/36-ai-down-actionable-picks-dedup.md.
-
-## Previous (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
-
-- [x] **Create `lib/services/ai/fallbackAnalysis.ts`** — pure technical-analysis fallback target/SL calculation using momentum20, volatility20, distanceFrom20dHigh, changePercent; direction-aware via `evaluateRecommendationLevels`
-- [x] **Modify `lib/services/ai/swing-agent.ts`** — replace `getDefaultSwingAnalysis` (OBSERVE, success:false) with `calculateFallbackSwingAnalysis` (directional, success:true) so targets show and analysisStatus becomes "done"
-- [x] **Modify `lib/services/ai/recommendation-agent.ts`** — replace `getDefaultRecommendation` (HOLD, success:false) with `calculateFallbackRecommendation` (directional, success:true) so daily picks persist with targets
-- [x] **Modify `lib/services/dailyRecommendationService.ts`** — remove the all-fail early-return that discards the run; fallback results now succeed so the run completes normally
-- [x] **Add/update tests** for fallback analysis + agent integration — 113 tests pass
-- [x] **Verify**: tsc (prod 0), Jest (fallback + swing + daily suites), eslint
-- [x] **Document**: agent-memory.md, Primer.md, session-todos.md
+Verified old branches: unsuffixed feature/spec-42-durable-worker-cron was a preliminary branch from PR #154 merge commit; suffixed -pr154 branch was based on the pre-merge PR #154 head and contains prior draft. Both are superseded by v2. No stale ref has been deleted.

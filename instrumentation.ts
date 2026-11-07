@@ -17,6 +17,15 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
+  // Spec 42 §5.7/§7: On Netlify, skip the in-process worker + cron daemon
+  // loops — execution is owned by the standalone Scheduled/Background
+  // Functions (netlify/functions/worker-dispatch / worker-runner-background).
+  // Preserve unrelated startup work (cache, SQLite, price flush, ops
+  // counters, write-behind). Use isNetlifyRuntime() from lib/netlify.ts —
+  // no new detection heuristic.
+  const { isNetlifyRuntime } = await import("@/lib/netlify");
+  const onNetlify = isNetlifyRuntime();
+
   try {
     const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, getSqliteFallback, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { setDegradedMode, isDegradedModeActive }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
@@ -28,59 +37,61 @@ export async function register() {
       import("@/lib/logger"),
     ]);
 
-    // LEADER WATCHDOGS (v3.33.0, spec 11): replaces the one-shot boot election
-    // below. Before, each role elected a leader exactly ONCE at boot and NO ONE
-    // ever re-claimed the lock — a crashed/recycled leader left the scheduler /
-    // worker engine dead until a manual admin "Start Engine" click. Each
-    // `watchLeaderRole` block is now a self-healing loop:
-    //   standby → adaptive probe → claim stale/absent lock → onAcquired
-    //   leader  → existing heartbeat (leader.ts) → row lost → onLost → standby
-    // DB-unavailable degrade (fail-open local leader) is preserved by leader.ts.
+    // LEADER WATCHDOGS (v3.33.0, spec 11): On Netlify, skip all three
+    // watchdog loops — the standalone Scheduled/Background Functions own
+    // execution via the shared DB lease (failOpen:false). On persistent Node,
+    // the self-healing watchdog loops start as before.
     const leader = await import("@/lib/services/leader");
 
-    leader.watchLeaderRole("worker", {
-      onAcquired: () => {
-        // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
-        // startWorker is idempotent (guards on its interval handle) so a
-        // re-acquire after onLost restarts it without double-polling.
-        startWorker(30_000);
-      },
-      onLost: () => {
-        // v3.28.2: actually stop the poll loop when leadership is lost. Without
-        // this, a fail-open DB blip lets EVERY instance start a worker; when the
-        // DB recovers only one keeps the leader row but the losers kept polling
-        // forever → multiple active workers/tasks.
-        logger.warn({ msg: "Lost worker leadership — stopping poll loop", self: leader.LEADER_SELF });
-        stopWorkerEngine();
-      },
-    });
+    if (!onNetlify) {
+      leader.watchLeaderRole("worker", {
+        onAcquired: () => {
+          // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
+          // startWorker is idempotent (guards on its interval handle) so a
+          // re-acquire after onLost restarts it without double-polling.
+          startWorker(30_000);
+        },
+        onLost: () => {
+          // v3.28.2: actually stop the poll loop when leadership is lost. Without
+          // this, a fail-open DB blip lets EVERY instance start a worker; when the
+          // DB recovers only one keeps the leader row but the losers kept polling
+          // forever → multiple active workers/tasks.
+          logger.warn({ msg: "Lost worker leadership — stopping poll loop", self: leader.LEADER_SELF });
+          stopWorkerEngine();
+        },
+      });
 
-    leader.watchLeaderRole("cron-daemon", {
-      onAcquired: () => {
-        startCronDaemon().then(() =>
-          logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
-        );
-      },
-      onLost: () => {
-        logger.warn({ msg: "Lost cron leadership — stopping daemon", self: leader.LEADER_SELF });
-        stopCronDaemon();
-      },
-    });
+      leader.watchLeaderRole("cron-daemon", {
+        onAcquired: () => {
+          startCronDaemon().then(() =>
+            logger.info({ msg: "Cron daemon started (leader)", self: leader.LEADER_SELF }),
+          );
+        },
+        onLost: () => {
+          logger.warn({ msg: "Lost cron leadership — stopping daemon", self: leader.LEADER_SELF });
+          stopCronDaemon();
+        },
+      });
+
+      // sqlite-sync is LOG-ONLY (no engine to stop): the Prisma→SQLite sync
+      // inside initSqliteBackup is gated per-run by isLeader, so a lost row just
+      // means this instance stops doing the heavy sync until it re-claims.
+      leader.watchLeaderRole("sqlite-sync", {
+        onAcquired: () => {},
+        onLost: () => {
+          logger.warn({ msg: "Lost sqlite-sync leadership — sync will be skipped", self: leader.LEADER_SELF });
+        },
+      });
+
+      logger.info({ msg: "Leader watchdogs started (persistent Node mode)", self: leader.LEADER_SELF });
+    } else {
+      logger.info({ msg: "Leader watchdogs skipped (Netlify runtime — standalone functions own execution)", self: leader.LEADER_SELF });
+    }
 
     // Pre-load intelligence cache from DB so there's no cold-start penalty
     await restoreIntelligenceCacheFromDB().catch((err: unknown) =>
       logger.warn({ msg: "Intelligence cache restore failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
     );
-
-    // sqlite-sync is LOG-ONLY (no engine to stop): the Prisma→SQLite sync
-    // inside initSqliteBackup is gated per-run by isLeader, so a lost row just
-    // means this instance stops doing the heavy sync until it re-claims.
-    leader.watchLeaderRole("sqlite-sync", {
-      onAcquired: () => {},
-      onLost: () => {
-        logger.warn({ msg: "Lost sqlite-sync leadership — sync will be skipped", self: leader.LEADER_SELF });
-      },
-    });
 
     // Initialize SQLite backup (background sync, non-blocking). NOTE: the
     // Prisma->SQLite sync inside is leader-gated (sqlite-sync) — SQLite itself

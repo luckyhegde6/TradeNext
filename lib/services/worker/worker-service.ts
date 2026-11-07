@@ -680,7 +680,7 @@ async function executeScreener(payload?: Record<string, unknown>): Promise<unkno
  * Recommendations - Generate daily stock recommendations via Chartink screeners + AI analysis
  */
 async function executeRecommendations(taskId: string, payload?: Record<string, unknown>): Promise<unknown> {
-  logger.info({ msg: "Starting daily recommendations generation" });
+  logger.info({ msg: "Starting daily recommendations generation", taskId, payloadPhase: payload?.phase });
 
   try {
     const { runDailyRecommendations } = await import("@/lib/services/dailyRecommendationService");
@@ -690,13 +690,27 @@ async function executeRecommendations(taskId: string, payload?: Record<string, u
     // scheduled run already sent the "AI unavailable" heartbeat, so re-notifying
     // here is what spammed Telegram on 2026-10-14/15.
     const notifyAiUnavailable = payload?.source !== "catchup";
-    const result = await runDailyRecommendations({ triggeredBy, notifyAiUnavailable });
+    // Checkpoint phase (Spec 42): when payload.phase is set, run only that
+    // bounded phase; otherwise the full monolithic pipeline runs (backward
+    // compatible for local/persistent-Node and admin manual runs).
+    const phase = payload?.phase as "coordinator" | "batch" | "finalizer" | undefined;
+    const result = await runDailyRecommendations({
+      triggeredBy,
+      notifyAiUnavailable,
+      phase,
+      taskId,
+      runId: payload?.runId as string | undefined,
+      batchIndex: payload?.batchIndex as number | undefined,
+      stockSlice: Array.isArray(payload?.stockSlice) ? payload.stockSlice : undefined,
+      parentTaskId: payload?.parentTaskId as string | undefined,
+    });
     const runOutcome =
       result.aiProcessed > 0 ? "completed" :
       result.aiFailed > 0 ? "ai_unavailable" : "empty";
     await logTaskEvent(taskId, "task_progress", "Daily recommendations pipeline finished", {
       runId: result.runId,
       runOutcome,
+      phase,
       totalStocks: result.totalStocks,
       aiProcessed: result.aiProcessed,
       aiFailed: result.aiFailed,
@@ -709,6 +723,7 @@ async function executeRecommendations(taskId: string, payload?: Record<string, u
       stockCount: result.totalStocks,
       runId: result.runId,
       triggeredBy,
+      phase,
       runOutcome,
       aiProcessed: result.aiProcessed,
       aiFailed: result.aiFailed,
@@ -716,7 +731,7 @@ async function executeRecommendations(taskId: string, payload?: Record<string, u
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error({ msg: "Daily recommendations failed", error: errMsg });
+    logger.error({ msg: "Daily recommendations failed", error: errMsg, taskId, phase: payload?.phase });
     throw error;
   }
 }
