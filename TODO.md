@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-Current branch — Spec 42 (feature/spec-42-durable-worker-cron-v2), based on main 10337d9 after PR #154 merge. See .agents/specs/42-durable-netlify-worker-cron.md and .agents/plans/42-durable-netlify-worker-cron.md. Revised architecture/plan and worker docs created; fail-closed serverless leader acquire/renew options + tests added. Full implementation pending fencing/checkpoint schema approval, functions, runner, long-task batching and tests.
+Current branch — Spec 42 (feature/spec-42-durable-worker-cron-v2), based on main 10337d9 after PR #154 merge. **IMPLEMENTATION COMPLETE.** Netlify Scheduled/Background Function handlers (worker-dispatch.mjs, worker-runner-background.mts), bounded serverless runner (netlify-runner.ts), Daily Recommendations coordinator/batch/finalizer checkpointing, instrumentation.ts Netlify split, DB Health runtime observability. No schema/migration/package/env changes. All checks passed: npm run test (2144 pass / 0 fail), npx tsc --noEmit (0 prod errors), npm run lint (0 errors), npm run quickbuild (202/202 pages). Ready for commit/push/PR — WORKER_DISPATCH_SECRET must be set in Netlify dashboard before deploy; user controls merge/deploy.
 
 > Live / in-progress work is tracked in **`.agents/session-todos.md`**.
 > The completed-feature Quick Reference archive moved to

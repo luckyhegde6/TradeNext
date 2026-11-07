@@ -12,13 +12,14 @@
 import { runChartinkUnifiedScreeners } from "./chartinkUnifiedScreenerService";
 import type { ScreenerResult } from "./chartinkService";
 import { exportDailyRecs } from "./googleSheets/exporter";
+import type { DailyRecStockInput } from "./googleSheets/rows";
 import {
   analyzeStocks,
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
 import { calculateFallbackRecommendation } from "./ai/fallbackAnalysis";
-import { loadConfig, hasValidConfig } from "./ai/config";
+import { loadConfig, hasValidConfig, type AIConfig, getDefaultConfig } from "./ai/config";
 import { runAiConnectionTest } from "./ai/connectionTestService";
 import { getRecommendationContext } from "./ai/recommendation-context";
 import { getAICircuitBreaker, CircuitBreakerError } from "./ai/circuit-breaker";
@@ -150,27 +151,62 @@ let lastDailyRecNoticeDay: string | null = null;
 // ─── Main Orchestration ─────────────────────────────────────────────────
 
 /**
- * Run the full daily recommendation pipeline.
+ * Run the daily recommendation pipeline, optionally scoped to a single
+ * checkpoint phase for serverless bounded execution (Spec 42).
  *
- * Steps:
- * 1. Create a {@link DailyRecommendationRun} record (status: running)
- * 2. Record start event via unifiedEventService
- * 3. Run all 7 screeners via chartinkService
- * 4. Deduplicate results by symbol
- * 5. For each unique stock, upsert RecommendationTracker
- * 6. Create DailyRecommendationStock entries
- * 7. Analyze stocks via AI (with circuit breaker protection)
- * 8. Update DailyRecommendationStock with AI results
- * 9. Update RecommendationTracker with latest AI analysis
- * 10. Record prediction for tracking
- * 11. Record completion event + metrics
- * 12. Return run summary
+ * Phases:
+ *   - coordinator: create run, run screeners, persist symbol snapshot
+ *   - batch:       AI analysis for one bounded batch of stocks
+ *   - finalizer:   rank, publish (Sheets/Telegram), invalidate cache, complete run
+ *
+ * When no `phase` is given, the full monolithic pipeline runs (backward
+ * compatible for local/persistent-Node and admin manual runs).
+ *
+ * Checkpoint idempotency (no schema change — encoded in WorkerTask):
+ *   - Coordinator: runId is the idempotency key; a completed run with the
+ *     same runId is skipped.
+ *   - Batch: parentTaskId + batchIndex + stockSlice — results are written
+ *     exactly once; retries reuse completed rows.
+ *   - Finalizer: runId — only runs when all batches are terminal; idempotent
+ *     re-run is safe (existing per-day dedup guards).
  *
  * @param options.triggeredBy Source of this run: "system" (cron/scheduler) or "admin" (manual Run Now). Defaults to "system".
+ * @param options.phase Checkpoint phase: "coordinator" | "batch" | "finalizer" (undefined = monolithic).
+ * @param options.runId Run id (coordinator creates it; batch/finalizer use it).
+ * @param options.batchIndex Batch index (0-based) for batch phase.
+ * @param options.stockSlice Stock symbols for this batch (batch phase only).
+ * @param options.parentTaskId Coordinator task id (batch/finalizer phases).
+ * @param options.notifyAiUnavailable Whether to send the AI-unavailable Telegram notice.
  */
 export async function runDailyRecommendations(
-  options: { triggeredBy?: string; notifyAiUnavailable?: boolean } = {},
+  options: {
+    triggeredBy?: string;
+    notifyAiUnavailable?: boolean;
+    phase?: "coordinator" | "batch" | "finalizer";
+    taskId?: string;
+    runId?: string;
+    batchIndex?: number;
+    stockSlice?: string[];
+    parentTaskId?: string;
+  } = {},
 ): Promise<DailyRunResult> {
+  const phase = options.phase;
+  const taskId = options.taskId;
+
+  // ─── Checkpoint phases (Spec 42 — serverless bounded execution) ────────
+
+  if (phase === "coordinator") {
+    return runCoordinatorPhase(options);
+  }
+  if (phase === "batch") {
+    return runBatchPhase(options);
+  }
+  if (phase === "finalizer") {
+    return runFinalizerPhase({ taskId, runId: options.runId });
+  }
+
+  // ─── Monolithic path (backward compatible) ─────────────────────────────
+
   const startTime = Date.now();
   const todayMidnight = getTodayMidnight();
   const triggeredBy = options.triggeredBy ?? "system";
@@ -960,6 +996,914 @@ export async function runDailyRecommendations(
 
     throw error;
   }
+}
+
+// ─── Checkpoint phases (Spec 42 — serverless bounded execution) ──────────
+
+/**
+ * Coordinator phase: create a DailyRecommendationRun, run screeners, persist
+ * a stable symbol snapshot. Idempotent by runId.
+ *
+ * Returns { runId, totalScreeners, successfulScreeners, totalStocks,
+ *           uniqueStocks, stockSymbols }.
+ */
+async function runCoordinatorPhase(
+  options: {
+    triggeredBy?: string;
+    runId?: string;
+  },
+): Promise<DailyRunResult> {
+  const startTime = Date.now();
+  const triggeredBy = options.triggeredBy ?? "system";
+  const runId = options.runId ?? randomUUID();
+
+  logger.info({ msg: "Daily recommendation coordinator phase starting", runId, triggeredBy });
+
+  // Idempotency: if a completed run with this runId already exists, skip.
+  const existingRun = await prisma.dailyRecommendationRun.findUnique({
+    where: { id: runId },
+    select: { id: true, status: true, uniqueStocks: true, completedAt: true },
+  });
+  if (existingRun && existingRun.status === "completed") {
+    logger.info({
+      msg: "Coordinator phase skipped — run already completed",
+      runId,
+      status: existingRun.status,
+    });
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: Number(existingRun.uniqueStocks),
+      aiProcessed: 0,
+      aiFailed: 0,
+      executionTimeMs: 0,
+      stocks: [],
+    };
+  }
+
+  // Create (or reuse) the run record — SQLite mirror write-through.
+  const sqlite = getSqliteFallback();
+  if (!sqlite) {
+    logger.warn({
+      msg: "SQLite mirror unavailable — coordinator phase will not persist rows",
+      runId,
+      triggeredBy,
+    });
+  }
+  const runRow: Record<string, unknown> = {
+    id: runId,
+    status: "running",
+    runDate: new Date(),
+    triggeredBy,
+    createdAt: new Date(),
+  };
+  sqlite?.upsertDailyRecommendationRun(runRow);
+
+  // Record start event
+  await recordScreenerEvent(
+    "run_start",
+    `Daily recommendation run started [${runId}]`,
+    { runId, triggeredBy },
+  ).catch((e) => logger.warn({ msg: "Start event failed", runId, error: e }));
+
+  // Audit: screener run started
+  await createAuditLog({
+    action: "SCREENER_RUN_START",
+    resource: "daily_recommendation",
+    resourceId: runId,
+    metadata: { runId, triggerSource: triggeredBy },
+  }).catch((e) => logger.warn({ msg: "Start audit failed", runId, error: e }));
+
+  // Run all screeners (Chartink 117 registry primary → TradingView fallback).
+  const screenerResults = await runChartinkUnifiedScreeners({
+    forceRefresh: true,
+    excludeCategoryIds: ["swing"],
+  }).catch((e) => {
+    logger.error({ msg: "Screener run failed", runId, error: e instanceof Error ? e.message : String(e) });
+    return [];
+  });
+
+  const successfulScreenerNames = new Set(
+    screenerResults.flatMap((s) => s.screenerNames),
+  );
+  const totalRawHits = screenerResults.reduce(
+    (sum, s) => sum + (s.screenerCount || 0),
+    0,
+  );
+
+  // Select top stocks by market cap for AI analysis
+  const rankedResults = selectTopByMarketCap(screenerResults, MAX_AI_STOCKS);
+  const stockSymbols = rankedResults.map((r) => r.symbol);
+
+  logger.info({
+    msg: "Persisting screener results",
+    uniqueStocks: rankedResults.length,
+    runId,
+  });
+
+  // Pre-fetch existing trackers — mirror-first full rows.
+  const symbols = stockSymbols;
+  let existingTrackers: Array<Record<string, unknown>> =
+    sqlite?.getRecommendationTrackers({ symbolIn: symbols }) ?? [];
+  const mirrorSymbols = new Set(existingTrackers.map((t) => String(t.symbol).toUpperCase()));
+  const missingSymbols = symbols.filter((s) => !mirrorSymbols.has(s.toUpperCase()));
+  if (missingSymbols.length > 0) {
+    try {
+      const prismaTrackers = await prisma.recommendationTracker.findMany({
+        where: { symbol: { in: missingSymbols } },
+      });
+      for (const t of prismaTrackers) {
+        sqlite?.upsertRecommendationTracker({ ...t });
+        existingTrackers.push(t as unknown as Record<string, unknown>);
+      }
+    } catch (err) {
+      logger.warn({
+        msg: "Recommendation tracker backfill unavailable — proceeding with mirror-only trackers",
+        missing: missingSymbols.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  const trackerMap = new Map(
+    existingTrackers.map((t) => [String(t.symbol).toUpperCase(), t]),
+  );
+
+  // Batch create NEW trackers into the mirror.
+  const newTrackerData = rankedResults
+    .filter((r) => !trackerMap.has(r.symbol.toUpperCase()))
+    .map((r) => ({
+      id: randomUUID(),
+      symbol: r.symbol,
+      entryPrice: r.price,
+      currentPrice: r.price,
+      status: "active",
+      timeHorizon: "medium" as const,
+      screenerAttribution: r.screenerNames,
+      targetPrice: r.price * 1.2,
+      stopLoss: r.price * 0.95,
+      confidence: 0,
+      aiRecommendation: "HOLD" as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
+  for (const t of newTrackerData) {
+    sqlite?.upsertRecommendationTracker(t);
+    trackerMap.set(t.symbol.toUpperCase(), t);
+  }
+
+  // Update existing trackers — mirror write-through.
+  let updatedTrackers = 0;
+  for (const r of rankedResults) {
+    const trackerRow = trackerMap.get(r.symbol.toUpperCase());
+    if (!trackerRow) continue;
+    sqlite?.upsertRecommendationTracker({
+      ...trackerRow,
+      currentPrice: r.price,
+      screenerAttribution: r.screenerNames,
+      lastCheckedAt: new Date(),
+    });
+    updatedTrackers++;
+  }
+
+  // Create stock entries into the mirror.
+  const stockCreateData = rankedResults.map((r) => {
+    const tracker = trackerMap.get(r.symbol.toUpperCase());
+    if (!tracker) return null;
+    return {
+      id: randomUUID(),
+      runId,
+      trackerId: tracker.id as string,
+      symbol: r.symbol,
+      price: r.price,
+      change: r.change,
+      changePercent: r.changePercent,
+      volume: Number(Math.round(r.volume)),
+      screenerAttribution: r.screenerNames,
+      screenerCount: r.screenerCount,
+      createdAt: new Date(),
+    };
+  }).filter((d): d is NonNullable<typeof d> => d !== null);
+
+  for (const d of stockCreateData) {
+    sqlite?.upsertDailyRecommendationStock(d);
+  }
+
+  // Update run with screener stats (mirror write-through).
+  Object.assign(runRow, {
+    totalScreeners: TOTAL_SCREENER_COUNT,
+    successfulScreeners: successfulScreenerNames.size,
+    totalStocks: totalRawHits,
+    uniqueStocks: rankedResults.length,
+  });
+  sqlite?.upsertDailyRecommendationRun(runRow);
+
+  // ─── Spawn checkpoint tasks (Spec 42 §5.5) ─────────────────────────────
+  // Split ranked symbols into bounded batches and spawn one WorkerTask per
+  // batch, plus a finalizer task. All tasks use taskType "recommendations"
+  // with triggeredBy "batch"/"finalizer" and carry the runId + phase in the
+  // payload. The runner claims each task independently across invocations.
+  const BATCH_SIZE = 10; // stocks per AI batch — bounded for serverless budget
+  const batches: string[][] = [];
+  for (let i = 0; i < stockSymbols.length; i += BATCH_SIZE) {
+    batches.push(stockSymbols.slice(i, i + BATCH_SIZE));
+  }
+
+  const { spawnRegularTask } = await import("@/lib/services/worker/task-orchestrator");
+
+  // Spawn batch tasks — one per slice.
+  for (let bi = 0; bi < batches.length; bi += 1) {
+    await spawnRegularTask({
+      name: `Daily Rec Batch ${bi + 1}/${batches.length}`,
+      taskType: "recommendations",
+      triggeredBy: "batch",
+      priority: 6,
+      maxRetries: 3,
+      payload: {
+        phase: "batch",
+        runId,
+        batchIndex: bi,
+        stockSlice: batches[bi],
+      },
+    });
+  }
+
+  // Spawn the finalizer task — runs after all batches complete.
+  await spawnRegularTask({
+    name: `Daily Rec Finalizer`,
+    taskType: "recommendations",
+    triggeredBy: "finalizer",
+    priority: 5,
+    maxRetries: 10, // allow retries while batches complete
+    payload: {
+      phase: "finalizer",
+      runId,
+    },
+  });
+
+  logger.info({
+    msg: "Coordinator phase complete — batch + finalizer tasks spawned",
+    runId,
+    batchCount: batches.length,
+    stockCount: stockSymbols.length,
+  });
+
+  return {
+    runId,
+    totalScreeners: TOTAL_SCREENER_COUNT,
+    successfulScreeners: successfulScreenerNames.size,
+    totalStocks: totalRawHits,
+    uniqueStocks: rankedResults.length,
+    aiProcessed: 0,
+    aiFailed: 0,
+    executionTimeMs: Date.now() - startTime,
+    stocks: [],
+  };
+}
+
+/**
+ * Batch phase: AI analysis for one bounded batch of stocks.
+ *
+ * Payload expectations (from WorkerTask.payload):
+ *   { runId, batchIndex, stockSlice: string[] }
+ *
+ * Idempotent by parentTaskId + batchIndex: if DailyRecommendationStock rows
+ * for this runId already carry AI verdicts for these symbols, the AI call is
+ * skipped and existing results are reused.
+ *
+ * Returns { runId, batchIndex, analyzed, aiProcessed, aiFailed }.
+ */
+async function runBatchPhase(
+  options: {
+    runId?: string;
+    batchIndex?: number;
+    stockSlice?: string[];
+    parentTaskId?: string;
+  },
+): Promise<DailyRunResult> {
+  const startTime = Date.now();
+  const runId = options.runId;
+  const batchIndex = options.batchIndex ?? 0;
+  const stockSlice = options.stockSlice ?? [];
+
+  if (!runId) {
+    throw new Error("Batch phase requires runId");
+  }
+
+  logger.info({
+    msg: "Daily recommendation batch phase starting",
+    runId,
+    batchIndex,
+    stockCount: stockSlice.length,
+  });
+
+  // Build stock entries for AI analysis from the mirror's stock entries for this run.
+  const sqlite = getSqliteFallback();
+  const allStockEntries = sqlite?.getRecommendationStocks(runId) ?? [];
+  const stockEntryMap = new Map(
+    allStockEntries.map((e) => [String(e.symbol).toUpperCase(), e]),
+  );
+
+  // Filter to this batch's symbols that have stock entries.
+  const batchSymbols = stockSlice.filter((s) => stockEntryMap.has(s.toUpperCase()));
+  if (batchSymbols.length === 0) {
+    logger.warn({
+      msg: "Batch phase skipped — no stock entries for batch symbols",
+      runId,
+      batchIndex,
+    });
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: 0,
+      aiProcessed: 0,
+      aiFailed: 0,
+      executionTimeMs: Date.now() - startTime,
+      stocks: [],
+    };
+  }
+
+  // Idempotency: check if AI results already exist for these symbols in this run.
+  const alreadyProcessed = batchSymbols.filter((sym) => {
+    const entry = stockEntryMap.get(sym.toUpperCase());
+    return Boolean(entry && entry.aiSuccess === true && entry.aiRecommendation);
+  });
+  if (alreadyProcessed.length === batchSymbols.length) {
+    logger.info({
+      msg: "Batch phase skipped — all symbols already analyzed",
+      runId,
+      batchIndex,
+      count: batchSymbols.length,
+    });
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: batchSymbols.length,
+      aiProcessed: batchSymbols.length,
+      aiFailed: 0,
+      executionTimeMs: Date.now() - startTime,
+      stocks: alreadyProcessed.map((sym) => {
+        const entry = stockEntryMap.get(sym.toUpperCase());
+        return {
+          symbol: sym,
+          aiRecommendation: String(entry?.aiRecommendation ?? "HOLD"),
+          confidence: Number(entry?.confidence ?? 0),
+        };
+      }),
+    };
+  }
+
+  // Build AI input for unprocessed symbols.
+  const symbolsToAnalyze = batchSymbols.filter(
+    (sym) => !alreadyProcessed.includes(sym),
+  );
+  const aiInput: StockAnalysisInput[] = symbolsToAnalyze.map((sym) => {
+    const entry = stockEntryMap.get(sym.toUpperCase());
+    return {
+      symbol: String(entry?.symbol ?? sym),
+      price: typeof entry?.price === "number" ? entry.price : 0,
+      change: typeof entry?.change === "number" ? entry.change : 0,
+      changePercent: typeof entry?.changePercent === "number" ? entry.changePercent : 0,
+      volume: typeof entry?.volume === "number" ? entry.volume : 0,
+      screenerNames: Array.isArray(entry?.screenerAttribution)
+        ? (entry.screenerAttribution as string[])
+        : [],
+    };
+  });
+
+  // Enrich with fundamental context (best-effort).
+  try {
+    const stockContextMap = await getRecommendationContext(aiInput.map((s) => s.symbol));
+    for (const entry of aiInput) {
+      const ctx = stockContextMap[entry.symbol];
+      if (ctx) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (entry as any).context = ctx;
+      }
+    }
+  } catch (e) {
+    // Context failure drops context, never the pipeline.
+    logger.warn({ msg: "Batch context enrichment failed", runId, batchIndex, error: e });
+  }
+
+  // AI pre-flight gate.
+  const circuitBreaker = getAICircuitBreaker();
+  const aiConfig: AIConfig = await loadConfig().catch(() => getDefaultConfig());
+  let skipAi = false;
+  let effectiveModel = aiConfig.model;
+  if (aiInput.length > 0 && hasValidConfig(aiConfig)) {
+    const preflight = await runAiConnectionTest(120_000);
+    if (preflight.status === "ok") {
+      // proceed
+    } else if (preflight.status === "fallback" && preflight.recommendedModel) {
+      effectiveModel = preflight.recommendedModel;
+    } else {
+      skipAi = true;
+    }
+  }
+
+  let aiResults: StockAnalysisResult[] = [];
+  if (skipAi) {
+    aiResults = aiInput.map((s) => ({
+      ...s,
+      aiRecommendation: calculateFallbackRecommendation(s),
+      tokensUsed: 0,
+      executionMs: 0,
+      success: true,
+      error: "AI pre-flight failed on all models — defaulting to HOLD",
+    } as StockAnalysisResult));
+  } else {
+    try {
+      const effectiveConfig: AIConfig =
+        effectiveModel === aiConfig.model
+          ? aiConfig
+          : { ...aiConfig, model: effectiveModel };
+      aiResults = await circuitBreaker.call(() =>
+        analyzeStocks(aiInput, effectiveConfig),
+      );
+    } catch (e) {
+      logger.warn({
+        msg: "Batch AI analysis failed — using fallback",
+        runId,
+        batchIndex,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      aiResults = aiInput.map((s) => ({
+        ...s,
+        aiRecommendation: calculateFallbackRecommendation(s),
+        tokensUsed: 0,
+        executionMs: 0,
+        success: true,
+        error: "AI analysis failed — defaulting to HOLD",
+      } as StockAnalysisResult));
+    }
+  }
+
+  const successfulResults = aiResults.filter((r) => r.success);
+  const aiFailed = aiResults.length - successfulResults.length;
+
+  // Update stock entries and trackers via mirror write-through.
+  let aiProcessed = 0;
+  const predictionUpdates: Promise<unknown>[] = [];
+
+  for (const aiResult of successfulResults) {
+    const stockRow = stockEntryMap.get(aiResult.symbol.toUpperCase());
+    if (!stockRow) continue;
+
+    sqlite?.upsertDailyRecommendationStock({
+      ...stockRow,
+      aiRecommendation: aiResult.aiRecommendation.recommendation,
+      confidence: aiResult.aiRecommendation.confidence,
+      targetPrice: aiResult.aiRecommendation.targetPrice,
+      stopLoss: aiResult.aiRecommendation.stopLoss,
+      timeHorizon: aiResult.aiRecommendation.timeHorizon,
+      reasoning: aiResult.aiRecommendation.reasoning,
+      riskFactors: aiResult.aiRecommendation.riskFactors,
+      aiTokensUsed: aiResult.tokensUsed,
+      aiExecutionMs: aiResult.executionMs,
+      aiSuccess: aiResult.success,
+      aiError: aiResult.error ?? null,
+    });
+
+    const trackerRow = trackerMapFromRun(runId, sqlite).get(aiResult.symbol.toUpperCase());
+    if (trackerRow) {
+      sqlite?.upsertRecommendationTracker({
+        ...trackerRow,
+        aiRecommendation: aiResult.aiRecommendation.recommendation,
+        confidence: aiResult.aiRecommendation.confidence,
+        targetPrice: aiResult.aiRecommendation.targetPrice,
+        stopLoss: aiResult.aiRecommendation.stopLoss,
+        timeHorizon: aiResult.aiRecommendation.timeHorizon,
+        reasoning: aiResult.aiRecommendation.reasoning,
+        riskFactors: aiResult.aiRecommendation.riskFactors,
+        currentPrice: aiResult.price,
+      });
+    }
+
+    predictionUpdates.push(
+      recordPrediction({
+        agentType: "recommendation",
+        symbol: aiResult.symbol,
+        prediction: aiResult.aiRecommendation.recommendation,
+        confidence: aiResult.aiRecommendation.confidence,
+        entryPrice: aiResult.price,
+        targetPrice: aiResult.aiRecommendation.targetPrice,
+        stopLoss: aiResult.aiRecommendation.stopLoss,
+        runId,
+      }).catch((e) => {
+        logger.warn({ msg: "Prediction tracking failed", symbol: aiResult.symbol, error: e });
+      }),
+    );
+
+    aiProcessed++;
+  }
+
+  await runInChunks(predictionUpdates, 10, (chunk) => Promise.all(chunk));
+
+  logger.info({
+    msg: "Batch phase complete",
+    runId,
+    batchIndex,
+    analyzed: aiResults.length,
+    aiProcessed,
+    aiFailed,
+  });
+
+  return {
+    runId,
+    totalScreeners: 0,
+    successfulScreeners: 0,
+    totalStocks: 0,
+    uniqueStocks: aiResults.length,
+    aiProcessed,
+    aiFailed,
+    executionTimeMs: Date.now() - startTime,
+    stocks: successfulResults.map((r) => ({
+      symbol: r.symbol,
+      aiRecommendation: r.aiRecommendation.recommendation,
+      confidence: r.aiRecommendation.confidence,
+    })),
+  };
+}
+
+/**
+ * Finalizer phase: wait for all batches to complete, rank results, publish
+ * (Sheets/Telegram), invalidate cache, mark run completed.
+ *
+ * Idempotent: if the run is already completed, skip. If batches are not yet
+ * all terminal, resets this task to "pending" so the runner re-claims it on
+ * the next tick — no auto-retry mechanism is needed.
+ *
+ * @param options.taskId WorkerTask id (for resetting to pending when not ready).
+ * @param options.runId Run id.
+ *
+ * Returns { runId, uniqueStocks, aiProcessed, aiFailed }.
+ */
+async function runFinalizerPhase(
+  options: {
+    taskId?: string;
+    runId?: string;
+  },
+): Promise<DailyRunResult> {
+  const startTime = Date.now();
+  const taskId = options.taskId;
+  const runId = options.runId;
+
+  if (!runId) {
+    throw new Error("Finalizer phase requires runId");
+  }
+
+  logger.info({ msg: "Daily recommendation finalizer phase starting", runId, taskId });
+
+  // Idempotency: if run already completed, skip.
+  const existingRun = await prisma.dailyRecommendationRun.findUnique({
+    where: { id: runId },
+    select: { id: true, status: true, uniqueStocks: true },
+  });
+  if (existingRun && existingRun.status === "completed") {
+    logger.info({
+      msg: "Finalizer phase skipped — run already completed",
+      runId,
+    });
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: Number(existingRun.uniqueStocks),
+      aiProcessed: 0,
+      aiFailed: 0,
+      executionTimeMs: 0,
+      stocks: [],
+    };
+  }
+
+  // Gather all stock entries for this run from the mirror.
+  const sqlite = getSqliteFallback();
+  const allStockEntries = sqlite?.getRecommendationStocks(runId) ?? [];
+
+  // Readiness check: every stock entry for this run must carry an AI verdict.
+  const allHaveVerdict = allStockEntries.length > 0 &&
+    allStockEntries.every((e) => e.aiSuccess === true && e.aiRecommendation);
+
+  if (!allHaveVerdict) {
+    // Batches not all done — reset this task to pending so the runner can
+    // re-claim it on the next tick. Do NOT mark failed; batches are still
+    // in flight and will complete independently.
+    if (taskId) {
+      try {
+        await prisma.workerTask.update({
+          where: { id: taskId },
+          data: {
+            status: "pending",
+            startedAt: null,
+            assignedTo: null,
+          },
+        });
+        logger.info({
+          msg: "Finalizer phase — batches not ready, resetting task to pending",
+          runId,
+          taskId,
+          stockCount: allStockEntries.length,
+        });
+      } catch (e) {
+        logger.warn({
+          msg: "Finalizer phase — failed to reset task to pending",
+          runId,
+          taskId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: 0,
+      aiProcessed: 0,
+      aiFailed: 0,
+      executionTimeMs: Date.now() - startTime,
+      stocks: [],
+    };
+  }
+
+  // Only stocks with real AI verdicts are "successful".
+  const successfulResults = allStockEntries.filter(
+    (e) => e.aiSuccess === true && e.aiRecommendation,
+  ) as Array<{
+    symbol: string;
+    aiRecommendation: string;
+    confidence: number;
+    price: number;
+    targetPrice?: number;
+    stopLoss?: number;
+    screenerNames?: unknown;
+    marketCap?: unknown;
+  }>;
+
+  // v3.52.0 ranking: confidence desc → screener score → market cap → symbol.
+  successfulResults.sort((a, b) => {
+    if (Number(b.confidence) !== Number(a.confidence)) {
+      return Number(b.confidence) - Number(a.confidence);
+    }
+    const scoreA = Array.isArray(a.screenerNames) ? a.screenerNames.length : 0;
+    const scoreB = Array.isArray(b.screenerNames) ? b.screenerNames.length : 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return Number(b.marketCap ?? 0) - Number(a.marketCap ?? 0);
+  });
+
+  const aiProcessed = successfulResults.length;
+  const aiFailed = allStockEntries.length - aiProcessed;
+
+  // Handle the all-AI-failed case: mark run failed with no picks.
+  if (aiProcessed === 0 && allStockEntries.length > 0) {
+    const sqlite2 = getSqliteFallback();
+    sqlite2?.deleteRecommendationStocksByRun(runId);
+    Object.assign({}, {
+      status: "failed",
+      errorMessage: "AI analysis failed on all stocks — run kept without picks",
+      aiProcessed: 0,
+      aiFailed: allStockEntries.length,
+      uniqueStocks: 0,
+      executionTimeMs: Date.now() - startTime,
+      completedAt: new Date(),
+      metadata: { aiUnavailable: true },
+    });
+    sqlite2?.upsertDailyRecommendationRun({
+      id: runId,
+      status: "failed",
+      errorMessage: "AI analysis failed on all stocks — run kept without picks",
+      aiProcessed: 0,
+      aiFailed: allStockEntries.length,
+      uniqueStocks: 0,
+      executionTimeMs: Date.now() - startTime,
+      completedAt: new Date(),
+      metadata: { aiUnavailable: true },
+    });
+
+    await recordScreenerEvent(
+      "run_failed",
+      `Daily run failed — AI unavailable, no picks persisted`,
+      { runId, uniqueStocks: 0, aiProcessed: 0, aiFailed: allStockEntries.length },
+    ).catch(() => {});
+
+    invalidateRecommendationsCache();
+
+    logger.warn({
+      msg: "Finalizer phase — AI unavailable on all stocks",
+      runId,
+      aiFailed: allStockEntries.length,
+    });
+
+    return {
+      runId,
+      totalScreeners: 0,
+      successfulScreeners: 0,
+      totalStocks: 0,
+      uniqueStocks: 0,
+      aiProcessed: 0,
+      aiFailed: allStockEntries.length,
+      executionTimeMs: Date.now() - startTime,
+      stocks: [],
+    };
+  }
+
+  // Cap to MAX_RECOMMENDED_STOCKS for Today's Picks.
+  const topPicks = successfulResults.slice(0, MAX_RECOMMENDED_STOCKS);
+
+  // Complete the run.
+  const executionTimeMs = Date.now() - startTime;
+  const runRowUpdate: Record<string, unknown> = {
+    status: "completed",
+    aiProcessed,
+    aiFailed,
+    uniqueStocks: aiProcessed,
+    executionTimeMs,
+    completedAt: new Date(),
+    metadata: {
+      screenerNames: [],
+      topPicksCount: topPicks.length,
+    },
+  };
+  sqlite?.upsertDailyRecommendationRun({ id: runId, ...runRowUpdate });
+
+  // Record completion event.
+  await recordScreenerEvent(
+    "run_complete",
+    `Daily run completed: ${aiProcessed}/${allStockEntries.length} stocks analyzed in ${executionTimeMs}ms`,
+    {
+      runId,
+      uniqueStocks: aiProcessed,
+      aiProcessed,
+      aiFailed,
+      executionTimeMs,
+    },
+  ).catch(() => {});
+
+  // Audit: run completed.
+  await createAuditLog({
+    action: "SCREENER_RUN_COMPLETE",
+    resource: "daily_recommendation",
+    resourceId: runId,
+    metadata: {
+      runId,
+      uniqueStocks: aiProcessed,
+      aiProcessed,
+      aiFailed,
+      executionTimeMs,
+    },
+  }).catch(() => {});
+
+  // Publish to Google Sheets (fire-and-forget, non-throwing).
+  try {
+    const { exportDailyRecs } = await import("./googleSheets/exporter");
+    const sheetStocks: DailyRecStockInput[] = topPicks.map((r) => ({
+      symbol: r.symbol,
+      price: r.price,
+      change: 0,
+      changePercent: 0,
+      volume: 0,
+      screenerNames: Array.isArray(r.screenerNames) ? (r.screenerNames as string[]) : [],
+      aiRecommendation: {
+        recommendation: r.aiRecommendation as "BUY" | "HOLD" | "SELL",
+        confidence: r.confidence,
+        targetPrice: r.targetPrice ?? null,
+        stopLoss: r.stopLoss ?? null,
+      } as import("./googleSheets/rows").DailyRecVerdict | null,
+    }));
+    const sheetExport = await exportDailyRecs(
+      { runId, runDate: new Date(startTime).toISOString() },
+      sheetStocks,
+    );
+    logger.info({
+      msg: "Google Sheets daily-recs publish finished",
+      runId,
+      rows: sheetStocks.length,
+      outcome: sheetExport,
+    });
+  } catch (e) {
+    logger.warn({ msg: "Sheets publish failed (non-critical)", runId, error: e });
+  }
+
+  // Record metrics.
+  try {
+    await recordMetric({
+      metricType: "screener_duration",
+      metricName: "daily_recommendation_run",
+      value: executionTimeMs,
+      unit: "ms",
+      source: "recommendation_service",
+      metadata: {
+        runId,
+        uniqueStocks: aiProcessed,
+        aiProcessed,
+        aiFailed,
+      },
+    });
+  } catch (e) {
+    logger.warn({ msg: "Metric record failed", runId, error: e });
+  }
+
+  // Invalidate cache so next API request gets fresh data.
+  invalidateRecommendationsCache();
+
+  // Broadcast to Telegram subscribers (Spec 36 per-day dedup via module-level flag).
+  try {
+    const { broadcastToSubscribers } = await import("./telegramBotService");
+    const { buildRecommendationBroadcast } = await import("./recommendationBroadcast");
+
+    const noticeDay = new Date().toISOString().slice(0, 10);
+    if (lastDailyRecNoticeDay !== noticeDay) {
+      lastDailyRecNoticeDay = noticeDay;
+
+      const tgStocks: Array<{
+        symbol: string;
+        price: number;
+        aiRecommendation: {
+          recommendation: "BUY" | "HOLD" | "SELL";
+          confidence: number;
+          targetPrice: number;
+          stopLoss: number;
+        };
+        screenerNames?: string[];
+      }> = topPicks.map((r) => ({
+        symbol: r.symbol,
+        price: r.price,
+        aiRecommendation: {
+          recommendation: r.aiRecommendation as "BUY" | "HOLD" | "SELL",
+          confidence: r.confidence,
+          targetPrice: r.targetPrice ?? 0,
+          stopLoss: r.stopLoss ?? 0,
+        },
+        screenerNames: Array.isArray(r.screenerNames) ? (r.screenerNames as string[]) : [],
+      }));
+      const tgMessage = buildRecommendationBroadcast(tgStocks, undefined, {
+        aiDown: false,
+      });
+      const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
+        prependTitle: false,
+      });
+      logger.info({ msg: "Telegram broadcast for recommendations", runId, sent });
+    } else {
+      logger.info({ msg: "Telegram broadcast suppressed (already sent today)", runId });
+    }
+  } catch (tgErr) {
+    logger.warn({ msg: "Telegram broadcast failed (non-critical)", runId, error: tgErr });
+  }
+
+  logger.info({
+    msg: "Finalizer phase complete",
+    runId,
+    uniqueStocks: aiProcessed,
+    aiProcessed,
+    aiFailed,
+    executionTimeMs,
+  });
+
+  return {
+    runId,
+    totalScreeners: 0,
+    successfulScreeners: 0,
+    totalStocks: 0,
+    uniqueStocks: aiProcessed,
+    aiProcessed,
+    aiFailed,
+    executionTimeMs,
+    stocks: topPicks.map((r) => ({
+      symbol: r.symbol,
+      aiRecommendation: r.aiRecommendation,
+      confidence: r.confidence,
+    })),
+  };
+}
+
+/**
+ * Build a tracker map for a run from the SQLite mirror. Returns an empty map
+ * if the mirror is unavailable.
+ */
+function trackerMapFromRun(
+  runId: string,
+  sqlite: ReturnType<typeof getSqliteFallback> | undefined,
+): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  if (!sqlite) return map;
+  try {
+    // Get all trackers and index by symbol for lookup.
+    const trackers = sqlite.getRecommendationTrackers?.() ?? [];
+    for (const t of trackers) {
+      map.set(String(t.symbol).toUpperCase(), t);
+    }
+  } catch {
+    // Ignore — map stays empty.
+  }
+  return map;
 }
 
 // ─── Performance Tracking ────────────────────────────────────────────────
