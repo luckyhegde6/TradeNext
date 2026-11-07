@@ -92,7 +92,10 @@ function toRow(role: LeaderRole, status: string): {
  *      running locally so cron/work continue — this is a fail-open for
  *      availability. We re-elect once the DB recovers.
  */
-export async function acquireLeaderLock(role: LeaderRole): Promise<boolean> {
+export async function acquireLeaderLock(
+  role: LeaderRole,
+  options: { failOpen?: boolean } = {},
+): Promise<boolean> {
   const workerId = leaderWorkerId(role);
   // Non-conflict errors that escaped the create step are genuine faults (a DB
   // validation/constraint we couldn't interpret) that MUST propagate — but the
@@ -126,13 +129,17 @@ export async function acquireLeaderLock(role: LeaderRole): Promise<boolean> {
   } catch (error) {
     // Fail-open ONLY for DB unavailability (plan-limit hold / breaker).
     if (isDbUnavailableError(error)) {
+      const failOpen = options.failOpen !== false;
       logger.warn({
-        msg: "DB unavailable during leader election — degrading to local leader",
+        msg: failOpen
+          ? "DB unavailable during leader election — degrading to local leader"
+          : "DB unavailable during serverless leader election — failing closed",
         role,
         workerId,
+        failOpen,
         error: error instanceof Error ? error.message : String(error),
       });
-      return true;
+      return failOpen;
     }
     if (createPath) {
       // A genuine non-conflict error escaped the create step — surface it so the
@@ -161,7 +168,10 @@ export async function acquireLeaderLock(role: LeaderRole): Promise<boolean> {
  * If someone else took it while we were renewing (they shouldn't — we hold a
  * fresh row), the updateMany returns 0 and we stand down.
  */
-export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
+export async function renewLeaderLock(
+  role: LeaderRole,
+  options: { failOpen?: boolean } = {},
+): Promise<boolean> {
   const workerId = leaderWorkerId(role);
   try {
     const updated = await prisma.workerStatus.updateMany({
@@ -171,8 +181,9 @@ export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
     return updated.count > 0;
   } catch (error) {
     if (isDbUnavailableError(error)) {
-      // DB down — keep local leadership (degrade), we already hold in-memory.
-      return true;
+      // A serverless runner cannot prove shared ownership while PostgreSQL is
+      // unavailable. Persistent Node callers retain the existing fail-open mode.
+      return options.failOpen !== false;
     }
     logger.error({
       msg: "Leader heartbeat renew failed",
@@ -195,11 +206,12 @@ export async function renewLeaderLock(role: LeaderRole): Promise<boolean> {
 export function startLeaderHeartbeat(
   role: LeaderRole,
   onLost?: (role: LeaderRole) => void,
+  options: { failOpen?: boolean } = {},
 ): () => void {
   let stopped = false;
   const timer = setInterval(() => {
     if (stopped) return;
-    renewLeaderLock(role).then((stillLeader) => {
+    renewLeaderLock(role, options).then((stillLeader) => {
       if (stopped) return;
       if (!stillLeader) {
         logger.warn({
