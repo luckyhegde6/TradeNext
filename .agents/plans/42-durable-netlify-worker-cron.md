@@ -60,13 +60,13 @@ Exit: serverless runner executes only tasks proven to fit or supported by a chec
 Exit: full 25–35-minute path is distributed across bounded invocations without duplicate side effects.
 
 ## Phase 5 — Netlify function handlers and secret boundary
-1. Implement Scheduled Function in netlify/functions using the repo's current Netlify conventions and package type. Schedule every minute UTC; handler only sends a bounded POST.
-2. Implement Background Function with fixed event envelope, strict method/content-type/body size/schema checks and WORKER_DISPATCH_SECRET requirement.
+1. Implement standalone Scheduled Function in netlify/functions (not a Next.js Advanced API route) using current Netlify supported Request/Response + inline schedule config. Schedule every minute UTC; handler only sends a bounded POST. Confirm request body next_run and UTC schedule.
+2. Implement standalone Background Function with -background suffix (not a Next.js Advanced API route), asynchronous 202 invocation contract and fixed event envelope, strict method/content-type/body size/schema checks and WORKER_DISPATCH_SECRET requirement.
 3. Use constant-time fixed-length digest comparison. Missing env means fail closed; never expose token in errors.
 4. Build background invocation URL from a documented trusted Netlify base URL / deploy context; do not accept URL from request.
 5. Timeout/retry policy: scheduler's HTTP request should be bounded; repeated schedule invocation is safe due to lease and DB idempotency.
 6. Add unit tests for handler auth, malformed body, body too large, unsupported method, missing env, wrong token, accepted dispatch, function invoke failure and no secret logging.
-7. Add local test instructions using generated ephemeral secret, never a committed value.
+7. Document branch testing via Netlify UI Run now or netlify functions:invoke; scheduled functions do not auto-fire on branch deploys. Add local test instructions using generated ephemeral secret, never a committed value.
 
 Exit: handler authentication tests pass; no public route or arbitrary job execution.
 
@@ -145,3 +145,10 @@ Revert feature branch commits. Keep existing local persistent Node daemon behavi
 - Daily Recommendations batch checkpoints may require durable model changes; stop and request approval if existing task/event models cannot represent this safely.
 - Netlify function handler conventions and background invocation URL must be validated against current deploy context.
 - OAuth invalid_grant and Blobs expired token require operator credential refresh; no secret is modified by code.
+
+
+## Netlify compatibility references checked 2026-11-08
+- Scheduled Functions: https://docs.netlify.com/build/functions/scheduled-functions/ — 30s limit, UTC schedule, next_run, published deploys only, Run now / CLI invoke for previews.
+- Background Functions: https://docs.netlify.com/build/functions/background-functions/ — async invocation, 202 response, up to 15 min.
+- Function configuration: https://docs.netlify.com/build/functions/configuration/ — current limits and payload caps.
+- Netlify Next.js migration note: https://github.com/netlify/next-scheduled-bg-function-migration — use standalone Netlify Functions rather than deprecated Next.js Advanced API scheduled/background routes.
