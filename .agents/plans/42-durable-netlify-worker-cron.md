@@ -152,3 +152,9 @@ Revert feature branch commits. Keep existing local persistent Node daemon behavi
 - Background Functions: https://docs.netlify.com/build/functions/background-functions/ — async invocation, 202 response, up to 15 min.
 - Function configuration: https://docs.netlify.com/build/functions/configuration/ — current limits and payload caps.
 - Netlify Next.js migration note: https://github.com/netlify/next-scheduled-bg-function-migration — use standalone Netlify Functions rather than deprecated Next.js Advanced API scheduled/background routes.
+
+
+## Branch lineage and cleanup
+- Verified PR #154 merge commit a5daee935f4ef7740d4f8d4d10f6131414d7449e and main at branch creation 10337d956cafc943c3e97f73121e1038330d86af.
+- feature/spec-42-durable-worker-cron was a premature empty branch based on the merge commit; feature/spec-42-durable-worker-cron-pr154 was based on the pre-merge PR head and contains the earlier draft. Both are superseded by feature/spec-42-durable-worker-cron-v2.
+- Preserve old refs until the v2 branch's content is verified and pushed. Then delete both stale branches using GitHub's branch deletion API (not force-update). The GitHub connector currently exposes no branch-delete action; use repository's GitHub UI/API when available. Never delete main.
