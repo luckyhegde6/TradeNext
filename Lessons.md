@@ -2186,3 +2186,16 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 ### 169. Google Sheets exporter tests must mock the effective config gate
 **Issue:** exporter moved from the legacy auth-level enable flag to `configService.isTrackingActive()` (env + DB gate), but tests only changed the old auth mock and reported enabled unexpectedly.
 **Rule:** mock `isTrackingActive` and `resolveSheetId` in exporter tests; keep test setup aligned with the service contract actually used by the exporter.
+
+
+### 170. Serverless worker leases require fencing, not just heartbeat freshness
+**Issue:** A serverless invocation may pause or be terminated while another invocation takes over an expired WorkerStatus lease. A heartbeat row with owner identity only does not stop the former invocation from continuing to write after takeover.
+**Rule:** A production serverless runner needs a durable lease token/fencing generation checked at task-claim and completion boundaries. DB-unavailable acquisition AND renewal must fail closed. Keep existing persistent Node fail-open behavior separate and covered by tests. Do not claim a lease is distributed-safe until old owners are fenced.
+
+### 171. Durable task checkpoint keys must be enforced by the database
+**Issue:** JSON task payloads and TaskEvent history alone do not provide unique concurrent ownership for recommendation AI batches or idempotent finalization.
+**Rule:** Check whether the current schema offers a unique durable identity and compare-and-set transition for every checkpoint. If it does not, stop and obtain explicit schema/migration approval. Never present payload convention as an atomic uniqueness guarantee.
+
+### 172. Netlify scheduled functions are wake-ups, not persistent daemons
+**Issue:** In-process node-cron and setTimeout polling depend on the lifetime of a request-serving instance.
+**Rule:** On Netlify, use standalone Scheduled Functions as short UTC wake-ups and Background Functions for bounded work; keep CronJob.nextRun/WorkerTask as durable truth. Branch deploys do not auto-run schedules; verify using Netlify UI Run now or CLI function invocation. Check current platform limits before setting task budgets.
