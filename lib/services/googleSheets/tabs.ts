@@ -140,30 +140,49 @@ export function classifyHeader(
  * user's sheet. Returns `unknown` rather than throwing so one unreadable tab
  * cannot break the whole status payload.
  */
-export async function readHeaderState(tab: TrackerTab): Promise<HeaderState> {
+export interface HeaderDiagnostic {
+  state: HeaderState;
+  /** Sanitized category only; never includes raw provider error text or credentials. */
+  errorCode: "missing_sheet_id" | "permission_denied" | "not_found" | "auth_failed" | "rate_limited" | "api_unavailable" | "unknown_error" | null;
+}
+
+function classifyHeaderError(err: unknown): HeaderDiagnostic["errorCode"] {
+  const value = err as { code?: unknown; response?: { status?: unknown } } | null;
+  const status = typeof value?.response?.status === "number"
+    ? value.response.status
+    : typeof value?.code === "number" ? value.code : null;
+  if (status === 401) return "auth_failed";
+  if (status === 403) return "permission_denied";
+  if (status === 404) return "not_found";
+  if (status === 429) return "rate_limited";
+  if (status !== null && status >= 500) return "api_unavailable";
+  return "unknown_error";
+}
+
+/** Read-only header probe with a sanitized failure category for admin diagnostics. */
+export async function readHeaderDiagnostic(tab: TrackerTab): Promise<HeaderDiagnostic> {
   try {
     const spreadsheetId = await resolveSheetId();
-    if (!spreadsheetId) return "unknown";
+    if (!spreadsheetId) return { state: "unknown", errorCode: "missing_sheet_id" };
 
     const sheets = await getSheetsClient();
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      // Full first row, not `A1`: a 1x1 probe can never match a multi-column
-      // header and misreports every populated tab as "drifted" (found live).
       range: `${tab}!1:1`,
       majorDimension: "ROWS",
     });
-    return classifyHeader(res.data?.values?.[0], TRACKER_TABS[tab]);
+    return { state: classifyHeader(res.data?.values?.[0], TRACKER_TABS[tab]), errorCode: null };
   } catch (err) {
-    logger.debug({
-      msg: "Google Sheets header state read failed",
-      tab,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return "unknown";
+    const errorCode = classifyHeaderError(err);
+    logger.debug({ msg: "Google Sheets header state read failed", tab, errorCode });
+    return { state: "unknown", errorCode };
   }
 }
 
+/** Compatibility wrapper used by callers that only need the header enum. */
+export async function readHeaderState(tab: TrackerTab): Promise<HeaderState> {
+  return (await readHeaderDiagnostic(tab)).state;
+}
 /** True when `tab` is a known tab (guards against a typo reaching the API). */
 export function isTrackerTab(tab: string): tab is TrackerTab {
   return Object.prototype.hasOwnProperty.call(TRACKER_TABS, tab);

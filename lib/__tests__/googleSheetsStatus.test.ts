@@ -6,7 +6,7 @@
  * user's sheet. A regression in either is invisible in the UI but leaks into
  * screenshots and issue threads.
  */
-import { classifyHeader, TRACKER_TABS, readHeaderState, type TrackerTab } from "@/lib/services/googleSheets/tabs";
+import { classifyHeader, TRACKER_TABS, readHeaderState, readHeaderDiagnostic, type TrackerTab } from "@/lib/services/googleSheets/tabs";
 import { getStatus } from "@/lib/services/googleSheets/statusService";
 import { isTrackingEnabled, trackerSheetId, getSheetsClient } from "@/lib/services/googleSheets/auth";
 
@@ -276,5 +276,37 @@ describe("missingEnvVars (Spec 31)", () => {
     const s = await getStatus();
     expect(s.envEnabled).toBe(false);
     expect(s.missingEnvVars).toEqual(REQUIRED);
+  });
+});
+
+
+describe("readHeaderDiagnostic", () => {
+  it("returns a sanitized permission diagnostic without exposing provider details", async () => {
+    mockGetSheetsClient.mockResolvedValue({
+      spreadsheets: { values: { get: jest.fn().mockRejectedValue({ response: { status: 403 }, message: "private sheet details" }) } },
+    });
+    await expect(readHeaderDiagnostic("swing")).resolves.toEqual({
+      state: "unknown",
+      errorCode: "permission_denied",
+    });
+  });
+
+  it("distinguishes missing spreadsheet configuration", async () => {
+    mockTrackerSheetId.mockReturnValue(null);
+    await expect(readHeaderDiagnostic("swing")).resolves.toEqual({
+      state: "unknown",
+      errorCode: "missing_sheet_id",
+    });
+  });
+
+  it("includes sanitized diagnostics in the status payload", async () => {
+    mockGetSheetsClient.mockResolvedValue({
+      spreadsheets: { values: { get: jest.fn().mockRejectedValue({ response: { status: 429 } }) } },
+    });
+    const s = await getStatus();
+    expect(s.perTab[0]).toEqual(expect.objectContaining({
+      headerState: "unknown",
+      diagnostic: "rate_limited",
+    }));
   });
 });

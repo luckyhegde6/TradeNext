@@ -71,6 +71,10 @@ export interface PerformanceCheckResult {
   stopLossHit: number;
   archived: number;
   executionTimeMs: number;
+  /** Trackers with a fresh price written to the SQLite mirror. */
+  updated?: number;
+  /** Active trackers skipped because neither daily nor live price was available. */
+  skippedNoPrice?: number;
 }
 
 /** The latest run with its stocks. */
@@ -582,6 +586,15 @@ export async function runDailyRecommendations(
     const aiFailed = aiResults.length - successfulResults.length;
 
     if (successfulResults.length === 0 && aiResults.length > 0) {
+      // No real AI verdicts means there are intentionally no daily-rec rows
+      // to publish. Make the reason explicit in operational logs rather than
+      // leaving the sheet's empty state ambiguous.
+      logger.warn({
+        msg: "Google Sheets daily-recs publish skipped: no successful AI verdicts",
+        runId: run.id,
+        attempted: aiResults.length,
+        aiFailed: aiResults.length,
+      });
       // Total AI failure — discard this run's picks entirely. The previous
       // good run remains the latest shown; no broadcast (nothing to say).
       const executionTimeMs = Date.now() - startTime;
@@ -809,16 +822,20 @@ export async function runDailyRecommendations(
     // Append the picks to the Tracker `daily-rec` tab. Only stocks with a REAL
     // AI verdict are exported — synthetic fallback HOLDs are deliberately not
     // persisted (v3.11.1) and must not pollute the sheet either. Fire-and-forget.
-    exportDailyRecs(
+    // Await the best-effort publish before the worker task completes. In
+    // serverless/short-lived worker contexts, fire-and-forget can be cut off
+    // after the recommendation run reports success, leaving the sheet empty.
+    // ExportResult is non-throwing; publish failure never fails the run.
+    const sheetExport = await exportDailyRecs(
       { runId: run.id, runDate: new Date(startTime).toISOString() },
       successfulResults
-    ).catch((err) =>
-      logger.error({
-        msg: "Google Sheets daily-recs export dispatch failed",
-        runId: run.id,
-        error: err instanceof Error ? err.message : String(err),
-      })
     );
+    logger.info({
+      msg: "Google Sheets daily-recs publish finished",
+      runId: run.id,
+      rows: successfulResults.length,
+      outcome: sheetExport,
+    });
 
     // Record health metrics
     await recordMetric({
@@ -1009,6 +1026,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       stopLossHit: 0,
       archived: archive.archived,
       executionTimeMs: 0,
+      updated: 0,
+      skippedNoPrice: 0,
     };
   }
 
@@ -1077,6 +1096,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   }
 
   let checked = 0;
+  let updated = 0;
+  let skippedNoPrice = 0;
   let targetAchieved = 0;
   let stopLossHit = 0;
 
@@ -1089,6 +1110,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
     const currentPrice = priceMap.get(tracker.symbol);
     if (currentPrice === undefined) {
+      skippedNoPrice++;
       logger.warn({ msg: "No price data found for tracker symbol", symbol: tracker.symbol, trackerId: tracker.id });
       continue;
     }
@@ -1128,6 +1150,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       currentPrice,
       lastCheckedAt: new Date(),
     });
+    updated++;
 
     if (newStatus) {
       const previousStatus = tracker.status;
@@ -1205,6 +1228,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // entry per run so monitoring tabs show the sweep ran even with zero status changes.
   const runMeta = {
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,
@@ -1236,6 +1261,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   logger.info({
     msg: "Performance check completed",
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,
@@ -1244,6 +1271,8 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
 
   return {
     checked,
+    updated,
+    skippedNoPrice,
     targetAchieved,
     stopLossHit,
     archived: archive.archived,

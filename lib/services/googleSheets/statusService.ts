@@ -15,7 +15,7 @@
 import logger from "@/lib/logger";
 import { isTrackingEnabled } from "./auth";
 import { getConfig, isTrackingActive, maskSheetId } from "./configService";
-import { TRACKER_TABS, readHeaderState, type HeaderState, type TrackerTab } from "./tabs";
+import { TRACKER_TABS, readHeaderDiagnostic, type HeaderState, type TrackerTab } from "./tabs";
 
 /** Per-tab status row rendered by the console. */
 export interface TabStatus {
@@ -24,6 +24,8 @@ export interface TabStatus {
   headerState: HeaderState;
   /** ISO high-water mark for the next manual sync, or `null` if never synced. */
   lastMark: string | null;
+  /** Sanitized cause when the header could not be read. */
+  diagnostic: string | null;
 }
 
 /** The full status payload. Contains no secret values by construction. */
@@ -77,11 +79,15 @@ export async function getStatus(): Promise<SheetsStatus> {
   // and keeps the console fast.
   const tabs = Object.keys(TRACKER_TABS) as TrackerTab[];
   const perTab = await Promise.all(
-    tabs.map(async (tab) => ({
-      tab,
-      headerState: await readHeaderState(tab),
-      lastMark: config.tabMarks[tab] ?? null,
-    }))
+    tabs.map(async (tab) => {
+      const header = await readHeaderDiagnostic(tab);
+      return {
+        tab,
+        headerState: header.state,
+        diagnostic: header.errorCode,
+        lastMark: config.tabMarks[tab] ?? null,
+      };
+    })
   );
 
   const status: SheetsStatus = {

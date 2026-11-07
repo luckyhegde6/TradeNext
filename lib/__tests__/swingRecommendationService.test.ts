@@ -20,6 +20,9 @@ jest.mock("@/lib/services/chartinkUnifiedScreenerService", () => ({
 jest.mock("@/lib/services/ai/swing-agent", () => ({
   analyzeSwingStocks: jest.fn(),
 }));
+jest.mock("@/lib/services/googleSheets/exporter", () => ({
+  exportSwing: jest.fn().mockResolvedValue("enabled"),
+}));
 
 // v3.52.0 — durable terminal notification. Mocked so the notification tests
 // assert the broadcast contract without touching the Bot API/prisma.user.
@@ -759,6 +762,12 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingJobs[0].analyzedCount).toBe(0);
     expect(swingJobs[0].error).toContain("not valid JSON");
     expect(swingJobs[0].completedAt).toBeInstanceOf(Date);
+    const { exportSwing } = jest.requireMock("@/lib/services/googleSheets/exporter") as {
+      exportSwing: jest.Mock;
+    };
+    expect(exportSwing).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ symbol: "RELIANCE" }),
+    ]), swingJobs[0].id);
 
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_START");

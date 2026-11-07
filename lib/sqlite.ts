@@ -2464,51 +2464,44 @@ const PROBE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
  * leader they pick up the probe on the next tick. `syncFromPrisma()` is itself
  * leader + breaker + syncing guarded, so this is safe to call unconditionally.
  */
-function startRecoveryProbe(): void {
-  if (state.probeTimer) return;
-
-  state.probeTimer = setInterval(async () => {
-    if (state.syncing) return;
-
-    try {
-      const leader = await import("@/lib/services/leader");
-      const isSyncLeader = await leader.isLeader("sqlite-sync");
-      if (!isSyncLeader) {
-        // Not the sqlite-sync leader — skip the Prisma probe. The leader's
-        // sync + recovery is authoritative; we stay a standby buffer.
-        state.lastProbeAt = new Date().toISOString();
-        return;
-      }
-
-      // Lightweight probe: try to read one row from any table
-      await prisma.cronJob.findFirst({ select: { id: true }, take: 1 });
-      const wasUnavailable = !state.prismaAvailable;
-      state.prismaAvailable = true;
-
-      // v3.26.0: run a periodic full reconcile on EVERY tick when Prisma is
-      // available — this is the "15min Prisma sync/reconcile". Not gated
-      // on the down→up transition, so pending SQLite→Prisma control writes
-      // reach Prisma every 15min even on a healthy DB. syncFromPrisma() is
-      // leader + breaker + syncing guarded internally.
-      if (wasUnavailable) {
-        logger.info({ msg: "SQLite: Prisma recovered, triggering re-sync" });
-      }
-      await syncFromPrisma();
-
-      // Plan 09 Phase 4: drain _sync_outbox one-way to Prisma on the same
-      // probe cadence (leader + breaker gated inside pushSqliteToPrisma).
-      await pushSqliteToPrisma();
-    } catch (err) {
-      if (isDbUnavailableError(err)) {
-        state.prismaAvailable = false;
-        logger.debug({ msg: "SQLite: Prisma probe still unavailable" });
-      } else {
-        // Non-DB errors (e.g. model not found) mean the connection works
-        state.prismaAvailable = true;
-      }
+/**
+ * One leader-gated Prisma liveness probe plus SQLite→Prisma outbox drain.
+ * Recurring probes must NOT call syncFromPrisma(): boot hydration is the
+ * only automatic Prisma→SQLite pull. A full pull every 15 minutes amplified
+ * Prisma reads and could overwrite local mirror state with stale shared data.
+ * The write-behind outbox remains the recurring push/recovery path.
+ * Exported for focused regression coverage.
+ */
+export async function runRecoveryProbeOnce(): Promise<void> {
+  if (state.syncing) return;
+  try {
+    const leader = await import("@/lib/services/leader");
+    const isSyncLeader = await leader.isLeader("sqlite-sync");
+    if (!isSyncLeader) {
+      state.lastProbeAt = new Date().toISOString();
+      return;
     }
 
-    state.lastProbeAt = new Date().toISOString();
+    await prisma.cronJob.findFirst({ select: { id: true }, take: 1 });
+    state.prismaAvailable = true;
+    await pushSqliteToPrisma();
+  } catch (err) {
+    if (isDbUnavailableError(err)) {
+      state.prismaAvailable = false;
+      logger.debug({ msg: "SQLite: Prisma probe still unavailable" });
+    } else {
+      state.prismaAvailable = true;
+    }
+  }
+  state.lastProbeAt = new Date().toISOString();
+}
+
+function startRecoveryProbe(): void {
+  if (state.probeTimer) return;
+  state.probeTimer = setInterval(() => {
+    runRecoveryProbeOnce().catch((err) =>
+      logger.warn({ msg: "SQLite recovery probe failed (non-fatal)", error: err instanceof Error ? err.message : String(err) }),
+    );
   }, PROBE_INTERVAL_MS);
 }
 
