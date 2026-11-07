@@ -10,7 +10,7 @@
 
 Replace reliance on in-process cron and worker timers as the production wake-up mechanism on Netlify with a platform-scheduled, authenticated, bounded execution path. Preserve TradeNext's existing PostgreSQL/Prisma task queue, CronJob.nextRun schedule ledger, task executor registry, TaskEvent timeline, SQLite mirror/degraded queue and admin controls.
 
-The Netlify Scheduled Function is a short dispatcher only. It invokes an authenticated Background Function that obtains a fail-closed distributed lease, recovers due cron jobs, and processes only work that is safe to execute inside the remaining function budget. The platform timer wakes the runner; database rows remain the durable schedule and task truth.
+The Netlify Scheduled Function is a short dispatcher only. It invokes an authenticated Background Function using Netlify's supported standalone Functions format (not deprecated Next.js Advanced API scheduled/background routes) that obtains a fail-closed distributed lease, recovers due cron jobs, and processes only work that is safe to execute inside the remaining function budget. The platform timer wakes the runner; database rows remain the durable schedule and task truth.
 
 Daily Recommendations currently has an observed 25–35 minute monolithic path, beyond the 15-minute Netlify Background Function ceiling. It must be made resumable with durable idempotent batches and a finalizer before that job can be enabled in the serverless worker. All other task types require a measured/declared runtime audit. Wrapping the old pollAndExecute() unchanged in a Background Function is explicitly forbidden.
 
@@ -99,6 +99,7 @@ flowchart TD
 ```
 
 ### 5.1 Scheduled function
+- Implement as a standalone file under netlify/functions with inline config.schedule = "* * * * *" (UTC), using the currently supported Netlify Functions Request/Response contract. Do not implement it as a Next.js API route.
 - Schedule: * * * * * UTC, one-minute wake-up.
 - No DB reads, task execution, imports of the heavy application service graph or business logic.
 - Create fixed envelope: source=scheduled, scheduledAt ISO timestamp, nextRun informational only.
@@ -107,6 +108,7 @@ flowchart TD
 - No inbound/user-supplied task IDs, cron IDs, task types, schedule expressions or arbitrary payloads.
 
 ### 5.2 Background function
+- Use the supported -background function filename suffix (for example worker-runner-background.mts) and supported standalone Netlify handler contract. Netlify responds 202 to asynchronous invocations; handler result is not returned to the scheduled caller.
 - POST only; validate content type, strict Zod envelope and small body-size cap.
 - Missing WORKER_DISPATCH_SECRET => fail closed; never fall back to public unauthenticated execution.
 - Constant-time bearer comparison (fixed-length digest comparison); never log authorization header or secret.
@@ -273,3 +275,13 @@ Keep data bounded and admin-only. Do not add Prisma reads to the core low-cost D
 3. **Cancellation:** platform termination may skip finally. Only start resumable/idempotent tasks and stop early.
 4. **DB outage:** do not reinterpret local degraded-mode behavior as a distributed lease.
 5. **Production auth errors:** invalid_grant and expired Blobs token are external config issues; code may improve diagnostics, but only the user/operator rotates secrets.
+
+
+## 13. Official Netlify function contract verified 2026-11-08
+
+- Scheduled Functions use a standalone Netlify Function and UTC cron configuration; the request body contains next_run, and scheduled handlers cannot be invoked directly by URL.
+- Scheduled Functions run on published deploys only; branch/deploy-preview verification must use the Functions UI Run now action or netlify functions:invoke.
+- Scheduled Function execution limit is 30 seconds.
+- Background Functions use the -background filename suffix (or supported background config), are asynchronously invoked and return an initial 202; their maximum execution is 15 minutes and payload limit is 256 KB.
+- Netlify Next.js Runtime v5 guidance deprecates Scheduled/Background Next.js Advanced API routes in favor of standalone Netlify Functions. This spec uses standalone functions under netlify/functions.
+- Implementation must verify the current Netlify Functions package/types already available; do not install a package without approval. Use native platform types/handlers only if the installed Netlify bundler accepts them.
