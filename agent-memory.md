@@ -1,3 +1,19 @@
+### 2026-11-08 | Spec 42 — clean-main restart after PR #154 merge
+
+**Request:** PR #154 is merged. Continue Spec 42 on a new branch from latest main, document findings/solutions/step plan; investigate the duplicate feature branches.
+
+**Baseline:** PR #154 merged as a5daee935f4ef7740d4f8d4d10f6131414d7449e. Main at creation: 10337d956cafc943c3e97f73121e1038330d86af. New branch feature/spec-42-durable-worker-cron-v2 is based directly on main. Old unsuffixed branch was the preliminary branch; old -pr154 branch was based on the pre-merge PR head. Both are superseded; neither has been deleted.
+
+**Docs:** Revised .agents/specs/42-durable-netlify-worker-cron.md and .agents/plans/42-durable-netlify-worker-cron.md include production findings, reuse map, current Netlify contract, proposed architecture, failure behavior, acceptance criteria, schema gates, rollback and step-by-step plan. .agents/docs/tasks-cron-workers.md updated with Netlify target architecture. Handoff/TODO updated.
+
+**Code:** Reapplied optional failOpen=false to leader acquisition/renewal/heartbeat; existing persistent Node defaults preserved. Added tests for fail-closed acquisition and renewal.
+
+**Critical gates:** Netlify scheduled function 30s; background function 15m; Daily Recommendations currently 25–35m. WorkerStatus has no fencing token/lease expiry; WorkerTask has no durable checkpoint unique key; CronJob.name not unique. Need schema design and explicit approval before schema/migration changes. Do not wrap pollAndExecute unchanged.
+
+**Verification:** No tests/tsc/lint/build run yet. No commit/push/PR/merge/deploy. WORKER_DISPATCH_SECRET value not configured.
+ 
+---
+
 # Agent Memory - Activity Log
 
 > This file tracks all agent activities. Use git hooks to automatically append activity logs.
