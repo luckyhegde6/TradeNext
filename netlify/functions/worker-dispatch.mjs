@@ -126,8 +126,9 @@ export default async function handler(request) {
       dispatchError = `background function returned ${resp.status}`;
     }
   } catch (err) {
-    dispatchError =
-      err instanceof Error ? err.message : String(err);
+    // Sanitize the error message — never expose raw error details (stack
+    // traces, internal URLs, or provider-specific messages) to the caller.
+    dispatchError = "dispatch_failed";
   }
 
   const durationMs = Date.now() - startedAt;
