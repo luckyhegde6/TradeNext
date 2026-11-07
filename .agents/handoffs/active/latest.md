@@ -58,3 +58,8 @@ The earlier production log also reported Prisma Accelerate timeouts, Netlify Blo
 ## Verification
 
 No Jest/TypeScript/lint/quickbuild/Playwright checks have been run in this remote-editing session. No commit/push/PR created. No schema/migration or dependency change. No env var configured. No merge or deployment.
+
+
+## Documentation updated in this branch
+- HANDOFF.md, Primer.md, Lessons.md (lessons 170–172), TODO.md, agent-memory.md, .agents/session-todos.md, .agents/changelog/versions-index.md, .agents/CHANGELOG.md draft entry and AGENTS.md version index.
+- .agents/docs/tasks-cron-workers.md now documents the intended Netlify production model and the current implementation gates.
