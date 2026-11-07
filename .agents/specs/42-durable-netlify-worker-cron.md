@@ -285,3 +285,12 @@ Keep data bounded and admin-only. Do not add Prisma reads to the core low-cost D
 - Background Functions use the -background filename suffix (or supported background config), are asynchronously invoked and return an initial 202; their maximum execution is 15 minutes and payload limit is 256 KB.
 - Netlify Next.js Runtime v5 guidance deprecates Scheduled/Background Next.js Advanced API routes in favor of standalone Netlify Functions. This spec uses standalone functions under netlify/functions.
 - Implementation must verify the current Netlify Functions package/types already available; do not install a package without approval. Use native platform types/handlers only if the installed Netlify bundler accepts them.
+
+
+## 14. Earlier branch lineage (verified 2026-11-08)
+
+- feature/spec-42-durable-worker-cron was created prematurely from merge commit a5daee935f4ef7740d4f8d4d10f6131414d7449e while preparing the first branch; it did not contain the actual implementation draft.
+- feature/spec-42-durable-worker-cron-pr154 was created from the then-current PR #154 head 7816d229706e24e3ae20de8e9af3a844f764f710 before PR #154 merged. It contains the earlier Spec 42 draft and fail-closed leader-option experiment, but its history is divergent from merged main.
+- PR #154 merged as a5daee935f4ef7740d4f8d4d10f6131414d7449e. Main then advanced to 10337d956cafc943c3e97f73121e1038330d86af.
+- feature/spec-42-durable-worker-cron-v2 was created directly from that latest main SHA. The revised spec and plan are the authoritative continuation.
+- Old branches are marked stale candidates. Delete only after confirming v2 has the required docs/code lineage and the user has asked for stale branch cleanup. No branch is deleted by this spec itself.
