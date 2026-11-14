@@ -1,6 +1,6 @@
 ---
 name: server-log-analysis
-description: Triage, clean, and analyze server logs from Netlify function logs, DB logs, and local worker logs. Includes Netlify MCP tool integration for live server queries and log retrieval.
+description: Server-side log triage and cleanup workflow for TradeNext - parse raw Netlify/function logs, strip noise, extract key events, add skills for log-driven debugging
 metadata:
   audience: agents
   workflow: observability
@@ -8,68 +8,66 @@ metadata:
 
 # Server Log Analysis Skill
 
-A systematic workflow for triaging, cleaning, and formatting TradeNext server logs so agents can debug issues accurately and efficiently.
+Systematic workflow for triaging, cleaning, and formatting TradeNext server logs so agents can read them efficiently and add durable log-analysis capability.
 
-## 1. Log Sources & Architecture
+## 1. Source map (where logs live)
 
-| Source | Path / Interface | Format | Description & Purpose |
-|--------|------------------|--------|-----------------------|
-| **Raw Netlify Logs** | Root (`29Oct.log`, `15OctProdlog..txt`) or Netlify MCP | Text with `<Date/Time>: <request-id> <LEVEL> <UTC-ISO> \| msg=...` | Live serverless function execution traces, cold starts, cron executions |
-| **Netlify MCP** | MCP server (`@netlify/mcp`) | Interactive tools | Query site details, recent deploys, build logs, and function outputs |
-| **Worker Logs** | `worker_logs/<taskId>.log` | Line-delimited JSON / text | Execution log for specific worker tasks |
-| **Server DB Logs** | `ServerLog` table | SQL table | 7-day retention of internal subsystem logs (`source`: nse, worker, ai, api, system) |
-| **Cleaned Artifacts** | `logs/YYYY-MM/YYYY-MM-DD-agent-clean.md` | Markdown | Distilled, agent-readable incident timeline with noise removed |
+| Source | Path | Format | Notes |
+|--------|------|--------|-------|
+| **Raw Netlify function logs** | Repo root: `29Oct.log`, `15OctProdlog..txt` | text with `<Mon DD, hh:mm:ss AM>: <hash> [LEVEL] <UTC ISO> \| <emoji> <LEVEL> \| msg=...` | Captured from Netlify; UTC ISO inside structured lines |
+| **File logs (runtime)** | `.next/server_logs/*.log`, `worker_logs/<taskId>.log` | pino pretty | Fall back to DB `ServerLog` when FS unavailable (serverless) |
+| **DB logs** | `ServerLog` table (`source`: nse\|worker\|ai\|api\|system\|sync\|auth) | rows | Primary on serverless; 7-day retention |
+| **HTTP logs** | `APIRequestLog` | rows | method/path/status/duration |
+| **Unified events** | `UnifiedEvent` | rows | telegram\|ai_agent\|screener\|system_health\|audit |
+| **Health metrics** | `SystemHealthLog` | rows | ai_response_time, screener_duration, delivery_rate, db_query_time, uptime |
 
-## 2. Using Netlify MCP for Log & Deploy Analysis
+Full design: `.agents/docs/monitoring-and-logging.md`.
 
-When `@netlify/mcp` is active in `.opencode/opencode.json` or as an MCP server:
-- Check recent deploys and deployment statuses to correlate server errors with new releases.
-- Query function logs directly to monitor in-flight background tasks.
-- Verify environment variables (e.g. checking whether fallback models or external API keys are configured) without exposing secrets.
+## 2. Raw log line taxonomy (what to keep / drop)
 
-## 3. Log Line Taxonomy (What to Keep vs. What to Drop)
+- **KEEP**: structured pino lines with meaningful `msg=` fields (`msg=Cron job due, spawning task...`, `msg=Executing task...`, `msg=Daily recommendation run starting...`, `msg=AI ...`, `msg=...error...`).
+- **DROP (noise)**: boot lines `<Mon DD, hh:mm:ss AM>: <hash> Duration: xxx ms\tMemory Usage: yyy MB`, `✓ Running next.config took xms`, raw `Web Vitals metric received...` (unless chasing perf), duplicate mirror-snapshot uploads, raw auth-session chatter (keep the login SUCCESS/Failure outcome).
+- **KEEP as WARN**: `Live Chartink fetch failed, TV fallback, ... error=Chartink scan HTTP 419` — high volume, keep counts (`templates=117`, per-template list), not per-failure detail.
 
-When processing raw logs like `29Oct.log`:
-- **KEEP (High Signal)**:
-  - Structured pino logs containing `msg=...` (e.g. `msg=Cron job due, spawning task`, `msg=Executing task`, `msg=Daily recommendation run starting`, `msg=AI ...`).
-  - Error and warning lines (`ERROR`, `WARN`, `CircuitBreakerError`, `HTTP 402`, `HTTP 419`, `P6003`, Accelerate probe failures).
-  - Leader lock acquisitions/losses (`role=worker`, `role=cron-daemon`, `role=sqlite-sync`).
-  - Worker task lifecycle events (`task_started`, `task completed`, `reaped`, `timed out`).
-- **DROP (Noise)**:
-  - Container metric lines: `Duration: xxx ms\tMemory Usage: yyy MB`.
-  - Next.js config boot lines: `✓ Running next.config took xms`.
-  - Client web vitals reports (`msg=Web Vitals metric received...`) unless specifically analyzing frontend latency.
-  - Periodic duplicate mirror snapshot uploads (`msg=SQLite: mirror snapshot uploaded to Blobs`).
+## 3. Cleaning & formatting protocol
 
-## 4. Cleaning & Formatting Protocol
-
-```text
-1. Read the raw log file or fetch logs via Netlify MCP.
-2. Filter for structured lines containing `msg=` or error markers.
-3. Align timestamps: note both the local header timestamp (often IST) and the inner UTC ISO timestamp (IST = UTC + 5:30).
-4. Group by subsystem:
-   - Cron Daemon & Scheduler
-   - Worker Engine & Task Execution
-   - Daily Recommendations Pipeline & Screeners
-   - AI Analysis & LLM Providers (OpenRouter status/credits)
-   - Database / Accelerate / SQLite Mirror
-5. Generate the cleaned artifact at `logs/YYYY-MM/YYYY-MM-DD-agent-clean.md`.
-6. Retain raw logs untouched for auditability.
+```
+1. Extract structured lines (those containing `msg=`).
+2. Strip noise lines (Duration/Memory, next.config, Web Vitals unless perf-investigating).
+3. Normalize timestamps: keep both local prefix + UTC ISO from the structured payload.
+4. Group by subsystem: cron / task / ai / chartink / sqlite / auth / db / infra.
+5. Write cleaned artifact: logs/2026-10/YYYY-MM-DD-agent-clean.md (or docs/logs/<date>-clean.md).
+6. Keep the raw file untouched — cleaned version is additive, never a rewrite of evidence.
 ```
 
-## 5. Triage Playbook (Common TradeNext Symptoms)
+## 4. Triage playbook (highest-frequency incidents)
 
-| Symptom | Diagnostic Grep in Log | Root Cause & Remediation |
-|---|---|---|
-| **"Cron not firing / No runs in history"** | `Cron job due, spawning task`, `Daily recommendation run starting` | Check if cron ticked but spawned task got stuck, or if container suspended mid-execution. Verify if `DailyRecommendationRun` reached Prisma or only SQLite mirror. |
-| **"Run failed / 0 stocks / 0 AI analyzed"** | `AI pre-flight FAILED`, `Insufficient credits`, `402`, `429` | OpenRouter credits exhausted or daily free quota latched. Check fallback chain (`config.ts`, `modelChain.ts`). |
-| **"Task running forever / busy worker"** | `Executing task`, `STALE_MS`, `Reaped by worker`, `task timed out` | Worker container frozen by Netlify timeout or Accelerate query hung past deadline. Check `TASK_TIMEOUT_MS` and liveness heartbeat. |
-| **"Accelerate timeout / DB unavailable"** | `Accelerate probe failed`, `Prisma query WorkerStatus timed out` | Accelerate network degradation or plan limit hold (`P6003`). Verify degraded mode switch and SQLite fallback. |
-| **"Chartink scan HTTP 419"** | `Live Chartink fetch failed, TV fallback` | Chartink CSRF/session block; verify TradingView fallback is taking over properly. |
+| Symptom (dashboard / user report) | First grep on cleaned log |
+|---|---|
+| "not firing" / no runs | `Cron job due, spawning task`, `Recommendations catch-up enqueued`, `cron resync deferred`, `Scheduled cron job` |
+| AI all-HOLD / silent | `AI Connection Test`, `Daily recommendation run starting`, `skipAi`, `aiSuccess:false`, OpenRouter 402/429 |
+| Task stuck / reaped | `Executing task`, `task timed out`, `Reaped by worker`, `task ran past 45 min` |
+| DB ops / plan-limit hold | `Plan limit circuit breaker open`, `fetch failed`, `P6003`, `db_health`, `flushWriteBehind`, degraded mode lines |
+| NSE / market sync failure | `market_data`, `a is not iterable`, `getIndexStocks`, NSE fetch errors |
 
-## 6. Verification Checklist
+## 5. Netlify-specific realities
 
-- [ ] Timestamps cross-checked between IST and UTC (IST = UTC + 5h30m).
-- [ ] Task IDs correlated from Cron trigger -> Worker execution -> Task completion/failure.
-- [ ] Cleaned markdown artifact saved to `logs/YYYY-MM/YYYY-MM-DD-agent-clean.md`.
-- [ ] Findings and actions clearly documented for pair-programming agent or human review.
+- Netlify suspends idle instances ~2h → node-cron ticks stop silently; daemon runs on persistent host / Netlify Functions via `instrumentation.ts` (`CRON_DAEMON_DISABLED=1` opt-out).
+- Netlify function gateway ~30s wall → long tasks must go through worker task queue (async), never in-request.
+- File logs are ephemeral on serverless → use DB layers for durable triage; use file logs for local dev.
+- Netlify MCP tools (`@netlify/mcp`) available for deploy/site/log queries when wired; skill usage: `npx -y @netlify/mcp` server config (currently `enabled:false` in `.opencode/opencode.json` — flip when needed).
+
+## 6. Verification before declaring "log reviewed"
+
+1. Raw log re-read for the incident window (cross-check UTC vs IST: IST = UTC+5:30).
+2. Cleaned artifact written and committed.
+3. Root cause traced to code path; fix landed in same PR; cleaned log committed alongside.
+
+## Checklist
+
+- [ ] Locate raw log (`29Oct.log` naming pattern) + relevant date window
+- [ ] Strip noise, keep structured `msg=` events
+- [ ] Group by subsystem + write cleaned artifact
+- [ ] Triage via playbook table above
+- [ ] Cross-check UTC/IST before concluding
+- [ ] Add new learnings to the skill if a pattern repeats

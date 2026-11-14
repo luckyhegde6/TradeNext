@@ -22,10 +22,10 @@ This skill is the umbrella. For deep work, load the focused skill:
 
 | Task | Focused skill |
 |------|---------------|
-| Apply repo doc updates after a change | `docs-updater` (`.opencode/skills/docs-updater/`) |
-| Publish/maintain wiki pages | `wiki-creator` (`.opencode/skills/wiki-creator/`) |
-| Hunt/verify bugs before or after a change | `bug-finder` (`.opencode/skills/bug-finder/`) |
-| Audit/enhance UI/UX before or after a change | `ux-enhancer` (`.opencode/skills/ux-enhancer/`) |
+| Apply repo doc updates after a change | `docs-updater` (`.agents/skills/docs-updater/`) |
+| Publish/maintain wiki pages | `wiki-creator` (`.agents/skills/wiki-creator/`) |
+| Hunt/verify bugs before or after a change | `bug-finder` (`.agents/skills/bug-finder/`) |
+| Audit/enhance UI/UX before or after a change | `ux-enhancer` (`.agents/skills/ux-enhancer/`) |
 
 Agent/command mappings live in `.agents/AGENT-SKILL-MATRIX.md` (agents: doc-writer, wiki-publisher, bug-hunter, ux-designer).
 

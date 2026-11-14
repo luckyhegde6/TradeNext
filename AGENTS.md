@@ -5,6 +5,7 @@
 > **Agentic operating model:** `.agents/RULES.md` (must-read on first session) + `.agents/SOUL.md` (identity). Full history & legacy docs live in `.agents/CHANGELOG.md`.
 
 ## Version History
+| **v3.57.0** | 2026-11-15 | PR #155: canonical `.agents/skills` consolidation (format A), WebMCP skill/agent, agent/rules/cmd/orchestration+handoff updates, perf lastCheckedAt stamp + index/NIFTY TOTAL MARKET fallback+diagnostics. Targeted Jest 36/36, lint 0 err. Detail `.agents/changelog/versions-v3.57.md`. |
 | **v3.53.0** | 2026-11-02 | Spec 36 AI-down actionable picks + dedupe daily notice (COMMIT PENDING USER; D9). Credit/quota predicates + UTC-day latch, one-notice/day guard, AI-down ranked BUY/SELL fallback, swing/stock fallback verified. Detail `.agents/changelog/versions-v3.53.md` (Lesson 167). |
 | **v3.56.0 (draft)** | 2026-11-08 | Spec 42 durable Netlify worker/cron (post PR #154): spec/plan + fail-closed leader/tests; runner/checkpoint pending schema approval. `.agents/specs/42-durable-netlify-worker-cron.md`. |
 | **v3.52.0** | 2026-10-22 | Spec 34 — 4 user-reported prod defects (COMMIT PENDING USER, D9; detail `.agents/changelog/versions-v3.52.md`, Lesson 165). (1) **Batching + ranking**: `BATCH_SIZE 5→20`, `CONCURRENCY 5→3` (100 stocks = 5 calls) + new exported `rankStockAnalysisResults()` applied **once after the batches combine** — success → confidence → screener score → marketCap → symbol — re-asserted on `successfulResults` in `dailyRecommendationService` (its `rankActionableByConfidence` was dead code). (2) **Swing Telegram = durability**: the send lived only at the tail of `processSwingAnalysisJob` (Netlify freezes the request path) and the recovery path marked `failed` **silently** → durable `payload.tgNotifiedAt` (JSON, no migration) + `notifySwingTerminal(jobId)` (`SWING_TG_WINDOW_MS` 6h, at-most-once, payload merged) called from the processor tail, the recovery path, both terminal serves and a 1h sweep of the newest jobs (new `getSwingAnalysisJobs({order:"desc"})`); `failed` now sends the honest `buildSwingUnavailableNotice()`. Job-awareness also moved **before** the `staticCache` short-circuit (the analyze=0 poll was serving a cached `skipped` feed, flipping the banner back to "AI targets off" ~15 s after Refresh — found in live verification, not by unit tests). (3) **Single Telegram header**: `broadcastToSubscribers(..., {prependTitle:false})` — builders own the `🔔` line. (4) **Logger mirror**: one change in `lib/logger.ts` — extra native `console.log/warn/error("[LEVEL]", msg, ...args)` beside the formatted line (`LOG_CONSOLE_EXTRA=false` off, silent in tests). Deleted the no-op `onSuccess` in `SwingTab.tsx`. Gates: tsc **46 exact (prod 0)** · Jest **138/138** · eslint 0. |
@@ -135,11 +136,11 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 
 | Layer | Location | Notes |
 |-------|----------|-------|
-| Skills (machine) | `.opencode/skills/<name>/SKILL.md` | YAML frontmatter (`name`, `description`); auto-discovered |
-| Skills (human mirror) | `.agents/skills/<name>.md` | Short version + `Source:` footer |
-| Agent profiles | `.agents/agents/<name>.md` | Expertise + Workflow + Handoff Triggers |
-| Commands | `.agents/commands/<name>.md` | `/command` templates |
-| Wiring | `.opencode/opencode.json` | `agent:` + `command:` sections |
+| Skills (canonical) | `.agents/skills/<name>/SKILL.md` | Format A: folder per skill + `SKILL.md` (YAML frontmatter), optional `references/`; **source of truth for all LLMs** |
+| Agent profiles | `.agents/agents/<name>.md` | Expertise, workflow, skills/tools, handoff triggers |
+| Commands | `.agents/commands/<name>.md` | `/command` templates and required output shapes |
+| Wiring | `.opencode/opencode.json` | `agent:` + `command:` + MCP/tool bindings |
+| Rules & memory | `.agents/rules/`, `.agents/handoffs/`, `.agents/sessions/` | Checklists, session/handoff/continuation, orchestration health |
 
 **Focused skills**:
 
@@ -153,10 +154,11 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `playwright-e2e` | e2e-agent | — | committed e2e suite (`e2e/`, `npm run test:e2e`): regression guards, cross-browser + mobile |
 | `playwright-debug` | qa / e2e-agent / bug-hunter / ux-designer / code-reviewer / tdd | — | Playwright developer debug toolkit (Inspector `--debug`, UI Mode, Codegen, Trace Viewer, HTML report) — diagnose failing/flaky tests + generate stable role/text locators |
 | `playwright-cli` | — | — | exploratory browser testing via Playwright MCP tools (not committed) |
-| `server-log-analysis` | observability | — | server log triage/clean/format (Netlify raw logs, DB layers, cleaning protocol, incident playbook) |
-| — | orchestrator | `/orchestrate` | decompose ≥2 independent workstreams → parallel dispatch (Tier A) or chunked-sequential (Tier B); declares tier, monitors subagent health, owns handoff |
+| `server-log-analysis` | observability | `/server-log` | server log triage/clean/format (Netlify raw logs, DB layers, cleaning protocol, incident playbook) |
+| `webmcp` | webmcp-integrator | — | implement WebMCP (`document.modelContext`) tool surfaces in web pages (client-only, secure, schema-driven) |
+| — | orchestrator | `/orchestrate` | decompose ≥2 independent workstreams → parallel dispatch (Tier A) or chunked-sequential (Tier B); monitors health, persists handoff/continuation state |
 
-**Adding a new skill**: create `.opencode/skills/<name>/SKILL.md` → mirror `.agents/skills/<name>.md` → profile + command → wire `opencode.json` → update matrix + this table.
+**Adding a new skill**: create `.agents/skills/<name>/SKILL.md` (+ optional `references/`) → add/update agent profile + command → wire `opencode.json` if needed → update `.agents/AGENT-SKILL-MATRIX.md` and this table. Do **not** add skills under `.opencode/skills` (avoid confusion; `.agents/skills` is canonical).
 
 **GitHub wiki gotchas** (wiki-creator skill): wiki git repo is lazy-created (create first page via web UI before cloning); GitHub's mermaid renderer is stricter — quote ALL labels with specials (`A["text<br/>more"]`, `E3["action: none|buy|sell|paper_trade"]`).
 
@@ -279,11 +281,11 @@ Key functions: `getIndexData`, `getMarketIndices`, `getStockQuote`, `getStockCha
 - Use `nseFetch(path, qs)` from `lib/nse-client.ts` (cookie + cache handled). Server-side proxy only; never call NSE from client.
 - **Historical data endpoint**: `GET /api/historicalOR/generateSecurityWiseHistoricalData?from=DD-MM-YYYY&to=DD-MM-YYYY&symbol=SYMBOL&type=priceVolumeDeliverable&series=ALL` → `{ data: SecurityWiseHistoricalRow[] }` (fields: `CH_SYMBOL`, `CH_SERIES` EQ|BL, `mTIMESTAMP`/`CH_TIMESTAMP`, OHLC, `VWAP`, `CH_TOT_TRADED_QTY`, `CH_TOT_TRADED_VAL`, `CH_TOTAL_TRADES`, `COP_DELIV_QTY`, `COP_DELIV_PERC`). Fetcher + OHLCV mapper in `lib/nse-api.ts`; use `parseNseDate`.
 - **Securities available for trading (Equity segment)**: machine CSV at **`https://archives.nseindia.com/content/equities/EQUITY_L.csv`** — the `www.nseindia.com/static/market-data/securities-available-for-trading` listing page is JS-guarded (curl returns a 404 HTML shell), use the archives host for this file. Full 2,570-scrip metadata (EQ/BE/BZ series) is committed as the generated constant `lib/services/nseScripList.ts` (`NSE_SCRIPS` / `NSE_SYMBOL_SET` / `NSE_SCRIP_BY_SYMBOL` + `isNseSymbol` / `getNseScrip` / `searchNseSymbols`), refreshed via `npm run fetch:scrips -- --write`. ISINs are `^IN[0-9A-Z]{10}$` — SME scrips start `IN9`, not `INE`.
-- Rate limits respected; retry + backoff; cache with TTL. See `.opencode/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md`.
+- Rate limits respected; retry + backoff; cache with TTL. See `.agents/skills/nse-integration/SKILL.md` + `.agents/skills/nse-integration.md`.
 
 ## Documentation Workflow Skill
 
-- **`docs-workflow`** (`.opencode/skills/docs-workflow/SKILL.md` + `.agents/skills/docs-workflow.md`) — how to create feature plan files (`docs/designDoc/ph<NN>-*.md`), publish GitHub wiki pages (`TradeNext.wiki.git`), and apply the mandatory repo doc updates (AGENTS.md version table, CHANGELOG, TODO, Primer, Lessons, agent-memory, swagger/OpenAPI). Load this skill before any documentation work.
+- **`docs-workflow`** (`.agents/skills/docs-workflow/SKILL.md` + `.agents/skills/docs-workflow.md`) — how to create feature plan files (`docs/designDoc/ph<NN>-*.md`), publish GitHub wiki pages (`TradeNext.wiki.git`), and apply the mandatory repo doc updates (AGENTS.md version table, CHANGELOG, TODO, Primer, Lessons, agent-memory, swagger/OpenAPI). Load this skill before any documentation work.
 
 
 <!-- BEGIN:nextjs-agent-rules -->

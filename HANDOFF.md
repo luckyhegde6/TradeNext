@@ -5,12 +5,12 @@
 ## Current State
 
 ```yaml
-status: "implementation_complete"
+status: "completed"
 current_agent: "system"
 next_agent: "human"
 handoff_version: "1.1"
-last_updated: "2026-11-08T00:00:00Z"
-feature: "Spec 42 — Durable Netlify scheduled worker and cron execution on feature/spec-42-durable-worker-cron-v2, based on main 10337d956cafc943c3e97f73121e1038330d86af after PR #154 merged. IMPLEMENTATION COMPLETE: Netlify Scheduled/Background Function handlers, bounded serverless runner, Daily Recommendations coordinator/batch/finalizer checkpointing, instrumentation.ts Netlify split, DB Health runtime observability. All verification passed: npm run test (2144 pass, 0 fail), npx tsc --noEmit (0 prod errors), npm run lint (0 errors), npm run quickbuild (202/202 pages). Ready for commit/push/PR. User controls merge/deploy."
+last_updated: "2026-11-15T00:00:00Z"
+feature: "v3.57.0 on feature/spec-42-durable-worker-cron-v2 (PR #155): canonical .agents/skills consolidation (format A), WebMCP skill/agent, agent/rules/commands/orchestration + session continuation/handoff updates, and targeted rec/perf/index/worker fixes. Spec 42 implementation remains complete. Targeted validation: Jest 36/36, eslint 0 errors, tsc baseline unchanged for changed prod libs. S2 prod Prisma-Remote diagnostics blocked (approval/tool unavailable). Commit/push/PR update performed per explicit request; user controls merge/deploy (WORKER_DISPATCH_SECRET required in Netlify)."
 ```
 
 ## Handoff Required?

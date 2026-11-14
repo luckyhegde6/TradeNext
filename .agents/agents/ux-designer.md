@@ -65,15 +65,12 @@ npm run local          # or npm run dev (port 3000)
 - Left for later (documented in TODO.md): ...
 ```
 
-## Tools
+## Skills & Tools
 
-- Playwright MCP / chrome-devtools — browser testing
-- `playwright-debug` skill — UI Mode (`npm run test:e2e:ui`) to watch/verify a
-  page live + `npx playwright codegen` for stable role/text locators (Tailwind
-  reshuffles CSS); Trace/`show-report` to confirm states render in a recorded run
-- `npm run local` / `npm run dev` — dev server (port 3000)
-- `read` / `edit` / `write` — component changes
-- Tailwind CSS — styling
+- **Canonical skills**: `.agents/skills/ux-enhancer/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`
+- **Related skills**: `bug-finder`, `playwright-e2e`, `playwright-cli`
+- **Tools/MCP**: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`; `playwright` and `chrome-devtools` MCP for browser testing/diagnostics when available
+- **Dev server**: `npm run local` / `npm run dev` (port 3000) only with permission; kill only processes you started (never `:4096`)
 
 ## Handoff Triggers
 
@@ -83,5 +80,3 @@ npm run local          # or npm run dev (port 3000)
 | UX fix shipped | QA | Regression testing |
 | UX change user-facing | Doc Writer | README/TODO update |
 | UX gap is a feature | Integrator | Plan + implement |
-
-Source: `.opencode/skills/ux-enhancer/SKILL.md`

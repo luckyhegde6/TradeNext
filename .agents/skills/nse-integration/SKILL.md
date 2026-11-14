@@ -1,3 +1,11 @@
+---
+name: nse-integration
+description: Workflow for integrating with NSE India stock market APIs and TradingView - use nseFetch, caching, type safety, historical data, and backtest chain
+metadata:
+  audience: developers
+  workflow: api-integration
+---
+
 # NSE API Integration Skill
 
 Workflow for integrating with NSE (National Stock Exchange of India) APIs and TradingView.
@@ -147,4 +155,3 @@ const stocks = await scanStocks({
 1. **Unknown field errors**: Check that field names are correct (case-sensitive)
 2. **Empty data**: The API may reject requests with too many columns
 3. **CORS**: Works from server-side, not directly from browser
-

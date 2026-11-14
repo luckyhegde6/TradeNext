@@ -62,28 +62,19 @@ curl "http://localhost:3000/api/recommendations/performance?limit=25&offset=0&so
 - `prisma/schema.prisma` — nullable vs required, camelCase mapping
 - Cache layer — stale TTL after writes
 
-## Tools
+## Skills & Tools
 
-- `curl` — raw API reproduction
-- `grep` / `glob` — contract comparisons
-- `npx tsc --noEmit` / `npm run test` — verification
-- Playwright / chrome-devtools — browser path confirmation
-- Browser console + network tab — error detection
+- **Canonical skills**: `.agents/skills/bug-finder/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`
+- **Related skills**: `playwright-e2e`, `playwright-cli`, `docs-updater`
+- **Tools/MCP**: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash` (`curl`, `npx tsc`, `npm run test`, targeted Playwright commands), `playwright`/`chrome-devtools` MCP for browser repro when available
 
-## Browser reproduction & diagnosis (`playwright-debug` skill)
+## Browser reproduction & diagnosis
 
-When a bug manifests in the browser (not just the API), use the debug toolkit:
-1. **Trace** — reproduce on the app then inspect the failing action's DOM
-   snapshot, network (4xx/5xx from a zod/sort mismatch), and console. Often the
-   layer-contract root cause is visible in the network tab alone.
-2. **Inspector** — `npx playwright test --debug e2e/<spec>.ts -g "title"` to step
-   through the exact flow + evaluate the DOM.
-3. **UI Mode** — `npm run test:e2e:ui` to watch/re-run a failing spec live.
-4. **Codegen** — `npx playwright codegen http://localhost:3000
-   --load-storage=playwright/.auth/demo.json` to reproduce a UI-only bug as a
-   recorded set of actions / get a stable locator.
-
-See `.opencode/skills/playwright-debug/SKILL.md` for the full toolkit.
+When a bug manifests in the browser (not just the API), use `.agents/skills/playwright-debug/SKILL.md`:
+1. **Trace** — inspect failing action DOM snapshot, network (4xx/5xx contract mismatches), console.
+2. **Inspector** — `npx playwright test --debug e2e/<spec>.ts -g "title"`.
+3. **UI Mode** — `npm run test:e2e:ui` to watch/re-run.
+4. **Codegen** — `npx playwright codegen http://localhost:3000 --load-storage=playwright/.auth/demo.json` for repro/stable locators.
 
 ## Handoff Triggers
 
@@ -91,7 +82,5 @@ See `.opencode/skills/playwright-debug/SKILL.md` for the full toolkit.
 |-----------|------------|--------|
 | Bug verified + fix applied | QA | Regression suite |
 | Bug needs UI changes | UX Enhancer | UI audit |
-| Bug is a docs gap | Doc Writer | Document fix |
+| Bug is a docs gap | Doc Writer | Document fix / Lessons |
 | Contract change | Doc Writer | Swagger/OpenAPI update |
-
-Source: `.opencode/skills/bug-finder/SKILL.md`

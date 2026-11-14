@@ -4,9 +4,9 @@
 > run, generating a test/locator, picking a stable selector, or stepping through a
 > browser flow that fails.
 >
-> Companion skills: `.opencode/skills/playwright-debug/` (this toolkit),
-> `.opencode/skills/playwright-e2e/` (run/author the committed e2e suite),
-> `.opencode/skills/playwright-cli/` (interactive browser automation), MCP servers
+> Companion skills: `.agents/skills/playwright-debug/` (this toolkit),
+> `.agents/skills/playwright-e2e/` (run/author the committed e2e suite),
+> `.agents/skills/playwright-cli/` (interactive browser automation), MCP servers
 > `playwright` (`@playwright/mcp`) and `chrome-devtools`.
 
 ## 1. Why a debug toolkit?

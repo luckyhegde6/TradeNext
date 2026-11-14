@@ -37,7 +37,7 @@ import { createAuditLog } from "@/lib/audit";
 import { recommendationsCache } from "@/lib/cache";
 import prisma, { withAccelerateCache } from "@/lib/prisma";
 import logger from "@/lib/logger";
-import { isDbUnavailableError } from "@/lib/db-utils";
+import { isDbUnavailableError, isPlanLimitBreakerOpen } from "@/lib/db-utils";
 import { getSqliteFallback } from "@/lib/sqlite";
 import { calculateNextRun } from "@/lib/cron-parser";
 import { getCronFrom } from "@/lib/services/timeCorrection";
@@ -2055,7 +2055,38 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     const currentPrice = priceMap.get(tracker.symbol);
     if (currentPrice === undefined) {
       skippedNoPrice++;
-      logger.warn({ msg: "No price data found for tracker symbol", symbol: tracker.symbol, trackerId: tracker.id });
+      const checkedAt = new Date();
+      // Stamp lastCheckedAt even when no price is available so "Performance
+      // last checked" reflects the actual check run (not a stale prior date),
+      // while leaving currentPrice/status unchanged.
+      sqlite?.upsertRecommendationTracker({
+        ...tracker,
+        lastCheckedAt: checkedAt,
+      });
+      // Best-effort Prisma-backed stamp for prod topologies where reads come
+      // from Prisma and mirror push is delayed/insufficient (non-fatal).
+      try {
+        if (!isPlanLimitBreakerOpen()) {
+          await prisma.recommendationTracker.update({
+            where: { id: tracker.id },
+            data: { lastCheckedAt: checkedAt },
+          });
+        }
+      } catch (error) {
+        if (!isDbUnavailableError(error)) {
+          logger.warn({
+            msg: "Perf check: Prisma lastCheckedAt stamp failed for no-price tracker (non-fatal)",
+            symbol: tracker.symbol,
+            trackerId: tracker.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      logger.warn({
+        msg: "No price data found for tracker symbol (lastCheckedAt stamped)",
+        symbol: tracker.symbol,
+        trackerId: tracker.id,
+      });
       continue;
     }
 

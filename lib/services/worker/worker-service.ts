@@ -192,7 +192,10 @@ export async function executeStockSync(payload?: Record<string, unknown>): Promi
   const stocks = await getIndexStocks(indexName);
 
   if (!stocks || stocks.length === 0) {
-    throw new Error("No stocks fetched from NSE");
+    throw new Error(
+      `No stocks fetched from NSE for index "${indexName}" (stock sync). ` +
+        "Verify NSE endpoint availability and index name."
+    );
   }
 
   // Sync to database
@@ -904,12 +907,15 @@ async function executeMarketDataSync(payload?: Record<string, unknown>): Promise
   const stocks = await getIndexStocks(indexName);
 
   // Guard against a non-array return (NSE error → getIndexStocks returns
-  // null). Without this, `for (const stock of stocks)` throws a bare
+  // null/[]). Without this, `for (const stock of stocks)` throws a bare
   // "X is not iterable" which surfaced in prod as the Daily Market Sync
   // (system) `market_data` task failing with "a is not iterable". Throw a
-  // clear, actionable error like executeStockSync does (v3.26.0).
+  // clear, actionable error including the index name for diagnostics (v3.26.0).
   if (!Array.isArray(stocks) || stocks.length === 0) {
-    throw new Error("No stocks fetched from NSE (market data sync)");
+    throw new Error(
+      `No stocks fetched from NSE for index "${indexName}" (market data sync). ` +
+        "Verify NSE endpoint availability and index name."
+    );
   }
 
   const now = new Date();

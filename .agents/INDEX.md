@@ -80,7 +80,7 @@
 | Topic | File |
 |-------|------|
 | Agent ↔ Skill ↔ Command matrix | `.agents/AGENT-SKILL-MATRIX.md` |
-| Skill machines (auto-discovered) | `.opencode/skills/<name>/SKILL.md` |
+| Skill machines (auto-discovered) | `.agents/skills/<name>/SKILL.md` |
 | Skill human mirror | `.agents/skills/` |
 | Agent profiles | `.agents/agents/` |
 | Orchestrator agent (decompose → dispatch → monitor → handoff) | `.agents/agents/orchestrator.md` |

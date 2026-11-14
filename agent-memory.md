@@ -1,3 +1,22 @@
+### 2026-11-15 | v3.57.0 — canonical `.agents/skills` consolidation, WebMCP, rec/index fixes (PR #155)
+
+**Request:** Approve all and complete skill consolidation/migration to `.agents/skills` (format A), update agents/rules/commands/orchestration/session handoff/continuation, validate targeted lib fixes, update docs, and commit/push/update PR #155 (`feature/spec-42-durable-worker-cron-v2`).
+
+**Work completed:**
+- Consolidated skills to `.agents/skills/<name>/SKILL.md` (format A) as single source of truth; migrated/canonicalized `bug-finder`, `docs-updater`, `docs-workflow`, `nse-integration` (richer content), `playwright-cli` (+ refs), `playwright-debug`, `playwright-e2e`, `server-log-analysis`, `ux-enhancer`, `wiki-creator`, and added `webmcp`. Removed legacy `.opencode/skills/**` and obsolete `.agents/skills/*.md` mirrors; updated references across agents/rules/commands/docs/matrix/index/config.
+- Added WebMCP artifacts: `.agents/agents/webmcp-integrator.md`, `.agents/skills/webmcp/SKILL.md`.
+- Optimized orchestration/session continuity: updated `orchestrator`/agent profiles, `.agents/rules/session-memory-rules.md`, `.agents/commands/orchestrate.md`, `.agents/rules/README.md`, `.agents/AGENT-SKILL-MATRIX.md` for canonical skills, Tier A/B health, file-based resume/handoff (`Resume from`), and continuation discipline.
+- Targeted runtime fixes kept/validated:
+  - `lib/services/dailyRecommendationService.ts`: perf no-price path stamps `lastCheckedAt` in SQLite mirror + best-effort Prisma update (plan-limit breaker guarded, non-fatal).
+  - `lib/index-service.ts`: index fallback/config-aware resolution/caching for invalid/`NIFTY TOTAL MARKET` diagnostics.
+  - `lib/services/worker/worker-service.ts`: index-aware market/stock sync error diagnostics.
+
+**Verification:** targeted Jest **36/36 pass** (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`); `npm run lint` **0 errors** (repo warnings pre-existing); `npx tsc --noEmit` shows pre-existing baseline test/type errors (no changed prod-lib errors identified). **S2 prod Prisma-Remote diagnostics blocked** (approval/tool unavailable) — no prod DB mutations.
+
+**Docs/session:** `versions-v3.57.md`, `versions-index.md`, `.agents/CHANGELOG.md`, `AGENTS.md`, `TODO.md`, `Primer.md`, `Lessons.md` (168), `HANDOFF.md`, `.agents/handoffs/active/latest.md`, `.agents/session-todos.md`, `.agents/sessions/2026-11-15-skills-consolidation/{decisions,flow}.md`.
+
+---
+
 ### 2026-11-08 | Spec 42 — clean-main restart after PR #154 merge
 
 **Request:** PR #154 is merged. Continue Spec 42 on a new branch from latest main, document findings/solutions/step plan; investigate the duplicate feature branches.
@@ -74,7 +93,7 @@ The post-commit hook has been created automatically as part of the Handoff File 
   - The cron job is **active** and next scheduled run is today, **30 Oct 2026 at 10:00:00 AM IST**.
   - All prerequisites for successful runs (OpenRouter free fallback model `nvidia/nemotron-3-ultra-550b-a55b:free`, Accelerate resilience, and 15-min push sync) are implemented on branch `fix/openrouter-credits-accelerate-6hr-sync` (PR #137) pending user merge and deploy.
 - **UI Update**: In `app/admin/utils/workers/page.tsx`, moved the task creation timestamp to the very first column (`Timestamp`) before `Status`, formatted as `en-IN` (DD/MM/YYYY, hh:mm:ss am/pm), and removed the redundant `Created` column.
-- **Agent Skill**: Created `.agents/skills/server-log-analysis/SKILL.md` (and `.opencode/skills/server-log-analysis/SKILL.md`) detailing log line taxonomy, Netlify MCP integration, noise stripping, and symptom triage playbooks.
+- **Agent Skill**: Created `.agents/skills/server-log-analysis/SKILL.md` (and `.agents/skills/server-log-analysis/SKILL.md`) detailing log line taxonomy, Netlify MCP integration, noise stripping, and symptom triage playbooks.
 - **Cleaned Log Artifact**: Updated `logs/2026-10/2026-10-29-agent-clean.md` with structured event timelines, task IDs, and failure root causes.
 
 ---
@@ -669,8 +688,8 @@ The post-commit hook has been created automatically as part of the Handoff File 
 - **Status**: Code ready on `feat/plan-limit-resilience`; commit/push/PR pending user. External blockers: Prisma Postgres extension must be removed from Netlify Dashboard before deploy; hold must be lifted before full recovery (breaker auto-recovers).
 
 ### 2026-08-28 | playwright-debug skill + agent wiring (tooling/docs only, no code/test/API change)
-- **Action**: Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation), then wired it into every coding/verification agent. (1) **Machine skill** `.opencode/skills/playwright-debug/SKILL.md` (YAML frontmatter `name`/`description`/`allowed-tools: Bash(npx playwright *), Bash(npm run test:e2e:*)`): quick problem→tool matrix, Inspector/UI Mode/Codegen/Trace/Report sections, TradeNext config facts, recommended diagnosis flow, `trace: 'on-first-retry'` gotcha, locator strategy (role/text over raw CSS), related skills. (2) **Human mirror** `.agents/skills/playwright-debug/SKILL.md` (Source: footer). (3) **Deep-dive** `.agents/docs/playwright-debug.md` (matches `playwright-e2e.md` pattern). (4) **6 agent profiles** updated (qa, e2e-agent, bug-hunter, ux-designer, code-reviewer, tdd-guide). (5) **opencode.json** prompts wired for qa, e2e-agent, bug-hunter, ux-designer, code-reviewer, tdd, + build agent UI/UX section. (6) `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table updated.
-- **Files Created**: `.opencode/skills/playwright-debug/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`, `.agents/docs/playwright-debug.md`.
+- **Action**: Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation), then wired it into every coding/verification agent. (1) **Machine skill** `.agents/skills/playwright-debug/SKILL.md` (YAML frontmatter `name`/`description`/`allowed-tools: Bash(npx playwright *), Bash(npm run test:e2e:*)`): quick problem→tool matrix, Inspector/UI Mode/Codegen/Trace/Report sections, TradeNext config facts, recommended diagnosis flow, `trace: 'on-first-retry'` gotcha, locator strategy (role/text over raw CSS), related skills. (2) **Human mirror** `.agents/skills/playwright-debug/SKILL.md` (Source: footer). (3) **Deep-dive** `.agents/docs/playwright-debug.md` (matches `playwright-e2e.md` pattern). (4) **6 agent profiles** updated (qa, e2e-agent, bug-hunter, ux-designer, code-reviewer, tdd-guide). (5) **opencode.json** prompts wired for qa, e2e-agent, bug-hunter, ux-designer, code-reviewer, tdd, + build agent UI/UX section. (6) `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table updated.
+- **Files Created**: `.agents/skills/playwright-debug/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`, `.agents/docs/playwright-debug.md`.
 - **Files Modified**: `.opencode/opencode.json` (7 agent prompts), `.agents/agents/{qa,e2e-agent,bug-hunter,ux-designer,code-reviewer,tdd-guide}.md`, `.agents/AGENT-SKILL-MATRIX.md`, `AGENTS.md`.
 - **Tests**: N/A — tooling/docs-only, no code/test/API/behavior change to the shipped app.
 - **Lesson Learned (opencode.json editing)**: agent prompts are **single-line JSON strings with literal `\n` escapes**; `filesystem_edit_file` is whitespace-sensitive, so a raw `"title"` (unescaped double quotes) inside an inserted command breaks the JSON (SyntaxError). Use the `edit` tool with exact substrings and escape inner quotes as `\"` (e.g. `-g \"title\"`); validate with `node -e "JSON.parse(...)"` after every edit. Verified JSON OK after the fix.

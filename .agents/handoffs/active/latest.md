@@ -1,55 +1,62 @@
-# Live Resume — Spec 42 (Durable Netlify scheduled worker and cron)
+---
+handoff_version: "1.1"
+session_id: "sess-20261115-v3.57.0-skills-webmcp-fixes"
+agent: "system"
+timestamp: "2026-11-15T00:00:00Z"
+status: "completed"
+priority: "high"
+parent_session: "sess-20261108-spec42-impl"
+child_sessions: []
+checkpoint: "v3.57.0"
+---
 
-> Updated: 2026-11-08
-> Branch: feature/spec-42-durable-worker-cron-v2
-> Base: main 10337d956cafc943c3e97f73121e1038330d86af
-> PR #154: merged 2026-11-07, merge commit a5daee935f4ef7740d4f8d4d10f6131414d7449e.
-> No PR created yet, no merge/deployment, no production credentials or schema changes.
+# Live Resume — v3.57.0 skills consolidation + WebMCP + rec/index fixes (PR #155)
 
-## Current status
+> Updated: 2026-11-15
+> Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
+> Base/main context: Spec 42 implementation already complete on this branch; this session added tooling/docs consolidation and targeted reliability fixes.
 
-**IMPLEMENTATION COMPLETE.** All Spec 42 phases implemented and verified on feature/spec-42-durable-worker-cron-v2.
+## Context
+- Task: consolidate all skills to canonical `.agents/skills` (format A), add WebMCP support, optimize agent/rules/commands/orchestration and session handoff/continuation handling, validate 3 uncommitted lib fixes, update docs, commit/push/update PR (explicit user request).
+- Prior blockers: Prisma-Remote prod diagnostics (S2) required approval/tool access; not completed. No prod DB mutations.
 
-Implemented on this branch:
-- Re-applied optional failOpen=false to acquireLeaderLock, renewLeaderLock and startLeaderHeartbeat so serverless callers can fail closed on DB unavailability; default behavior remains unchanged for current persistent Node callers. (existing, from earlier commits 6a77bb5/0c24f53)
-- Added leader acquisition and renewal regression tests for fail-closed behavior. (existing)
-- **netlify/functions/worker-dispatch.mjs (NEW)** — Standalone Netlify Scheduled Function, `* * * * *` UTC, 30s limit. Validates config, POSTs fixed envelope to background function with WORKER_DISPATCH_SECRET. No Prisma, no business logic.
-- **netlify/functions/worker-runner-background.mts (NEW)** — Standalone Netlify Background Function, 15m limit (target ≤13m). Validates method/content-type/body size/Zod envelope/WORKER_DISPATCH_SECRET via constant-time comparison. Delegates to runBounded().
-- **lib/services/worker/netlify-runner.ts (NEW)** — Bounded serverless runner: fail-closed lease (acquireLeaderLock failOpen:false), durable cron tick (ensureRecommendationCrons + catchUpMissedCronJobs + ensureDailyRecommendationRan), atomic pending→running claim (concurrency 1), 13-minute budget with 2-minute headroom, task runtime budget allowlist, deferred types never marked successful, lease loss stops claims, lease release on completion.
-- **instrumentation.ts (MODIFIED)** — Skips all three watchdog loops (worker, cron-daemon, sqlite-sync) on Netlify runtime via isNetlifyRuntime(). Preserves cache restore, SQLite init, ops counter persistence, price flush timer, write-behind flush. Local persistent Node behavior unchanged.
-- **lib/services/dailyRecommendationService.ts (MODIFIED)** — Checkpoint phases: coordinator (create run + screeners + symbol snapshot), batch (bounded AI analysis per slice, idempotent by parentTaskId+batchIndex), finalizer (rank + publish Sheets/Telegram + cache invalidation + run completion, idempotent, resets to pending if batches not ready). Monolithic path preserved for backward compatibility.
-- **lib/services/worker/worker-service.ts (MODIFIED)** — executeRecommendations passes phase/taskId/runId/batchIndex/stockSlice/parentTaskId from payload to runDailyRecommendations.
-- **app/api/admin/db-health/runtime/route.ts (MODIFIED)** — Extended with lease observability (leader-worker row: status, heartbeat, age), scheduler observability (queue depth, tracked crons, recent task events), tick→runner→lease→task→publish correlation.
-- **netlify.toml (MODIFIED)** — Added [[functions]] config for worker-dispatch schedule `* * * * *`.
+## Progress
+- [x] Migrated/normalized skills to `.agents/skills/<name>/SKILL.md` (+ refs as needed), removed legacy `.opencode/skills`, removed obsolete `.agents/skills/*.md` mirrors.
+- [x] Added WebMCP artifacts: `.agents/skills/webmcp/SKILL.md`, `.agents/agents/webmcp-integrator.md`.
+- [x] Updated agent profiles, rules, commands, matrix/index/docs, `AGENTS.md`, and `.opencode/opencode.json` references to canonical `.agents/skills`.
+- [x] Kept/validated lib fixes: `lib/index-service.ts`, `lib/services/dailyRecommendationService.ts`, `lib/services/worker/worker-service.ts`.
+- [x] Targeted Jest: **36/36 pass** (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`). `npm run lint`: **0 errors**. `npx tsc --noEmit`: pre-existing baseline test/type errors remain (no changed prod-lib errors identified).
+- [x] Docs/session updates: `versions-v3.57.md`, `versions-index.md`, `.agents/CHANGELOG.md`, `AGENTS.md`, `TODO.md`, `Primer.md`, `Lessons.md` (168), `agent-memory.md`, `.agents/session-todos.md`, `HANDOFF.md`, session `decisions.md`/`flow.md`.
+- [x] Commit/push/PR update executed per explicit user request (see git/PR state after this session).
 
-Not implemented (by design — user-controlled):
-- WORKER_DISPATCH_SECRET must be set in Netlify dashboard before deploy (never committed).
-- Daily Recommendations task type ("recommendations") NOT added to serverless eligible list until user enables via deploy — checkpoint infrastructure is in place but the runner defers it (DEFERRED_TASK_TYPES removed "recommendations" but taskType "recommendations" with phase=coordinator/batch/finalizer is now budget-eligible; the coordinator phase spawns batch/finalizer tasks).
-- Stale branches `feature/spec-42-durable-worker-cron` and `feature/spec-42-durable-worker-cron-pr154` not deleted — GitHub connector lacks delete action; delete via GitHub UI/API after v2 pushed.
+## Subagent Status
+| Stream | Agent | Outcome | Budget | Tier B fallback |
+|--------|-------|---------|--------|-----------------|
+| Skills migration + refs updates | build | completed | session | n/a |
+| Docs/rules/commands/orchestration updates | build | completed | session | n/a |
+| Targeted validation (jest/lint/tsc) | build | completed (targeted) | session | full CI via PR checks |
+| Prod Prisma-Remote diagnostics (S2) | build | blocked (approval/tool unavailable) | ops-limited | retry when approved |
 
-## Verified architecture constraints
+## Decisions
+- Canonical skills are `.agents/skills/<name>/SKILL.md` only (format A); no `.opencode/skills`.
+- Preserve richer canonical `nse-integration` content in `.agents`.
+- Record S2 as blocked rather than guessing; no prod mutations.
 
-Netlify Scheduled Functions: 30s limit, UTC cron, only published deploys run automatically; manually invoke branch deploy through UI Run now or CLI netlify functions:invoke.
-Netlify Background Functions: 15m hard limit, async invocation with 202, -background filename suffix; request payload cap 256KB.
-Netlify Next.js runtime v5 guidance prefers standalone Netlify Functions over deprecated Next.js Advanced API scheduled/background routes.
-Existing worker TASK_TIMEOUT_MS is 240m and Daily Recommendations takes ~25–35m; wrapping pollAndExecute unchanged is unsafe — Spec 42 replaces with bounded phases.
+## Blockers
+- **S2 prod diagnostics blocked:** Prisma-Remote approval/tool access unavailable in this session; reported prod symptoms (stale recs/perf `lastCheckedAt`, 2026-11-04 AI-unavailable run, `NIFTY TOTAL MARKET` 404) not re-verified against prod DB/logs.
 
-## Verification results
+## Handoff Summary
+- **Scope:** v3.57.0 skills consolidation + WebMCP + targeted rec/index/worker fixes and docs on PR #155 branch.
+- **Verified:** targeted Jest 36/36, lint 0 errors; tsc baseline unchanged for changed prod libs.
+- **Not verified:** prod DB state for reported symptoms (S2 blocked).
+- **Risk/ops:** `WORKER_DISPATCH_SECRET` must be configured in Netlify dashboard before deploy; user controls merge/deploy.
 
-- npm run test: 2144 pass / 4 skip / 0 fail (139 suites)
-- npx tsc --noEmit: 0 production errors (46 total, all pre-existing test-file errors)
-- npm run lint: 0 errors (1176 warnings, all pre-existing patterns)
-- npm run quickbuild: 202/202 pages built successfully
+## Next Steps
+1. Monitor PR #155 checks and address any CI feedback.
+2. Retry S2 Prisma-Remote read-only diagnostics (ops-limited) once approval/tool access is available.
+3. Merge/deploy only on explicit user action; ensure `WORKER_DISPATCH_SECRET` is set in Netlify.
 
-## Next steps
-
-1. User commits, pushes feature/spec-42-durable-worker-cron-v2, creates PR targeting main.
-2. User configures WORKER_DISPATCH_SECRET in Netlify dashboard before deploy.
-3. User enables Daily Recommendations on serverless path (coordinator/batch/finalizer tasks now budget-eligible).
-4. Delete stale branches via GitHub UI/API after v2 safely pushed.
-
-## Documentation updated in this branch
-
-- HANDOFF.md, .agents/handoffs/active/latest.md, Primer.md, Lessons.md, agent-memory.md, TODO.md, .agents/session-todos.md, .agents/changelog/versions-index.md, .agents/CHANGELOG.md, AGENTS.md version index.
-- .agents/docs/tasks-cron-workers.md documents the intended Netlify production model and implementation gates.
-- Session decisions/flow: .agents/sessions/2026-11-08-spec42-impl/decisions.md + flow.md.
+## Resume from
+- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/changelog/versions-v3.57.md`
+- `.agents/sessions/2026-11-15-skills-consolidation/{decisions.md,flow.md}`
+- Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)

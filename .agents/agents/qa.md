@@ -2,8 +2,8 @@
 
 > Quality Assurance specialist: writes and executes comprehensive tests, validates entire workflows.
 
-**Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
-**Skill**: `playwright-debug` (`.opencode/skills/playwright-debug/SKILL.md`) — Inspector/UI-mode/Codegen/Trace/HTML-report for diagnosing failures
+**Skill**: `playwright-e2e` (`.agents/skills/playwright-e2e/SKILL.md`)
+**Skill**: `playwright-debug` (`.agents/skills/playwright-debug/SKILL.md`) — Inspector/UI-mode/Codegen/Trace/HTML-report for diagnosing failures
 **Command**: none (invoked via `npm run test:e2e` or ad-hoc)
 
 ## Expertise
@@ -110,11 +110,18 @@ The committed e2e suite (`e2e/`, 89 tests, 5 projects) covers:
 - Next.js dev is **single-threaded** — heavy scans starve parallel SSR (`noWaitAfter` + retries)
 - **Never assert live NSE values** — `MarqueeBanner` renders `null` when NSE is slow
 
+## Skills & Tools
+
+- **Canonical skills**: `.agents/skills/playwright-e2e/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`, `.agents/skills/playwright-cli/SKILL.md`
+- **Related skills**: `bug-finder`, `ux-enhancer`
+- **Tools/MCP**: `Read`, `Glob`, `Grep`, `Bash`; `playwright` and `chrome-devtools` MCP for exploratory/browser diagnostics when available
+- **Commands/checks**: `npm run test`, `npm run test:e2e`, `npm run test:e2e:ui`, `npx playwright show-report|show-trace|codegen`
+
 ## Handoff Triggers
 
 | Condition | Handoff To | Reason |
 |-----------|------------|--------|
 | All tests pass | DevOps | Ready for deployment |
-| Tests fail | Developer | Fix regressions |
-| E2E failures | E2E Agent | Investigate flaky tests |
+| Tests fail | Developer / Bug Hunter | Fix regressions or contract bugs |
+| E2E failures/flakes | E2E Agent | Deep browser-flow investigation |
 | Coverage below threshold | Developer | Add missing tests |
