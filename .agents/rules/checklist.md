@@ -3,7 +3,7 @@
 Engineering guardrails for AI agents and contributors. All changes must be validated against this checklist.
 
 ## Version
-1.3
+1.4
 
 ## Spec-Driven Development Gate
 
@@ -157,6 +157,17 @@ Engineering guardrails for AI agents and contributors. All changes must be valid
 - [ ] swagger_updated
 - [ ] security_reviewed
 - [ ] logs_added
+
+---
+
+## Bugfix & Feature Evidence (MANDATORY)
+
+> Applies to every **bug fix** and every **feature** change (UI, API, service, worker, data/cron). Collect evidence as you work and attach it to the PR/hand-off — do not claim fixed/implemented without proof.
+
+- [ ] **RCA documented (bug fixes)** — root cause, impact, why it escaped, and the fix rationale (in PR description/comment, commit message body, or linked session/spec note as appropriate).
+- [ ] **Verification evidence collected** — commands/tests run with outcomes (targeted Jest/Playwright/tsc/lint/build as applicable), relevant logs, and API/DB observations when relevant.
+- [ ] **Before/after screenshots attached (UI/UX-visible changes)** — capture the broken/baseline state ("before") and the corrected state ("after") for the affected flow/state (desktop + responsive/dark mode when applicable). For non-visual fixes, include before/after evidence (logs, API responses, test output, or screenshots of relevant dashboards) that proves the behavior changed.
+- [ ] **Evidence linked in PR** — attach screenshots/artifacts to the PR (or commit evidence under a tracked, non-junk path when appropriate) with a short explanation of what changed, how it was fixed/implemented, and how it was verified.
 
 ---
 

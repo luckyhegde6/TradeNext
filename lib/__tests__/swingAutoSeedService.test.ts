@@ -228,4 +228,23 @@ describe("autoTriggerOnce — decision-gate integration", () => {
     mockGetSwing.mockResolvedValue(null as never);
     expect(await hasStoredSwingTargetsForUser(99)).toBe(false);
   });
+
+  it("treats a screener-only skipped feed (no AI targets) as NOT stored so auto-seed can generate once", async () => {
+    mockGetSwing.mockResolvedValue({
+      success: true,
+      analysisStatus: "skipped",
+      stocks: [{ symbol: "RELIANCE", analysis: null }],
+      segregation: {},
+      totalRaw: 1,
+      topN: 1,
+      templateCount: 34,
+      generatedAt: new Date().toISOString(),
+    } as never);
+
+    const out = await autoTriggerOnce({ trigger: "empty-state", userId: 97 });
+    expect(out).toEqual({ seeded: true, skipped: false });
+    expect(mockGetSwing).toHaveBeenCalledWith(
+      expect.objectContaining({ forceRefresh: true, analyze: true }),
+    );
+  });
 });

@@ -1342,7 +1342,7 @@ describe("dailyRecommendationService", () => {
       expect(mockPrisma.recommendationTracker.update).not.toHaveBeenCalled();
     });
 
-    test("survives live-quote failures — symbol skipped, no throw", async () => {
+    test("survives live-quote failures — stamps lastCheckedAt, no throw", async () => {
       mockPrisma.recommendationTracker.findMany.mockResolvedValue([
         makePerfTracker({ id: "t1", symbol: "GONE" }),
       ]);
@@ -1352,7 +1352,15 @@ describe("dailyRecommendationService", () => {
       const result = await checkRecommendationPerformance();
 
       expect(result.checked).toBe(1);
-      expect(mockPrisma.recommendationTracker.update).not.toHaveBeenCalled();
+      expect(result.skippedNoPrice).toBe(1);
+      // No price found: mirror + best-effort Prisma lastCheckedAt stamp (non-fatal), no status/price change.
+      expect(mockSqlite.upsertRecommendationTracker).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "t1", lastCheckedAt: expect.any(Date) }),
+      );
+      expect(mockPrisma.recommendationTracker.update).toHaveBeenCalledWith({
+        where: { id: "t1" },
+        data: { lastCheckedAt: expect.any(Date) },
+      });
     });
 
     test("caps live fallback to 50 symbols", async () => {

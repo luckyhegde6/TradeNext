@@ -51,11 +51,11 @@ Open `https://github.com/luckyhegde6/TradeNext/wiki` — check:
 | `Monitoring-And-Logging.md` | `.agents/docs/monitoring-and-logging.md` |
 | `Alerts-System.md` | `.agents/docs/alerts-system.md` |
 
-## Tools
+## Skills & Tools
 
-- `git` — clone, commit, push to wiki repo
-- `read` / `write` — page content
-- Browser (Playwright/chrome-devtools) — rendering verification
+- **Canonical skill**: `.agents/skills/wiki-creator/SKILL.md` (load via `skill` tool when available)
+- **Related skills**: `docs-updater`, `docs-workflow`
+- **Tools**: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash` (`git`), `playwright`/`chrome-devtools` MCP for rendering verification when available
 
 ## Handoff Triggers
 
@@ -64,5 +64,3 @@ Open `https://github.com/luckyhegde6/TradeNext/wiki` — check:
 | Wiki published + verified | Doc Writer | Update AGENTS.md wiki references |
 | Repo docs changed | Doc Writer | Sync wiki with source of truth |
 | Mermaid parse error | Doc Writer | Fix label quoting in source docs |
-
-Source: `.opencode/skills/wiki-creator/SKILL.md`

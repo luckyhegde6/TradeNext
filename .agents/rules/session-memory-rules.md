@@ -1,19 +1,25 @@
 # Session, Memory & Handoff Rules — TradeNext
 
-> Agentic operating rules: when to read state, how to maintain memory, and how to hand off. Keeps context small — load files only when required, never dump whole docs.
+> Agentic operating rules: when to read state, how to maintain memory, how to hand off, and how to continue work across sessions/restarts. Load only what is needed; keep state in files.
 
-## 1. Session Start (READ order — in this order, nothing more)
+## 1. Session Start / Work Continuation (READ order)
 
 ```
-1. @HANDOFF.md                → orchestration state (always)
-2. .agents/handoffs/active/latest.md → live resume point (always)
-3. @Primer.md                  → project status (if latest.md is stale)
-4. @Lessons.md                 → rules & corrections (before writing code)
-5. .agents/session-todos.md   → current todos (always)
-6. .agents/RULES.md + SOUL.md → operating rules + identity (first session / new clone)
+1. @HANDOFF.md                         → orchestration state (always)
+2. .agents/handoffs/active/latest.md   → live resume point (always)
+3. .agents/session-todos.md            → current todos / in-progress work (always)
+4. .agents/sessions/<latest>/decisions.md + flow.md → if present and relevant (resume context)
+5. @Primer.md                          → project status (if latest handoff is stale/incomplete)
+6. @Lessons.md                         → rules & corrections (before writing code)
+7. .agents/RULES.md + SOUL.md          → operating rules + identity (first session / new clone)
 ```
 
-**Rule:** Read the index first (@AGENTS.md, @Lessons.md) — not full dumps. Use `read` with offset/limit, never `cat` whole files. See `@README.md` → **Agentic Coding** for the full agentic workflow.
+**Continuation checklist (on restart or "continue"):**
+- Confirm `git status`/branch/head and do not repeat completed work already reflected in files/commits.
+- Reconcile pending approvals, quotas/budgets, blocked MCP/tools, and running processes you started.
+- Pick up the next unfinished todo or the handoff's `Next Steps` / `Resume from` pointers.
+
+**Rule:** Read indexes first (@AGENTS.md, @Lessons.md, `.agents/INDEX.md`) — not full dumps. Use targeted reads (offset/limit/grep). Canonical skills live in `.agents/skills/<name>/SKILL.md` (format A).
 
 ## 2. Session During Work (maintenance cadence)
 
@@ -38,14 +44,14 @@
 - Old flat-file format `YYYY-MM-DD-<hash>.md` (Date/Commit/Work Completed/Todos/Issues) is superseded by the folder format; when archiving legacy sessions, either keep the flat file or convert to the folder shape.
 - **Only load an archive when needed** (e.g., "what did we do on X?" → read that folder's `flow.md`/`decisions.md`). Do NOT read all archives at session start.
 
-## 4. Handoff (`.agents/handoffs/`)
+## 4. Handoff (`.agents/handoffs/`) and work continuation
 
-- Update `latest.md` **before finishing any work block** (not just end of session)
-- Content: Context (task/branch/plan refs), Progress (x/done), Decisions, Blockers, Next Steps
-- YAML frontmatter: `session_id` (timestamp-based, e.g. `sess-YYYYMMDD-<phase>`), `checkpoint` (ph<N>), `status`
-- Handoff flows (`.agents/handoffs/flow/`): `session-cycle.md` (start→archive), `agent-to-agent.md` (agent↔agent, HTTP-like status codes), `agent-to-human.md` (consent/decision handoffs, `status: awaiting_human`), `error-recovery.md`
-- On session close: archive handoff → update `@HANDOFF.md` + `@Primer.md` + `@agent-memory.md`
-- **Next agent resumes from files, never conversation memory.** Consent-required operations hand off to the human via `agent-to-human.md` and WAIT — never auto-approve.
+- Update `.agents/handoffs/active/latest.md` **before finishing any work block**, before risky/long operations, and whenever stopping mid-task.
+- Required content (bounded): Context (task/branch/PR/plan refs), Progress, Decisions, Blockers, **Next Steps**, and **Resume from** pointers (files/commands/checks). Include `Subagent Status` + `Handoff Summary` per `.agents/handoffs/SCHEMA.md` when dispatch/orchestration was used.
+- YAML frontmatter: keep schema-compliant (`handoff_version`, `session_id`, `agent`, `timestamp`, `status`, `priority`, etc.). Use `status: awaiting_human` for consent/decision gates.
+- Handoff flows (`.agents/handoffs/flow/`): `session-cycle.md`, `agent-to-agent.md`, `agent-to-human.md`, `error-recovery.md`.
+- On session close or major milestone: archive/update `@HANDOFF.md`, `@Primer.md`, `@agent-memory.md`, and session todos/archives as applicable.
+- **Next agent resumes from files, never conversation memory.** Never auto-approve consent-required operations.
 
 ## 5. Documentation Updates (MANDATORY)
 
@@ -100,20 +106,14 @@ compaction loop. Hard rules:
 □ After editing an injected file, sanity-check its size (`wc -c` / `ls -l`) — growth is a regression
 ```
 
-## 8. Subagent Sessions (parallel work)
+## 8. Subagent Sessions and orchestration
 
-- Launch subagents (`task` tool: explore/general/review/tdd) for independent workstreams
-- Each subagent gets: self-contained context, exact files to touch, verification command, expected return
-- Merge results into session-todos before committing
-- Subagent outputs are not user-visible — summarize back to the user
+- Launch subagents for independent workstreams when beneficial; use the orchestrator/Tier A-B policy for multi-stream coordination (`/orchestrate`, `.agents/agents/orchestrator.md`).
+- Each subagent gets self-contained context: objective, exact files/paths, constraints, relevant canonical skill(s) in `.agents/skills`, verification command(s), timeout/budget expectation, and expected return format.
+- Never assign the same file to parallel streams. Record dispatch outcomes and merge results into todos/handoff.
+- Subagent outputs are not user-visible — summarize outcomes, evidence, and blockers back to the user.
 
-## 9. Interleaved / Unrelated User Messages → Subagent (DO NOT pollute main session)
+## 9. Interleaved / unrelated user messages
 
-- If the user posts a message **unrelated to the current work**, spawn a subagent to handle it
-  instead of doing it in the main session — this keeps the main agent's context, todos, and
-  session state clean and focused.
-- **Exception**: if the user explicitly says to handle it in the main session (e.g., "handle this
-  here"), do it in the main session.
-- The subagent should be given self-contained context (what to do, files, verification, expected
-  return) and its output summarized back — per rule #8.
-- Applies to: random questions, unrelated feature requests, side tasks arriving mid-session.
+- If the user posts an unrelated request mid-session, prefer a subagent (with self-contained context) to avoid polluting main-session state/todos, unless the user explicitly asks to handle it in the main session.
+- Preserve continuity: update handoff/todos before switching focus and record where to resume the prior work.

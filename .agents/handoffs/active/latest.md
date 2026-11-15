@@ -1,38 +1,62 @@
-# Live Resume — Spec 40/41 (SQLite sync amplification · DB Health runtime visibility · Sheets publish diagnostics)
+---
+handoff_version: "1.1"
+session_id: "sess-20261115-v3.57.0-skills-webmcp-fixes"
+agent: "system"
+timestamp: "2026-11-15T00:00:00Z"
+status: "completed"
+priority: "high"
+parent_session: "sess-20261108-spec42-impl"
+child_sessions: []
+checkpoint: "v3.57.0"
+---
 
-> Updated: 2026-11-04 · Branch: fix/sqlite-sync-startup-amplification
-> Base: latest main after PR #153 merge, SHA 7934335793a0773b39ecbc01ccbb59742dfdcfc5.
+# Live Resume — v3.57.0 skills consolidation + WebMCP + rec/index fixes (PR #155)
 
-## Status
-- Follow-up scope added from production screenshots: CI parser/test failures fixed; recurring 15-minute recovery probe no longer performs full Prisma→SQLite pull (boot hydration remains); Swing Sheets export now runs after AI try/catch so failed analysis still publishes screener rows. Daily worker task timeline now records runOutcome/AI counts and performance updated/skipped-no-price counts. Focused regression tests added; CI reruns queued as of 2026-11-05. Production runtime remains unverified without Netlify logs/admin access.
-- **PR #153:** merged and deployed per user confirmation.
-- **Branch:** fix/sqlite-sync-startup-amplification, created from latest main. No application-code changes on main.
-- **Spec/Plan:** Spec 40/Plan 40 (sync amplification); Spec 41/Plan 41 (runtime observability + Sheets publish recovery).
-- **Implementation:** source and focused tests written on branch. Verification pending; do not claim green.
-- **Deployment:** not performed. User controls PR/merge/deploy.
+> Updated: 2026-11-15
+> Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
+> Base/main context: Spec 42 implementation already complete on this branch; this session added tooling/docs consolidation and targeted reliability fixes.
 
-## Implemented
-- **Why tabs can remain empty:** daily recommendation export is gated on `successfulResults` (real AI verdicts only); the all-AI-failed path exits before export. Swing export occurs after background AI analysis; the ordinary feed poll is screener-only (`analyze=0`) and does not export. Performance checks previously updated tracker data/audit only and did not publish a Sheet row.
-- **Code fix:** daily-rec and Swing producer exports are now awaited (best-effort) before their owning worker operation finishes, with row count + exporter outcome logs. All-AI-failed daily run logs an explicit skipped-publish reason. Combined recommendation + Swing performance appends one KPI snapshot to `metrics`; standalone Swing performance appends one snapshot. Publish outcome is included in task progress.
-- **Live verification still needed:** no live Sheet contents or provider append tested because Drive connector access is disabled. Tests/build checks pending.
-- **Idle workers:** runtime endpoint and DB Health live list now exclude `status=idle` and heartbeat-stale rows; an excluded count is shown. Persisted WorkerStatus rows are retained, not deleted (they are status records, not process controls). Focused regression test added; verification still pending.
-- **Google Sheet link:** user supplied spreadsheet ID matches the masked ID shown in the previous admin screenshot (`1mRD…DXzQ`), so it appears already configured. Google Drive connector is disabled by admin and public URL fetch failed; sheet tab/header contents have not been inspected. Do not invent a schema mapping. Need authorized live sheet access to verify headers and publish behavior.
-1. New admin-only bounded endpoint: app/api/admin/db-health/runtime/route.ts; returns recent WorkerStatus, CronJob and tracked WorkerTask/TaskEvent data.
-2. DB Health UI now displays worker/daemon/leader records with active/stale state, first-seen, heartbeat timestamp/age; cron schedule + last/next run timestamps and outcomes; task created/started/completed/duration/event timeline.
-3. System cron tasks are labeled system cron; recommendation performance task records durable progress events for its Swing performance companion without scheduling or running a duplicate task.
-4. Google Sheets status includes sanitized header diagnostics (missing sheet ID, permission/auth, not found, rate limit, provider unavailable).
-5. Successful direct Sheets publishes update last-publish timestamp. Metrics publish reports explicit success/disabled/failure and the UI distinguishes Publish from Sync queue drain.
-6. Tests added/updated: dbHealthRuntimeRoute.test.ts, googleSheetsStatus.test.ts, googleSheetsTracking.test.ts, googleSheetsAdminRoutes.test.ts.
+## Context
+- Task: consolidate all skills to canonical `.agents/skills` (format A), add WebMCP support, optimize agent/rules/commands/orchestration and session handoff/continuation handling, validate 3 uncommitted lib fixes, update docs, commit/push/update PR (explicit user request).
+- Prior blockers: Prisma-Remote prod diagnostics (S2) required approval/tool access; not completed. No prod DB mutations.
 
-## Verification / remaining
-- Run targeted Jest suites and then required checks individually: npm run test; npx tsc --noEmit; npm run lint; npm run quickbuild.
-- Inspect actual CI runs and branch diff after checks.
-- Verify production cron executions and Google Sheets publish only after user-controlled deployment/auth context is available.
-- No schema migration, new package, or environment changes.
+## Progress
+- [x] Migrated/normalized skills to `.agents/skills/<name>/SKILL.md` (+ refs as needed), removed legacy `.opencode/skills`, removed obsolete `.agents/skills/*.md` mirrors.
+- [x] Added WebMCP artifacts: `.agents/skills/webmcp/SKILL.md`, `.agents/agents/webmcp-integrator.md`.
+- [x] Updated agent profiles, rules, commands, matrix/index/docs, `AGENTS.md`, and `.opencode/opencode.json` references to canonical `.agents/skills`.
+- [x] Kept/validated lib fixes: `lib/index-service.ts`, `lib/services/dailyRecommendationService.ts`, `lib/services/worker/worker-service.ts`.
+- [x] Targeted Jest: **36/36 pass** (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`). `npm run lint`: **0 errors**. `npx tsc --noEmit`: pre-existing baseline test/type errors remain (no changed prod-lib errors identified).
+- [x] Docs/session updates: `versions-v3.57.md`, `versions-index.md`, `.agents/CHANGELOG.md`, `AGENTS.md`, `TODO.md`, `Primer.md`, `Lessons.md` (168), `agent-memory.md`, `.agents/session-todos.md`, `HANDOFF.md`, session `decisions.md`/`flow.md`.
+- [x] Commit/push/PR update executed per explicit user request (see git/PR state after this session).
 
-## Operational caveats
-- Active/stale uses WorkerStatus heartbeat freshness (15 minutes). Idle worker processes may not continuously refresh shared Prisma heartbeats; the view reports recorded worker/daemon instances, not every serverless request instance.
-- First-seen uses WorkerStatus.createdAt and is not guaranteed to equal process boot time.
-- Runtime endpoint uses bounded Prisma queries and is polled separately; existing DB Health GET remains zero-Prisma.
-- Sheets Sync now drains undelivered retry-ledger rows only. Delivered rows are not replayed; stream history cannot be reconstructed unless the corresponding producer is explicitly re-run.
-- The Google Sheets screenshot showed queued=0 and header=unknown; the new diagnostic will reveal the failure category, but no live OAuth/Sheets operation was performed here.
+## Subagent Status
+| Stream | Agent | Outcome | Budget | Tier B fallback |
+|--------|-------|---------|--------|-----------------|
+| Skills migration + refs updates | build | completed | session | n/a |
+| Docs/rules/commands/orchestration updates | build | completed | session | n/a |
+| Targeted validation (jest/lint/tsc) | build | completed (targeted) | session | full CI via PR checks |
+| Prod Prisma-Remote diagnostics (S2) | build | blocked (approval/tool unavailable) | ops-limited | retry when approved |
+
+## Decisions
+- Canonical skills are `.agents/skills/<name>/SKILL.md` only (format A); no `.opencode/skills`.
+- Preserve richer canonical `nse-integration` content in `.agents`.
+- Record S2 as blocked rather than guessing; no prod mutations.
+
+## Blockers
+- **S2 prod diagnostics blocked:** Prisma-Remote approval/tool access unavailable in this session; reported prod symptoms (stale recs/perf `lastCheckedAt`, 2026-11-04 AI-unavailable run, `NIFTY TOTAL MARKET` 404) not re-verified against prod DB/logs.
+
+## Handoff Summary
+- **Scope:** v3.57.0 skills consolidation + WebMCP + targeted rec/index/worker fixes and docs on PR #155 branch.
+- **Verified:** targeted Jest 36/36, lint 0 errors; tsc baseline unchanged for changed prod libs.
+- **Not verified:** prod DB state for reported symptoms (S2 blocked).
+- **Risk/ops:** `WORKER_DISPATCH_SECRET` must be configured in Netlify dashboard before deploy; user controls merge/deploy.
+
+## Next Steps
+1. Monitor PR #155 checks and address any CI feedback.
+2. Retry S2 Prisma-Remote read-only diagnostics (ops-limited) once approval/tool access is available.
+3. Merge/deploy only on explicit user action; ensure `WORKER_DISPATCH_SECRET` is set in Netlify.
+
+## Resume from
+- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/changelog/versions-v3.57.md`
+- `.agents/sessions/2026-11-15-skills-consolidation/{decisions.md,flow.md}`
+- Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)

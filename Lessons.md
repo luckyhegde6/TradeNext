@@ -2178,6 +2178,23 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 **Cause**: Direct exporter success did not update the config last-publish timestamp; the UI described KPI append as queued even though the metrics exporter appends directly. Header diagnostics also collapsed provider errors to an opaque `unknown`.
 **Rule**: Keep append-only semantics; update last-publish metadata after successful direct append, return explicit publish outcomes, and distinguish producer publication from draining undelivered retry-ledger rows. Never replay delivered audit rows to make the UI appear synced.
 
+### 169. A Serverless Task Split Into Checkpoint Phases Is Only Resumable If Every Phase Is Idempotent (Spec 42)
+**Issue**: Spec 42 replaced Netlify's missed cron ticks + 240-minute task timeout with standalone Scheduled/Background Functions (30s / 15m platform caps). Daily Recommendations (~25–35m) could not run serverless until split into bounded phases, and every phase had to be resumable across invocations without duplicating side effects. With only `worker_status` (leader lease), `WorkerTask` (atomic pending→running claim, `payload` Json, `parentTaskId`, `triggeredBy`) and the v3.3.0 recommendation models (`DailyRecommendationRun`/`DailyRecommendationStock`), no schema change was permitted — user approved the no-migration approach.
+**Fix**:
+- **Coordinator phase** (`taskType:"recommendations"`, `triggeredBy:"coordinator"`, payload `{phase:"coordinator", runId}`): creates/reuses `DailyRecommendationRun`, runs screeners, persists symbol snapshot. Idempotent by `runId` — a completed run skips. Spawns one batch task per 10-stock slice plus one finalizer task via `spawnRegularTask` (all `taskType:"recommendations"`, `triggeredBy:"batch"`/`"finalizer"`).
+- **Batch phase** (`triggeredBy:"batch"`, payload `{phase:"batch", runId, batchIndex, stockSlice}`): runs bounded AI analysis on its slice. Idempotent by `parentTaskId + batchIndex` — retries reuse completed stock rows instead of re-paying the AI provider. Pre-flight skip, fallback verdicts written as `aiSuccess:true` only for the un-analyzed subset.
+- **Finalizer phase** (`triggeredBy:"finalizer"`, payload `{phase:"finalizer", runId}`): only runs when every stock entry carries an AI verdict (`aiSuccess === true`); otherwise resets itself to `pending` so the runner re-claims on the next tick — no auto-retry loop. Ranks (confidence → screener count → market cap → symbol), publishes Sheets/Telegram under existing per-day dedup (Spec 36 `lastDailyRecNoticeDay`), invalidates cache, marks run `completed`. Idempotent re-run safe.
+- **Runner** (`lib/services/worker/netlify-runner.ts`): acquires the shared `leader-worker` lease via `acquireLeaderLock("worker", {failOpen:false})` (DB down → no lease, no claims, retry next tick), runs one durable cron tick per invocation, claims at most one task via atomic `updateMany pending→running`, enforces a 13-minute budget with 2-minute headroom and per-task runtime allowlist, stops claiming on lease loss, releases on completion. Deferred types (`swing_performance`, `csv_processing`, `data_sync`, `historical_sync`, `news_fetch`, `screener_sync`) never claimed.
+- **instrumentation.ts**: skips all three watchdog loops on Netlify via `isNetlifyRuntime()`; preserves cache/SQLite/ops/price/write-behind startup. Local persistent Node behavior unchanged.
+- **DB Health runtime**: extended with lease row (status, heartbeat, age), scheduler queue depth + tracked crons + recent task events for tick→runner→task→publish correlation.
+- **netlify.toml**: `[[functions]]` config for `worker-dispatch` schedule `* * * * *`.
+**Rules**:
+- Phase checkpointing must derive idempotency from persisted state (runId, parentTaskId+batchIndex), not from unconstrained JSON — the atomic claim is the execution gate; dedup guards are best-effort secondary guards.
+- A phase that cannot finish yet must reset itself to `pending` (never fail, never silently succeed) — the runner re-claims it on the next tick.
+- Serverless lease acquisition must fail closed (`failOpen:false`); there is no local leader fallback on Netlify — a dead invocation's lease expires by staleness (`LEADER_STALENESS_MS`), and a new invocation has a different `LEADER_SELF` so cannot renew a dead row.
+- The monolithic path stays backward compatible — `runDailyRecommendations` without `phase` runs exactly as before for local/persistent-Node and admin manual triggers.
+**Verified after fix**: `npx tsc --noEmit` **46 exact baseline, 0 production errors** · `npm run lint` **0 errors** (1176 pre-existing warnings) · `npm run quickbuild` **202/202 pages** · `npm run test` **2144 pass / 4 skip / 0 fail** (139 suites, incl. new `netlify-runner.test.ts` 10 tests + `dailyRecCheckpoint.test.ts` 7 tests + `dbHealthRuntimeRoute.test.ts` updated mocks) · No schema/migration/package/env changes · `WORKER_DISPATCH_SECRET` must be set in Netlify dashboard before deploy (never committed).
+
 
 ### 168. SQLite-first recurring probe must not hydrate Prisma into each mirror
 **Issue:** the 15-minute recovery probe called `syncFromPrisma()` on every healthy tick, causing repeated full collection reads and potentially overwriting local mirror state.
@@ -2186,3 +2203,16 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 ### 169. Google Sheets exporter tests must mock the effective config gate
 **Issue:** exporter moved from the legacy auth-level enable flag to `configService.isTrackingActive()` (env + DB gate), but tests only changed the old auth mock and reported enabled unexpectedly.
 **Rule:** mock `isTrackingActive` and `resolveSheetId` in exporter tests; keep test setup aligned with the service contract actually used by the exporter.
+
+
+### 170. Serverless worker leases require fencing, not just heartbeat freshness
+**Issue:** A serverless invocation may pause or be terminated while another invocation takes over an expired WorkerStatus lease. A heartbeat row with owner identity only does not stop the former invocation from continuing to write after takeover.
+**Rule:** A production serverless runner needs a durable lease token/fencing generation checked at task-claim and completion boundaries. DB-unavailable acquisition AND renewal must fail closed. Keep existing persistent Node fail-open behavior separate and covered by tests. Do not claim a lease is distributed-safe until old owners are fenced.
+
+### 171. Durable task checkpoint keys must be enforced by the database
+**Issue:** JSON task payloads and TaskEvent history alone do not provide unique concurrent ownership for recommendation AI batches or idempotent finalization.
+**Rule:** Check whether the current schema offers a unique durable identity and compare-and-set transition for every checkpoint. If it does not, stop and obtain explicit schema/migration approval. Never present payload convention as an atomic uniqueness guarantee.
+
+### 172. Netlify scheduled functions are wake-ups, not persistent daemons
+**Issue:** In-process node-cron and setTimeout polling depend on the lifetime of a request-serving instance.
+**Rule:** On Netlify, use standalone Scheduled Functions as short UTC wake-ups and Background Functions for bounded work; keep CronJob.nextRun/WorkerTask as durable truth. Branch deploys do not auto-run schedules; verify using Netlify UI Run now or CLI function invocation. Check current platform limits before setting task budgets.

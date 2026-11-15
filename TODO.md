@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-Current branch — Spec 40/41 (fix/sqlite-sync-startup-amplification): investigate SQLite sync amplification; DB Health active-instance/scheduled-task timestamp visibility; system Daily Recommendations/Recommendation Performance/Swing companion tracing; Google Sheets publish/status diagnostics. Specs: .agents/specs/40-sqlite-sync-startup-amplification.md and .agents/specs/41-db-health-runtime-activity-and-sheets-publish.md. Implementation in progress; verification pending.
+Current branch — Spec 42 (feature/spec-42-durable-worker-cron-v2, PR #155), based on main 10337d9 after PR #154 merge. **Spec 42 implementation remains complete**; 2026-11-15 adds **v3.57.0**: canonical `.agents/skills` consolidation (format A, legacy `.opencode/skills` removed), WebMCP skill/agent, agent/rules/commands/orchestration + session continuation/handoff updates, and targeted fixes (daily rec perf `lastCheckedAt` stamp, index/NIFTY TOTAL MARKET fallback+diagnostics, worker sync index-aware errors). **Targeted validation:** Jest 36/36 (worker-service, historicalPriceSyncService, googleSheetsRescanTask), eslint 0 errors, tsc baseline unchanged for changed prod libs. **S2 prod Prisma-Remote diagnostics blocked** (approval/tool unavailable). Commit/push/PR update performed on explicit user request. `WORKER_DISPATCH_SECRET` must be set in Netlify dashboard before deploy; user controls merge/deploy.
 
 > Live / in-progress work is tracked in **`.agents/session-todos.md`**.
 > The completed-feature Quick Reference archive moved to

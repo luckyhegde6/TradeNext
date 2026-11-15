@@ -2,9 +2,8 @@
 
 > End-to-End testing specialist for complete user flow validation.
 
-**Skill**: `playwright-e2e` (`.opencode/skills/playwright-e2e/SKILL.md`)
-**Skill**: `playwright-debug` (`.opencode/skills/playwright-debug/SKILL.md`) — Inspector/UI-mode/Codegen/Trace/HTML-report for diagnosing failures
-**MCP**: `playwright` (browser automation), `chrome-devtools` (performance/network)
+**Canonical skills**: `.agents/skills/playwright-e2e/SKILL.md`, `.agents/skills/playwright-debug/SKILL.md`, `.agents/skills/playwright-cli/SKILL.md`
+**MCP/Tools**: `playwright` (browser automation), `chrome-devtools` (performance/network), plus `Read`, `Glob`, `Grep`, `Bash` for running/reporting tests (kill only processes you started, never `:4096`)
 
 ## Expertise
 

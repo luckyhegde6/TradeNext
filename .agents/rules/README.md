@@ -5,10 +5,12 @@
 - **`.agents/RULES.md`** — Master agentic rules (session/memory discipline, git, sensitive ops, security, checklist gate). Read on first session / fresh clone.
 - **`.agents/SOUL.md`** — Agent identity & principles (think-first, minimal code, trustworthy, surgical, memory discipline, done definition).
 - **`.agents/rules/spec-driven-development.md`** — ⚠️ MANDATORY for all feature development. Spec → Plan → Implement → Verify flow. Templates: `.agents/templates/spec-template.md` + `.agents/templates/plan-template.md`. Specs saved to `.agents/specs/`, plans to `.agents/plans/`.
-- **`.agents/rules/session-memory-rules.md`** — Session start read-order, todo maintenance cadence, session archives, handoff updates, mandatory documentation updates, git guidelines summary, context/token efficiency, subagent sessions.
-- **`.agents/rules/session-decisions-flow.md`** — ⚠️ MANDATORY per-session `decisions.md` + `flow.md` (decisions with reasoning + execution flow/code touched) in `.agents/sessions/<YYYY-MM-DD-<hash>>/` — write during work, before code, at every code/package change.
-- **`.agents/rules/checklist.md`** — Engineering guardrail checklist (v1.2) — hard contract for all changes.
-- See also `.agents/code-hygiene.md` (ponytail minimal code, file size/function limits), `.agents/linear-history.md` (git flow), `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/documentation-standards.md`.
+- **`.agents/rules/session-memory-rules.md`** — Session start/continuation read-order, todo cadence, session archives, handoff/continuation protocol, doc/git/context rules, orchestration/subagent sessions.
+- **`.agents/rules/session-decisions-flow.md`** — ⚠️ MANDATORY per-session `decisions.md` + `flow.md` in `.agents/sessions/<YYYY-MM-DD-<hash>>/` (write during work, before code, at every code/package change).
+- **`.agents/rules/checklist.md`** — Engineering guardrail checklist (v1.3) — hard contract for all changes.
+- **`.agents/AGENT-SKILL-MATRIX.md`** + **`.agents/agents/*`** + **`.agents/commands/*`** — canonical agent/skill/command mappings (skills live in `.agents/skills/<name>/SKILL.md`, format A).
+- **`.agents/agents/orchestrator.md`** + **`.agents/agents/orchestrator-health.md`** + **`.agents/handoffs/SCHEMA.md`** — orchestration, dispatch health, resumable handoffs/work continuation.
+- See also `.agents/code-hygiene.md`, `.agents/linear-history.md`, `.agents/pre-commit-workflow.md`, `.agents/security-checklist.md`, `.agents/documentation-standards.md`, `.agents/INDEX.md`.
 
 ## TypeScript Rules
 
