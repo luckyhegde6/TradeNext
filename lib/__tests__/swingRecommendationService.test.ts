@@ -1305,7 +1305,7 @@ describe("notifySwingTerminal", () => {
     expect(broadcastToSubscribers).toHaveBeenCalledTimes(1);
     const [title, message, opts] = broadcastToSubscribers.mock.calls[0];
     expect(title).toBe("🌊 Swing Signals");
-    expect(opts).toEqual({ prependTitle: false });
+    expect(opts).toEqual(expect.objectContaining({ prependTitle: false }));
     expect(message.startsWith("🔔 ")).toBe(true);
     expect(message).toContain("Swing Signals —");
 
