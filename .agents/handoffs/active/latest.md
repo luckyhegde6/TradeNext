@@ -1,62 +1,51 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20261115-v3.57.0-skills-webmcp-fixes"
+session_id: "sess-20261115-spec43-prediction-targets"
 agent: "system"
-timestamp: "2026-11-15T00:00:00Z"
-status: "completed"
+timestamp: "2026-11-15T20:45:00Z"
+status: "in_progress"
 priority: "high"
-parent_session: "sess-20261108-spec42-impl"
+parent_session: "sess-20261115-v3.57.0-skills-webmcp-fixes"
 child_sessions: []
-checkpoint: "v3.57.0"
+checkpoint: "tracks1-4-verified-archify-graphify-complete"
 ---
 
-# Live Resume — v3.57.0 skills consolidation + WebMCP + rec/index fixes (PR #155)
+# Live Resume — Spec 43 committed; Tracks 1–4 implemented/verified; Archify+Graphify artifacts generated
 
-> Updated: 2026-11-15
-> Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
-> Base/main context: Spec 42 implementation already complete on this branch; this session added tooling/docs consolidation and targeted reliability fixes.
+> Branch: `feature/spec-43-prediction-targets` @ `1cb4d36` (Spec 43 committed, not pushed/merged/deployed)
 
 ## Context
-- Task: consolidate all skills to canonical `.agents/skills` (format A), add WebMCP support, optimize agent/rules/commands/orchestration and session handoff/continuation handling, validate 3 uncommitted lib fixes, update docs, commit/push/update PR (explicit user request).
-- Prior blockers: Prisma-Remote prod diagnostics (S2) required approval/tool access; not completed. No prod DB mutations.
+- Spec 43 (`analysisMode` + prediction targets, no "AI targets off") is committed as `1cb4d36`. Approved follow-up Tracks 1–4 are implemented locally and remain **uncommitted**.
+- Tracks 1–3: unified per-recipient outbound notification tracking (structured logs + DB) and persistence/manage/retry-cancel/audit UI across outbound channels, with `/admin/utils/notifications` and cross-links from `/admin/alerts` and `/admin/utils/announcements`.
+- Track 4: `deploy_prep` runs synchronously in-request and creates/updates a real `worker_tasks` record with checks/result (not queued), fixing workers/admin visibility expectations.
+- Archify (project-only/opencode) and Graphify (option C, `graphifyy`) install+generation completed per confirmed scope.
 
 ## Progress
-- [x] Migrated/normalized skills to `.agents/skills/<name>/SKILL.md` (+ refs as needed), removed legacy `.opencode/skills`, removed obsolete `.agents/skills/*.md` mirrors.
-- [x] Added WebMCP artifacts: `.agents/skills/webmcp/SKILL.md`, `.agents/agents/webmcp-integrator.md`.
-- [x] Updated agent profiles, rules, commands, matrix/index/docs, `AGENTS.md`, and `.opencode/opencode.json` references to canonical `.agents/skills`.
-- [x] Kept/validated lib fixes: `lib/index-service.ts`, `lib/services/dailyRecommendationService.ts`, `lib/services/worker/worker-service.ts`.
-- [x] Targeted Jest: **36/36 pass** (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`). `npm run lint`: **0 errors**. `npx tsc --noEmit`: pre-existing baseline test/type errors remain (no changed prod-lib errors identified).
-- [x] Docs/session updates: `versions-v3.57.md`, `versions-index.md`, `.agents/CHANGELOG.md`, `AGENTS.md`, `TODO.md`, `Primer.md`, `Lessons.md` (168), `agent-memory.md`, `.agents/session-todos.md`, `HANDOFF.md`, session `decisions.md`/`flow.md`.
-- [x] Commit/push/PR update executed per explicit user request (see git/PR state after this session).
-
-## Subagent Status
-| Stream | Agent | Outcome | Budget | Tier B fallback |
-|--------|-------|---------|--------|-----------------|
-| Skills migration + refs updates | build | completed | session | n/a |
-| Docs/rules/commands/orchestration updates | build | completed | session | n/a |
-| Targeted validation (jest/lint/tsc) | build | completed (targeted) | session | full CI via PR checks |
-| Prod Prisma-Remote diagnostics (S2) | build | blocked (approval/tool unavailable) | ops-limited | retry when approved |
+- [x] **Spec 43 committed:** `1cb4d36 feat(spec43): add prediction targets and analysisMode` (not pushed/merged/deployed).
+- [x] **Tracks 1–4 code present (uncommitted):** `OutboundNotification` schema+migration `20261115170000_add_outbound_notifications`, SQLite mirror/outbox/read-write/push sink, `outboundNotificationService`, outbound integrations (Telegram/daily/swing/admin broadcast/user test/notification+alert delivery/announcements), `GET/PATCH /api/admin/notifications` + `/admin/utils/notifications` UI + alerts/announcements cross-links, synchronous deploy-prep/task/checks/result in `db-health` route, audit actions. `lib/__tests__/dbHealthRoute.test.ts` updated for Track 4 sync contract (uncommitted).
+- [x] **Local DB/schema:** `tradenext-db-1` up on `:5432`; `npx prisma db push` synced (incl. `outbound_notifications`).
+- [x] **Verification:** `tsc --noEmit` 47 pre-existing test-file errors only; `npm run lint` exit 0 (warnings); `dbHealthRoute` Jest **21/21**; `npm run quickbuild` **202/202**; doc budget **OK (95.9/100 KB)**.
+- [x] **Visual validation (Playwright, admin `admin@tradenext6.app`/`admin123`, dev stopped after):** screenshots `.playwright-cli/snapshots/track2-notifications.png`, `track2-notifications-loaded.png`, `track3-admin-alerts.png`, `track3-admin-announcements.png`, `track4-workers.png`, `track4-db-health.png` (notifications/alerts/announcements/workers/db-health verified; workers tasks visible, 50 total/not 0; no console errors observed).
+- [x] **Archify:** `.agents/skills/archify` installed (doctor OK). Finalized validated HTML (browser-check pass): `.archify/architecture-tracks-1-4-20261116/tracks-1-4-architecture.html`, `.archify/dataflow-tracks-1-4-20261116/tracks-1-4-dataflow.html`, `.archify/workflow-tracks-1-4-20261116/tracks-1-4-workflow.html` (+ candidates/receipts). Notes: uncommitted source evidence stripped and repo pin removed for validation; layout/routing simplified (standard quality where needed) to satisfy gates.
+- [x] **Graphify:** `graphifyy-0.9.110` + `graphify install`; `extract . --code-only` + `cluster-only` complete. Outputs: `graphify-out/graph.json`, `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md` (8936 nodes, 22473 edges, 278 communities; labels placeholders — no LLM backend configured).
 
 ## Decisions
-- Canonical skills are `.agents/skills/<name>/SKILL.md` only (format A); no `.opencode/skills`.
-- Preserve richer canonical `nse-integration` content in `.agents`.
-- Record S2 as blocked rather than guessing; no prod mutations.
+- `OutboundNotification` unified per-recipient outbound log with SQLite-first mirror/outbox write-through + id-keyed upsert/push sink; Prisma fallback when SQLite unavailable; best-effort logging (never blocks primary send paths).
+- Track 4 deploy-prep is synchronous in-request with real `worker_tasks` lifecycle/result (not scheduler-queued).
+- Archify/Graphify installed per confirmed scope (project-only/opencode, option C); diagram candidates adjusted only for validation against uncommitted state.
 
-## Blockers
-- **S2 prod diagnostics blocked:** Prisma-Remote approval/tool access unavailable in this session; reported prod symptoms (stale recs/perf `lastCheckedAt`, 2026-11-04 AI-unavailable run, `NIFTY TOTAL MARKET` 404) not re-verified against prod DB/logs.
-
-## Handoff Summary
-- **Scope:** v3.57.0 skills consolidation + WebMCP + targeted rec/index/worker fixes and docs on PR #155 branch.
-- **Verified:** targeted Jest 36/36, lint 0 errors; tsc baseline unchanged for changed prod libs.
-- **Not verified:** prod DB state for reported symptoms (S2 blocked).
-- **Risk/ops:** `WORKER_DISPATCH_SECRET` must be configured in Netlify dashboard before deploy; user controls merge/deploy.
+## Blockers / notes
+- **Uncommitted work:** Tracks 1–4 + `lib/__tests__/dbHealthRoute.test.ts` + Archify/Graphify artifacts/candidates/scripts in `.archify/` and `.agents/skills/archify/` and `graphify-out/` (review before staging; `graphify-out`/generated artifacts may be large/gitignored depending on repo policy).
+- Dev-log observation (likely unrelated): SQLite push/outbox errors for `swing_analysis_job`/`swing_signal` (`analyzedCount` null / FK) during local run.
+- No commit/push/merge/deploy without explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy (Spec 42).
+- S2 minimal Prisma-Remote prod read-only diagnostics pending approval/tool access. Full `npm test` and full eslint warning summary not completed.
 
 ## Next Steps
-1. Monitor PR #155 checks and address any CI feedback.
-2. Retry S2 Prisma-Remote read-only diagnostics (ops-limited) once approval/tool access is available.
-3. Merge/deploy only on explicit user action; ensure `WORKER_DISPATCH_SECRET` is set in Netlify.
+1. On explicit request: review `git status`, decide which artifacts (`.agents/skills/archify`, `.archify`, `graphify-out`) to include/ignore, stage, and commit Tracks 1–4 (+ docs/tests as appropriate).
+2. Optional follow-ups: label Graphify communities with an LLM backend if desired; refine Archify layout/readability for visual review hints; run full `npm test`.
+3. Push/PR/merge/deploy only on explicit request (ensure `WORKER_DISPATCH_SECRET` set before deploy).
 
 ## Resume from
-- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/changelog/versions-v3.57.md`
-- `.agents/sessions/2026-11-15-skills-consolidation/{decisions.md,flow.md}`
-- Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
+- `.agents/session-todos.md`, `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`
+- `.archify/{architecture,dataflow,workflow}-tracks-1-4-20261116/tracks-1-4-*.html`, `graphify-out/{graph.html,GRAPH_REPORT.md,graph.json}`
+- Branch: `feature/spec-43-prediction-targets` @ `1cb4d36` (uncommitted Tracks 1–4 working tree)

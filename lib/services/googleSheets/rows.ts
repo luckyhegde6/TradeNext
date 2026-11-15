@@ -99,6 +99,7 @@ export function swingRow(stock: SwingStock, postedAt?: string): string[] {
     cell(a?.logic),
     cell(a?.riskFactors),
     cell(stock.analysisError),
+    cell((stock as any).analysisMode ?? (a as any)?.analysisMode),
   ];
 }
 
@@ -125,6 +126,8 @@ export interface DailyRecStockInput {
   /** False when the AI call failed and the stock fell back to a synthetic HOLD. */
   success?: boolean;
   aiRecommendation?: DailyRecVerdict | null;
+  /** Spec 43: per-stock provenance ("AI Targets" | "Prediction Targets"). */
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 /** Run identity stamped on every row of one recommendation run. */
@@ -133,7 +136,7 @@ export interface DailyRecRunContext {
   runDate: string;
 }
 
-/** One recommendation stock → `daily-rec` row (16 columns). */
+/** One recommendation stock → `daily-rec` row (17 columns; Spec 43 adds analysisMode). */
 export function dailyRecRow(
   stock: DailyRecStockInput,
   run: DailyRecRunContext
@@ -156,6 +159,7 @@ export function dailyRecRow(
     cell(v?.timeHorizon),
     cell(stock.success === false ? "ai-failed" : "analyzed"),
     cell(v?.reasoning),
+    cell(stock.analysisMode ?? ((v as any)?.analysisMode ?? null)),
   ];
 }
 

@@ -12,7 +12,12 @@ import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { formatStockContext, type StockContext } from "./recommendation-context";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
-import { calculateFallbackRecommendation } from "./fallbackAnalysis";
+import {
+  calculateFallbackRecommendation,
+  ANALYSIS_MODE_AI,
+  ANALYSIS_MODE_PREDICTION,
+  type AnalysisMode,
+} from "./fallbackAnalysis";
 import logger from "@/lib/logger";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -48,6 +53,8 @@ export interface StockAnalysisResult extends StockAnalysisInput {
   tokensUsed: number;
   executionMs: number;
   success: boolean;
+  /** Spec 43: per-stock provenance ("AI Targets" | "Prediction Targets"). */
+  analysisMode: AnalysisMode;
   error?: string;
 }
 
@@ -388,7 +395,8 @@ async function analyzeBatch(
           tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
           executionMs: attemptMs,
           success: true,
-        };
+          analysisMode: ANALYSIS_MODE_AI,
+        } satisfies StockAnalysisResult;
       });
 
       // Track AI call for monitoring (await so it persists)
@@ -658,13 +666,14 @@ function sleep(ms: number): Promise<void> {
 function failedResult(stock: StockAnalysisInput, error: string): StockAnalysisResult {
   return {
     ...stock,
-    // Fallback targets are real, actionable levels — mark success so the daily
-    // pipeline persists them (targets survive, performance-checkable). The
-    // error is retained for logging but the stock is not discarded.
+    // Prediction/fallback targets are real, actionable levels — mark success so
+    // the daily pipeline persists them (targets survive, performance-checkable).
+    // The error is retained for logging but the stock is not discarded.
     aiRecommendation: calculateFallbackRecommendation(stock),
     tokensUsed: 0,
     executionMs: 0,
     success: true,
+    analysisMode: ANALYSIS_MODE_PREDICTION,
     error,
   };
 }

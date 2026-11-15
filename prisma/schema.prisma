@@ -1305,6 +1305,46 @@ model DeliveryLog {
   @@map("delivery_logs")
 }
 
+// Unified per-recipient outbound notification tracking (Tracks 1-3).
+// Records every outbound send attempt/event across channels (Telegram broadcasts,
+// direct user alerts, bot command replies, email/webhook/in-app deliveries,
+// announcements/admin sends) with status, preview, and audit-friendly metadata.
+model OutboundNotification {
+  id             String    @id @default(uuid())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  channel        String // telegram | email | webhook | in_app | system
+  chatId         String? // Telegram chat ID / external recipient id
+  recipientType  String? // user | chat | channel | broadcast_subscriber | system
+  recipientId    String? // TradeNext user id (stringified) or external id
+  notificationType String // daily_recommendations_broadcast | swing_broadcast | ai_unavailable_notice | alert_delivery | telegram_bot_reply | admin_broadcast | announcement | telegram_test | etc.
+  title          String?
+  message        String
+  messagePreview String?
+  status         String    @default("pending") // pending | sent | failed | cancelled | retrying | skipped
+  error          String?
+  attemptCount   Int       @default(0)
+  lastAttemptAt  DateTime?
+  source         String? // service/route origin
+  triggeredBy    String? // system | admin | cron | user | bot
+  batchId        String? // groups recipients of one logical broadcast/send
+  parentId       String? // retry/copy lineage
+  metadata       Json?
+  cancelledAt    DateTime?
+  cancelledBy    String?
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([channel])
+  @@index([notificationType])
+  @@index([chatId])
+  @@index([batchId])
+  @@index([recipientId])
+  @@map("outbound_notifications")
+}
+
 // ============================================
 // AI Agent Infrastructure (v3.2.0)
 // ============================================
@@ -1389,6 +1429,7 @@ model RecommendationTracker {
   timeHorizon         String // short | medium | long
   confidence          Float
   aiRecommendation    String // BUY | HOLD | SELL
+  analysisMode        String? // "AI Targets" | "Prediction Targets" (Spec 43)
   reasoning           String?
   riskFactors         Json?
   screenerAttribution Json? // Array of screener names that found this stock
@@ -1451,6 +1492,7 @@ model DailyRecommendationStock {
   targetPrice         Float?
   stopLoss            Float?
   timeHorizon         String? // short | medium | long
+  analysisMode        String? // "AI Targets" | "Prediction Targets" (Spec 43)
   reasoning           String?
   riskFactors         Json?
   // Execution metadata
@@ -1531,6 +1573,7 @@ model SwingSignal {
   momentumScore    Int       @default(0)
   analysis         Json? // SwingAnalysis snapshot (patched at job completion)
   aiRecommendation String? // BUY | SELL | HOLD (derived from analysis.action)
+  analysisMode     String? // "AI Targets" | "Prediction Targets" (Spec 43)
   confidence       Float?
   targetPrice      Float?
   stopLoss         Float?

@@ -37,14 +37,16 @@ export async function GET(
         reasoning: tracker.reasoning,
         riskFactors: tracker.riskFactors,
         screenerAttribution: tracker.screenerAttribution,
+        analysisMode: (tracker as any).analysisMode ?? null,
         createdAt: tracker.createdAt,
       },
-      history: history.map(h => ({
+      history: history.map((h: any) => ({
         date: h.createdAt,
         price: h.price,
         aiRecommendation: h.aiRecommendation,
         confidence: h.confidence,
         screenerCount: h.screenerCount,
+        analysisMode: h.analysisMode ?? null,
       })),
       statusHistory: trackerWithHistory.statusHistory?.map((sh) => ({
         previousStatus: sh.previousStatus,

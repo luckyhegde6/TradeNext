@@ -16,6 +16,7 @@ type TopStockRow = {
   timehorizon: string; reasoning: string | null; riskfactors: unknown;
   aisuccess: boolean | null; rundate: Date; runstatus: string;
   currentprice: number | null; entryprice: number | null; trackerstatus: string | null;
+  analysismode: string | null;
 };
 
 /**
@@ -76,6 +77,7 @@ function topStocksFromSqlite(
           entryprice: null,
           currentprice: null,
           trackerstatus: null,
+          analysismode: s.analysisMode != null ? String(s.analysisMode) : null,
         });
       }
     }
@@ -96,6 +98,7 @@ function topStocksFromSqlite(
         row.entryprice = t.entryPrice != null ? Number(t.entryPrice) : null;
         row.currentprice = t.currentPrice != null ? Number(t.currentPrice) : null;
         row.trackerstatus = t.status != null ? String(t.status) : null;
+        row.analysismode = row.analysismode ?? (t.analysisMode != null ? String(t.analysisMode) : null);
       }
     }
 
@@ -151,7 +154,8 @@ export async function GET(request: NextRequest) {
               s."targetPrice" as targetprice, s."stopLoss" as stoploss,
               s."timeHorizon" as timehorizon, s.reasoning, s."riskFactors" as riskfactors,
               s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus,
-              t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
+              t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus,
+              COALESCE(s."analysisMode", t."analysisMode") as analysismode
             FROM daily_recommendation_stocks s
             JOIN daily_recommendation_runs r ON r.id = s."runId"
             LEFT JOIN recommendation_trackers t ON t.id = s."trackerId"
@@ -170,7 +174,8 @@ export async function GET(request: NextRequest) {
               s."targetPrice" as targetprice, s."stopLoss" as stoploss,
               s."timeHorizon" as timehorizon, s.reasoning, s."riskFactors" as riskfactors,
               s."aiSuccess" as aisuccess, r."runDate" as rundate, r.status as runstatus,
-              t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus
+              t."currentPrice" as currentprice, t."entryPrice" as entryprice, t.status as trackerstatus,
+              COALESCE(s."analysisMode", t."analysisMode") as analysismode
             FROM daily_recommendation_stocks s
             JOIN daily_recommendation_runs r ON r.id = s."runId"
             LEFT JOIN recommendation_trackers t ON t.id = s."trackerId"
@@ -236,6 +241,7 @@ export async function GET(request: NextRequest) {
       entryPrice: s.entryprice,
       currentPrice: s.currentprice,
       trackerStatus: s.trackerstatus,
+      analysisMode: s.analysismode,
     }));
 
     const result = {

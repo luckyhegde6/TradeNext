@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c9b32654-2c68-4425-879e-e3eca139d484",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "F:\\Local_git\\TradeNext\\.archify\\workflow-tracks-1-4-20261116\\candidate.json",
+  "output": "F:\\Local_git\\TradeNext\\.archify\\workflow-tracks-1-4-20261116\\tracks-1-4-workflow.html",
+  "specification": {
+    "sha256": "8dd056cd6678820c653563b461b609bd96216eb731a6d04c5d3c1f96ee70ae47",
+    "bytes": 8113
+  },
+  "artifact": {
+    "sha256": "50dcf531708df5a6cf4354e39e62b3d056f61fc9e36db4e093f4680105273486",
+    "bytes": 866387
+  }
+}

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { getSqliteFallback } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
+import { recordOutboundNotification } from "@/lib/services/outboundNotificationService";
 
 // Force dynamic to prevent pre-rendering during build
 export const dynamic = "force-dynamic";
@@ -96,6 +97,55 @@ export async function POST(req: NextRequest) {
         }
       : await prisma.adminAnnouncement.create({ data: row });
 
+    // Record unified outbound send records for active announcements (admin in-app fanout).
+    if (announcement.isActive) {
+      try {
+        const admins = await prisma.user.findMany({
+          where: { role: "admin", isBlocked: false },
+          select: { id: true },
+        });
+        if (admins.length > 0) {
+          await prisma.notification.createMany({
+            data: admins.map((admin) => ({
+              userId: admin.id,
+              type: announcement.type || "info",
+              title: announcement.title,
+              message: announcement.message,
+              link: announcement.link || null,
+            })),
+          });
+          const batchId = `announcement_create_${announcement.id}_${Date.now()}`;
+          for (const admin of admins) {
+            await recordOutboundNotification({
+              channel: "in_app",
+              chatId: null,
+              recipientType: "admin",
+              recipientId: String(admin.id),
+              notificationType: "admin_announcement",
+              title: announcement.title,
+              message: announcement.message,
+              status: "sent",
+              attemptCount: 1,
+              sentAt: new Date(),
+              deliveredAt: new Date(),
+              source: "admin_announcements",
+              triggeredBy: session?.user?.email || String(session?.user?.id || "admin"),
+              batchId,
+              metadata: {
+                announcementId: announcement.id,
+                action: "create",
+                target: announcement.target ?? null,
+                isActive: true,
+                link: announcement.link ?? null,
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch (notifyErr) {
+        console.warn("[admin/announcements] create notification fan-out failed", notifyErr);
+      }
+    }
+
     await createAuditLog({
       userId: adminId,
       action: "ADMIN_ANNOUNCEMENT_CREATE",
@@ -146,12 +196,14 @@ export async function PUT(req: NextRequest) {
 
     const sqlite = getSqliteFallback();
     let announcement: any;
+    let previousAnnouncement: any = null;
     if (sqlite) {
       const rows = sqlite.getAnnouncements({ limit: 1000 }) as any[];
       const existing = rows.find((r) => Number(r.id) === Number(id));
       if (!existing) {
         return NextResponse.json({ error: "Announcement not found" }, { status: 404 });
       }
+      previousAnnouncement = existing;
 
       sqlite.upsertAnnouncement({ ...existing, ...updatePayload, id: Number(id) });
       announcement = {
@@ -165,11 +217,61 @@ export async function PUT(req: NextRequest) {
       if (!existing) {
         return NextResponse.json({ error: "Announcement not found" }, { status: 404 });
       }
+      previousAnnouncement = existing;
 
       announcement = await prisma.adminAnnouncement.update({
         where: { id },
         data: updatePayload,
       });
+    }
+
+    const wasActive = Boolean(previousAnnouncement?.isActive);
+    const isNowActive = Boolean(announcement?.isActive);
+    if (!wasActive && isNowActive) {
+      try {
+        const admins = await prisma.user.findMany({
+          where: { role: "admin", isBlocked: false },
+          select: { id: true },
+        });
+        if (admins.length > 0) {
+          await prisma.notification.createMany({
+            data: admins.map((admin) => ({
+              userId: admin.id,
+              type: announcement.type || "info",
+              title: announcement.title,
+              message: announcement.message,
+              link: announcement.link || null,
+            })),
+          });
+          const batchId = `announcement_activate_${announcement.id}_${Date.now()}`;
+          for (const admin of admins) {
+            await recordOutboundNotification({
+              channel: "in_app",
+              chatId: null,
+              recipientType: "admin",
+              recipientId: String(admin.id),
+              notificationType: "admin_announcement",
+              title: announcement.title,
+              message: announcement.message,
+              status: "sent",
+              attemptCount: 1,
+              sentAt: new Date(),
+              deliveredAt: new Date(),
+              source: "admin_announcements",
+              triggeredBy: session?.user?.email || String(session?.user?.id || "admin"),
+              batchId,
+              metadata: {
+                announcementId: announcement.id,
+                action: "activate",
+                target: announcement.target ?? null,
+                link: announcement.link ?? null,
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch (notifyErr) {
+        console.warn("[admin/announcements] activation notification fan-out failed", notifyErr);
+      }
     }
 
     await createAuditLog({

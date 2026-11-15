@@ -20,6 +20,7 @@ interface RecommendationCardProps {
   riskFactors?: string[] | null;
   screenerAttribution?: string[] | null;
   screenerCount?: number | null;
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 export default function RecommendationCard({
@@ -37,6 +38,7 @@ export default function RecommendationCard({
   riskFactors = [],
   screenerAttribution = [],
   screenerCount = 0,
+  analysisMode = null,
 }: RecommendationCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [screenerExpanded, setScreenerExpanded] = useState(false);
@@ -126,6 +128,18 @@ export default function RecommendationCard({
         <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-300">
           Vol: {formatVolume(safeVolume)}
         </span>
+        {analysisMode && (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs border ${
+              analysisMode === "AI Targets"
+                ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                : "bg-violet-500/15 text-violet-300 border-violet-500/30"
+            }`}
+            title="How targets were produced"
+          >
+            {analysisMode}
+          </span>
+        )}
         {safeScreenerCount > 1 && (
           <button
             onClick={() => setScreenerExpanded(!screenerExpanded)}

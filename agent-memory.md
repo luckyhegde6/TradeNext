@@ -1,3 +1,15 @@
+### 2026-11-15 | Spec 43 (v3.58.0) — prediction targets & `analysisMode` (commit prep)
+
+**Request:** Proceed with Spec 43 implementation/gates (1–4) and commit Spec 43 on `feature/spec-43-prediction-targets`, then continue with Tracks 1–4 and tooling todos (Archify/Graphify).
+
+**Work completed:** Implemented Spec 43 (approved): per-stock `analysisMode` (`AI Targets`/`Prediction Targets`) across Swing+Daily DB/schema migration `20261115160000_add_analysis_mode_prediction_targets`, SQLite mirror/push sinks, fallback/agents (daily fallback never HOLD), daily+swing prediction-backed persistence/propagation, APIs/UI, Telegram/broadcast, exports/Google Sheets, and bounded/idempotent perf-check backfill hooks. Stabilized swing `jobToResponse` terminal/prediction normalization and test determinism; fixed `recommendationsPlanLimitFallbacks` expectation and doc-budget trim.
+
+**Verification:** targeted Jest **174/174** (`dailyRecommendationService` 58, `swingRecommendationService` 68, `swingPerformanceService` 27, `recommendationsPlanLimitFallbacks` 21); lint **0 errors** (1227 warnings); tsc **46 baseline-aware**; doc budget **OK** (95.9/100 KB); quickbuild **202/202**. Local UI screenshot attempt limited by DB-unavailable dev env (`e2e-screenshots/spec43/error.png`).
+
+**Docs/session:** `versions-v3.58.md`, CHANGELOG/index updates, AGENTS/Primer/HANDOFF/latest handoff, session todos/flow/decisions updates.
+
+---
+
 ### 2026-11-15 | v3.57.0 — canonical `.agents/skills` consolidation, WebMCP, rec/index fixes (PR #155)
 
 **Request:** Approve all and complete skill consolidation/migration to `.agents/skills` (format A), update agents/rules/commands/orchestration/session handoff/continuation, validate targeted lib fixes, update docs, and commit/push/update PR #155 (`feature/spec-42-durable-worker-cron-v2`).

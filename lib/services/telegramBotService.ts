@@ -15,6 +15,21 @@ import logger from "@/lib/logger";
 import { getTelegramEnvConfig } from "@/lib/alerts/delivery/telegram-env";
 import { sendTelegramAlert } from "@/lib/alerts/delivery/telegram";
 import { createAuditLog } from "@/lib/audit";
+import {
+  createOutboundBatchId,
+  recordOutboundNotification,
+} from "@/lib/services/outboundNotificationService";
+
+type BotReplyTrackContext = {
+  notificationType?: string;
+  source?: string;
+  triggeredBy?: string;
+  batchId?: string | null;
+  metadata?: Record<string, unknown>;
+  recipientType?: string;
+  recipientId?: string | null;
+  title?: string | null;
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -116,12 +131,40 @@ const TELEGRAM_API_BASE = "https://api.telegram.org";
 /**
  * Send a message to a Telegram chat. Returns true on success.
  */
-async function sendBotMessage(chatId: number | string, text: string, parseMode: "Markdown" | "HTML" = "Markdown"): Promise<boolean> {
+async function sendBotMessage(
+  chatId: number | string,
+  text: string,
+  parseMode: "Markdown" | "HTML" = "Markdown",
+  track?: BotReplyTrackContext,
+): Promise<boolean> {
   const envConfig = getTelegramEnvConfig();
+  const notificationType = track?.notificationType ?? "telegram_bot_reply";
+  const source = track?.source ?? "telegram_bot";
+  const baseMeta = { ...(track?.metadata ?? {}), parseMode };
+
   if (!envConfig?.configured) {
-    logger.error({ msg: "Telegram bot: cannot send message — env not configured" });
+    const error = "Telegram env not configured";
+    logger.error({ msg: "Telegram bot: cannot send message — env not configured", chatId });
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: track?.recipientType ?? "chat",
+      recipientId: track?.recipientId ?? String(chatId),
+      notificationType,
+      title: track?.title ?? null,
+      message: text,
+      status: "failed",
+      error,
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      source,
+      triggeredBy: track?.triggeredBy ?? "telegram_bot",
+      batchId: track?.batchId ?? null,
+      metadata: { ...baseMeta, reason: "env_not_configured" },
+    }).catch(() => {});
     return false;
   }
+
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/bot${envConfig.botToken}/sendMessage`, {
       method: "POST",
@@ -134,12 +177,52 @@ async function sendBotMessage(chatId: number | string, text: string, parseMode: 
       }),
     });
     const data = await res.json();
-    if (!data.ok) {
+    const ok = data.ok === true;
+    if (!ok) {
       logger.warn({ msg: "Telegram bot: sendMessage failed", chatId, error: data.description });
     }
-    return data.ok === true;
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: track?.recipientType ?? "chat",
+      recipientId: track?.recipientId ?? String(chatId),
+      notificationType,
+      title: track?.title ?? null,
+      message: text,
+      status: ok ? "sent" : "failed",
+      error: ok ? null : (data?.description ? String(data.description) : "sendMessage failed"),
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      sentAt: ok ? new Date() : null,
+      source,
+      triggeredBy: track?.triggeredBy ?? "telegram_bot",
+      batchId: track?.batchId ?? null,
+      metadata: {
+        ...baseMeta,
+        telegramMessageId: data?.result?.message_id ?? null,
+      },
+    }).catch(() => {});
+    return ok;
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
     logger.error({ msg: "Telegram bot: sendMessage exception", chatId, error: err });
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: track?.recipientType ?? "chat",
+      recipientId: track?.recipientId ?? String(chatId),
+      notificationType,
+      title: track?.title ?? null,
+      message: text,
+      status: "failed",
+      error,
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      source,
+      triggeredBy: track?.triggeredBy ?? "telegram_bot",
+      batchId: track?.batchId ?? null,
+      metadata: { ...baseMeta, exception: true },
+    }).catch(() => {});
     return false;
   }
 }
@@ -615,12 +698,13 @@ async function handleSwing(): Promise<BotCommandResult> {
     const fmtPct = (n: number) => (n >= 0 ? `+${n.toFixed(1)}%` : `${n.toFixed(1)}%`);
 
     const lines = response.stocks.slice(0, 10).map((stock, i) => {
-      const analysis = stock.analysis;
+      const analysis = stock.analysis as any;
       const action = analysis?.action || "OBSERVE";
       const emoji = action === "LONG" ? "🟢" : action === "SHORT" ? "🔴" : "🟡";
       const conf = analysis ? ` ${analysis.confidence}%` : "";
+      const mode = analysis?.analysisMode || (stock as any).analysisMode || "";
       const levels = analysis
-        ? `\n   Entry ₹${analysis.entryPrice.toFixed(0)} → Target ₹${analysis.targetPrice.toFixed(0)} / Stop ₹${analysis.stopLoss.toFixed(0)}`
+        ? `\n   Entry ₹${analysis.entryPrice.toFixed(0)} → Target ₹${analysis.targetPrice.toFixed(0)} / Stop ₹${analysis.stopLoss.toFixed(0)}${mode ? ` (${mode})` : ""}`
         : "";
       const families = stock.families?.length ? ` _${stock.families.join(", ")}_` : "";
 
@@ -629,11 +713,13 @@ async function handleSwing(): Promise<BotCommandResult> {
 
     const status = response.analysisStatus === "done"
       ? "✅ AI targets ready"
-      : response.analysisStatus === "pending"
-        ? "⏳ AI targets generating…"
-        : response.analysisStatus === "failed"
-          ? "⚠️ AI targets unavailable"
-          : "";
+      : response.analysisStatus === "predicted" || response.analysisStatus === "skipped"
+        ? "✅ Prediction targets ready"
+        : response.analysisStatus === "pending"
+          ? "⏳ AI targets generating…"
+          : response.analysisStatus === "failed"
+            ? "⚠️ Targets unavailable"
+            : "";
 
     let text = `🌊 *Swing Trading Signals* — Top ${Math.min(response.stocks.length, 10)}\n\n`
       + lines.join("\n\n")
@@ -781,10 +867,35 @@ const COMMAND_MAP: Record<string, (ctx: BotCommandContext) => Promise<BotCommand
 export async function handleBotCommand(chatId: number, messageText: string, firstName: string): Promise<boolean> {
   // 1. Rate limit check
   const rl = checkRateLimit(chatId);
+  const rlUser = await lookupUserByChatId(chatId).catch(() => null);
   if (!rl.allowed) {
     if (rl.retryAfter && rl.retryAfter <= 30) {
       // Only notify if retry is short (within 30s)
-      await sendBotMessage(chatId, `⏳ ${rl.reason || "Rate limit reached. Please wait."} Retry in ${rl.retryAfter}s.`);
+      await sendBotMessage(chatId, `⏳ ${rl.reason || "Rate limit reached. Please wait."} Retry in ${rl.retryAfter}s.`, "Markdown", {
+        notificationType: "telegram_bot_rate_limit_reply",
+        source: "telegram_bot",
+        triggeredBy: "telegram_bot",
+        recipientType: rlUser ? "user" : "chat",
+        recipientId: rlUser ? String(rlUser.id) : String(chatId),
+        metadata: { command: null, rateLimited: true, reason: rl.reason ?? null, retryAfter: rl.retryAfter ?? null },
+      });
+    } else {
+      // Per-recipient/chat tracking even when no message is sent (suppressed by policy).
+      await recordOutboundNotification({
+        channel: "telegram",
+        chatId: String(chatId),
+        recipientType: rlUser ? "user" : "chat",
+        recipientId: rlUser ? String(rlUser.id) : String(chatId),
+        notificationType: "telegram_bot_rate_limit_suppressed",
+        title: "Telegram bot rate limit",
+        message: rl.reason || "Rate limit reached. Please wait.",
+        status: "skipped",
+        error: null,
+        attemptCount: 0,
+        source: "telegram_bot",
+        triggeredBy: "telegram_bot",
+        metadata: { rateLimited: true, reason: rl.reason ?? null, retryAfter: rl.retryAfter ?? null },
+      }).catch(() => {});
     }
     return false;
   }
@@ -804,7 +915,14 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   const KNOWN_COMMANDS = ["/start", "/chatid", "/help", "/recommendations", "/daily-recommendations", "/alerts", "/updates", "/ipo", "/ipo-analysis", "/events", "/swing", "/div"];
   if (!KNOWN_COMMANDS.includes(command)) {
     const result = await handleUnknown(ctx);
-    await sendBotMessage(chatId, result.text || "");
+    await sendBotMessage(chatId, result.text || "", "Markdown", {
+      notificationType: "telegram_bot_command_reply",
+      source: "telegram_bot",
+      triggeredBy: "telegram_bot",
+      recipientType: "chat",
+      recipientId: String(chatId),
+      metadata: { command, knownCommand: false, args: args.length ? args : undefined },
+    });
     // Audit log
     logger.info({ msg: "Telegram bot: unknown command", chatId, command, firstName });
     return true;
@@ -816,7 +934,19 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
 
   // 5. Send response
   if (result.text) {
-    await sendBotMessage(chatId, result.text);
+    const userForReply = await lookupUserByChatId(chatId).catch(() => null);
+    await sendBotMessage(chatId, result.text, "Markdown", {
+      notificationType: "telegram_bot_command_reply",
+      source: "telegram_bot",
+      triggeredBy: "telegram_bot",
+      recipientType: userForReply ? "user" : "chat",
+      recipientId: userForReply ? String(userForReply.id) : String(chatId),
+      metadata: {
+        command,
+        args: args.length ? args : undefined,
+        success: result.ok,
+      },
+    });
   }
 
   // 6. Audit log (file + DB for admin visibility)
@@ -848,6 +978,17 @@ export async function handleBotCommand(chatId: number, messageText: string, firs
   return true;
 }
 
+type SendAlertTrackOpts = {
+  prependTitle?: boolean;
+  notificationType?: string;
+  source?: string;
+  triggeredBy?: string;
+  batchId?: string | null;
+  recipientType?: string;
+  recipientId?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 /**
  * Send a proactive alert to a specific user by their Telegram chat ID.
  * Used for pushing alerts when they trigger, not in response to a command.
@@ -857,15 +998,37 @@ export async function sendAlertToUser(
   title: string,
   message: string,
   link?: string,
-  opts: { prependTitle?: boolean } = {},
+  opts: SendAlertTrackOpts = {},
 ): Promise<boolean> {
   const envConfig = getTelegramEnvConfig();
-  if (!envConfig?.configured) return false;
-
   // v3.52.0: broadcast bodies already carry their own `🔔 <header>` line, so
   // prepending `🔔 *title*` produced a duplicated header in subscribers'
   // Telegram. Callers that want the title inline pass prependTitle:false.
   const text = opts.prependTitle === false ? message : `🔔 *${title}*\n${message}`;
+  const notificationType = opts.notificationType ?? "telegram_alert";
+  const source = opts.source ?? "telegram_alert";
+  const baseMeta = { ...(opts.metadata ?? {}), link: link ?? null, prependTitle: opts.prependTitle !== false };
+
+  if (!envConfig?.configured) {
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: opts.recipientType ?? "chat",
+      recipientId: opts.recipientId ?? String(chatId),
+      notificationType,
+      title,
+      message: text,
+      status: "failed",
+      error: "Telegram env not configured",
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      source,
+      triggeredBy: opts.triggeredBy ?? "system",
+      batchId: opts.batchId ?? null,
+      metadata: { ...baseMeta, reason: "env_not_configured" },
+    }).catch(() => {});
+    return false;
+  }
 
   try {
     const tgConfig = {
@@ -874,16 +1037,61 @@ export async function sendAlertToUser(
       parseMode: "Markdown" as const,
     };
     const result = await sendTelegramAlert(tgConfig, text, link);
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: opts.recipientType ?? "chat",
+      recipientId: opts.recipientId ?? String(chatId),
+      notificationType,
+      title,
+      message: text,
+      status: result.success ? "sent" : "failed",
+      error: result.success ? null : (result.error ? String(result.error) : "send failed"),
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      sentAt: result.success ? new Date() : null,
+      source,
+      triggeredBy: opts.triggeredBy ?? "system",
+      batchId: opts.batchId ?? null,
+      metadata: baseMeta,
+    }).catch(() => {});
     return result.success;
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
     logger.error({ msg: "Failed to send alert to user", chatId, error: err });
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: String(chatId),
+      recipientType: opts.recipientType ?? "chat",
+      recipientId: opts.recipientId ?? String(chatId),
+      notificationType,
+      title,
+      message: text,
+      status: "failed",
+      error,
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      source,
+      triggeredBy: opts.triggeredBy ?? "system",
+      batchId: opts.batchId ?? null,
+      metadata: { ...baseMeta, exception: true },
+    }).catch(() => {});
     return false;
   }
 }
 
+type BroadcastTrackOpts = {
+  prependTitle?: boolean;
+  notificationType?: string;
+  source?: string;
+  triggeredBy?: string;
+  batchId?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 /**
  * Send a broadcast message to all subscribed users.
- * Used for admin announcements.
+ * Used for admin announcements and system recommendation broadcasts.
  *
  * @param opts.prependTitle Prefix `🔔 *title*` (default true). Pass `false` when
  *   the message body already starts with its own `🔔 ...` header — otherwise
@@ -892,8 +1100,13 @@ export async function sendAlertToUser(
 export async function broadcastToSubscribers(
   title: string,
   message: string,
-  opts: { prependTitle?: boolean } = {},
+  opts: BroadcastTrackOpts = {},
 ): Promise<number> {
+  const notificationType = opts.notificationType ?? "telegram_broadcast";
+  const source = opts.source ?? "telegram_broadcast";
+  const triggeredBy = opts.triggeredBy ?? "system";
+  const batchId = opts.batchId ?? createOutboundBatchId("tg_broadcast");
+
   try {
     // v3.16.0: surface a clear warning when Telegram env vars are missing so
     // admins can diagnose silent broadcast failures from logs.
@@ -902,7 +1115,25 @@ export async function broadcastToSubscribers(
       logger.warn({
         msg: "Telegram broadcast skipped — env vars missing",
         error: envConfig?.error ?? "getTelegramEnvConfig returned null",
+        title,
+        batchId,
       });
+      await recordOutboundNotification({
+        channel: "telegram",
+        chatId: null,
+        recipientType: "broadcast",
+        recipientId: "subscribers",
+        notificationType,
+        title,
+        message,
+        status: "failed",
+        error: envConfig?.error ?? "Telegram env not configured",
+        attemptCount: 0,
+        source,
+        triggeredBy,
+        batchId,
+        metadata: { ...(opts.metadata ?? {}), reason: "env_not_configured" },
+      }).catch(() => {});
       return 0;
     }
 
@@ -912,21 +1143,47 @@ export async function broadcastToSubscribers(
         telegramVerified: true,
         isBlocked: false,
       },
-      select: { telegramChatId: true },
+      select: { id: true, telegramChatId: true },
     });
 
     if (subscribers.length === 0) {
       logger.warn({
         msg: "Telegram broadcast skipped — no verified subscribers",
         title,
+        batchId,
       });
+      await recordOutboundNotification({
+        channel: "telegram",
+        chatId: null,
+        recipientType: "broadcast",
+        recipientId: "subscribers",
+        notificationType,
+        title,
+        message,
+        status: "skipped",
+        error: "No verified subscribers",
+        attemptCount: 0,
+        source,
+        triggeredBy,
+        batchId,
+        metadata: { ...(opts.metadata ?? {}), total: 0, sent: 0, failed: 0 },
+      }).catch(() => {});
       return 0;
     }
 
     let sent = 0;
     for (const sub of subscribers) {
       if (sub.telegramChatId) {
-        const ok = await sendAlertToUser(sub.telegramChatId, title, message, undefined, opts);
+        const ok = await sendAlertToUser(sub.telegramChatId, title, message, undefined, {
+          prependTitle: opts.prependTitle,
+          notificationType,
+          source,
+          triggeredBy,
+          batchId,
+          recipientType: "broadcast_subscriber",
+          recipientId: String(sub.id),
+          metadata: { ...(opts.metadata ?? {}), subscriberUserId: sub.id },
+        });
         if (ok) sent++;
       }
     }
@@ -936,13 +1193,30 @@ export async function broadcastToSubscribers(
     logger.info({
       msg: "Telegram broadcast sent",
       title,
+      batchId,
       total: subscribers.length,
       sent,
       failed: subscribers.length - sent,
     });
     return sent;
   } catch (err) {
-    logger.error({ msg: "Telegram broadcast failed", title, error: err });
+    logger.error({ msg: "Telegram broadcast failed", title, batchId, error: err });
+    await recordOutboundNotification({
+      channel: "telegram",
+      chatId: null,
+      recipientType: "broadcast",
+      recipientId: "subscribers",
+      notificationType,
+      title,
+      message,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      attemptCount: 0,
+      source,
+      triggeredBy,
+      batchId,
+      metadata: { ...(opts.metadata ?? {}), exception: true },
+    }).catch(() => {});
     return 0;
   }
 }

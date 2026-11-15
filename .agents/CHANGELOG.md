@@ -8,6 +8,7 @@
 
 | File | Contents |
 |------|----------|
+| [versions-v3.58.md](./changelog/versions-v3.58.md) | **v3.58.0** — Spec 43 prediction targets & `analysisMode` (no "AI targets off"): per-stock AI vs Prediction targets across Swing/Daily DB/APIs/UI/Telegram/exports/Sheets, directional daily fallback (never HOLD), swing auto prediction on load, bounded/idempotent perf backfill; migration + targeted gates in-session (feature branch, commit prepared). |
 | [versions-v3.57.md](./changelog/versions-v3.57.md) | **v3.57.0** — Canonical `.agents/skills` consolidation (format A), WebMCP agent/skill, agent/rules/commands/orchestration + session handoff/continuation updates, targeted rec/perf/index/worker fixes and validation (PR #155). |
 | [Spec 42 draft](./specs/42-durable-netlify-worker-cron.md) | v3.56.0 draft — Durable Netlify scheduled worker and cron execution plan; implementation incomplete, no verification or deployment claimed. |
 | [versions-v3.55.md](./changelog/versions-v3.55.md) | **v3.55.0** — Spec 41 DB Health runtime visibility, scheduled task timestamps, and Google Sheets publish diagnostics; implementation written, verification pending. |

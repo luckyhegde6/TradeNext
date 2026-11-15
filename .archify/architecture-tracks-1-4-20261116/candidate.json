@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TradeNext Tracks 1–4: Outbound Notifications and Synchronous Deploy Prep",
+    "subtitle": "Tracks 1–3 unify per-recipient outbound logging/persistence/admin control; Track 4 runs deploy prep synchronously in-request while recording a worker task",
+    "output": ".archify/architecture-tracks-1-4-20261116/tracks-1-4-architecture.html"
+  },
+  "components": [
+    {
+      "id": "producers",
+      "type": "backend",
+      "label": "Outbound Producers",
+      "sublabel": "Telegram, daily/swing, alerts, admin sends",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "tag": "Tracks 1–3"
+    },
+    {
+      "id": "outbound_service",
+      "type": "backend",
+      "label": "Outbound Notification Service",
+      "sublabel": "record/update/query per recipient",
+      "pos": [
+        260,
+        120
+      ],
+      "size": [
+        190,
+        70
+      ],
+      "tag": "SQLite-first"
+    },
+    {
+      "id": "structured_logs",
+      "type": "external",
+      "label": "Structured Server Logs",
+      "sublabel": "per-recipient outbound events",
+      "pos": [
+        260,
+        20
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite Mirror + Outbox",
+      "sublabel": "outbound_notifications + wb/outbox",
+      "pos": [
+        500,
+        120
+      ],
+      "size": [
+        180,
+        70
+      ],
+      "tag": "primary local path"
+    },
+    {
+      "id": "prisma",
+      "type": "database",
+      "label": "Prisma / Postgres",
+      "sublabel": "outbound_notifications + worker_tasks",
+      "pos": [
+        500,
+        260
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "push_sink",
+      "type": "backend",
+      "label": "SQLite Push Sink",
+      "sublabel": "outbound_notification upsert/delete",
+      "pos": [
+        730,
+        190
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "notifications_api",
+      "type": "backend",
+      "label": "Admin Notifications API",
+      "sublabel": "GET history/detail, PATCH retry/cancel",
+      "pos": [
+        260,
+        260
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "notifications_ui",
+      "type": "frontend",
+      "label": "Admin Notifications UI",
+      "sublabel": "/admin/utils/notifications + cross-links",
+      "pos": [
+        40,
+        260
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "db_health",
+      "type": "backend",
+      "label": "DB Health API",
+      "sublabel": "deploy_prep synchronous in-request",
+      "pos": [
+        40,
+        420
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "tag": "Track 4"
+    },
+    {
+      "id": "deploy_checks",
+      "type": "security",
+      "label": "Deploy Prep Checks",
+      "sublabel": "probe, breaker, latency, SQLite/mirror/outbox",
+      "pos": [
+        260,
+        420
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "worker_tasks",
+      "type": "database",
+      "label": "worker_tasks / TaskEvent",
+      "sublabel": "deploy_prep task record (running→done)",
+      "pos": [
+        500,
+        420
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "workers_ui",
+      "type": "frontend",
+      "label": "Workers Admin UI",
+      "sublabel": "/admin/utils/workers task visibility",
+      "pos": [
+        730,
+        420
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "producers-record",
+      "from": "producers",
+      "to": "outbound_service",
+      "label": "record/update"
+    },
+    {
+      "id": "service-logs",
+      "from": "outbound_service",
+      "to": "structured_logs",
+      "label": "structured log",
+      "variant": "dashed"
+    },
+    {
+      "id": "service-sqlite",
+      "from": "outbound_service",
+      "to": "sqlite",
+      "label": "upsert + outbox",
+      "variant": "emphasis"
+    },
+    {
+      "id": "service-prisma-fallback",
+      "from": "outbound_service",
+      "to": "prisma",
+      "label": "fallback upsert/query",
+      "variant": "dashed"
+    },
+    {
+      "id": "sqlite-push",
+      "from": "sqlite",
+      "to": "push_sink",
+      "label": "drained outbox rows"
+    },
+    {
+      "id": "push-prisma",
+      "from": "push_sink",
+      "to": "prisma",
+      "label": "id-keyed upsert/delete"
+    },
+    {
+      "id": "ui-api",
+      "from": "notifications_ui",
+      "to": "notifications_api",
+      "label": "history / actions"
+    },
+    {
+      "id": "api-query",
+      "from": "notifications_api",
+      "to": "sqlite",
+      "label": "read/manage"
+    },
+    {
+      "id": "api-prisma",
+      "from": "notifications_api",
+      "to": "prisma",
+      "label": "fallback read/retry",
+      "variant": "dashed",
+      "labelDy": 60
+    },
+    {
+      "id": "dbhealth-checks",
+      "from": "db_health",
+      "to": "deploy_checks",
+      "label": "run checks"
+    },
+    {
+      "id": "checks-sqlite",
+      "from": "deploy_checks",
+      "to": "sqlite",
+      "labelDy": -80
+    },
+    {
+      "id": "checks-prisma",
+      "from": "deploy_checks",
+      "to": "prisma",
+      "label": "probe + sync target"
+    },
+    {
+      "id": "dbhealth-task",
+      "from": "db_health",
+      "to": "worker_tasks",
+      "label": "create/update task",
+      "variant": "emphasis",
+      "labelDy": -75
+    },
+    {
+      "id": "workers-read",
+      "from": "workers_ui",
+      "to": "worker_tasks",
+      "label": "list/status/logs",
+      "labelDy": -70
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Tracks 1–3",
+      "items": [
+        "Per-recipient outbound records for all outbound channels",
+        "Structured log + DB persistence with SQLite-first/outbox path",
+        "Admin history, detail, retry/cancel, and cross-links"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Track 4",
+      "items": [
+        "deploy_prep runs synchronously in-request",
+        "Creates/updates a real worker_tasks record (not queued)",
+        "Workers UI surfaces deploy-prep/task visibility"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Scope",
+      "items": [
+        "Diagram reflects implemented local/branch state for Tracks 1–4",
+        "Fallback paths shown where code supports Prisma/SQLite alternatives"
+      ]
+    }
+  ]
+}

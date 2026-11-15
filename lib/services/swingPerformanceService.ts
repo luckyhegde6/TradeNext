@@ -13,7 +13,9 @@
 //       active → target_achieved  (price OR intraday range touched the AI target — direction-aware)
 //       active → stop_loss_hit    (price OR intraday range touched the stop — direction-aware)
 //       active → expired          (45 days since posting with no hit — user decision)
-//   - Signals WITHOUT AI levels (no target/stop) can only expire.
+//   - Spec 43: bounded/idempotent prediction+mode backfill for eligible active/open
+//     rows — missing targets/mode are generated/persisted so tracking is never blocked.
+//   - Signals WITHOUT AI levels can now be backfilled to prediction targets (not only expire).
 //   - Status transitions are audit-logged (SWING_SIGNAL_STATUS_CHANGED) and the
 //     run itself records one SWING_PERFORMANCE_CHECK entry (design parity with
 //     checkRecommendationPerformance §3/§8).
@@ -24,6 +26,12 @@ import { createAuditLog } from "@/lib/audit";
 import { recordSystemEvent } from "./unifiedEventService";
 import { recordMetric } from "./systemHealthService";
 import { isDbUnavailableError } from "@/lib/db-utils";
+import { getSqliteFallback } from "@/lib/sqlite";
+import {
+  ANALYSIS_MODE_AI,
+  ANALYSIS_MODE_PREDICTION,
+  calculateFallbackSwingAnalysis,
+} from "@/lib/services/ai/fallbackAnalysis";
 
 // ---------------------------------------------------------------------------
 // Constants & types
@@ -167,15 +175,38 @@ async function runInChunks<T>(
  * contained (missing prices skip, quote failures log) and callers wrap the
  * whole call in try/catch (cron hook + admin button) so the daily
  * recommendation_performance run is never blocked.
+ *
+ * Spec 43: bounded/idempotent prediction+mode backfill for eligible active/open
+ * rows — missing targets/mode are generated/persisted (no tracking blocked).
  */
 export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResult> {
   const startTime = Date.now();
   logger.info({ msg: "Swing performance check starting" });
 
-  let active: Array<{ id: string; symbol: string; postedAt: Date; status: string; jobId: string | null; aiRecommendation: string | null; targetPrice: number | null; stopLoss: number | null; price: number }>;
+  type ActiveSwingSignal = {
+    id: string;
+    symbol: string;
+    postedAt: Date;
+    status: string;
+    jobId: string | null;
+    aiRecommendation: string | null;
+    targetPrice: number | null;
+    stopLoss: number | null;
+    price: number;
+    analysisMode?: string | null;
+    analysis?: unknown;
+    reasoning?: string | null;
+    riskFactors?: unknown;
+    confidence?: number | null;
+    entryPrice?: number | null;
+  };
+
+  let active: ActiveSwingSignal[];
   try {
     active = await prisma.swingSignal.findMany({
       where: { status: "active" },
+      orderBy: { postedAt: "desc" },
+      take: 500,
     });
   } catch (err) {
     if (isDbUnavailableError(err)) {
@@ -186,6 +217,120 @@ export async function checkSwingPerformance(): Promise<SwingPerformanceCheckResu
       return { checked: 0, targetAchieved: 0, stopLossHit: 0, expired: 0, updated: 0, executionTimeMs: Date.now() - startTime };
     }
     throw err;
+  }
+
+  // Spec 43: bounded/idempotent prediction+mode backfill before evaluation.
+  const sqlite = getSqliteFallback();
+  const PERF_BACKFILL_LIMIT = 200;
+  let backfilled = 0;
+  for (let i = 0; i < active.length && backfilled < PERF_BACKFILL_LIMIT; i++) {
+    const s: any = active[i];
+    const hasTargets = Number(s.targetPrice) > 0 && Number(s.stopLoss) > 0;
+    const hasMode = typeof s.analysisMode === "string" && s.analysisMode.length > 0;
+    const hasAnalysis = s.analysis != null || s.reasoning != null || s.aiRecommendation != null;
+    if (hasTargets && hasMode) continue;
+
+    try {
+      let next: any = { ...s };
+      // Legacy rows with targets/analysis but missing mode -> AI Targets.
+      if (!hasMode && (hasTargets || hasAnalysis)) {
+        next.analysisMode = ANALYSIS_MODE_AI;
+      }
+      // Missing targets -> generate deterministic prediction targets/mode.
+      if (!hasTargets) {
+        const indicators = (s.indicators as any) ?? {};
+        const pred = calculateFallbackSwingAnalysis({
+          symbol: s.symbol,
+          price: Number(s.price ?? s.entryPrice ?? s.currentPrice ?? 0),
+          changePercent: Number((s as any).changePercent ?? (s as any).change ?? 0),
+          screenerNames: Array.isArray(s.screenerNames) ? s.screenerNames : [],
+          families: Array.isArray(s.families) ? s.families : [],
+          indicators: {
+            momentum10: indicators.momentum10 ?? null,
+            momentum20: indicators.momentum20 ?? null,
+            volatility20: indicators.volatility20 ?? null,
+            distanceFrom20dHigh: indicators.distanceFrom20dHigh ?? null,
+          },
+        } as any);
+        next = {
+          ...next,
+          analysis: pred,
+          analysisMode: ANALYSIS_MODE_PREDICTION,
+          aiRecommendation:
+            pred.action === "LONG" ? "BUY" : pred.action === "SHORT" ? "SELL" : "HOLD",
+          confidence: pred.confidence,
+          targetPrice: pred.targetPrice,
+          stopLoss: pred.stopLoss,
+          reasoning: next.reasoning ?? pred.logic,
+          riskFactors: next.riskFactors ?? pred.riskFactors,
+        };
+      }
+      if (!next.analysisMode) {
+        next.analysisMode = hasTargets || hasAnalysis ? ANALYSIS_MODE_AI : ANALYSIS_MODE_PREDICTION;
+      }
+
+      active[i] = next as ActiveSwingSignal;
+      backfilled++;
+
+      // Persist to mirror (best-effort, idempotent).
+      if (sqlite && s.jobId) {
+        try {
+          const rows = sqlite.getSwingSignals(String(s.jobId));
+          const row = rows.find(
+            (r) => String(r.symbol).toUpperCase() === String(s.symbol).toUpperCase(),
+          );
+          if (row) {
+            sqlite.upsertSwingSignal({
+              ...row,
+              ...(next.analysis != null ? { analysis: next.analysis } : {}),
+              aiRecommendation: next.aiRecommendation ?? row.aiRecommendation ?? null,
+              confidence: next.confidence ?? row.confidence ?? null,
+              targetPrice: next.targetPrice ?? row.targetPrice ?? null,
+              stopLoss: next.stopLoss ?? row.stopLoss ?? null,
+              analysisMode: next.analysisMode ?? row.analysisMode ?? null,
+              updatedAt: new Date(),
+            });
+          }
+        } catch (e) {
+          logger.warn({
+            msg: "Swing perf: mirror backfill failed (non-fatal)",
+            symbol: s.symbol,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      // Persist to Prisma (best-effort, idempotent).
+      try {
+        await prisma.swingSignal.update({
+          where: { id: s.id },
+          data: {
+            ...(next.analysis != null ? { analysis: next.analysis as any } : {}),
+            aiRecommendation: next.aiRecommendation ?? undefined,
+            confidence: next.confidence ?? undefined,
+            targetPrice: next.targetPrice ?? undefined,
+            stopLoss: next.stopLoss ?? undefined,
+            analysisMode: next.analysisMode ?? undefined,
+          },
+        });
+      } catch (e) {
+        if (!isDbUnavailableError(e)) {
+          logger.warn({
+            msg: "Swing perf: Prisma backfill failed (non-fatal)",
+            symbol: s.symbol,
+            signalId: s.id,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn({
+        msg: "Swing perf: prediction/mode backfill failed (non-fatal)",
+        symbol: s.symbol,
+        signalId: s.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   const now = Date.now();

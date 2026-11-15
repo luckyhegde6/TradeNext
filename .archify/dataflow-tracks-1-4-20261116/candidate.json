@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "TradeNext Tracks 1–4: Notification and Deploy-Prep Data Flows",
+    "subtitle": "Unified outbound notification records flow from triggers to persistence/admin; deploy prep flows synchronously through checks, task state, and mirror flush/sync",
+    "output": ".archify/dataflow-tracks-1-4-20261116/tracks-1-4-dataflow.html",
+    "viewBox": [
+      1500,
+      720
+    ]
+  },
+  "stages": [
+    {
+      "label": "Triggers"
+    },
+    {
+      "label": "Normalize"
+    },
+    {
+      "label": "Persist"
+    },
+    {
+      "label": "Sync / Task"
+    },
+    {
+      "label": "Admin Consume"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "outbound_triggers",
+      "type": "backend",
+      "label": "Outbound Triggers",
+      "sublabel": "Telegram, alerts, admin",
+      "stage": 0,
+      "row": 0,
+      "tag": "Tracks 1–3",
+      "width": 150
+    },
+    {
+      "id": "announcement_trigger",
+      "type": "backend",
+      "label": "Announcements",
+      "sublabel": "create/activate fanout",
+      "stage": 0,
+      "row": 2,
+      "tag": "Track 3",
+      "width": 150
+    },
+    {
+      "id": "deploy_action",
+      "type": "frontend",
+      "label": "Deploy Prep Action",
+      "sublabel": "admin DB Health request",
+      "stage": 0,
+      "row": 3,
+      "tag": "Track 4",
+      "width": 150
+    },
+    {
+      "id": "outbound_record",
+      "type": "backend",
+      "label": "Outbound Record",
+      "sublabel": "normalize, status, preview",
+      "stage": 1,
+      "row": 0,
+      "width": 150
+    },
+    {
+      "id": "deploy_checks",
+      "type": "security",
+      "label": "Deploy Checks",
+      "sublabel": "probe, breaker, SQLite",
+      "stage": 1,
+      "row": 3,
+      "width": 150
+    },
+    {
+      "id": "sqlite_outbound",
+      "type": "database",
+      "label": "SQLite Outbound",
+      "sublabel": "mirror + outbox",
+      "stage": 2,
+      "row": 0,
+      "tag": "SQLite-first",
+      "width": 150
+    },
+    {
+      "id": "prisma_outbound",
+      "type": "database",
+      "label": "Prisma Outbound Table",
+      "sublabel": "fallback persist/query",
+      "stage": 2,
+      "row": 2,
+      "width": 150
+    },
+    {
+      "id": "worker_task_store",
+      "type": "database",
+      "label": "Worker Tasks",
+      "sublabel": "task + events",
+      "stage": 2,
+      "row": 3,
+      "width": 150
+    },
+    {
+      "id": "push_sink",
+      "type": "backend",
+      "label": "Outbox Push Sink",
+      "sublabel": "outbox to Prisma upsert",
+      "stage": 3,
+      "row": 1,
+      "width": 150
+    },
+    {
+      "id": "deploy_exec",
+      "type": "backend",
+      "label": "Deploy Exec",
+      "sublabel": "flush + sync mirror",
+      "stage": 3,
+      "row": 2,
+      "width": 150
+    },
+    {
+      "id": "admin_history",
+      "type": "frontend",
+      "label": "Admin History UI",
+      "sublabel": "notifications/alerts views",
+      "stage": 4,
+      "row": 1,
+      "width": 150
+    },
+    {
+      "id": "workers_view",
+      "type": "frontend",
+      "label": "Workers / Task View",
+      "sublabel": "task status and logs visibility",
+      "stage": 4,
+      "row": 3,
+      "width": 150
+    }
+  ],
+  "flows": [
+    {
+      "id": "triggers-to-record",
+      "from": "outbound_triggers",
+      "to": "outbound_record",
+      "label": "outbound send/result",
+      "variant": "emphasis",
+      "labelDy": -28
+    },
+    {
+      "id": "announce-to-record",
+      "from": "announcement_trigger",
+      "to": "outbound_record",
+      "label": "admin in-app records",
+      "variant": "default"
+    },
+    {
+      "id": "record-to-sqlite",
+      "from": "outbound_record",
+      "to": "sqlite_outbound",
+      "label": "normalized per-recipient row",
+      "classification": "SQLite-first",
+      "variant": "emphasis"
+    },
+    {
+      "id": "record-to-prisma-fallback",
+      "from": "outbound_record",
+      "to": "prisma_outbound",
+      "label": "fallback persist/query",
+      "classification": "best-effort",
+      "variant": "dashed"
+    },
+    {
+      "id": "sqlite-to-push",
+      "from": "sqlite_outbound",
+      "to": "push_sink",
+      "label": "outbox rows",
+      "variant": "default"
+    },
+    {
+      "id": "push-to-prisma",
+      "from": "push_sink",
+      "to": "prisma_outbound",
+      "label": "promoted outbound records",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sqlite-to-admin",
+      "from": "sqlite_outbound",
+      "to": "admin_history",
+      "label": "history/detail/manage",
+      "variant": "emphasis"
+    },
+    {
+      "id": "deploy-to-checks",
+      "from": "deploy_action",
+      "to": "deploy_checks",
+      "label": "deploy_prep request",
+      "variant": "emphasis",
+      "labelDy": -28
+    },
+    {
+      "id": "checks-to-task",
+      "from": "deploy_checks",
+      "to": "worker_task_store",
+      "variant": "default",
+      "label": "task ctx",
+      "labelDy": 50
+    },
+    {
+      "id": "exec-to-sqlite",
+      "from": "deploy_exec",
+      "to": "sqlite_outbound",
+      "label": "flush/sync mirror state",
+      "variant": "default",
+      "labelDy": -30
+    },
+    {
+      "id": "exec-to-prisma",
+      "from": "deploy_exec",
+      "to": "prisma_outbound",
+      "variant": "dashed",
+      "label": "probe/sync",
+      "labelDy": 60
+    },
+    {
+      "id": "exec-to-task",
+      "from": "deploy_exec",
+      "to": "worker_task_store",
+      "variant": "emphasis",
+      "label": "result",
+      "labelDy": -30
+    },
+    {
+      "id": "task-to-workers",
+      "from": "worker_task_store",
+      "to": "workers_view",
+      "label": "task visibility",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Outbound Flow (Tracks 1–3)",
+      "items": [
+        "All outbound sends are normalized into per-recipient records",
+        "Records are written SQLite-first and can fall back to Prisma",
+        "Admin pages consume unified history/detail and actions"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Deploy Prep Flow (Track 4)",
+      "items": [
+        "deploy_prep runs in-request with explicit checks",
+        "Worker task is created/updated as part of the same operation",
+        "Flush/sync touches SQLite and Prisma, result surfaced to workers/admin"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Notes",
+      "items": [
+        "Diagram is scoped to implemented Tracks 1–4 branch behavior",
+        "Some routes are dashed to indicate fallback or probe/sync relationships"
+      ]
+    }
+  ]
+}

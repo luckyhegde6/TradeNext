@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "dataflow",
+  "quality": "standard",
+  "specification": {
+    "path": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+    "sha256": "928d6cc92da17ae2a0708b23a76ead619b7fcb0aed0afbadad10ec90e180ce14",
+    "bytes": 6546
+  },
+  "artifact": {
+    "path": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+    "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+    "bytes": 848161
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.finalize.json",
+    "summaryReceipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.finalize-summary.json",
+    "browserCheckReceipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-15T19:20:17.891Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 5061,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

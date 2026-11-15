@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 import { dbOpsCounter, isDbWriteBudgetExceeded, WRITE_BUDGET_CONFIG, getDbErrorLog, getIstDayKey, getDbErrorCounts } from "@/lib/prisma";
 import { ensureSqliteBackup, getSqliteFallback, exportSqliteBackup, restoreSqliteBackup, getWriteBehindStats, flushWriteBehind, probePrismaNow, probeDbTimeNow, getDbLogFiles, readDbLogFile, exportDbLogsAsNdjson, pushSqliteToPrisma, hasSyncHistoryTable, getOutboxPending, getSqliteDerivedCounts, type WriteBehindKind } from "@/lib/sqlite";
 import { createAuditLog } from "@/lib/audit";
@@ -654,34 +655,157 @@ export async function POST(req: Request) {
   }
 
   if (action === "deploy_prep") {
+    // Track 4: run synchronously in-request, but still create a worker_tasks entry
+    // (not queued/pending scheduler path). Include required checks and record task.
+    const { isPlanLimitBreakerOpen } = await import("@/lib/db-utils");
+    let taskId: string | null = null;
+    const now = new Date();
     try {
-      const { spawnRegularTask } = await import("@/lib/services/worker/task-orchestrator");
-      const task = await spawnRegularTask({
-        name: "Deploy prep (flush logs + refresh mirror)",
-        taskType: "deploy_prep",
-        priority: 10,
-        payload: { reason: "admin_deploy_prep", triggeredBy: "admin" },
+      const { flushWriteBehind, ensureSqliteBackup, getWriteBehindStats, getOutboxPending } = await import("@/lib/sqlite");
+      const sqliteBefore = getSqliteFallback();
+      const probe = await probePrismaNow().catch((e) => ({
+        available: false,
+        latencyMs: null as number | null,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+
+      // Create task record in Prisma (and seed mirror best-effort) so it appears in workers/tasks.
+      const task = await prisma.workerTask.create({
+        data: {
+          name: "Deploy prep (synchronous in-request)",
+          taskType: "deploy_prep",
+          taskCategory: "regular",
+          triggeredBy: "admin",
+          priority: 10,
+          status: "running",
+          startedAt: now,
+          payload: { reason: "admin_deploy_prep", triggeredBy: "admin", synchronous: true } as any,
+          createdBy: session.user.id ? parseInt(session.user.id) : null,
+        },
       });
+      taskId = task.id;
+      try {
+        sqliteBefore?.upsertWorkerTask?.({
+          id: task.id,
+          name: task.name,
+          taskType: task.taskType,
+          priority: task.priority,
+          status: task.status,
+          createdAt: task.createdAt,
+          payload: task.payload,
+          assignedTo: task.assignedTo ?? null,
+          cronJobId: task.cronJobId ?? null,
+        } as any);
+      } catch {
+        /* non-fatal mirror seed */
+      }
+      try {
+        await prisma.taskEvent.create({
+          data: { taskId: task.id, eventType: "task_started", message: "Deploy prep started (synchronous in-request)", metadata: { action: "deploy_prep" } as any },
+        });
+      } catch { /* non-fatal */ }
+
+      const checks = {
+        probePrismaNow: probe,
+        breakerOpen: isPlanLimitBreakerOpen(),
+        latencyMs: (probe as any)?.latencyMs ?? null,
+        sqliteReady: !!sqliteBefore,
+        sqliteHealth: sqliteBefore?.getHealthStatus?.()?.sqlite ?? null,
+        writeBehind: getWriteBehindStats(),
+        mirrorOutboxState: {
+          outboxPending: getOutboxPending(),
+          syncHistoryTable: hasSyncHistoryTable(),
+          derivedCounts: getSqliteDerivedCounts(),
+        },
+      };
+
+      if (checks.breakerOpen) {
+        throw new Error("Plan-limit circuit breaker is open (recent DB query timeouts/hold) — try again in a few minutes");
+      }
+
+      const flushed = await flushWriteBehind();
+      const sqlite = await ensureSqliteBackup();
+      if (!sqlite) {
+        throw new Error("SQLite backup not initialized (logs flushed, mirror sync skipped)");
+      }
+
+      const SYNC_TIMEOUT_MS = 120_000;
+      await Promise.race([
+        sqlite.syncFromPrisma({ force: true, reason: "admin" }),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("Deploy prep mirror sync timed out after 2 minutes")), SYNC_TIMEOUT_MS)
+        ),
+      ]);
+      sqlite.persistOpsCounter();
+      sqlite.persistDbErrorCounts();
+      const health = sqlite.getHealthStatus();
+      const rowsFlushed = Object.values(flushed.flushed).reduce((a, b) => a + b, 0);
+
+      const result = {
+        checks,
+        flushed: flushed.flushed,
+        retained: flushed.retained,
+        pending: flushed.pending,
+        rowsFlushed,
+        sqlite: health.sqlite,
+      };
+
+      await prisma.workerTask.update({
+        where: { id: task.id },
+        data: {
+          status: "completed",
+          result: result as any,
+          completedAt: new Date(),
+          error: null,
+        },
+      });
+      try {
+        sqliteBefore?.upsertWorkerTask?.({ id: task.id, name: task.name, taskType: task.taskType, priority: task.priority, status: "completed", createdAt: task.createdAt, payload: task.payload, assignedTo: null, cronJobId: null } as any);
+        await prisma.taskEvent.create({
+          data: { taskId: task.id, eventType: "task_completed", message: "Deploy prep completed (synchronous in-request)", metadata: { rowsFlushed } as any },
+        });
+      } catch { /* non-fatal */ }
+
       void createAuditLog({
         userId: session.user.id ? parseInt(session.user.id) : undefined,
         userEmail: session.user.email,
-        action: "ADMIN_DB_DEPLOY_PREP_QUEUED",
+        action: "ADMIN_DB_DEPLOY_PREP",
         resource: "sqlite",
-        responseStatus: 202,
-        metadata: { taskId: task.id },
+        responseStatus: 200,
+        metadata: { taskId: task.id, rowsFlushed, checks: { breakerOpen: checks.breakerOpen, probeAvailable: (checks.probePrismaNow as any)?.available, latencyMs: checks.latencyMs } },
+      });
+
+      return NextResponse.json({
+        success: true,
+        synchronous: true,
+        queued: false,
+        taskId: task.id,
+        message: `Deploy prep completed — flushed ${rowsFlushed} write-behind rows and refreshed the SQLite mirror`,
+        ...result,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (taskId) {
+        try {
+          await prisma.workerTask.update({
+            where: { id: taskId },
+            data: { status: "failed", error: detail, completedAt: new Date() },
+          });
+          await prisma.taskEvent.create({
+            data: { taskId, eventType: "task_failed", message: "Deploy prep failed (synchronous in-request)", metadata: { error: detail } as any },
+          }).catch(() => {});
+        } catch { /* non-fatal */ }
+      }
+      void createAuditLog({
+        userId: session.user.id ? parseInt(session.user.id) : undefined,
+        userEmail: session.user.email,
+        action: "ADMIN_DB_DEPLOY_PREP",
+        resource: "sqlite",
+        responseStatus: 500,
+        metadata: { taskId, error: detail },
       });
       return NextResponse.json(
-        {
-          success: true,
-          queued: true,
-          taskId: task.id,
-          message: "Deploy prep queued — check Workers → Tasks for progress",
-        },
-        { status: 202 },
-      );
-    } catch (err) {
-      return NextResponse.json(
-        { error: "Failed to queue deploy prep", detail: err instanceof Error ? err.message : String(err) },
+        { error: "Deploy prep failed", detail, taskId },
         { status: 500 },
       );
     }

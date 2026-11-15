@@ -162,6 +162,12 @@ export default function AdminAnnouncementsPage() {
           <p className="text-lg text-gray-500 dark:text-slate-400 mt-2">
             Create and manage banner notifications for users and admins.
           </p>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-2">
+            Unified send history:{" "}
+            <a href="/admin/utils/notifications" className="text-blue-600 hover:underline font-medium">
+              View Outbound Notifications
+            </a>
+          </p>
         </div>
         <button
           onClick={() => { setShowForm(true); setEditingId(null); setFormData({ title: "", message: "", type: "info", target: "all", isActive: true, startsAt: "", endsAt: "", link: "" }); }}

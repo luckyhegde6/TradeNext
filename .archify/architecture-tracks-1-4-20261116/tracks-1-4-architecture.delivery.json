@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "6371a9dc-6f1d-447f-bd6d-8b7e65b6c35d",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "F:\\Local_git\\TradeNext\\.archify\\architecture-tracks-1-4-20261116\\candidate.json",
+  "output": "F:\\Local_git\\TradeNext\\.archify\\architecture-tracks-1-4-20261116\\tracks-1-4-architecture.html",
+  "specification": {
+    "sha256": "4ca29831e19779fea973da1ee32f8722f64416c65d4dca44ed957b4f732ca436",
+    "bytes": 6580
+  },
+  "artifact": {
+    "sha256": "0310858161d6be2d9336c2337da8d8276ff4dbf1ead8327515e7da88b3deb2d8",
+    "bytes": 858584
+  }
+}

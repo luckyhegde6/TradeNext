@@ -1,25 +1,32 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "archify": {
+      "source": "archify.si",
+      "sourceUrl": "https://archify.si",
+      "sourceType": "well-known",
+      "computedHash": "1cebae96d2e38bfd0588b82202900f8462dba03922e2ab841e959fcee961df5f",
+      "wellKnownDigest": "sha256:48c55f9b59cda383ea63741318995e3adffaeb483cefdc721665322065b47a2d"
+    },
     "prisma-client-api": {
       "source": "prisma/skills",
       "sourceType": "github",
-      "computedHash": "a982b2a15dc9d4223be7844f082e6481e1e24df1f379fbcf66b82d5b58e80bec"
+      "computedHash": "3401ac516584be177fb3e7248b17f92a3178959c2196ba7a8d55d32709f69ba1"
     },
     "prisma-database-setup": {
       "source": "prisma/skills",
       "sourceType": "github",
-      "computedHash": "72e2360923e949261a15ca1dbcfac5662ec5e851f6045ffb13163a55a083bcea"
+      "computedHash": "ab505df3aca3563ea1688d8f15687855a0c432407a0b9fa2d203aad3b04376f8"
     },
     "prisma-driver-adapter-implementation": {
       "source": "prisma/skills",
       "sourceType": "github",
-      "computedHash": "c4dd750d1e0629d9def6719330b773917b3f6649e4ed954100907275a1bb98ad"
+      "computedHash": "535d590648f7c7b6f2fb4dac76aaa3a23df36273d30404ed3d58c60cb560facb"
     },
     "prisma-postgres": {
       "source": "prisma/skills",
       "sourceType": "github",
-      "computedHash": "072f06690854c4db5dfc0e812105d83dadf2dfcbe2949a2e8af84d9174a018ea"
+      "computedHash": "3d5b48ff87daf075d62067d9e568f1e67bd69a8d9eb3f1421d7a5cf745a74119"
     }
   }
 }
