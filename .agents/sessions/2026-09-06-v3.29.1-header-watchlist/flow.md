@@ -20,7 +20,7 @@
 ## Tooling notes (Windows cmd)
 - `&` = separator, not background operator → `npx tsc --noEmit … & echo TSC-STARTED` ran tsc foreground; the 30s tool kill truncated it (`tmp-tsc2.log` SIZE=0). Foreground run with 120s timeout succeeded.
 - Playwright login needs a hydration wait: fill signin form → click Sign In → wait for header/avatar before the next step (specs already do this).
-- Grep tool: `path` = a DIRECTORY + `include` filter (whole-repo greps get polluted by `.opencode/skills`, `.claude/skills`).
+- Grep tool: `path` = a DIRECTORY + `include` filter (whole-repo greps get polluted by `.agents/skills`, `.claude/skills`).
 
 ## Next (handed to user)
 - Commit approval: `app/Header.tsx` + `app/watchlist/page.tsx` + `app/watchlist/__tests__/page.test.tsx` + this doc set. No push/merge/deploy without explicit approval.

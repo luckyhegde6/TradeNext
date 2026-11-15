@@ -131,6 +131,16 @@ describe("acquireLeaderLock", () => {
     expect(result).toBe(true);
   });
 
+  it("fails closed on DB unavailability when requested by a serverless runner", async () => {
+    prisma.workerStatus.updateMany.mockRejectedValue({ code: "P6003" });
+    isDbUnavailableError.mockReturnValue(true);
+
+    const result = await acquireLeaderLock("worker", { failOpen: false });
+
+    expect(result).toBe(false);
+    expect(prisma.workerStatus.create).not.toHaveBeenCalled();
+  });
+
   it("returns false when a non-DB generic error escapes election", async () => {
     prisma.workerStatus.updateMany.mockRejectedValue(new Error("boom"));
     isDbUnavailableError.mockReturnValue(false);
@@ -142,6 +152,15 @@ describe("acquireLeaderLock", () => {
 });
 
 describe("renewLeaderLock", () => {
+
+  it("fails closed on DB outage when renewing a serverless lease", async () => {
+    prisma.workerStatus.updateMany.mockRejectedValue({ code: "P6003" });
+    isDbUnavailableError.mockReturnValue(true);
+
+    const result = await renewLeaderLock("worker", { failOpen: false });
+
+    expect(result).toBe(false);
+  });
   beforeEach(() => jest.clearAllMocks());
 
   it("returns true when it refreshed its own heartbeat", async () => {

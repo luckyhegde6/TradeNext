@@ -41,20 +41,18 @@ Write `docs/designDoc/ph<NN>-<feature>-design.md`: Overview, Lifecycle (stateDia
 ### 5. Docs Gate
 Run `/pre-commit-check` → verify AGENTS/TODO/Primer/agent-memory/Lessons/session-todos current, README if user-facing. **If docs are not updated, the task is NOT complete.**
 
-## Tools
+## Skills & Tools
 
-- `git status` / `git diff` — what changed
-- `read` / `edit` / `write` — apply doc edits
-- `glob` / `grep` — locate doc references
-- Mermaid — diagrams in plans and wiki
+- **Canonical skills**: `.agents/skills/docs-updater/SKILL.md`, `.agents/skills/docs-workflow/SKILL.md`
+- **Related skills**: `wiki-creator` (handoff for wiki publish), `bug-finder` (lessons/root-cause capture)
+- **Tools**: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash` (`git status/diff`), `skill` tool when available
+- **Artifacts**: `AGENTS.md`, `.agents/CHANGELOG.md` + `.agents/changelog/*`, `TODO.md`, `README.md`, `Primer.md`, `agent-memory.md`, `Lessons.md`, `HANDOFF.md`, `.agents/session-todos.md`, `.agents/sessions/*`, `app/api/openapi/route.ts`
 
 ## Handoff Triggers
 
 | Condition | Handoff To | Reason |
 |-----------|------------|--------|
-| Docs updated + verified | Integrator | Commit/merge |
+| Docs updated + verified | Integrator / user | Ready for commit/review (commit only on explicit request) |
 | Wiki docs changed | Wiki Publisher | Publish wiki pages |
 | New bug/edge found | Bug Hunter | Investigate root cause |
 | API contract changed | Bug Hunter + QA | Verify UI ↔ API contract |
-
-Source: `.opencode/skills/docs-updater/SKILL.md`

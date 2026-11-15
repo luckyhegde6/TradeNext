@@ -168,7 +168,7 @@
 **Branch**: `feat/plan-limit-resilience` (sits with v3.20.3 and the committed Playwright-docs commit `e2c5607`).
 **What**: Built a dedicated **`playwright-debug`** skill from the user-pasted Playwright developer-tooling reference (Inspector `--debug`, HTML report, Codegen, Trace Viewer, emulation) and wired it into every coding/verification agent. No new dependency (ships in installed `@playwright/test`).
 **Delivered**:
-- NEW machine skill `.opencode/skills/playwright-debug/SKILL.md` + human mirror `.agents/skills/playwright-debug/SKILL.md` + deep-dive `.agents/docs/playwright-debug.md`.
+- NEW machine skill `.agents/skills/playwright-debug/SKILL.md` + human mirror `.agents/skills/playwright-debug/SKILL.md` + deep-dive `.agents/docs/playwright-debug.md`.
 - 6 agent profiles updated (`qa`, `e2e-agent`, `bug-hunter`, `ux-designer`, `code-reviewer`, `tdd-guide`) + `.opencode/opencode.json` prompts wired for all 6 + the build agent's UI/UX-testing step.
 - `.agents/AGENT-SKILL-MATRIX.md` + `AGENTS.md` focused-skills table updated.
 **Tests**: N/A — tooling/docs-only (no code/test/API/behavior change).

@@ -53,6 +53,12 @@ Always maintain `.agents/session-todos.md` from session start until the final co
   □ No junk artifacts staged (playwright snapshots, dev-server.log, screenshots)
   □ git status reviewed — all staged files intended
 
+□ EVIDENCE (Bugfixes & Features — MANDATORY)
+  □ RCA documented for bug fixes (root cause, impact, why escaped, fix rationale)
+  □ Verification evidence collected (targeted tests/tsc/lint/build/logs/API-DB checks as applicable)
+  □ Before/after screenshots attached for UI/UX-visible changes (and before/after evidence for non-visual fixes)
+  □ PR/hand-off includes evidence + explanation of what changed, how it was fixed/implemented, and how verified
+
 □ PRODUCT
   □ Feature solves a real user problem
   □ Error states handled (loading/empty/error)

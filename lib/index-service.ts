@@ -775,39 +775,91 @@ export async function getIndexStocks(indexName: string = "NIFTY TOTAL MARKET") {
     const cached = staticCache.get(cacheKey);
     if (cached) return cached;
 
-    try {
-        // Double-check safeIndexName is a valid string before using
-        if (typeof safeIndexName !== 'string' || safeIndexName.length === 0) {
-            logger.error({ msg: 'Invalid indexName provided', indexName });
-            return null;
+    const candidateIndexes = (() => {
+        const primary = safeIndexName.trim();
+        const list = [primary];
+        // "NIFTY TOTAL MARKET" has historically been the broad-universe index, but
+        // NSE endpoint availability/name handling can vary (prod observed 404).
+        // Fall back to a large-cap/broad index to keep market-data sync resilient.
+        if (primary.toUpperCase() === "NIFTY TOTAL MARKET") {
+            list.push("NIFTY 500", "NIFTY TOTAL MKT");
         }
-        
-        const encodedIndex = encodeURIComponent(safeIndexName);
-        const url = `https://www.nseindia.com/api/equity-stockIndices?index=${encodedIndex}`;
+        const envFallback = process.env.MARKET_DATA_INDEX_FALLBACK;
+        if (envFallback) {
+            for (const part of envFallback.split(",")) {
+                const v = part.trim();
+                if (v) list.push(v);
+            }
+        }
+        return [...new Set(list.filter(Boolean))];
+    })();
 
-        logger.info({ msg: 'Fetching index stocks from NSE', index: safeIndexName });
-
-        const data = await nseFetch(url) as any;
-
-        // Response format: { name, advance, timestamp, data: [...] }
-        // The first item in data array is the index itself, rest are stocks
-        const stocksData = data?.data || [];
-
-        // Filter out the index itself (first item has symbol matching indexName)
-        const stocks = stocksData.filter((item: any) =>
-            item.symbol && item.symbol !== safeIndexName && item.series === 'EQ'
-        );
-
-        // Cache for 1 hour
-        const ttl = 3600;
-        staticCache.set(cacheKey, stocks, ttl);
-
-        logger.info({ msg: 'Index stocks fetched', index: safeIndexName, count: stocks.length });
-        return stocks;
-    } catch (e) {
-        logger.error({ msg: 'Index stocks fetch error', index: safeIndexName, error: e });
+    if (typeof safeIndexName !== 'string' || safeIndexName.length === 0) {
+        logger.error({ msg: 'Invalid indexName provided', indexName });
         return null;
     }
+
+    let lastError: unknown = null;
+    for (const candidate of candidateIndexes) {
+        try {
+            const encodedIndex = encodeURIComponent(candidate);
+            const url = `https://www.nseindia.com/api/equity-stockIndices?index=${encodedIndex}`;
+
+            logger.info({ msg: 'Fetching index stocks from NSE', index: candidate, requestedIndex: safeIndexName });
+
+            const data = await nseFetch(url) as any;
+
+            // Response format: { name, advance, timestamp, data: [...] }
+            // The first item in data array is the index itself, rest are stocks
+            const stocksData = Array.isArray(data?.data) ? data.data : [];
+
+            // Filter out the index itself (first item has symbol matching indexName)
+            const stocks = stocksData.filter((item: any) =>
+                item?.symbol && item.symbol !== candidate && item.symbol !== safeIndexName && item.series === 'EQ'
+            );
+
+            if (stocks.length === 0) {
+                logger.warn({
+                    msg: 'Index stocks fetch returned empty set',
+                    index: candidate,
+                    requestedIndex: safeIndexName,
+                });
+                continue;
+            }
+
+            // Cache for 1 hour under both requested and resolved index keys so
+            // callers asking for the original name benefit from fallback resolution.
+            const ttl = 3600;
+            staticCache.set(cacheKey, stocks, ttl);
+            const resolvedKey = `nse:indexStocks:${candidate.replace(/\s+/g, '_')}`;
+            staticCache.set(resolvedKey, stocks, ttl);
+
+            if (candidate !== safeIndexName) {
+                logger.warn({
+                    msg: 'Index stocks fallback succeeded',
+                    requestedIndex: safeIndexName,
+                    resolvedIndex: candidate,
+                    count: stocks.length,
+                });
+            } else {
+                logger.info({ msg: 'Index stocks fetched', index: safeIndexName, count: stocks.length });
+            }
+            return stocks;
+        } catch (e) {
+            lastError = e;
+            logger.error({
+                msg: 'Index stocks fetch error',
+                index: candidate,
+                requestedIndex: safeIndexName,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
+    if (lastError) {
+        logger.error({ msg: 'Index stocks fetch failed for all candidates', index: safeIndexName, candidates: candidateIndexes, error: lastError });
+    }
+    return null;
 }
 
 /**

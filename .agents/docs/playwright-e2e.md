@@ -3,8 +3,8 @@
 > TradeNext subsystem deep-dive. Read before adding/modifying e2e tests, debugging a
 > failing run, or wiring Playwright into agent workflows.
 >
-> Companion skills: `.opencode/skills/playwright-e2e/` (suite authoring/debugging),
-> `.opencode/skills/playwright-cli/` (interactive browser automation), MCP servers
+> Companion skills: `.agents/skills/playwright-e2e/` (suite authoring/debugging),
+> `.agents/skills/playwright-cli/` (interactive browser automation), MCP servers
 > `playwright` (`@playwright/mcp`) and `chrome-devtools` (agentic browser control).
 
 ## 1. Why an e2e suite?
@@ -162,7 +162,7 @@ Two complementary tools exist for exploratory, non-scripted browser work:
 ### Playwright CLI (`playwright-cli`)
 
 Human/agent CLI for ad-hoc checks: open a page, snapshot, click, fill, resize, trace,
-state-save. Full reference: `.opencode/skills/playwright-cli/SKILL.md` +
+state-save. Full reference: `.agents/skills/playwright-cli/SKILL.md` +
 `.agents/skills/playwright-cli/AGENT-TESTING-GUIDE.md`.
 
 ```bash

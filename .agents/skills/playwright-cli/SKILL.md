@@ -276,11 +276,10 @@ playwright-cli close
 * **Test generation** [references/test-generation.md](references/test-generation.md)
 * **Tracing** [references/tracing.md](references/tracing.md)
 * **Video recording** [references/video-recording.md](references/video-recording.md)
-* **Agent Testing Guide** [AGENT-TESTING-GUIDE.md](AGENT-TESTING-GUIDE.md)
 
 ## Related skills & tooling
 
-- **`.opencode/skills/playwright-e2e/SKILL.md`** — the committed e2e test suite
+- **`.agents/skills/playwright-e2e/SKILL.md`** — the committed e2e test suite
   (`e2e/`, `npm run test:e2e`). Use it for scripted regression guards, cross-browser
   + mobile matrix, and before merge/PR. Deep-dive: `.agents/docs/playwright-e2e.md`.
   This CLI skill is for **exploratory/one-off** browser automation (debug a page, test

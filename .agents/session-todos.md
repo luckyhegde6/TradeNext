@@ -1,7 +1,7 @@
 ## Current (2026-11-15 — Spec 43 prediction targets & analysis mode: branch setup + prod worker analysis)
 
-Branch: `feature/spec-43-prediction-targets` (created from local `main`)  
-Base note: `git fetch/pull` from `origin` failed in this environment (`Could not resolve host: github.com`) so local `main` may be behind `origin/main` (PR #155 reported merged). Rebase/fetch when network access is available.
+Branch: `feature/spec-43-prediction-targets` (created from local `main`, merged with `origin/main` after PR #155)  
+Base: includes merged PR #155 (`v3.57.0`) + Spec 43 planning commit on this branch.
 
 ### Spec 43 — Prediction targets & `analysisMode` (no "AI targets off")
 - Spec: `.agents/specs/43-prediction-targets-analysis-mode.md`
@@ -22,9 +22,9 @@ Base note: `git fetch/pull` from `origin` failed in this environment (`Could not
 
 ### Prod worker/tasks investigation (tradenext6.netlify.app/admin/utils/workers, 2026-11-15 snapshot)
 - [x] Collected snapshot: **35 pending / 0 running / 0 completed / 0 failed** tasks (oldest 2026-11-09, newest deploy_prep 2026-11-15 06:08:51 pm), all `startedAt`/`completedAt` empty, retries `0/3`; 1 idle worker (`169.254.45.199-9`, completed 0, failed 0, heartbeat 6:06:39 pm); leaders `sqlite-sync`/`worker`/`cron-daemon` all holding same instance; Accelerate reachable (360ms). System/crons show last runs up to 2026-11-13 and next runs future; recent sync history shows frequent `↓ to SQLite` boots today + one `↑ to Prisma` admin sync.
-- [ ] Analyze root cause from code/config/logs: cron daemon spawning tasks but worker engine not claiming/executing pending `WorkerTask` rows (SQLite control-mirror freshness/discovery vs Prisma queue, degraded-mode path, Netlify runtime/runner behavior, leader/loop liveness, task seeding). Use previously provided logs/evidence where available.
-- [ ] Propose/implement remediation (and identify if prod deploy/config action needed, e.g. `WORKER_DISPATCH_SECRET` / runner enablement).
+- [x] Code/config analysis completed (see session response): likely contributors — SQLite-fresh mirror discovery can hide Prisma-pending rows until stale fallback, degraded/breaker/runner/runtime path can prevent Prisma task claims, and durable runner/dispatch preconditions (Spec 42) must be satisfied on prod.
+- [ ] Implement remediation/fix path and validate (code and/or prod config/deploy actions as required).
 
 ### Carried forward
 - [ ] **S2 (blocked):** retry minimal Prisma-Remote prod read-only diagnostics (ops-limited) once approval/tool access is available.
-- [ ] **Git:** fetch/rebase `feature/spec-43-prediction-targets` onto latest `origin/main` when network access is restored (PR #155 merge). No merge/deploy without explicit user request.
+- [ ] **User controls merge/deploy**; `WORKER_DISPATCH_SECRET` must be set in Netlify dashboard before deploy (Spec 42). No merge/deploy without explicit user request.

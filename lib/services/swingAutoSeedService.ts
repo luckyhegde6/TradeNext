@@ -30,10 +30,18 @@ export function isSwingSeededForUser(userId: number): boolean {
 }
 
 /**
- * Durable probe — are stored swing targets already persisted for this user?
- * Serves the STORED feed (analyze=false → serve-first path, NO AI, NO force,
- * NO refresh). A non-empty stored feed means "already seeded" so we never
- * double the AI. Returns false on any error (treated as unseeded).
+ * Durable probe — are swing AI targets stored, in progress, or already
+ * attempted for this user?
+ *
+ * "Stored targets" means actual AI-generated analysis (LONG/SHORT/OBSERVE with
+ * entry/target/stop), NOT a screener-only feed. A screener-only response
+ * (`analysisStatus: "skipped"` with no per-stock analysis) must NOT count as
+ * seeded, otherwise the one-time auto-seed never runs and the Swing tab stays
+ * stuck on "AI targets off / screener signals only".
+ *
+ * Read-only: inspects the durable swing-analysis job state (mirror/Prisma) and
+ * the serve-first feed; never triggers a scan or AI generation. Returns false on
+ * any error (treated as unseeded so the single bounded seed can attempt once).
  */
 export async function hasStoredSwingTargetsForUser(
   userId: number = PUBLIC_SWING_USER_ID,
@@ -41,16 +49,62 @@ export async function hasStoredSwingTargetsForUser(
   // Process guard short-circuits (no DB read at all when already seeded).
   if (seededUserIds.has(userId)) return true;
   try {
-    // serve-first: analyze=false never runs AI; forceRefresh=false never
-    // triggers a scan. Reads stored targets only.
+    // 1) Durable job state — side-effect free. A pending/running job means AI
+    // generation is already in flight; done/failed means a generation attempt
+    // completed (seed-once must not loop). This catches cases where the
+    // analyze=false serve path returns a screener-only cache miss.
+    const { getSqliteFallback } = await import("@/lib/sqlite");
+    const sqlite = getSqliteFallback();
+    const mirrorLatest =
+      sqlite?.getSwingAnalysisJobs({
+        status: ["pending", "running", "done", "failed"],
+        limit: 1,
+        order: "desc",
+      })?.[0] ?? null;
+
+    let latestJob: Record<string, unknown> | null = mirrorLatest;
+    if (!latestJob) {
+      try {
+        const prisma = (await import("@/lib/prisma")).default;
+        latestJob = (await prisma.swingAnalysisJob.findFirst({
+          where: { status: { in: ["pending", "running", "done", "failed"] } },
+          orderBy: { createdAt: "desc" },
+        })) as Record<string, unknown> | null;
+      } catch {
+        // Prisma unavailable — fall through to serve-first probe.
+      }
+    }
+
+    if (latestJob) {
+      const status = String(latestJob.status ?? "");
+      if (status === "pending" || status === "running") return true;
+      if (status === "done" || status === "failed") {
+        const payload = (latestJob.payload ?? {}) as {
+          stocks?: Array<{ analysis?: unknown }>;
+        };
+        const hasAnalysis =
+          Array.isArray(payload.stocks) &&
+          payload.stocks.some((s) => s && s.analysis != null);
+        // Treat a completed attempt as "seeded" (no auto-retry loop). A done job
+        // with analysis is stored targets; a failed/empty-analysis job is still a
+        // terminal once-attempt — manual Refresh remains available.
+        if (status === "done" ? true : hasAnalysis || true) return true;
+      }
+    }
+
+    // 2) Serve-first feed probe (NO AI, NO force). Covers in-memory/cached states
+    // not reflected in job lookup.
     const data = await getSwingRecommendations({ forceRefresh: false, analyze: false });
-    return (
-      data !== null &&
-      typeof data === "object" &&
-      "stocks" in data &&
-      Array.isArray((data as { stocks?: unknown[] }).stocks) &&
-      ((data as { stocks: unknown[] }).stocks).length > 0
-    );
+    if (!data || typeof data !== "object") return false;
+
+    const status = (data as { analysisStatus?: string }).analysisStatus;
+    if (status === "pending" || status === "done" || status === "failed") return true;
+
+    const stocks = (data as { stocks?: Array<{ analysis?: unknown }> }).stocks;
+    if (Array.isArray(stocks) && stocks.some((s) => s && s.analysis != null)) return true;
+
+    // Screener-only / skipped feed (even with picks) has no AI targets yet.
+    return false;
   } catch (error) {
     logger.warn({
       msg: "Swing stored-targets probe failed; treated as unseeded",

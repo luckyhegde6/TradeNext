@@ -243,3 +243,36 @@ Different task types need different indices (`stock_sync` → NIFTY TOTAL MARKET
 - The heartbeat is now 60s — if you add real-time "worker busy" UI, trigger `updateHeartbeat("busy", task.id)` on claim (already done) rather than waiting for the interval.
 - `os.loadavg()` is **not available on Windows** (returns `[]`) — memory is fine, CPU shows `0`/undefined locally. Do not depend on it on Windows dev boxes.
 - Zod validation uses `z.record(z.string(), z.unknown())` for payloads — JSON objects only, no arrays at the top level.
+
+
+---
+
+## 10. Netlify production scheduling migration (Spec 42 — in progress)
+
+The in-process `node-cron` and `startWorker()` loops remain the supported mode for a persistent Node process (local development and any explicitly provisioned persistent host). They are **not** the target production wake-up mechanism on Netlify.
+
+### Intended Netlify model
+
+1. A standalone Netlify Scheduled Function runs on a UTC one-minute schedule. It does not query Prisma or execute work; it only invokes a protected Background Function.
+2. A standalone Netlify Background Function (filename suffix `-background`) validates `WORKER_DISPATCH_SECRET` and a fixed small envelope. It acquires the database-backed runner lease with fail-closed semantics.
+3. The runner uses the existing `CronJob.nextRun` and WorkerTask records as the source of truth. It recovers due cron jobs and claims at most one task at a time through the existing atomic pending→running update.
+4. The runner stops claiming before its 15-minute platform deadline. A task that cannot safely finish in the remaining budget is deferred, not claimed and then abandoned.
+5. Long-running work (Daily Recommendations is known to run 25–35 minutes) must be divided into durable, idempotent coordinator/batch/finalizer tasks before it is eligible for serverless execution.
+
+### Runtime limits and testing
+
+- Scheduled Function: maximum 30 seconds.
+- Background Function: maximum 15 minutes; target runner budget is 13 minutes to leave recovery headroom.
+- Scheduled functions fire automatically only on published deploys. Branch deployments must be tested by manually invoking the function through Netlify UI or `netlify functions:invoke`.
+- Use standalone Netlify Functions. Do not add new scheduled/background Next.js API routes; the current Netlify Next.js runtime migration guidance deprecates those advanced route forms.
+- Keep `WORKER_DISPATCH_SECRET` server-side only. Never place its value in source control, logs, client bundles, diagnostics or example files.
+
+### Reliability gates — not yet enabled
+
+- The existing WorkerStatus leader row has no fencing token/lease expiry. A safe serverless lease design must prove that an expired/stalled invocation cannot continue writing after takeover.
+- WorkerTask has no durable checkpoint/idempotency key for AI batch work. CronJob.name is not unique. If safe uniqueness/fencing/checkpoint semantics require a Prisma schema change, get explicit approval before adding a migration.
+- Existing leader election currently fail-opens to local leadership when PostgreSQL is unavailable. Serverless runner acquisition and renewal must fail closed, while existing persistent Node behavior remains unchanged.
+- Preserve the SQLite-first invariant introduced in PR #154: boot hydration is separate from recurring SQLite→Prisma outbox push; no periodic full Prisma→SQLite pull is to be reintroduced.
+- WorkerTask completion and external Google Sheets/Telegram publish outcomes are separate facts. Keep exporter delivery ledger and task timelines distinct.
+
+Refer to `.agents/specs/42-durable-netlify-worker-cron.md` and `.agents/plans/42-durable-netlify-worker-cron.md` for the complete requirements, solutions, phase sequence, approval gates and verification plan. This section describes the target architecture; it does not claim implementation or deployment is complete.
