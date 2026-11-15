@@ -1,58 +1,30 @@
-## Current (2026-11-04 — Spec 40/41: SQLite sync amplification + DB Health runtime visibility + Sheets publish diagnostics)
+## Current (2026-11-15 — Spec 43 prediction targets & analysis mode: branch setup + prod worker analysis)
 
-Branch fix/sqlite-sync-startup-amplification, created from latest main after PR #153 merge. Specs/plans 40/41 are present.
+Branch: `feature/spec-43-prediction-targets` (created from local `main`)  
+Base note: `git fetch/pull` from `origin` failed in this environment (`Could not resolve host: github.com`) so local `main` may be behind `origin/main` (PR #155 reported merged). Rebase/fetch when network access is available.
 
-- [x] Add bounded admin runtime endpoint for WorkerStatus/CronJob/WorkerTask timestamps; exclude idle/stale instances from the live list while retaining stored diagnostics.
-- [ ] Inspect the linked Google Sheet's actual tabs/headers and validate mapping when Google Drive access is available (connector is currently disabled by admin; public URL fetch failed).
-- [x] Add DB Health Active Instances, cron schedule timestamps, task timeline and trigger labels.
-- [x] Persist recommendation-performance and Swing companion progress as task events without double execution.
-- [x] Surface sanitized Google Sheets header diagnostics; fix direct publish timestamp and explicit metrics publish outcome/feedback.
-- [x] Add focused runtime, Sheets status, exporter and publish-route regression tests.
-- [x] Await daily-rec/Swing producer publishes and add performance KPI snapshots to metrics tab with task progress outcome.
-- [x] Log explicitly when all AI verdicts fail and daily-rec rows are intentionally skipped.
-- [x] Remove recurring full Prisma→SQLite pull from recovery probe; add regression test for no collection reads.
-- [x] Fix Google Sheets admin JSX parse error and update exporter test mocks to effective config gate.
-- [x] Publish Swing screener rows to Sheets even when AI analysis fails; add regression assertion.
-- [x] Record daily recommendation runOutcome/AI counts and performance updated/skipped-no-price counts in worker task timelines.
-- [ ] Run targeted Jest suites and full checks; validate a live run against the configured Google Sheet after authorized access/deployment.
-- [ ] Run targeted Jest suites and full required checks individually: npm run test, npx tsc --noEmit, npm run lint, npm run quickbuild.
-- [ ] Review branch diff/status and resolve any failures. No commit/push/PR/merge/deploy beyond documentation commits already made through the branch API; deployment remains user-controlled.
+### Spec 43 — Prediction targets & `analysisMode` (no "AI targets off")
+- Spec: `.agents/specs/43-prediction-targets-analysis-mode.md`
+- Plan: `.agents/plans/43-prediction-targets-analysis-mode.md`
+- Session: `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`
 
-Important limits: Active/stale classification uses WorkerStatus heartbeat freshness (15 min); idle worker processes may not refresh shared Prisma heartbeats continuously. First-seen is WorkerStatus.createdAt, not guaranteed process boot time. Runtime endpoint is bounded and separately polled to preserve the existing zero-Prisma DB Health GET. Sheets Sync now drains undelivered retry-ledger rows only; it does not replay delivered rows.
+**Status:** [x] spec drafted, [x] plan drafted, [x] TODOs/session updated — **APPROVED by user (Spec 43 + Plan 43, DB migration/backfill, verification). Implementation in progress.**
 
-## Previous session context
-## Current (2026-11-03 — v3.54.0 Spec 35 scheduled historical price sync)
+**User decisions:** `analysisMode="AI Targets"|"Prediction Targets"` (per stock) · historical rows with any target/analysis -> `AI Targets` · daily fallback/prediction never HOLD on weak signals (BUY/SELL); normal rare-neutral HOLD allowed · Swing auto prediction on every screener-only view/load · Swing keeps `LONG/SHORT/OBSERVE` with targets · perf checks generate+persist missing prediction targets/mode (bounded/idempotent) · Telegram/admin exports/Sheets keep working and include mode.
 
-Branch `fix/swing-indicators-daily-prices-gap` (from `main` `9a44878`) — **COMMIT PENDING USER; merge/deploy are user-only actions (D9)**.
+**Implementation tasks:**
+- [ ] **Phase 1 (DB/persistence, PERMISSION GRANTED):** add `analysisMode` to `DailyRecommendationStock`, `RecommendationTracker`, `SwingSignal` (Prisma schema + migration), update SQLite mirror (`lib/sqlite.ts`) + push sinks (`lib/sqlitePushSinks.ts`) + types/mappings, `prisma generate`.
+- [ ] **Phase 2 (fallback):** make daily prediction fallback strictly directional BUY/SELL (never HOLD), ensure swing prediction yields targets for LONG/SHORT/OBSERVE; add/update unit tests.
+- [ ] **Phase 3 (daily):** per-stock mode in agent/service persistence + AI-unavailable/partial paths produce prediction targets; update APIs/broadcast/exports/Sheets to include mode; tests.
+- [ ] **Phase 4 (swing):** auto prediction on screener-only load, remove "AI targets off"/targetless skipped UX, per-stock mode in payloads/signals, Swing UI labels/mode; align SwingSignal active/status contract for perf; tests.
+- [ ] **Phase 5 (perf/backfill):** bounded/idempotent prediction+mode backfill in `checkRecommendationPerformance`/`checkSwingPerformance` (+ scheduled/admin paths) and one-time historical `AI Targets` backfill for rows with targets/analysis; tests.
+- [ ] **Phase 6 (verify/docs):** targeted/full tests, `tsc --noEmit`, `npm run lint`, `npm run quickbuild`, local UI verification + evidence; update required docs/changelog/session artifacts; commit only on explicit request.
 
-- [x] **Spec + Plan 35** authored and approved (`.agents/specs/35-scheduled-historical-price-sync.md`, `.agents/plans/35-scheduled-historical-price-sync.md` — all boxes checked, deviations noted)
-- [x] **5th system cron** — `Historical Price Sync (System)` `45 10 * * 1-5` (16:15 IST Mon–Fri) in `ensureRecommendationCrons()`, `SYSTEM_JOB_NAME_BY_TASK_TYPE` entry, per-def `defConfig` with `dryRun:false` on create + drift self-heal
-- [x] **Scope + defaults** — `resolveSyncScope` = NIFTY 50 ∪ `getSwingSignalSymbols()` (mirror, zero Prisma), `DEFAULT_MAX_SYMBOLS 50→200`, `DEFAULT_DAYS 180→60`
-- [x] **New mirror read** — `sqlite.getSwingSignalSymbols(limit)` (interface + impl, never throws, clamp 1…2000)
-- [x] **Swing indicator fallback** — `fetchRecentCloses` Prisma → per-symbol SQLite gap fill; **`NSE:<SYMBOL>` key bug caught pre-commit** (Lesson 167) + regression test
-- [x] **Tests** — 4 suites touched / **117 targeted pass**
-- [x] **Gates** — `check-tsc-baseline` 46 exact (prod 0, delta +0) · full Jest **138/138 · 2110 pass / 4 skip / 0 fail** · ESLint 0 errors
-- [x] **Docs** — `versions-v3.54.md` + CHANGELOG index + versions-index + Primer + agent-memory + Lesson 167 + HANDOFF + latest.md (AGENTS.md row DEFERRED, Lesson 142)
-- [ ] **Commit + push + PR** — pending explicit user request
-- [ ] **Live verify** — deferred (no local Postgres/Timescale this session); prod: one manual wide-scope `historical_price_sync` run, then the 16:15 IST cron
+### Prod worker/tasks investigation (tradenext6.netlify.app/admin/utils/workers, 2026-11-15 snapshot)
+- [x] Collected snapshot: **35 pending / 0 running / 0 completed / 0 failed** tasks (oldest 2026-11-09, newest deploy_prep 2026-11-15 06:08:51 pm), all `startedAt`/`completedAt` empty, retries `0/3`; 1 idle worker (`169.254.45.199-9`, completed 0, failed 0, heartbeat 6:06:39 pm); leaders `sqlite-sync`/`worker`/`cron-daemon` all holding same instance; Accelerate reachable (360ms). System/crons show last runs up to 2026-11-13 and next runs future; recent sync history shows frequent `↓ to SQLite` boots today + one `↑ to Prisma` admin sync.
+- [ ] Analyze root cause from code/config/logs: cron daemon spawning tasks but worker engine not claiming/executing pending `WorkerTask` rows (SQLite control-mirror freshness/discovery vs Prisma queue, degraded-mode path, Netlify runtime/runner behavior, leader/loop liveness, task seeding). Use previously provided logs/evidence where available.
+- [ ] Propose/implement remediation (and identify if prod deploy/config action needed, e.g. `WORKER_DISPATCH_SECRET` / runner enablement).
 
-## Previous (2026-11-02 — Spec 36: AI-down actionable picks + duplicate daily-notice fix)
-
-- [x] Spec 36 specification and plan authored/approved.
-- [x] AI failure handling: HTTP 402/credit exhaustion recognized and quota latch + connection-test status wired.
-- [x] Duplicate daily-notice suppression per UTC day; worker catch-up dedup verified.
-- [x] AI-down broadcast uses screener/fallback-backed BUY/SELL picks when actionable; genuine all-HOLD preserved.
-- [x] Swing and stock fallback paths verified to return technical target/stop levels with success:true.
-- [x] Gates recorded: tsc 46 exact; targeted Jest 8 suites / 286 tests; lint 0 errors; doc-size gate pass.
-- [ ] External blocker: OpenRouter credits/AI availability; deployment remains user-controlled.
-- Spec/plan: .agents/specs/36-ai-down-actionable-picks-dedup.md and .agents/plans/36-ai-down-actionable-picks-dedup.md.
-
-## Previous (2026-10-30 — AI fallback targets for Swing + Daily Recommendations)
-
-- [x] **Create `lib/services/ai/fallbackAnalysis.ts`** — pure technical-analysis fallback target/SL calculation using momentum20, volatility20, distanceFrom20dHigh, changePercent; direction-aware via `evaluateRecommendationLevels`
-- [x] **Modify `lib/services/ai/swing-agent.ts`** — replace `getDefaultSwingAnalysis` (OBSERVE, success:false) with `calculateFallbackSwingAnalysis` (directional, success:true) so targets show and analysisStatus becomes "done"
-- [x] **Modify `lib/services/ai/recommendation-agent.ts`** — replace `getDefaultRecommendation` (HOLD, success:false) with `calculateFallbackRecommendation` (directional, success:true) so daily picks persist with targets
-- [x] **Modify `lib/services/dailyRecommendationService.ts`** — remove the all-fail early-return that discards the run; fallback results now succeed so the run completes normally
-- [x] **Add/update tests** for fallback analysis + agent integration — 113 tests pass
-- [x] **Verify**: tsc (prod 0), Jest (fallback + swing + daily suites), eslint
-- [x] **Document**: agent-memory.md, Primer.md, session-todos.md
+### Carried forward
+- [ ] **S2 (blocked):** retry minimal Prisma-Remote prod read-only diagnostics (ops-limited) once approval/tool access is available.
+- [ ] **Git:** fetch/rebase `feature/spec-43-prediction-targets` onto latest `origin/main` when network access is restored (PR #155 merge). No merge/deploy without explicit user request.
