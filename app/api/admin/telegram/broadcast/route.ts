@@ -25,7 +25,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const validated = broadcastSchema.parse(body);
 
-    const sent = await broadcastToSubscribers(validated.title, validated.message);
+    const sent = await broadcastToSubscribers(validated.title, validated.message, {
+      notificationType: "admin_telegram_broadcast",
+      source: "admin_telegram_broadcast_api",
+      triggeredBy: `admin:${session.user.email || session.user.id}`,
+      metadata: { requestedBy: session.user.id, requestedByEmail: session.user.email ?? null },
+    });
 
     await createAuditLog({
       action: "TELEGRAM_BROADCAST",

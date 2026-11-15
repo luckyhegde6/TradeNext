@@ -34,4 +34,15 @@
 ## D8 — SDD gate before implementation
 - **Decision:** Created Spec 43 and Plan 43; implementation (including DB migration/data backfill) required explicit user approval/permission before code/schema changes.
 - **Reasoning:** Mandatory spec-driven workflow and sensitive DB operations policy.
-- **Update (2026-11-15):** Spec/plan and DB migration/backfill/verification explicitly approved by user; implementation completed and verified in-session (targeted tests + gates). Spec 43 commit explicitly requested and prepared on `feature/spec-43-prediction-targets`; Tracks 1–4 sequenced after commit.
+- **Update (2026-11-15):** Spec/plan and DB migration/backfill/verification explicitly approved by user; implementation completed and verified in-session (targeted tests + gates). Spec 43 committed as `1cb4d36` on `feature/spec-43-prediction-targets` (not pushed/merged/deployed); Tracks 1–4 sequenced after commit.
+
+## D9 — Tracks 1–4 outbound notifications and synchronous deploy prep (approved sequence)
+- **Decision:** Implement unified per-recipient outbound-notification tracking/persistence/admin management and fix deploy-prep/workers visibility: `OutboundNotification` (`outbound_notifications`) with SQLite-first mirror/outbox/id-keyed upsert push sink and best-effort Prisma fallback; central `record/update` service logging structured per-recipient events; `/admin/utils/notifications` + `GET/PATCH /api/admin/notifications` (history/detail/retry/cancel/filters/audit) with cross-links from alerts/announcements and announcement send-record storage; `deploy_prep` runs synchronously in-request creating/updating a real `worker_tasks` record with checks/result (not scheduler-queued).
+- **Reasoning:** Deliver complete outbound auditability and admin operability (including all HOLD/daily notice cases) and make deploy-prep/task state truthful and visible in workers/admin.
+- **Status (2026-11-15):** Implemented locally (uncommitted) with migration `20261115170000_add_outbound_notifications`, `prisma db push`, verification (`tsc` baseline-only, lint exit 0, dbHealthRoute 21/21, quickbuild 202/202, doc budget OK), and Playwright visual validation screenshots captured. Commit/push/merge/deploy pending explicit request.
+
+## D10 — Archify and Graphify tooling/artifacts (confirmed scope)
+- **Decision:** Install Archify project-only for `opencode` and generate architecture/dataflow/workflow diagrams for Tracks 1–4; install Graphify via `python -m pip install --user graphifyy` (option C), run `graphify install`, and generate `graphify-out` artifacts for `.`.
+- **Reasoning:** User-requested codebase/feature visualization and knowledge-graph outputs for review.
+- **Implementation notes:** Archify candidates required adjustment for uncommitted state (removed `meta.repository` pin and stripped `sources` evidence referencing files not present at HEAD revision; simplified layout/routing and used standard quality where needed) to pass finalize/browser-check gates. Graphify `extract --code-only` + `cluster-only` completed; `GRAPH_REPORT.md`/labels are placeholders because no LLM backend was configured.
+- **Artifacts:** `.archify/{architecture,dataflow,workflow}-tracks-1-4-20261116/tracks-1-4-*.html` (+ receipts/candidates); `graphify-out/{graph.json,graph.html,GRAPH_REPORT.md}`.

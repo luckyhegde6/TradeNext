@@ -42,7 +42,16 @@ export async function POST() {
         + `• Your Telegram subscription is working ✅\n`
         + `• Chat ID: \`${user.telegramChatId}\`\n`
         + `• Verified: ${user.telegramVerified ? "Yes ✅" : "No ⏳"}\n\n`
-        + `You'll receive alerts here when your rules trigger.`
+        + `You'll receive alerts here when your rules trigger.`,
+      undefined,
+      {
+        notificationType: "telegram_test_message",
+        source: "user_telegram_test_api",
+        triggeredBy: `user:${userId}`,
+        recipientType: "user",
+        recipientId: String(userId),
+        metadata: { userId },
+      }
     );
 
     if (ok) {

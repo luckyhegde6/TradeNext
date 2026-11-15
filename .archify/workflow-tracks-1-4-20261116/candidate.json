@@ -1,0 +1,346 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "TradeNext Tracks 1–4: Outbound Notification and Deploy Prep Workflow",
+    "subtitle": "Record/manage per-recipient outbound notifications and run synchronous deploy prep with a tracked worker task",
+    "output": ".archify/workflow-tracks-1-4-20261116/tracks-1-4-workflow.html"
+  },
+  "lanes": [
+    {
+      "id": "triggers",
+      "label": "Triggers & Admin UI"
+    },
+    {
+      "id": "outbound",
+      "label": "Outbound Service (Tracks 1–3)"
+    },
+    {
+      "id": "persist",
+      "label": "Persistence & Sync"
+    },
+    {
+      "id": "deploy",
+      "label": "Deploy Prep / Workers (Track 4)",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "emit",
+      "label": "Emit / Request",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "record",
+      "label": "Record & Persist",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "operate",
+      "label": "Operate & Verify",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "outbound_flow",
+      "label": "Unified outbound tracking",
+      "lane": "outbound",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "deploy_flow",
+      "label": "Synchronous deploy prep",
+      "lane": "deploy",
+      "fromCol": 1,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "trigger_send",
+      "lane": "triggers",
+      "col": 0,
+      "type": "external",
+      "label": "Outbound Trigger",
+      "sublabel": "Telegram/alerts/daily/swing/admin"
+    },
+    {
+      "id": "announce_send",
+      "lane": "triggers",
+      "col": 2,
+      "type": "frontend",
+      "label": "Announcement Action",
+      "sublabel": "create or activate"
+    },
+    {
+      "id": "deploy_click",
+      "lane": "triggers",
+      "col": 1,
+      "type": "frontend",
+      "label": "Prepare for Deploy",
+      "sublabel": "DB Health admin action"
+    },
+    {
+      "id": "admin_manage",
+      "lane": "triggers",
+      "col": 5,
+      "type": "frontend",
+      "label": "Admin Review/Manage",
+      "sublabel": "history, retry, cancel, workers view"
+    },
+    {
+      "id": "normalize_record",
+      "lane": "outbound",
+      "col": 1,
+      "type": "backend",
+      "label": "Normalize & Log",
+      "sublabel": "per-recipient record + structured log"
+    },
+    {
+      "id": "status_update",
+      "lane": "outbound",
+      "col": 3,
+      "type": "backend",
+      "label": "Update Status",
+      "sublabel": "sent/failed/cancelled/retry"
+    },
+    {
+      "id": "retry_path",
+      "lane": "outbound",
+      "col": 4,
+      "type": "messagebus",
+      "label": "Retry/Cancel Action",
+      "sublabel": "admin-initiated"
+    },
+    {
+      "id": "persist_sqlite",
+      "lane": "persist",
+      "col": 2,
+      "type": "database",
+      "label": "SQLite Mirror",
+      "sublabel": "upsert outbound + outbox"
+    },
+    {
+      "id": "prisma_fallback",
+      "lane": "persist",
+      "col": 0,
+      "type": "database",
+      "label": "Prisma Fallback",
+      "sublabel": "best-effort persist/query"
+    },
+    {
+      "id": "push_prisma",
+      "lane": "persist",
+      "col": 3,
+      "type": "backend",
+      "label": "Push Sink",
+      "sublabel": "promote outbox to Prisma"
+    },
+    {
+      "id": "query_history",
+      "lane": "persist",
+      "col": 4,
+      "type": "database",
+      "label": "Read History/Detail",
+      "sublabel": "SQLite-first, Prisma fallback"
+    },
+    {
+      "id": "create_task",
+      "lane": "deploy",
+      "col": 1,
+      "type": "messagebus",
+      "label": "Create worker_tasks",
+      "sublabel": "deploy_prep running (synchronous)"
+    },
+    {
+      "id": "run_checks",
+      "lane": "deploy",
+      "col": 2,
+      "type": "security",
+      "label": "Run Checks",
+      "sublabel": "probe, breaker, latency, SQLite/outbox"
+    },
+    {
+      "id": "flush_sync",
+      "lane": "deploy",
+      "col": 3,
+      "type": "backend",
+      "label": "Flush + Sync",
+      "sublabel": "write-behind flush, mirror sync, persist stats"
+    },
+    {
+      "id": "complete_task",
+      "lane": "deploy",
+      "col": 4,
+      "type": "backend",
+      "label": "Complete/Fail Task",
+      "sublabel": "result + TaskEvent + audit"
+    },
+    {
+      "id": "workers_visible",
+      "lane": "deploy",
+      "col": 5,
+      "type": "frontend",
+      "label": "Workers Visibility",
+      "sublabel": "task record/status in admin workers"
+    }
+  ],
+  "edges": [
+    {
+      "id": "trigger-normalize",
+      "from": "trigger_send",
+      "to": "normalize_record",
+      "label": "send event/result",
+      "variant": "emphasis"
+    },
+    {
+      "id": "announce-normalize",
+      "from": "announce_send",
+      "to": "normalize_record",
+      "label": "fanout record",
+      "variant": "default"
+    },
+    {
+      "id": "normalize-sqlite",
+      "from": "normalize_record",
+      "to": "persist_sqlite",
+      "label": "record",
+      "variant": "emphasis"
+    },
+    {
+      "id": "normalize-fallback",
+      "from": "normalize_record",
+      "to": "prisma_fallback",
+      "label": "fallback",
+      "variant": "dashed"
+    },
+    {
+      "id": "sqlite-push",
+      "from": "persist_sqlite",
+      "to": "push_prisma",
+      "label": "outbox drain",
+      "variant": "default"
+    },
+    {
+      "id": "push-fallback-store",
+      "from": "push_prisma",
+      "to": "prisma_fallback",
+      "label": "promoted rows",
+      "variant": "dashed"
+    },
+    {
+      "id": "history-ui",
+      "from": "query_history",
+      "to": "admin_manage",
+      "label": "history/detail",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sqlite-query",
+      "from": "persist_sqlite",
+      "to": "query_history",
+      "label": "SQLite-first read",
+      "variant": "default"
+    },
+    {
+      "id": "fallback-query",
+      "from": "prisma_fallback",
+      "to": "query_history",
+      "label": "fallback read",
+      "variant": "dashed"
+    },
+    {
+      "id": "admin-retry",
+      "from": "admin_manage",
+      "to": "retry_path",
+      "label": "retry/cancel",
+      "variant": "security"
+    },
+    {
+      "id": "retry-status",
+      "from": "retry_path",
+      "to": "status_update",
+      "label": "apply action",
+      "variant": "default"
+    },
+    {
+      "id": "status-persist",
+      "from": "status_update",
+      "to": "persist_sqlite",
+      "label": "update",
+      "variant": "default"
+    },
+    {
+      "id": "deploy-create",
+      "from": "deploy_click",
+      "to": "create_task",
+      "label": "POST deploy_prep",
+      "variant": "emphasis"
+    },
+    {
+      "id": "task-checks",
+      "from": "create_task",
+      "to": "run_checks",
+      "label": "running",
+      "variant": "default"
+    },
+    {
+      "id": "checks-flush",
+      "from": "run_checks",
+      "to": "flush_sync",
+      "label": "checks passed",
+      "variant": "emphasis"
+    },
+    {
+      "id": "flush-complete",
+      "from": "flush_sync",
+      "to": "complete_task",
+      "label": "result",
+      "variant": "default"
+    },
+    {
+      "id": "complete-visible",
+      "from": "complete_task",
+      "to": "workers_visible",
+      "label": "task status/log context",
+      "variant": "emphasis"
+    },
+    {
+      "id": "visible-admin",
+      "from": "workers_visible",
+      "to": "admin_manage",
+      "label": "visible in admin",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Tracks 1–3",
+      "items": [
+        "Normalize and log each outbound recipient send",
+        "Persist unified records (SQLite-first, Prisma fallback)",
+        "Admin can review history/detail and run retry/cancel actions"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Track 4",
+      "items": [
+        "deploy_prep executes synchronously in-request",
+        "Creates and updates a real worker_tasks record with checks/result",
+        "Workers/admin surfaces show task outcome and visibility"
+      ]
+    }
+  ]
+}

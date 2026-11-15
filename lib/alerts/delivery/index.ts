@@ -12,6 +12,7 @@ import { sendEmailAlert, buildAlertEmailHtml, type EmailConfig } from "./email";
 import { sendWebhookAlert, type WebhookConfig } from "./webhook";
 import { sendTelegramAlert, type TelegramConfig } from "./telegram";
 import { getTelegramEnvConfig, buildTelegramChannelConfig } from "./telegram-env";
+import { recordOutboundNotification } from "@/lib/services/outboundNotificationService";
 
 export interface AlertContext {
   ruleId: string;
@@ -61,7 +62,7 @@ export async function deliverAlert(
 
     for (const channel of channels) {
       const startTime = Date.now();
-      const result = await deliverToChannel(channel, context);
+      const result = await deliverToChannel(channel, context, userId);
       result.durationMs = Date.now() - startTime;
       results.push(result);
 
@@ -103,7 +104,14 @@ export async function deliverAlert(
       if (!alreadyDeliveredViaTelegram) {
         const { sendAlertToUser } = await import("@/lib/services/telegramBotService");
         const text = `*${context.ruleName}*\n${context.message}${context.symbol ? `\nSymbol: ${context.symbol}` : ""}${context.price ? `\nPrice: ₹${context.price.toLocaleString("en-IN")}` : ""}`;
-        const sent = await sendAlertToUser(user.telegramChatId, context.ruleName, text, context.link);
+        const sent = await sendAlertToUser(user.telegramChatId, context.ruleName, text, context.link, {
+          notificationType: "alert_direct_telegram",
+          source: "alert_delivery",
+          triggeredBy: "system",
+          recipientType: "user",
+          recipientId: String(userId),
+          metadata: { userId, ruleId: context.ruleId, symbol: context.symbol ?? null },
+        });
 
         results.push({
           channelId: "telegram-direct",
@@ -126,12 +134,22 @@ export async function deliverAlert(
  */
 async function deliverToChannel(
   channel: { id: string; type: string; config: any },
-  context: AlertContext
+  context: AlertContext,
+  userId: number
 ): Promise<DeliveryResult> {
   const config =
     typeof channel.config === "string"
       ? JSON.parse(channel.config)
       : channel.config;
+
+  const baseMeta = {
+    userId,
+    ruleId: context.ruleId,
+    ruleName: context.ruleName,
+    symbol: context.symbol ?? null,
+    price: context.price ?? null,
+    channelId: channel.id,
+  };
 
   switch (channel.type) {
     case "email": {
@@ -147,6 +165,23 @@ async function deliverToChannel(
         link: context.link,
       });
       const result = await sendEmailAlert(emailConfig, subject, html);
+      await recordOutboundNotification({
+        channel: "email",
+        chatId: null,
+        recipientType: "email",
+        recipientId: emailConfig?.toEmail ?? null,
+        notificationType: "alert_channel_email",
+        title: subject,
+        message: context.message,
+        status: result.success ? "sent" : "failed",
+        error: result.error ?? null,
+        attemptCount: 1,
+        lastAttemptAt: new Date(),
+        sentAt: result.success ? new Date() : null,
+        source: "alert_delivery",
+        triggeredBy: "system",
+        metadata: { ...baseMeta, messageId: result.messageId ?? null },
+      }).catch(() => {});
       return {
         channelId: channel.id,
         channelType: "email",
@@ -171,6 +206,23 @@ async function deliverToChannel(
         color: (context.change || 0) >= 0 ? "green" : "red",
       };
       const result = await sendWebhookAlert(webhookConfig, payload);
+      await recordOutboundNotification({
+        channel: "webhook",
+        chatId: null,
+        recipientType: "webhook",
+        recipientId: webhookConfig?.url ?? null,
+        notificationType: "alert_channel_webhook",
+        title: payload.title,
+        message: context.message,
+        status: result.success ? "sent" : "failed",
+        error: result.error ?? null,
+        attemptCount: 1,
+        lastAttemptAt: new Date(),
+        sentAt: result.success ? new Date() : null,
+        source: "alert_delivery",
+        triggeredBy: "system",
+        metadata: { ...baseMeta, statusCode: result.statusCode ?? null },
+      }).catch(() => {});
       return {
         channelId: channel.id,
         channelType: "webhook",
@@ -199,6 +251,23 @@ async function deliverToChannel(
 
       const text = `*${context.ruleName}*\n${context.message}${context.symbol ? `\nSymbol: ${context.symbol}` : ""}${context.price ? `\nPrice: ₹${context.price.toLocaleString("en-IN")}` : ""}`;
       const result = await sendTelegramAlert(tgConfig, text, context.link);
+      await recordOutboundNotification({
+        channel: "telegram",
+        chatId: tgConfig?.chatId ? String(tgConfig.chatId) : null,
+        recipientType: "channel",
+        recipientId: tgConfig?.chatId ? String(tgConfig.chatId) : String(channel.id),
+        notificationType: "alert_channel_telegram",
+        title: context.ruleName,
+        message: text,
+        status: result.success ? "sent" : "failed",
+        error: result.error ?? null,
+        attemptCount: 1,
+        lastAttemptAt: new Date(),
+        sentAt: result.success ? new Date() : null,
+        source: "alert_delivery",
+        triggeredBy: "system",
+        metadata: { ...baseMeta, editedMessageId: (tgConfig as any)?.messageId ?? null },
+      }).catch(() => {});
       return {
         channelId: channel.id,
         channelType: "telegram",
@@ -212,6 +281,21 @@ async function deliverToChannel(
         msg: "Push channel type not yet implemented",
         channelType: channel.type,
       });
+      await recordOutboundNotification({
+        channel: "push",
+        chatId: null,
+        recipientType: "push",
+        recipientId: String(channel.id),
+        notificationType: "alert_channel_push",
+        title: context.ruleName,
+        message: context.message,
+        status: "skipped",
+        error: `Channel type '${channel.type}' not yet implemented`,
+        attemptCount: 0,
+        source: "alert_delivery",
+        triggeredBy: "system",
+        metadata: baseMeta,
+      }).catch(() => {});
       return {
         channelId: channel.id,
         channelType: "push",
@@ -220,6 +304,21 @@ async function deliverToChannel(
       };
 
     default:
+      await recordOutboundNotification({
+        channel: String(channel.type || "unknown"),
+        chatId: null,
+        recipientType: String(channel.type || "unknown"),
+        recipientId: String(channel.id),
+        notificationType: "alert_channel_unknown",
+        title: context.ruleName,
+        message: context.message,
+        status: "failed",
+        error: `Unknown channel type: ${channel.type}`,
+        attemptCount: 0,
+        source: "alert_delivery",
+        triggeredBy: "system",
+        metadata: baseMeta,
+      }).catch(() => {});
       return {
         channelId: channel.id,
         channelType: channel.type,
@@ -237,7 +336,7 @@ async function createInAppNotification(
   userId: number
 ): Promise<void> {
   try {
-    await prisma.notification.create({
+    const n = await prisma.notification.create({
       data: {
         userId,
         type: "alert_triggered",
@@ -247,6 +346,28 @@ async function createInAppNotification(
         deliveryStatus: "delivered",
       },
     });
+    await recordOutboundNotification({
+      channel: "in_app",
+      chatId: null,
+      recipientType: "user",
+      recipientId: String(userId),
+      notificationType: "alert_triggered_in_app",
+      title: context.ruleName,
+      message: context.message,
+      status: "sent",
+      attemptCount: 1,
+      sentAt: new Date(),
+      deliveredAt: new Date(),
+      source: "alert_delivery",
+      triggeredBy: "system",
+      metadata: {
+        notificationId: n.id,
+        userId,
+        ruleId: context.ruleId,
+        symbol: context.symbol ?? null,
+        link: context.link ?? "/alerts",
+      },
+    }).catch(() => {});
   } catch (error) {
     logger.error({
       msg: "Failed to create in-app notification",
@@ -254,6 +375,22 @@ async function createInAppNotification(
       ruleId: context.ruleId,
       error: error instanceof Error ? error.message : String(error),
     });
+    await recordOutboundNotification({
+      channel: "in_app",
+      chatId: null,
+      recipientType: "user",
+      recipientId: String(userId),
+      notificationType: "alert_triggered_in_app",
+      title: context.ruleName,
+      message: context.message,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      attemptCount: 1,
+      lastAttemptAt: new Date(),
+      source: "alert_delivery",
+      triggeredBy: "system",
+      metadata: { userId, ruleId: context.ruleId, symbol: context.symbol ?? null },
+    }).catch(() => {});
   }
 }
 

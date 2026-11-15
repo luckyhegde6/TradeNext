@@ -1,0 +1,2025 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "dataflow",
+  "quality": "standard",
+  "startedAt": "2026-11-15T19:25:35.091Z",
+  "specification": {
+    "path": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+    "sha256": "928d6cc92da17ae2a0708b23a76ead619b7fcb0aed0afbadad10ec90e180ce14",
+    "bytes": 6546
+  },
+  "artifact": {
+    "path": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+    "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+    "bytes": 848161
+  },
+  "stages": {
+    "validate": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": null,
+      "execution": "embedded-in-deliver",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "F:\\Local_git\\TradeNext\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "dataflow",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "--quality",
+        "standard",
+        "--repo-root",
+        "F:\\Local_git\\TradeNext",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "validate",
+        "specification": {
+          "sha256": "928d6cc92da17ae2a0708b23a76ead619b7fcb0aed0afbadad10ec90e180ce14",
+          "bytes": 6546
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "standard",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 11,
+          "compositionIssues": [
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "outbox rows",
+              "labelRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 604.6,
+                "y": 188.5,
+                "width": 65.9,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "promoted outbound records",
+              "labelRelationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 570.3,
+                "y": 307,
+                "width": 134.5,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "flush/sync mirror state",
+              "labelRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "otherRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 575.2,
+                "y": 220,
+                "width": 124.7,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                157
+              ],
+              "to": [
+                637.5,
+                262
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "probe/sync",
+              "labelRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "otherRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 607,
+                "y": 428.5,
+                "width": 61,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                398
+              ],
+              "to": [
+                637.5,
+                490
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "result",
+              "labelRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "otherRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 616.8,
+                "y": 393,
+                "width": 41.4,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 1,
+              "threshold": 2,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/ambiguous-corridor",
+              "relationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "otherSegmentIndex": 1,
+              "overlapLength": 92,
+              "from": [
+                637.5,
+                280
+              ],
+              "to": [
+                637.5,
+                372
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "triggers-to-record",
+                "from": "outbound_triggers",
+                "to": "outbound_record",
+                "label": "outbound send/result",
+                "collectionIndex": 0,
+                "artifactIndex": 1
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                207.5,
+                157
+              ],
+              "to": [
+                207.5,
+                148
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "record-to-sqlite",
+                "from": "outbound_record",
+                "to": "sqlite_outbound",
+                "label": "normalized per-recipient row",
+                "collectionIndex": 2,
+                "artifactIndex": 3
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                422.5,
+                148
+              ],
+              "to": [
+                422.5,
+                157
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "task-to-workers",
+                "from": "worker_task_store",
+                "to": "workers_view",
+                "label": "task visibility",
+                "collectionIndex": 12,
+                "artifactIndex": 13
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                745,
+                508
+              ],
+              "to": [
+                745,
+                499
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/desktop-readability",
+              "nodeId": "outbound_triggers",
+              "owner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "viewportWidth": 1440,
+              "viewportHeight": 900,
+              "availableDiagramWidth": 930,
+              "budgetBasis": "legacy-930",
+              "readerContract": "declared-wide-v1",
+              "requestedTargetPx": null,
+              "requestedTargetMet": null,
+              "budgetLimit": "legacy",
+              "viewBoxWidth": 1500,
+              "scale": 0.62,
+              "text": "Telegram, alerts, admin",
+              "detail": "context",
+              "sourceFontPx": 7,
+              "projectedFontPx": 4.34,
+              "minimumProjectedFontPx": 6
+            }
+          ]
+        }
+      }
+    },
+    "deliver": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 649,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "F:\\Local_git\\TradeNext\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "dataflow",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "--quality",
+        "standard",
+        "--repo-root",
+        "F:\\Local_git\\TradeNext",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "receiptId": "d75f36aa-d85f-4d15-9aa9-e9ea194fb061",
+        "ok": true,
+        "command": "deliver",
+        "type": "dataflow",
+        "input": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+        "output": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "specification": {
+          "sha256": "928d6cc92da17ae2a0708b23a76ead619b7fcb0aed0afbadad10ec90e180ce14",
+          "bytes": 6546
+        },
+        "artifact": {
+          "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+          "bytes": 848161
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "standard",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 11,
+          "compositionIssues": [
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "outbox rows",
+              "labelRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 604.6,
+                "y": 188.5,
+                "width": 65.9,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "promoted outbound records",
+              "labelRelationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 570.3,
+                "y": 307,
+                "width": 134.5,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "flush/sync mirror state",
+              "labelRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "otherRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 575.2,
+                "y": 220,
+                "width": 124.7,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                157
+              ],
+              "to": [
+                637.5,
+                262
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "probe/sync",
+              "labelRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "otherRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 607,
+                "y": 428.5,
+                "width": 61,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                398
+              ],
+              "to": [
+                637.5,
+                490
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "result",
+              "labelRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "otherRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 616.8,
+                "y": 393,
+                "width": 41.4,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 1,
+              "threshold": 2,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/ambiguous-corridor",
+              "relationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "otherSegmentIndex": 1,
+              "overlapLength": 92,
+              "from": [
+                637.5,
+                280
+              ],
+              "to": [
+                637.5,
+                372
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "triggers-to-record",
+                "from": "outbound_triggers",
+                "to": "outbound_record",
+                "label": "outbound send/result",
+                "collectionIndex": 0,
+                "artifactIndex": 1
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                207.5,
+                157
+              ],
+              "to": [
+                207.5,
+                148
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "record-to-sqlite",
+                "from": "outbound_record",
+                "to": "sqlite_outbound",
+                "label": "normalized per-recipient row",
+                "collectionIndex": 2,
+                "artifactIndex": 3
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                422.5,
+                148
+              ],
+              "to": [
+                422.5,
+                157
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "task-to-workers",
+                "from": "worker_task_store",
+                "to": "workers_view",
+                "label": "task visibility",
+                "collectionIndex": 12,
+                "artifactIndex": 13
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                745,
+                508
+              ],
+              "to": [
+                745,
+                499
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/desktop-readability",
+              "nodeId": "outbound_triggers",
+              "owner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "viewportWidth": 1440,
+              "viewportHeight": 900,
+              "availableDiagramWidth": 930,
+              "budgetBasis": "legacy-930",
+              "readerContract": "declared-wide-v1",
+              "requestedTargetPx": null,
+              "requestedTargetMet": null,
+              "budgetLimit": "legacy",
+              "viewBoxWidth": 1500,
+              "scale": 0.62,
+              "text": "Telegram, alerts, admin",
+              "detail": "context",
+              "sourceFontPx": 7,
+              "projectedFontPx": 4.34,
+              "minimumProjectedFontPx": 6
+            }
+          ]
+        },
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      }
+    },
+    "check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 269,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "F:\\Local_git\\TradeNext\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "check",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "--require-provenance"
+      ],
+      "receipt": {
+        "ok": true,
+        "file": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "artifact": {
+          "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+          "bytes": 848161
+        },
+        "checks": [
+          {
+            "name": "single_svg",
+            "ok": true,
+            "details": [
+              "found 1 <svg> block(s)"
+            ]
+          },
+          {
+            "name": "finite_svg",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "orthogonal_arrows",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "label_route_clearance",
+            "ok": true,
+            "details": [
+              "[composition/label-route-clearance] standard label \"outbox rows\" on relationship id \"sqlite-to-push\" (\"sqlite_outbound\" -> \"push_sink\") is 0px from relationship id \"exec-to-sqlite\" (\"deploy_exec\" -> \"sqlite_outbound\") segment 1 [637.5, 372] -> [637.5, 170] with 16px hidden by the mask (minimum 2px) — use renderer-supported label controls (message y for sequence; otherwise labelAt, labelDx, labelDy, or labelSegment), or adjust the other relationship route/via/channel.",
+              "[composition/label-route-clearance] standard label \"promoted outbound records\" on relationship id \"push-to-prisma\" (\"push_sink\" -> \"prisma_outbound\") is 0px from relationship id \"exec-to-sqlite\" (\"deploy_exec\" -> \"sqlite_outbound\") segment 1 [637.5, 372] -> [637.5, 170] with 16px hidden by the mask (minimum 2px) — use renderer-supported label controls (message y for sequence; otherwise labelAt, labelDx, labelDy, or labelSegment), or adjust the other relationship route/via/channel.",
+              "[composition/label-route-clearance] standard label \"flush/sync mirror state\" on relationship id \"exec-to-sqlite\" (\"deploy_exec\" -> \"sqlite_outbound\") is 0px from relationship id \"sqlite-to-push\" (\"sqlite_outbound\" -> \"push_sink\") segment 1 [637.5, 157] -> [637.5, 262] with 16px hidden by the mask (minimum 2px) — use renderer-supported label controls (message y for sequence; otherwise labelAt, labelDx, labelDy, or labelSegment), or adjust the other relationship route/via/channel.",
+              "[composition/label-route-clearance] standard label \"probe/sync\" on relationship id \"exec-to-prisma\" (\"deploy_exec\" -> \"prisma_outbound\") is 0px from relationship id \"exec-to-task\" (\"deploy_exec\" -> \"worker_task_store\") segment 1 [637.5, 398] -> [637.5, 490] with 16px hidden by the mask (minimum 2px) — use renderer-supported label controls (message y for sequence; otherwise labelAt, labelDx, labelDy, or labelSegment), or adjust the other relationship route/via/channel.",
+              "[composition/label-route-clearance] standard label \"result\" on relationship id \"exec-to-task\" (\"deploy_exec\" -> \"worker_task_store\") is 0px from relationship id \"exec-to-prisma\" (\"deploy_exec\" -> \"prisma_outbound\") segment 1 [637.5, 385] -> [637.5, 394] with 1px hidden by the mask (minimum 2px) — use renderer-supported label controls (message y for sequence; otherwise labelAt, labelDx, labelDy, or labelSegment), or adjust the other relationship route/via/channel."
+            ]
+          },
+          {
+            "name": "relationship_crossings",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "relationship_corridors",
+            "ok": true,
+            "details": [
+              "[composition/ambiguous-corridor] standard relationship id \"push-to-prisma\" (\"push_sink\" -> \"prisma_outbound\") shares a 92px corridor with relationship id \"exec-to-sqlite\" (\"deploy_exec\" -> \"sqlite_outbound\") at [637.5, 280] -> [637.5, 372]"
+            ]
+          },
+          {
+            "name": "container_border_runs",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "route_rhythm",
+            "ok": true,
+            "details": [
+              "[composition/short-interior-segment] standard relationship id \"triggers-to-record\" (\"outbound_triggers\" -> \"outbound_record\") has a 9px interior segment 1 [207.5, 157] -> [207.5, 148]",
+              "[composition/short-interior-segment] standard relationship id \"record-to-sqlite\" (\"outbound_record\" -> \"sqlite_outbound\") has a 9px interior segment 1 [422.5, 148] -> [422.5, 157]",
+              "[composition/short-interior-segment] standard relationship id \"exec-to-prisma\" (\"deploy_exec\" -> \"prisma_outbound\") has a 9px interior segment 1 [637.5, 385] -> [637.5, 394]",
+              "[composition/short-interior-segment] standard relationship id \"task-to-workers\" (\"worker_task_store\" -> \"workers_view\") has a 9px interior segment 1 [745, 508] -> [745, 499]"
+            ]
+          },
+          {
+            "name": "legend_clearance",
+            "ok": true,
+            "details": []
+          }
+        ],
+        "composition": {
+          "schemaVersion": 1,
+          "profile": "standard",
+          "status": "pass",
+          "summary": {
+            "errors": 0,
+            "warnings": 11
+          },
+          "metrics": {
+            "properCrossings": 0,
+            "resolvedCrossovers": 0,
+            "ambiguousCorridors": 1,
+            "arrowheadCollisions": 0,
+            "containerBorderRuns": 0,
+            "labelRouteClearanceIssues": 5,
+            "labelCanvasOverflowIssues": 0,
+            "minLabelRouteClearance": 0,
+            "desktopReadabilityIssues": 1,
+            "viewportHeightIssues": 0,
+            "minProjectedNodeTextPx": 4.34,
+            "maxBends": 2,
+            "routesOverSuggestedBends": 0,
+            "maxStretch": 1,
+            "routesOverSuggestedStretch": 0,
+            "minSegmentPx": 9,
+            "minInteriorSegmentPx": 9,
+            "shortSegmentCount": 4,
+            "shortEndpointSegmentCount": 0,
+            "shortInteriorSegmentCount": 4,
+            "microSegmentCount": 0
+          },
+          "suggestedLimits": {
+            "bendsPerRelationship": 2,
+            "stretch": 1.35,
+            "segmentPx": 16,
+            "microSegmentPx": 8
+          },
+          "routeReview": {
+            "crossings": [],
+            "detours": []
+          },
+          "leadingSpace": {
+            "measured": false,
+            "reviewSuggested": false
+          },
+          "desktopReadability": {
+            "budgetBasis": "legacy-930",
+            "readerContract": "declared-wide-v1",
+            "availableDiagramWidth": 930,
+            "actualBudgetPx": 930,
+            "limit": "legacy",
+            "requestedTargetPx": null,
+            "requestedTargetMet": null,
+            "hardFloorPx": 6,
+            "hardFloorMet": false,
+            "minimumOwner": {
+              "kind": "node",
+              "id": "outbound_triggers"
+            },
+            "minimumSourceTextPx": 7,
+            "minimumProjectedTextPx": 4.34,
+            "semanticTextCount": 37
+          },
+          "issues": [
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "outbox rows",
+              "labelRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 604.6,
+                "y": 188.5,
+                "width": 65.9,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "promoted outbound records",
+              "labelRelationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 570.3,
+                "y": 307,
+                "width": 134.5,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                372
+              ],
+              "to": [
+                637.5,
+                170
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "flush/sync mirror state",
+              "labelRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "otherRelationship": {
+                "id": "sqlite-to-push",
+                "from": "sqlite_outbound",
+                "to": "push_sink",
+                "label": "outbox rows",
+                "collectionIndex": 4,
+                "artifactIndex": 5
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 575.2,
+                "y": 220,
+                "width": 124.7,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                157
+              ],
+              "to": [
+                637.5,
+                262
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "probe/sync",
+              "labelRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "otherRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 607,
+                "y": 428.5,
+                "width": 61,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 16,
+              "threshold": 2,
+              "from": [
+                637.5,
+                398
+              ],
+              "to": [
+                637.5,
+                490
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/label-route-clearance",
+              "label": "result",
+              "labelRelationship": {
+                "id": "exec-to-task",
+                "from": "deploy_exec",
+                "to": "worker_task_store",
+                "label": "result",
+                "collectionIndex": 11,
+                "artifactIndex": 12
+              },
+              "otherRelationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "labelRect": {
+                "x": 616.8,
+                "y": 393,
+                "width": 41.4,
+                "height": 16
+              },
+              "clearance": 0,
+              "intersectionLength": 1,
+              "threshold": 2,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/ambiguous-corridor",
+              "relationship": {
+                "id": "push-to-prisma",
+                "from": "push_sink",
+                "to": "prisma_outbound",
+                "label": "promoted outbound records",
+                "collectionIndex": 5,
+                "artifactIndex": 6
+              },
+              "otherRelationship": {
+                "id": "exec-to-sqlite",
+                "from": "deploy_exec",
+                "to": "sqlite_outbound",
+                "label": "flush/sync mirror state",
+                "collectionIndex": 9,
+                "artifactIndex": 10
+              },
+              "segmentIndex": 1,
+              "otherSegmentIndex": 1,
+              "overlapLength": 92,
+              "from": [
+                637.5,
+                280
+              ],
+              "to": [
+                637.5,
+                372
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "triggers-to-record",
+                "from": "outbound_triggers",
+                "to": "outbound_record",
+                "label": "outbound send/result",
+                "collectionIndex": 0,
+                "artifactIndex": 1
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                207.5,
+                157
+              ],
+              "to": [
+                207.5,
+                148
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "record-to-sqlite",
+                "from": "outbound_record",
+                "to": "sqlite_outbound",
+                "label": "normalized per-recipient row",
+                "collectionIndex": 2,
+                "artifactIndex": 3
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                422.5,
+                148
+              ],
+              "to": [
+                422.5,
+                157
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "exec-to-prisma",
+                "from": "deploy_exec",
+                "to": "prisma_outbound",
+                "label": "probe/sync",
+                "collectionIndex": 10,
+                "artifactIndex": 11
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                637.5,
+                385
+              ],
+              "to": [
+                637.5,
+                394
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/short-interior-segment",
+              "relationship": {
+                "id": "task-to-workers",
+                "from": "worker_task_store",
+                "to": "workers_view",
+                "label": "task visibility",
+                "collectionIndex": 12,
+                "artifactIndex": 13
+              },
+              "segmentIndex": 1,
+              "position": "interior",
+              "length": 9,
+              "from": [
+                745,
+                508
+              ],
+              "to": [
+                745,
+                499
+              ]
+            },
+            {
+              "severity": "warning",
+              "code": "composition/desktop-readability",
+              "nodeId": "outbound_triggers",
+              "owner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "viewportWidth": 1440,
+              "viewportHeight": 900,
+              "availableDiagramWidth": 930,
+              "budgetBasis": "legacy-930",
+              "readerContract": "declared-wide-v1",
+              "requestedTargetPx": null,
+              "requestedTargetMet": null,
+              "budgetLimit": "legacy",
+              "viewBoxWidth": 1500,
+              "scale": 0.62,
+              "text": "Telegram, alerts, admin",
+              "detail": "context",
+              "sourceFontPx": 7,
+              "projectedFontPx": 4.34,
+              "minimumProjectedFontPx": 6
+            }
+          ]
+        },
+        "provenance": "current",
+        "deliveryReceiptId": "d75f36aa-d85f-4d15-9aa9-e9ea194fb061"
+      }
+    },
+    "browser-check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 2652,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "F:\\Local_git\\TradeNext\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "browser-check",
+        "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+        "--json",
+        "--require-provenance"
+      ],
+      "execution": "in-process",
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "browser-check",
+        "evidenceKind": "automated-browser",
+        "status": "pass",
+        "visualReview": "not-requested",
+        "provenance": "current",
+        "deliveryReceiptId": "d75f36aa-d85f-4d15-9aa9-e9ea194fb061",
+        "artifact": {
+          "path": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+          "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+          "bytes": 848161
+        },
+        "state": {
+          "detail": "read",
+          "motion": "still"
+        },
+        "chrome": {
+          "status": "available",
+          "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        },
+        "diagnostics": [],
+        "containment": {
+          "status": "pass",
+          "policy": "fit-or-reader-declared-readable-vertical-scroll",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 99,
+                "diagramChromePx": 78,
+                "svgPx": 646,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 6.281333333333333,
+              "minimumProjectedNonEdgeTextPx": 6.281333333333333,
+              "minimumProjectedEdgeTextPx": 7.1786666666666665,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1536,
+              "diagramWidth": 1506,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 723,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1768,
+              "diagramWidth": 1738,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 834,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 94,
+                "diagramChromePx": 94,
+                "svgPx": 898,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "themeStates": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            }
+          ]
+        },
+        "readability": {
+          "status": "pass",
+          "minimumProjectedNodeTextPx": 6,
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 99,
+                "diagramChromePx": 78,
+                "svgPx": 646,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 6.281333333333333,
+              "minimumProjectedNonEdgeTextPx": 6.281333333333333,
+              "minimumProjectedEdgeTextPx": 7.1786666666666665,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1536,
+              "diagramWidth": 1506,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 723,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1768,
+              "diagramWidth": 1738,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 834,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 94,
+                "diagramChromePx": 94,
+                "svgPx": 898,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "viewerChrome": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 99,
+                "diagramChromePx": 78,
+                "svgPx": 646,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 6.281333333333333,
+              "minimumProjectedNonEdgeTextPx": 6.281333333333333,
+              "minimumProjectedEdgeTextPx": 7.1786666666666665,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1536,
+              "diagramWidth": 1506,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 723,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1768,
+              "diagramWidth": 1738,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 86,
+                "diagramChromePx": 84,
+                "svgPx": 834,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 94,
+                "diagramChromePx": 94,
+                "svgPx": 898,
+                "cardsPx": 0,
+                "viewBoxHeight": 720
+              },
+              "viewBoxWidth": 1500,
+              "minimumProjectedNodeTextPx": 7,
+              "minimumProjectedNonEdgeTextPx": 7,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "Telegram, alerts, admin",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "outbound_triggers"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "captures": {
+          "status": "not-requested",
+          "screenshots": [],
+          "contactSheet": null
+        },
+        "sidecars": {
+          "receipt": "tracks-1-4-dataflow.browser-check.json",
+          "files": []
+        }
+      }
+    }
+  },
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "diagnostics": [],
+  "evidence": {
+    "receipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.finalize.json",
+    "summaryReceipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.finalize-summary.json",
+    "browserCheckReceipt": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "finishedAt": "2026-11-15T19:25:40.153Z",
+  "durationMs": 5061,
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-15T19:20:17.891Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  }
+}

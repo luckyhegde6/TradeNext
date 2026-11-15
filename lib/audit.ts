@@ -186,7 +186,11 @@ export type AuditAction =
   // ── v3.49.0 Spec 30: day-level recommendations catch-up ────────────────────
   // The daemon noticed that today's 04:30Z weekday run window produced no
   // successful run and enqueued a catch-up task. Metadata: scope, hadRun, reason.
-  | 'RECOMMENDATIONS_CATCHUP';
+  | 'RECOMMENDATIONS_CATCHUP'
+  // ── Tracks 1-3: unified outbound notification admin actions ───────────────
+  | 'ADMIN_OUTBOUND_NOTIFICATION_CANCEL'
+  | 'ADMIN_OUTBOUND_NOTIFICATION_RETRY_REQUESTED'
+  | 'ADMIN_OUTBOUND_NOTIFICATION_RETRY';
 
 interface AuditLogParams {
   userId?: number;

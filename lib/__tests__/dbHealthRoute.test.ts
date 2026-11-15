@@ -97,12 +97,14 @@ jest.mock("@/lib/services/leader", () => ({
 }));
 jest.mock("@/lib/services/readTier", () => ({ getReadMetrics: jest.fn(() => ({})) }));
 jest.mock("@/lib/cache", () => ({ getCacheMetrics: jest.fn(() => ({})) }));
-// v3.50.0 / tests updated v3.51.0 — `deploy_prep` is now QUEUED, not executed
-// in-request (the synchronous flush+mirror sequence 502'd at the Netlify
-// gateway). Mock the orchestrator so the route returns 202 without touching the
-// real task queue or SQLite.
+// Track 4 (v3.58.x / spec 43 branch): `deploy_prep` runs synchronously in-request
+// but still creates a worker_tasks record. Mock orchestrator unused now; mock
+// breaker/db-utils as needed per test.
 jest.mock("@/lib/services/worker/task-orchestrator", () => ({
   spawnRegularTask: jest.fn(async () => ({ id: "task-deploy-prep-1" })),
+}));
+jest.mock("@/lib/db-utils", () => ({
+  isPlanLimitBreakerOpen: jest.fn(() => false),
 }));
 // v3.45.0 (spec 21) — the degraded block of the GET response. Mocked rather
 // than real so the assertions pin the RESPONSE SHAPE (which is the page's
@@ -424,35 +426,107 @@ describe("GET /api/admin/db-health — queryConsumption monthly ledger (v3.34.0)
   });
 });
 
-describe("POST /api/admin/db-health — deploy_prep queues a worker task (v3.50.0; spec updated v3.51.0)", () => {
-  it("returns 202 `queued` and does NOT run the synchronous flush/mirror sequence in-request", async () => {
-    const res = await POST(jsonPost({ action: "deploy_prep" }));
-    expect(res.status).toBe(202);
-    const body = await res.json();
-    expect(body.queued).toBe(true);
-    expect(body.taskId).toBe("task-deploy-prep-1");
+describe("POST /api/admin/db-health — deploy_prep synchronous in-request with task record (Track 4)", () => {
+  const { isPlanLimitBreakerOpen } = jest.requireMock("@/lib/db-utils") as { isPlanLimitBreakerOpen: jest.Mock };
+  const prismaMock = jest.requireMock("@/lib/prisma") as any;
 
-    expect(mockSpawnRegularTask).toHaveBeenCalledWith(
-      expect.objectContaining({
+  beforeEach(() => {
+    isPlanLimitBreakerOpen.mockReturnValue(false);
+    prismaMock.prisma = prismaMock.prisma || {};
+  });
+
+  it("returns 200 `synchronous` and records/completes a worker task (flush+mirror in-request)", async () => {
+    const sqlite = require("@/lib/sqlite") as any;
+    const prisma = require("@/lib/prisma") as any;
+    prisma.workerTask = {
+      create: jest.fn(async () => ({
+        id: "task-deploy-prep-1",
+        name: "Deploy prep (synchronous in-request)",
         taskType: "deploy_prep",
-        payload: { reason: "admin_deploy_prep", triggeredBy: "admin" },
-      }),
+        priority: 10,
+        status: "running",
+        createdAt: new Date(),
+        payload: {},
+        assignedTo: null,
+        cronJobId: null,
+      })),
+      update: jest.fn(async () => ({})),
+    };
+    prisma.taskEvent = { create: jest.fn(async () => ({})) };
+
+    sqlite.flushWriteBehind.mockResolvedValueOnce({ flushed: { audit_log: 1 }, retained: {}, pending: {} });
+    const sqliteApi = {
+      upsertWorkerTask: jest.fn(),
+      syncFromPrisma: jest.fn(async () => {}),
+      persistOpsCounter: jest.fn(),
+      persistDbErrorCounts: jest.fn(),
+      getHealthStatus: jest.fn(() => ({ sqlite: { ready: true } })),
+    };
+    sqlite.getSqliteFallback.mockReturnValue(sqliteApi);
+    sqlite.ensureSqliteBackup.mockResolvedValueOnce(sqliteApi);
+    sqlite.getWriteBehindStats.mockReturnValue({});
+    sqlite.getOutboxPending.mockReturnValue(0);
+    sqlite.hasSyncHistoryTable.mockReturnValue(false);
+    sqlite.getSqliteDerivedCounts.mockReturnValue({});
+
+    const res = await POST(jsonPost({ action: "deploy_prep" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.synchronous).toBe(true);
+    expect(body.queued).toBe(false);
+    expect(body.taskId).toBe("task-deploy-prep-1");
+    expect(body.rowsFlushed).toBe(1);
+
+    expect(prisma.workerTask.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ taskType: "deploy_prep", status: "running" }) }),
     );
-    // The entire point of the hotfix: no flush/backup work in the request that
-    // the Netlify gateway would time out on (the original 502).
-    expect(mockFlushWriteBehind).not.toHaveBeenCalled();
+    expect(prisma.workerTask.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "task-deploy-prep-1" }, data: expect.objectContaining({ status: "completed" }) }),
+    );
+    expect(sqlite.flushWriteBehind).toHaveBeenCalled();
+    expect(sqliteApi.syncFromPrisma).toHaveBeenCalledWith({ force: true, reason: "admin" });
     expect(mockCreateAuditLog).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "ADMIN_DB_DEPLOY_PREP_QUEUED", responseStatus: 202 }),
+      expect.objectContaining({ action: "ADMIN_DB_DEPLOY_PREP", responseStatus: 200 }),
     );
   });
 
-  it("returns 500 with the failure detail when the task cannot be queued", async () => {
-    mockSpawnRegularTask.mockRejectedValueOnce(new Error("queue unavailable"));
+  it("returns 500 with failure detail when deploy prep cannot complete", async () => {
+    const sqlite = require("@/lib/sqlite") as any;
+    const prisma = require("@/lib/prisma") as any;
+    prisma.workerTask = {
+      create: jest.fn(async () => ({
+        id: "task-deploy-prep-1",
+        name: "Deploy prep (synchronous in-request)",
+        taskType: "deploy_prep",
+        priority: 10,
+        status: "running",
+        createdAt: new Date(),
+        payload: {},
+        assignedTo: null,
+        cronJobId: null,
+      })),
+      update: jest.fn(async () => ({})),
+    };
+    prisma.taskEvent = { create: jest.fn(async () => ({})) };
+
+    sqlite.flushWriteBehind.mockResolvedValueOnce({ flushed: {}, retained: {}, pending: {} });
+    sqlite.getSqliteFallback.mockReturnValue(null);
+    sqlite.ensureSqliteBackup.mockResolvedValueOnce(null);
+    sqlite.getWriteBehindStats.mockReturnValue({});
+    sqlite.getOutboxPending.mockReturnValue(0);
+    sqlite.hasSyncHistoryTable.mockReturnValue(false);
+    sqlite.getSqliteDerivedCounts.mockReturnValue({});
+
     const res = await POST(jsonPost({ action: "deploy_prep" }));
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe("Failed to queue deploy prep");
-    expect(body.detail).toContain("queue unavailable");
+    expect(body.error).toBe("Deploy prep failed");
+    expect(body.detail).toContain("SQLite backup not initialized");
+    expect(body.taskId).toBe("task-deploy-prep-1");
+    expect(mockCreateAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ADMIN_DB_DEPLOY_PREP", responseStatus: 500 }),
+    );
   });
 });
 

@@ -717,6 +717,37 @@ export interface SqliteFallback {
   /** v3.39.x Analytics SQLITE-only: NSE market-cache (gainers/losers/mostActive/advanceDecline/corporateEvents/insider/blockBulk/Short). */
   getMarketCache(cacheKey: string): Record<string, unknown> | null;
   upsertMarketCache(row: Record<string, unknown>): void;
+  // Tracks 1-3 — unified per-recipient outbound notification log (SQLite-first).
+  /** Write-through: upsert one outbound-notification row + outbox. Returns id. */
+  upsertOutboundNotification(row: Record<string, unknown>): string;
+  /** Mirror read: outbound notifications (filters + pagination), newest first. */
+  getOutboundNotifications(opts?: {
+    status?: string | string[];
+    channel?: string | string[];
+    notificationType?: string | string[];
+    chatId?: string;
+    batchId?: string;
+    recipientId?: string;
+    source?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Array<Record<string, unknown>>;
+  /** Mirror read: count outbound notifications matching filters. */
+  countOutboundNotifications(opts?: {
+    status?: string | string[];
+    channel?: string | string[];
+    notificationType?: string | string[];
+    chatId?: string;
+    batchId?: string;
+    recipientId?: string;
+    source?: string;
+    q?: string;
+  }): number;
+  /** Mirror read: one outbound notification by id, or null. */
+  getOutboundNotificationById(id: string): Record<string, unknown> | null;
+  /** Write-through: patch/update one outbound-notification row + outbox. */
+  updateOutboundNotification(id: string, patch: Record<string, unknown>): void;
   /** Plan 09 §4.10: single zero-Prisma snapshot for the admin dashboard. */
   getSqliteDerived(): Record<string, unknown>;
 }
@@ -2047,6 +2078,44 @@ export const SCHEMA_SQL = `
     delivered   INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_gs_ledger_tab_seq ON google_sheets_ledger (tab, seq);
+
+  -- Unified per-recipient outbound notification tracking (Tracks 1-3).
+  -- SQLite-first mirror (admin/outbound writes outboxed to Prisma via 6h push).
+  -- Keeps per-recipient/chatId records for Telegram broadcasts, direct alerts,
+  -- bot replies, email/webhook/in-app deliveries, announcements/admin sends.
+  CREATE TABLE IF NOT EXISTS outbound_notification (
+    id                TEXT PRIMARY KEY,
+    created_at        TEXT,
+    updated_at        TEXT,
+    sent_at           TEXT,
+    delivered_at      TEXT,
+    channel           TEXT,
+    chat_id           TEXT,
+    recipient_type    TEXT,
+    recipient_id      TEXT,
+    notification_type TEXT,
+    title             TEXT,
+    message           TEXT,
+    message_preview   TEXT,
+    status            TEXT,
+    error             TEXT,
+    attempt_count     INTEGER DEFAULT 0,
+    last_attempt_at   TEXT,
+    source            TEXT,
+    triggered_by      TEXT,
+    batch_id          TEXT,
+    parent_id         TEXT,
+    metadata          TEXT,
+    cancelled_at      TEXT,
+    cancelled_by      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_created ON outbound_notification (created_at);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_status ON outbound_notification (status);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_channel ON outbound_notification (channel);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_type ON outbound_notification (notification_type);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_chat ON outbound_notification (chat_id);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_batch ON outbound_notification (batch_id);
+  CREATE INDEX IF NOT EXISTS idx_outbound_notification_recipient ON outbound_notification (recipient_id);
 
   -- v3.45.0 Spec 21: degraded-mode control state. SINGLETON — the row id is
   -- always the literal 'singleton', mirroring the google_sheets_config pattern.
@@ -4784,6 +4853,7 @@ const DERIVED_COUNT_TABLES = [
   // Spec 20 — unbounded append-only ledger; counted, but NOT part of any
   // per-request health budget (pruned after a successful drain).
   "google_sheets_ledger",
+  "outbound_notification",
 ] as const;
 
 /** True when the durable `sync_history` ledger table exists in the mirror.
@@ -5001,6 +5071,9 @@ const OUTBOX_TABLES = [
   // extended TOGETHER — pushTable() throws for an unregistered table, which would
   // break the push for every mirrored table, not just this one.
   "google_sheets_config",
+  // Tracks 1-3 — unified per-recipient outbound notification log (SQLite-first
+  // outbox mirror; write-through service persists per send attempt/event).
+  "outbound_notification",
 ] as const;
 
 type OutboxItem = { tableName: string; rowId: string; op: "upsert" | "delete" };
@@ -6630,6 +6703,235 @@ function createFallback(db: Database): SqliteFallback {
         // request, so the caller falls back to the env-only (Spec 19) behaviour.
         logger.debug({
           msg: "SQLite: upsertGoogleSheetsConfig failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    // ---- Tracks 1-3: unified outbound notification log (SQLite-first) ----
+    upsertOutboundNotification(row: Record<string, unknown>): string {
+      if (!db) return "";
+      try {
+        const now = new Date().toISOString();
+        const id = row.id != null && String(row.id).trim() !== "" ? String(row.id) : randomUUID();
+        const createdAt = toIsoVal(row.createdAt ?? row.created_at) || now;
+        const updatedAt = toIsoVal(row.updatedAt ?? row.updated_at) || now;
+        const metadataVal = toJsonVal(row.metadata);
+        const attemptCount = row.attemptCount != null ? Number(row.attemptCount) : row.attempt_count != null ? Number(row.attempt_count) : 0;
+        db.run(
+          `INSERT OR REPLACE INTO outbound_notification (
+             id, created_at, updated_at, sent_at, delivered_at, channel, chat_id, recipient_type, recipient_id,
+             notification_type, title, message, message_preview, status, error, attempt_count, last_attempt_at,
+             source, triggered_by, batch_id, parent_id, metadata, cancelled_at, cancelled_by
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            id,
+            createdAt,
+            updatedAt,
+            toIsoVal(row.sentAt ?? row.sent_at),
+            toIsoVal(row.deliveredAt ?? row.delivered_at),
+            String(row.channel ?? ""),
+            row.chatId != null ? String(row.chatId) : row.chat_id != null ? String(row.chat_id) : null,
+            row.recipientType != null ? String(row.recipientType) : row.recipient_type != null ? String(row.recipient_type) : null,
+            row.recipientId != null ? String(row.recipientId) : row.recipient_id != null ? String(row.recipient_id) : null,
+            String(row.notificationType ?? row.notification_type ?? ""),
+            row.title != null ? String(row.title) : null,
+            String(row.message ?? ""),
+            row.messagePreview != null ? String(row.messagePreview) : row.message_preview != null ? String(row.message_preview) : null,
+            String(row.status ?? "pending"),
+            row.error != null ? String(row.error) : null,
+            Number.isFinite(attemptCount) ? attemptCount : 0,
+            toIsoVal(row.lastAttemptAt ?? row.last_attempt_at),
+            row.source != null ? String(row.source) : null,
+            row.triggeredBy != null ? String(row.triggeredBy) : row.triggered_by != null ? String(row.triggered_by) : null,
+            row.batchId != null ? String(row.batchId) : row.batch_id != null ? String(row.batch_id) : null,
+            row.parentId != null ? String(row.parentId) : row.parent_id != null ? String(row.parent_id) : null,
+            metadataVal,
+            toIsoVal(row.cancelledAt ?? row.cancelled_at),
+            row.cancelledBy != null ? String(row.cancelledBy) : row.cancelled_by != null ? String(row.cancelled_by) : null,
+          ],
+        );
+        recordSyncOutbox(db, "outbound_notification", id, "upsert");
+        return id;
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: upsertOutboundNotification failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return "";
+      }
+    },
+
+    getOutboundNotifications(opts?: {
+      status?: string | string[];
+      channel?: string | string[];
+      notificationType?: string | string[];
+      chatId?: string;
+      batchId?: string;
+      recipientId?: string;
+      source?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    }): Array<Record<string, unknown>> {
+      if (!db) return [];
+      try {
+        const conds: string[] = [];
+        const params: Array<string | number> = [];
+        const pushIn = (col: string, v?: string | string[]) => {
+          if (!v) return;
+          const arr = Array.isArray(v) ? v.filter(Boolean) : [v].filter(Boolean);
+          if (!arr.length) return;
+          conds.push(`${col} IN (${arr.map(() => "?").join(",")})`);
+          params.push(...arr);
+        };
+        pushIn("status", opts?.status);
+        pushIn("channel", opts?.channel);
+        pushIn("notification_type", opts?.notificationType);
+        if (opts?.chatId) { conds.push("chat_id = ?"); params.push(String(opts.chatId)); }
+        if (opts?.batchId) { conds.push("batch_id = ?"); params.push(String(opts.batchId)); }
+        if (opts?.recipientId) { conds.push("recipient_id = ?"); params.push(String(opts.recipientId)); }
+        if (opts?.source) { conds.push("source = ?"); params.push(String(opts.source)); }
+        if (opts?.q && opts.q.trim()) {
+          const like = `%${opts.q.trim().toLowerCase()}%`;
+          conds.push("(lower(coalesce(title,'')) LIKE ? OR lower(coalesce(message,'')) LIKE ? OR lower(coalesce(message_preview,'')) LIKE ? OR lower(coalesce(chat_id,'')) LIKE ? OR lower(coalesce(notification_type,'')) LIKE ?)");
+          params.push(like, like, like, like, like);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const limit = Math.min(Math.max(Number(opts?.limit ?? 100), 1), 500);
+        const offset = Math.max(Number(opts?.offset ?? 0), 0);
+        const rows = db.exec(
+          `SELECT * FROM outbound_notification${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [...params, limit, offset],
+        );
+        if (!rows.length || !rows[0].values.length) return [];
+        const cols = rows[0].columns;
+        return rows[0].values.map((row) =>
+          rehydrateRow(cols, row, {
+            dateKeys: ["created_at", "updated_at", "sent_at", "delivered_at", "last_attempt_at", "cancelled_at"],
+            jsonKeys: ["metadata"],
+            alias: {
+              created_at: "createdAt",
+              updated_at: "updatedAt",
+              sent_at: "sentAt",
+              delivered_at: "deliveredAt",
+              chat_id: "chatId",
+              recipient_type: "recipientType",
+              recipient_id: "recipientId",
+              notification_type: "notificationType",
+              message_preview: "messagePreview",
+              attempt_count: "attemptCount",
+              last_attempt_at: "lastAttemptAt",
+              triggered_by: "triggeredBy",
+              batch_id: "batchId",
+              parent_id: "parentId",
+              cancelled_at: "cancelledAt",
+              cancelled_by: "cancelledBy",
+            },
+          }),
+        );
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getOutboundNotifications failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    },
+
+    countOutboundNotifications(opts?: {
+      status?: string | string[];
+      channel?: string | string[];
+      notificationType?: string | string[];
+      chatId?: string;
+      batchId?: string;
+      recipientId?: string;
+      source?: string;
+      q?: string;
+    }): number {
+      if (!db) return 0;
+      try {
+        const conds: string[] = [];
+        const params: Array<string | number> = [];
+        const pushIn = (col: string, v?: string | string[]) => {
+          if (!v) return;
+          const arr = Array.isArray(v) ? v.filter(Boolean) : [v].filter(Boolean);
+          if (!arr.length) return;
+          conds.push(`${col} IN (${arr.map(() => "?").join(",")})`);
+          params.push(...arr);
+        };
+        pushIn("status", opts?.status);
+        pushIn("channel", opts?.channel);
+        pushIn("notification_type", opts?.notificationType);
+        if (opts?.chatId) { conds.push("chat_id = ?"); params.push(String(opts.chatId)); }
+        if (opts?.batchId) { conds.push("batch_id = ?"); params.push(String(opts.batchId)); }
+        if (opts?.recipientId) { conds.push("recipient_id = ?"); params.push(String(opts.recipientId)); }
+        if (opts?.source) { conds.push("source = ?"); params.push(String(opts.source)); }
+        if (opts?.q && opts.q.trim()) {
+          const like = `%${opts.q.trim().toLowerCase()}%`;
+          conds.push("(lower(coalesce(title,'')) LIKE ? OR lower(coalesce(message,'')) LIKE ? OR lower(coalesce(message_preview,'')) LIKE ? OR lower(coalesce(chat_id,'')) LIKE ? OR lower(coalesce(notification_type,'')) LIKE ?)");
+          params.push(like, like, like, like, like);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+        const res = db.exec(`SELECT COUNT(*) FROM outbound_notification${where}`, params);
+        if (!res.length || !res[0].values.length) return 0;
+        return Number(res[0].values[0][0] ?? 0);
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: countOutboundNotifications failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return 0;
+      }
+    },
+
+    getOutboundNotificationById(id: string): Record<string, unknown> | null {
+      if (!db || !id) return null;
+      try {
+        const rows = db.exec("SELECT * FROM outbound_notification WHERE id = ? LIMIT 1", [String(id)]);
+        if (!rows.length || !rows[0].values.length) return null;
+        const cols = rows[0].columns;
+        return rehydrateRow(cols, rows[0].values[0], {
+          dateKeys: ["created_at", "updated_at", "sent_at", "delivered_at", "last_attempt_at", "cancelled_at"],
+          jsonKeys: ["metadata"],
+          alias: {
+            created_at: "createdAt",
+            updated_at: "updatedAt",
+            sent_at: "sentAt",
+            delivered_at: "deliveredAt",
+            chat_id: "chatId",
+            recipient_type: "recipientType",
+            recipient_id: "recipientId",
+            notification_type: "notificationType",
+            message_preview: "messagePreview",
+            attempt_count: "attemptCount",
+            last_attempt_at: "lastAttemptAt",
+            triggered_by: "triggeredBy",
+            batch_id: "batchId",
+            parent_id: "parentId",
+            cancelled_at: "cancelledAt",
+            cancelled_by: "cancelledBy",
+          },
+        });
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: getOutboundNotificationById failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+
+    updateOutboundNotification(id: string, patch: Record<string, unknown>): void {
+      if (!db || !id) return;
+      try {
+        const existing = this.getOutboundNotificationById(id);
+        if (!existing) return;
+        const merged: Record<string, unknown> = { ...existing, ...patch, id, updatedAt: new Date().toISOString() };
+        this.upsertOutboundNotification(merged);
+      } catch (err) {
+        logger.debug({
+          msg: "SQLite: updateOutboundNotification failed",
           error: err instanceof Error ? err.message : String(err),
         });
       }

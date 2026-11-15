@@ -2,47 +2,50 @@
 handoff_version: "1.1"
 session_id: "sess-20261115-spec43-prediction-targets"
 agent: "system"
-timestamp: "2026-11-15T17:35:00Z"
+timestamp: "2026-11-15T20:45:00Z"
 status: "in_progress"
 priority: "high"
 parent_session: "sess-20261115-v3.57.0-skills-webmcp-fixes"
 child_sessions: []
-checkpoint: "spec43-commit-prep"
+checkpoint: "tracks1-4-verified-archify-graphify-complete"
 ---
 
-# Live Resume — Spec 43 prediction targets & `analysisMode` (commit prep)
+# Live Resume — Spec 43 committed; Tracks 1–4 implemented/verified; Archify+Graphify artifacts generated
 
-> Branch: `feature/spec-43-prediction-targets` (post PR #155 / v3.57.0)  
-> Spec/Plan: `.agents/specs/43-prediction-targets-analysis-mode.md`, `.agents/plans/43-prediction-targets-analysis-mode.md`
+> Branch: `feature/spec-43-prediction-targets` @ `1cb4d36` (Spec 43 committed, not pushed/merged/deployed)
 
 ## Context
-- Spec 43 approved (DB migration/backfill + verification). User requested: proceed with steps 1–4 and then **commit Spec 43**, then implement Tracks 1–4 incrementally with PR screenshots.
-- Sequence after Spec 43 commit: Track 1 per-recipient/chatId outbound-notification tracking (logs+DB, all channels) → Track 2 unified notification persistence (schema/migration+mirror/push sinks, manage/retry/cancel/bulk/filters/audit) → Track 3 `/admin/utils/notifications` + unified history/cross-links/announcement send records → Track 4 synchronous “Prepare for Deploy” with checks + `worker_tasks` record and workers-showing-0 fix.
+- Spec 43 (`analysisMode` + prediction targets, no "AI targets off") is committed as `1cb4d36`. Approved follow-up Tracks 1–4 are implemented locally and remain **uncommitted**.
+- Tracks 1–3: unified per-recipient outbound notification tracking (structured logs + DB) and persistence/manage/retry-cancel/audit UI across outbound channels, with `/admin/utils/notifications` and cross-links from `/admin/alerts` and `/admin/utils/announcements`.
+- Track 4: `deploy_prep` runs synchronously in-request and creates/updates a real `worker_tasks` record with checks/result (not queued), fixing workers/admin visibility expectations.
+- Archify (project-only/opencode) and Graphify (option C, `graphifyy`) install+generation completed per confirmed scope.
 
 ## Progress
-- [x] Spec/plan/session created and approved; implementation present (schema+migration `20261115160000_add_analysis_mode_prediction_targets`, mirror/push sinks, fallback/agents, daily+swing prediction/perf persistence+propagation, APIs/UI, Telegram/broadcast, exports/Google Sheets).
-- [x] Stabilized swing prediction-backed serving/tests (`jobToResponse` normalization/terminal serve-cache-notify, deterministic mirror-empty test, async flush cleanup).
-- [x] Fixed gate regressions: `recommendationsPlanLimitFallbacks` updated for `analysisMode`; doc budget restored (TODO trimmed). Temp files cleaned; session-started dev servers stopped.
-- [x] Verification: targeted Jest **174/174 pass**; `npm run lint` **0 errors / 1227 warnings**; `npx tsc --noEmit` **46 baseline-aware**; doc budget **OK**; `npm run quickbuild` **202/202**.
-- [~] Docs/session memory updated for Spec 43 (changelog detail/index, AGENTS, Primer, session todos/flow, HANDOFF/latest); agent-memory/Lessons review in progress as needed.
-- [ ] **Stage and commit Spec 43** (explicitly requested) — pending final review.
+- [x] **Spec 43 committed:** `1cb4d36 feat(spec43): add prediction targets and analysisMode` (not pushed/merged/deployed).
+- [x] **Tracks 1–4 code present (uncommitted):** `OutboundNotification` schema+migration `20261115170000_add_outbound_notifications`, SQLite mirror/outbox/read-write/push sink, `outboundNotificationService`, outbound integrations (Telegram/daily/swing/admin broadcast/user test/notification+alert delivery/announcements), `GET/PATCH /api/admin/notifications` + `/admin/utils/notifications` UI + alerts/announcements cross-links, synchronous deploy-prep/task/checks/result in `db-health` route, audit actions. `lib/__tests__/dbHealthRoute.test.ts` updated for Track 4 sync contract (uncommitted).
+- [x] **Local DB/schema:** `tradenext-db-1` up on `:5432`; `npx prisma db push` synced (incl. `outbound_notifications`).
+- [x] **Verification:** `tsc --noEmit` 47 pre-existing test-file errors only; `npm run lint` exit 0 (warnings); `dbHealthRoute` Jest **21/21**; `npm run quickbuild` **202/202**; doc budget **OK (95.9/100 KB)**.
+- [x] **Visual validation (Playwright, admin `admin@tradenext6.app`/`admin123`, dev stopped after):** screenshots `.playwright-cli/snapshots/track2-notifications.png`, `track2-notifications-loaded.png`, `track3-admin-alerts.png`, `track3-admin-announcements.png`, `track4-workers.png`, `track4-db-health.png` (notifications/alerts/announcements/workers/db-health verified; workers tasks visible, 50 total/not 0; no console errors observed).
+- [x] **Archify:** `.agents/skills/archify` installed (doctor OK). Finalized validated HTML (browser-check pass): `.archify/architecture-tracks-1-4-20261116/tracks-1-4-architecture.html`, `.archify/dataflow-tracks-1-4-20261116/tracks-1-4-dataflow.html`, `.archify/workflow-tracks-1-4-20261116/tracks-1-4-workflow.html` (+ candidates/receipts). Notes: uncommitted source evidence stripped and repo pin removed for validation; layout/routing simplified (standard quality where needed) to satisfy gates.
+- [x] **Graphify:** `graphifyy-0.9.110` + `graphify install`; `extract . --code-only` + `cluster-only` complete. Outputs: `graphify-out/graph.json`, `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md` (8936 nodes, 22473 edges, 278 communities; labels placeholders — no LLM backend configured).
 
 ## Decisions
-- `analysisMode` per stock: `"AI Targets"` | `"Prediction Targets"`; historical rows with targets/analysis treated as AI targets per migration intent.
-- Daily fallback/prediction never `HOLD` on weak signals (BUY/SELL); Swing keeps `LONG/SHORT/OBSERVE` with targets; screener-only swing loads auto-produce prediction targets.
-- Perf checks generate/persist missing prediction targets/mode (bounded/idempotent). Telegram/exports/Sheets include mode.
+- `OutboundNotification` unified per-recipient outbound log with SQLite-first mirror/outbox write-through + id-keyed upsert/push sink; Prisma fallback when SQLite unavailable; best-effort logging (never blocks primary send paths).
+- Track 4 deploy-prep is synchronous in-request with real `worker_tasks` lifecycle/result (not scheduler-queued).
+- Archify/Graphify installed per confirmed scope (project-only/opencode, option C); diagram candidates adjusted only for validation against uncommitted state.
 
 ## Blockers / notes
-- No push/merge/deploy without explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy (Spec 42 carry-forward).
-- S2 prod Prisma-Remote diagnostics blocked (approval/tool unavailable). Archify/Graphify installs/diagrams require explicit package/tool-install permission.
-- Local UI screenshot evidence limited by DB-unavailable dev environment (`e2e-screenshots/spec43/error.png`).
+- **Uncommitted work:** Tracks 1–4 + `lib/__tests__/dbHealthRoute.test.ts` + Archify/Graphify artifacts/candidates/scripts in `.archify/` and `.agents/skills/archify/` and `graphify-out/` (review before staging; `graphify-out`/generated artifacts may be large/gitignored depending on repo policy).
+- Dev-log observation (likely unrelated): SQLite push/outbox errors for `swing_analysis_job`/`swing_signal` (`analyzedCount` null / FK) during local run.
+- No commit/push/merge/deploy without explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy (Spec 42).
+- S2 minimal Prisma-Remote prod read-only diagnostics pending approval/tool access. Full `npm test` and full eslint warning summary not completed.
 
 ## Next Steps
-1. Complete final doc/memory touch-ups if needed, review `git status`, stage Spec 43 changes, and create the Spec 43 commit.
-2. Begin Track 1 outbound-notification tracking (per recipient/chatId, logs+DB, all channels) with tests.
-3. Implement Tracks 2–4 and capture PR screenshots per approved sequence.
+1. On explicit request: review `git status`, decide which artifacts (`.agents/skills/archify`, `.archify`, `graphify-out`) to include/ignore, stage, and commit Tracks 1–4 (+ docs/tests as appropriate).
+2. Optional follow-ups: label Graphify communities with an LLM backend if desired; refine Archify layout/readability for visual review hints; run full `npm test`.
+3. Push/PR/merge/deploy only on explicit request (ensure `WORKER_DISPATCH_SECRET` set before deploy).
 
 ## Resume from
-- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`
-- `.agents/changelog/versions-v3.58.md`, `.agents/CHANGELOG.md`, `.agents/changelog/versions-index.md`, `AGENTS.md`, `Primer.md`
-- Branch: `feature/spec-43-prediction-targets`
+- `.agents/session-todos.md`, `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`
+- `.archify/{architecture,dataflow,workflow}-tracks-1-4-20261116/tracks-1-4-*.html`, `graphify-out/{graph.html,GRAPH_REPORT.md,graph.json}`
+- Branch: `feature/spec-43-prediction-targets` @ `1cb4d36` (uncommitted Tracks 1–4 working tree)

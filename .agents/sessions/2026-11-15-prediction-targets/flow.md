@@ -26,15 +26,23 @@
 - Fixed regressions uncovered during gates: `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` updated for `analysisMode: null` (21/21 pass); `TODO.md` trimmed to restore injected-doc budget (doc-size gate 14/14 pass, total 95.7 KB). Cleaned session temp/junk files and stopped session-started dev server processes on `:3000`.
 - **Verification:** targeted Spec 43 suites **174/174 pass** (`dailyRecommendationService` 58, `swingRecommendationService` 68, `swingPerformanceService` 27, `recommendationsPlanLimitFallbacks` 21). `npm run lint` **0 errors / 1227 warnings**. `npx tsc --noEmit` **46 errors, baseline-aware (no Spec 43-modified prod/service/component or non-test errors identified)**. `node scripts/dev-checks/check-doc-sizes.mjs` **OK**. UI screenshot capture attempted for PR evidence; local dev run had DB-unavailable errors and capture produced `e2e-screenshots/spec43/error.png` only.
 
-## Pending (before Spec 43 commit)
-- Confirm remaining Spec 43 behavior/propagation gaps (per-stock/mixed runs, daily execute/coordinator/batch/finalizer and swing serve/job/status/auto-seed/admin-consumer paths, Telegram/admin/export/Sheets/perf backfill store coverage, idempotence/bounds, no targetless/AI-off states) and add targeted tests only for confirmed gaps.
-- Reconfirm gates as needed: full `npm run test`, `npm run quickbuild` (prior runs indicated green in-session; capture final evidence for commit/docs), and improve UI screenshot evidence if feasible in local environment.
-- Update required docs/session memory for Spec 43: `AGENTS.md`, `.agents/CHANGELOG.md` (+ changelog detail file), `TODO.md`, `Primer.md`, `Lessons.md` (if warranted), `agent-memory.md`, `HANDOFF.md`, `.agents/handoffs/active/latest.md`, session `decisions.md`/`flow.md`/todos.
-- Stage and perform **Spec 43 commit** on `feature/spec-43-prediction-targets` (explicitly requested).
+## Spec 43 commit
+- Spec 43 committed as `1cb4d36 feat(spec43): add prediction targets and analysisMode` on `feature/spec-43-prediction-targets` (not pushed/merged/deployed).
 
-## After Spec 43 commit (approved sequence)
-- Track 1: per-recipient/chatId outbound-notification tracking in structured logs + DB hooks for all outbound notifications.
-- Track 2: unified notification persistence (schema/migration + SQLite mirror/push sinks) + manage/retry/cancel/bulk/filters/detail/audit.
-- Track 3: `/admin/utils/notifications` + unified history/cross-links + announcement send records.
-- Track 4: synchronous “Prepare for Deploy” with checks + `worker_tasks` record; fix `/admin/utils/workers` showing 0.
-- Capture PR screenshots for Tracks 1–4/UI changes. S2 diagnostics remain blocked pending approval/tool access. Archify/Graphify installs/diagrams pending explicit package/tool-install permission.
+## Tracks 1–4 implementation and verification (2026-11-15, uncommitted)
+- Implemented approved Tracks 1–4 on top of `1cb4d36`:
+  - **Track 1/2:** unified outbound notification service + structured per-recipient logging and persistence (`OutboundNotification`, migration `20261115170000_add_outbound_notifications`, SQLite mirror/outbox/read-write helpers, `outbound_notification` push sink, Prisma fallback) wired into Telegram broadcast/direct/test, daily/swing recommendation notices (incl. all-HOLD), notification/alert delivery, and admin announcements.
+  - **Track 3:** `GET/PATCH /api/admin/notifications` + `/admin/utils/notifications` admin UI (filters/detail/retry/cancel/audit), utils sidebar `Notifications`, unified send-history cross-links in `/admin/alerts` and `/admin/utils/announcements`, announcement create/activate send-record storage.
+  - **Track 4:** `app/api/admin/db-health/route.ts` `deploy_prep` made synchronous in-request with real `worker_tasks` lifecycle/result and checks (probe/breaker/latency, SQLite ready/flush, mirror/outbox/sync state); workers visibility aligned. `lib/__tests__/dbHealthRoute.test.ts` updated for sync contract.
+- Local DB: started `tradenext-db-1` and ran `npx prisma db push` to sync schema (incl. `outbound_notifications`).
+- Gates: `npx tsc --noEmit` 47 pre-existing test-file errors only; `npm run lint` exit 0 (warnings); `npx jest lib/__tests__/dbHealthRoute.test.ts --runInBand` **21/21**; `npm run quickbuild` **202/202** (`/admin/utils/notifications` included); doc budget **OK (95.9/100 KB)**.
+- Visual validation (Playwright, admin `admin@tradenext6.app`/`admin123`, dev on `:3000` started/stopped): screenshots `.playwright-cli/snapshots/track2-notifications.png`, `track2-notifications-loaded.png`, `track3-admin-alerts.png`, `track3-admin-announcements.png`, `track4-workers.png`, `track4-db-health.png` confirm notifications/alerts/announcements/workers/db-health UI states; workers tasks visible (50 total, not 0); no console errors observed on captured pages.
+- Observation: local dev logs showed SQLite push/outbox errors for `swing_analysis_job`/`swing_signal` (`analyzedCount` null / FK) likely unrelated to Tracks 1–4.
+
+## Archify + Graphify (2026-11-15)
+- **Archify (project-only, opencode):** installed to `.agents/skills/archify` via `npx skills add https://archify.si --skill archify -a opencode`; `doctor` ready. Authored Tracks 1–4 candidates in `.archify/{architecture,dataflow,workflow}-tracks-1-4-20261116/`. Finalize initially failed due uncommitted-file repository-evidence pins and layout/routing diagnostics; fixed by removing `meta.repository`/stripping `sources`, simplifying routing/boundaries/labels/rows, and using standard quality where needed. Finalized validated HTML artifacts (browser-check pass): `tracks-1-4-architecture.html`, `tracks-1-4-dataflow.html`, `tracks-1-4-workflow.html` with receipts.
+- **Graphify (option C):** installed `graphifyy-0.9.110` (`python -m pip install --user`) and ran `graphify install`. `graphify extract . --code-only` (bg) + `cluster-only .` produced `graphify-out/graph.json`, `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md` (+ analysis/build/labels/cache/manifest). Stats: 8936 nodes, 22473 edges, 278 communities; placeholder community labels (no LLM backend configured).
+
+## Pending
+- On explicit request: decide artifact inclusion (`.agents/skills/archify`, `.archify`, `graphify-out`), review/stage, and commit Tracks 1–4 (+ docs/tests/memory updates). No push/merge/deploy without explicit request (`WORKER_DISPATCH_SECRET` required before deploy).
+- Optional: full `npm test`, Graphify LLM labeling, Archify visual-readability refinements. S2 prod diagnostics remain blocked pending approval/tool access.

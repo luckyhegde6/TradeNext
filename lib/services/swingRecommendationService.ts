@@ -924,6 +924,13 @@ export async function notifySwingTerminal(jobId: string): Promise<boolean> {
     // otherwise subscribers would see two headers (v3.52.0).
     const sent = await broadcastToSubscribers("🌊 Swing Signals", tgMessage, {
       prependTitle: false,
+      notificationType: "swing_recommendations",
+      source: "swing_recommendation_service",
+      triggeredBy: "system",
+      metadata: {
+        jobId: job?.id ?? jobId ?? null,
+        status,
+      },
     });
     logger.info({ msg: "Telegram broadcast for swing signals", sent, jobId, status });
 

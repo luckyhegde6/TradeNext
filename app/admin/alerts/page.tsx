@@ -1227,13 +1227,19 @@ export default function AdminAlertsPage() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         {/* Header */}
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
               Alert Management
             </h1>
             <p className="text-gray-500 dark:text-slate-400 mt-1 font-medium">
               Alerts config, delivery channels, secrets, and event observability
+            </p>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mt-2">
+              Unified outbound send history:{" "}
+              <a href="/admin/utils/notifications" className="text-blue-600 hover:underline font-medium">
+                View Notifications
+              </a>
             </p>
           </div>
           <a

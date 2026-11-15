@@ -628,6 +628,37 @@ async function pushGoogleSheetsConfig(db: Database, rows: OutboxRow[]): Promise<
   return pushByIdUpsert(db, "google_sheets_config", "google_sheets_config", cols, rows);
 }
 
+/** Tracks 1-3 — unified per-recipient outbound notification log. */
+async function pushOutboundNotifications(db: Database, rows: OutboxRow[]): Promise<number> {
+  const cols: GenCol[] = [
+    { sql: "id", val: (m) => String(sv(m.id) ?? "") },
+    { sql: '"createdAt"', val: (m) => sv(m.created_at) },
+    { sql: '"updatedAt"', val: (m) => sv(m.updated_at) },
+    { sql: '"sentAt"', val: (m) => sv(m.sent_at) },
+    { sql: '"deliveredAt"', val: (m) => sv(m.delivered_at) },
+    { sql: "channel", val: (m) => String(sv(m.channel) ?? "") },
+    { sql: '"chatId"', val: (m) => sv(m.chat_id) },
+    { sql: '"recipientType"', val: (m) => sv(m.recipient_type) },
+    { sql: '"recipientId"', val: (m) => sv(m.recipient_id) },
+    { sql: '"notificationType"', val: (m) => String(sv(m.notification_type) ?? "") },
+    { sql: "title", val: (m) => sv(m.title) },
+    { sql: "message", val: (m) => String(sv(m.message) ?? "") },
+    { sql: '"messagePreview"', val: (m) => sv(m.message_preview) },
+    { sql: "status", val: (m) => String(sv(m.status) ?? "pending") },
+    { sql: "error", val: (m) => sv(m.error) },
+    { sql: '"attemptCount"', val: (m) => Number(sv(m.attempt_count) ?? 0) },
+    { sql: '"lastAttemptAt"', val: (m) => sv(m.last_attempt_at) },
+    { sql: "source", val: (m) => sv(m.source) },
+    { sql: '"triggeredBy"', val: (m) => sv(m.triggered_by) },
+    { sql: '"batchId"', val: (m) => sv(m.batch_id) },
+    { sql: '"parentId"', val: (m) => sv(m.parent_id) },
+    { sql: "metadata", json: true, val: (m) => sv(m.metadata) },
+    { sql: '"cancelledAt"', val: (m) => sv(m.cancelled_at) },
+    { sql: '"cancelledBy"', val: (m) => sv(m.cancelled_by) },
+  ];
+  return pushByIdUpsert(db, "outbound_notification", "outbound_notifications", cols, rows);
+}
+
 /** Apply one mirror table's drained outbox slice to Prisma. Returns the
  *  number of outbox rows consumed (rows that should be removed from the
  *  outbox). Throws on a table-level failure so the caller retains the rows. */
@@ -669,6 +700,8 @@ export async function pushTable(db: Database, tableName: string, rows: OutboxRow
     // this case the default arm throws and breaks the push for EVERY table.
     case "google_sheets_config":
       return pushGoogleSheetsConfig(db, rows);
+    case "outbound_notification":
+      return pushOutboundNotifications(db, rows);
     default:
       throw new Error(`lib/sqlitePushSinks: no sink for table "${tableName}"`);
   }

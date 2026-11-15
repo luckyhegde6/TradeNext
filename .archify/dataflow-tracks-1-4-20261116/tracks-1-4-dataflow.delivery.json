@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d75f36aa-d85f-4d15-9aa9-e9ea194fb061",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\candidate.json",
+  "output": "F:\\Local_git\\TradeNext\\.archify\\dataflow-tracks-1-4-20261116\\tracks-1-4-dataflow.html",
+  "specification": {
+    "sha256": "928d6cc92da17ae2a0708b23a76ead619b7fcb0aed0afbadad10ec90e180ce14",
+    "bytes": 6546
+  },
+  "artifact": {
+    "sha256": "2faf38e9f142fda872a416c227ff222505df93cc5069454f46ef51ada40c64d6",
+    "bytes": 848161
+  }
+}

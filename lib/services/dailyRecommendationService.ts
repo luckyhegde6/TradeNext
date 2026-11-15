@@ -696,6 +696,10 @@ export async function runDailyRecommendations(
           const tgMessage = buildAiUnavailableNotice();
           const sent = await broadcastToSubscribers("⚠️ AI Unavailable", tgMessage, {
             prependTitle: false,
+            notificationType: "daily_recommendations_ai_unavailable",
+            source: "daily_recommendation_service",
+            triggeredBy: triggeredBy ?? "system",
+            metadata: { runId: run?.id ?? runRow?.id ?? null, aiUnavailable: true },
           });
           logger.info({ msg: "Telegram broadcast for AI unavailability notice", sent });
         } catch (tgErr) {
@@ -917,6 +921,14 @@ export async function runDailyRecommendations(
 
         const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
           prependTitle: false,
+          notificationType: "daily_recommendations",
+          source: "daily_recommendation_service",
+          triggeredBy: triggeredBy ?? "system",
+          metadata: {
+            runId: run?.id ?? runRow?.id ?? null,
+            uniqueStocks: successfulResults.length,
+            aiDown: skipAi === true,
+          },
         });
         logger.info({ msg: "Telegram broadcast for recommendations", sent });
       } else {
@@ -1855,6 +1867,15 @@ async function runFinalizerPhase(
       });
       const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
         prependTitle: false,
+        notificationType: "daily_recommendations",
+        source: "daily_recommendation_service",
+        triggeredBy: "system",
+        metadata: {
+          runId,
+          uniqueStocks: tgStocks.length,
+          aiDown,
+          phase: "finalizer",
+        },
       });
       logger.info({ msg: "Telegram broadcast for recommendations", runId, sent });
     } else {
