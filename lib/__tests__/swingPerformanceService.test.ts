@@ -484,7 +484,14 @@ describe("checkSwingPerformance", () => {
     expect(result).toEqual(
       expect.objectContaining({ checked: 0, targetAchieved: 0, stopLossHit: 0, expired: 0, updated: 0 }),
     );
-    expect(prisma.swingSignal.update).not.toHaveBeenCalled();
+    // Spec 43: perf check may backfill missing mode/targets (idempotent) even when no price is resolvable.
+    expect(prisma.swingSignal.update).toHaveBeenCalledTimes(1);
+    expect(prisma.swingSignal.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "sig-1" },
+        data: expect.objectContaining({ analysisMode: "AI Targets" }),
+      }),
+    );
   });
 
   it("bridges missing symbols with a live quote when daily_prices has no rows", async () => {
@@ -508,7 +515,14 @@ describe("checkSwingPerformance", () => {
     const result = await checkSwingPerformance();
     // Bridge failure → price unresolvable → signal skipped, run still completes.
     expect(result.checked).toBe(0);
-    expect(prisma.swingSignal.update).not.toHaveBeenCalled();
+    // Spec 43: perf check may backfill missing mode/targets (idempotent) even when no price is resolvable.
+    expect(prisma.swingSignal.update).toHaveBeenCalledTimes(1);
+    expect(prisma.swingSignal.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "sig-1" },
+        data: expect.objectContaining({ analysisMode: "AI Targets" }),
+      }),
+    );
   });
 
   // ── Touch semantics via the intraday window query (v3.32.2) ──

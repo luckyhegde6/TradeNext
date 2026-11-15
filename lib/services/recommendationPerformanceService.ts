@@ -73,6 +73,7 @@ export interface PerformanceListItem {
   reasoning: string | null;
   lastCheckedAt: string | null;
   createdAt: string;
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 export interface PerformanceColumn {
@@ -134,6 +135,7 @@ function toListItem(t: {
   reasoning: string | null;
   lastCheckedAt: Date | null;
   createdAt: Date;
+  analysisMode?: string | null;
 }): PerformanceListItem {
   const returnPercent =
     t.currentPrice != null
@@ -160,6 +162,7 @@ function toListItem(t: {
     reasoning: t.reasoning ?? null,
     lastCheckedAt: t.lastCheckedAt ? t.lastCheckedAt.toISOString() : null,
     createdAt: t.createdAt.toISOString(),
+    analysisMode: (t.analysisMode as any) ?? null,
   };
 }
 
@@ -211,6 +214,7 @@ function listItemFromMirrorTracker(t: Record<string, unknown>): PerformanceListI
     reasoning: t.reasoning != null ? String(t.reasoning) : null,
     lastCheckedAt,
     createdAt: createdAt.toISOString(),
+    analysisMode: t.analysisMode != null ? (String(t.analysisMode) as any) : null,
   };
 }
 

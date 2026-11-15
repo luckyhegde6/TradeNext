@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
           reasoning: s.reasoning,
           riskFactors: s.riskFactors,
           aiSuccess: s.aiSuccess,
+          analysisMode: s.analysisMode ?? null,
         })),
       })),
       timestamp: new Date().toISOString(),

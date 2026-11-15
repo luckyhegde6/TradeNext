@@ -56,13 +56,13 @@ export const TRACKER_TABS: Record<TrackerTab, readonly string[]> = {
     "volume", "marketCap", "screenerCount", "screenerNames", "families",
     "templateIds", "source", "momentumScore", "indicators", "action",
     "confidence", "entryPrice", "targetPrice", "stopLoss", "timeHorizon",
-    "logic", "riskFactors", "analysisError",
+    "logic", "riskFactors", "analysisError", "analysisMode",
   ],
   "daily-rec": [
     "runDate", "runId", "symbol", "price", "change", "changePercent",
     "volume", "screenerAttribution", "screenerCount", "aiRecommendation",
     "confidence", "targetPrice", "stopLoss", "timeHorizon", "status",
-    "reasoning",
+    "reasoning", "analysisMode",
   ],
   screener: [
     "capturedAt", "runId", "symbol", "name", "close", "changePercent",

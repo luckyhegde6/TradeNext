@@ -12,7 +12,12 @@ import { hasValidConfig, type AIConfig } from "./config";
 import { modelFallbackChain } from "./modelChain";
 import { trackAiCall } from "./ai-monitoring";
 import { evaluateRecommendationLevels } from "@/lib/services/recommendationLevelEvaluator";
-import { calculateFallbackSwingAnalysis } from "./fallbackAnalysis";
+import {
+  calculateFallbackSwingAnalysis,
+  ANALYSIS_MODE_AI,
+  ANALYSIS_MODE_PREDICTION,
+  type AnalysisMode,
+} from "./fallbackAnalysis";
 import type {
   SwingAction,
   SwingAnalysis,
@@ -43,6 +48,8 @@ export interface SwingAnalysisResult extends SwingAnalysisInput {
   tokensUsed: number;
   executionMs: number;
   success: boolean;
+  /** Spec 43: per-stock provenance ("AI Targets" | "Prediction Targets"). */
+  analysisMode: AnalysisMode;
   error?: string;
 }
 
@@ -284,11 +291,12 @@ async function analyzeSwingBatch(
         }
         return {
           ...stock,
-          analysis,
+          analysis: { ...analysis, analysisMode: ANALYSIS_MODE_AI },
           tokensUsed: estimateTokens(prompt) + estimateTokens(raw),
           executionMs: attemptMs,
           success: true,
-        };
+          analysisMode: ANALYSIS_MODE_AI,
+        } satisfies SwingAnalysisResult;
       });
 
       await trackAiCall({
@@ -534,15 +542,17 @@ function clampEntry(action: SwingAction, entry: number, price: number): number {
 }
 
 function failedSwingResult(stock: SwingAnalysisInput, error: string): SwingAnalysisResult {
+  const analysis = calculateFallbackSwingAnalysis(stock);
   return {
     ...stock,
-    // Fallback targets are real, actionable levels — mark success so the swing
-    // processor treats them as analyzed (analysisStatus → "done", targets
-    // persisted, performance-checkable). The error is retained for logging.
-    analysis: calculateFallbackSwingAnalysis(stock),
+    // Prediction targets are real, actionable levels — mark success so the swing
+    // processor treats them as analyzed (targets persisted, performance-checkable).
+    // The error is retained for logging.
+    analysis: { ...analysis, analysisMode: ANALYSIS_MODE_PREDICTION },
     tokensUsed: 0,
     executionMs: 0,
     success: true,
+    analysisMode: ANALYSIS_MODE_PREDICTION,
     error,
   };
 }

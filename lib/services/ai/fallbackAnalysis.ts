@@ -32,6 +32,11 @@ export const FALLBACK_MAX_CONFIDENCE = 65;
 /** Min confidence for a directional fallback (vs pure OBSERVE/HOLD). */
 export const FALLBACK_MIN_CONFIDENCE = 40;
 
+/** Spec 43: analysis provenance label. */
+export type AnalysisMode = "AI Targets" | "Prediction Targets";
+export const ANALYSIS_MODE_AI: AnalysisMode = "AI Targets";
+export const ANALYSIS_MODE_PREDICTION: AnalysisMode = "Prediction Targets";
+
 /** Round to 2dp. */
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -55,8 +60,8 @@ function volatilityLevels(volatility20: number | null): { targetPct: number; sto
 /**
  * Infer a directional action from price change + momentum indicators.
  *
- * Strong momentum in the direction of today's move → directional setup.
- * Weak/conflicting momentum → OBSERVE (no edge).
+ * Swing keeps LONG/SHORT/OBSERVE (Spec 43). Mild/conflicting momentum may
+ * resolve to OBSERVE, but callers MUST still produce valid prediction targets.
  */
 function inferSwingDirection(input: {
   changePercent: number;
@@ -69,18 +74,64 @@ function inferSwingDirection(input: {
   if (changePercent > 1.5 && mom20 > 5) {
     return {
       action: "LONG",
-      confidence: clamp(FALLBACK_MIN_CONFIDENCE + Math.min(mom20, 25), FALLBACK_MIN_CONFIDENCE, FALLBACK_MAX_CONFIDENCE),
+      confidence: clamp(
+        FALLBACK_MIN_CONFIDENCE + Math.min(mom20, 25),
+        FALLBACK_MIN_CONFIDENCE,
+        FALLBACK_MAX_CONFIDENCE,
+      ),
     };
   }
   // Strong negative momentum → SHORT
   if (changePercent < -1.5 && mom20 < -5) {
     return {
       action: "SHORT",
-      confidence: clamp(FALLBACK_MIN_CONFIDENCE + Math.min(Math.abs(mom20), 25), FALLBACK_MIN_CONFIDENCE, FALLBACK_MAX_CONFIDENCE),
+      confidence: clamp(
+        FALLBACK_MIN_CONFIDENCE + Math.min(Math.abs(mom20), 25),
+        FALLBACK_MIN_CONFIDENCE,
+        FALLBACK_MAX_CONFIDENCE,
+      ),
     };
   }
-  // Mild momentum — no clear edge
-  return { action: "OBSERVE", confidence: FALLBACK_MIN_CONFIDENCE };
+  // Mild/conflicting momentum → OBSERVE (targets still computed by fallback)
+  return {
+    action: "OBSERVE",
+    confidence: clamp(
+      FALLBACK_MIN_CONFIDENCE + Math.min(Math.abs(changePercent) * 2 + Math.abs(mom20) * 0.5, 12),
+      FALLBACK_MIN_CONFIDENCE,
+      FALLBACK_MAX_CONFIDENCE,
+    ),
+  };
+}
+
+/**
+ * Daily prediction fallback must NEVER return HOLD on weak signals (Spec 43).
+ * Deterministic tie-break: prefer positive drift/momentum, else SELL.
+ */
+function inferDailyDirection(input: {
+  changePercent: number;
+  momentum20: number | null;
+}): { direction: "BUY" | "SELL"; confidence: number } {
+  const { changePercent, momentum20 } = input;
+  const mom20 = momentum20 ?? 0;
+  const score = changePercent + mom20 * 0.25;
+  if (score >= 0) {
+    return {
+      direction: "BUY",
+      confidence: clamp(
+        FALLBACK_MIN_CONFIDENCE + Math.min(Math.abs(score) * 2 + (changePercent >= 0 ? 5 : 0), 25),
+        FALLBACK_MIN_CONFIDENCE,
+        FALLBACK_MAX_CONFIDENCE,
+      ),
+    };
+  }
+  return {
+    direction: "SELL",
+    confidence: clamp(
+      FALLBACK_MIN_CONFIDENCE + Math.min(Math.abs(score) * 2 + (changePercent < 0 ? 5 : 0), 25),
+      FALLBACK_MIN_CONFIDENCE,
+      FALLBACK_MAX_CONFIDENCE,
+    ),
+  };
 }
 
 /**
@@ -163,25 +214,19 @@ export function calculateFallbackSwingAnalysis(input: SwingAnalysisInput): Swing
  * Recommendations still show picks with targets and the performance check
  * can evaluate them.
  *
- * Confidence is capped at 65 so real AI verdicts always outrank fallback picks.
+ * Spec 43: prediction/fallback must NEVER return HOLD on weak signals (always
+ * BUY/SELL). Confidence capped at 65 so real AI verdicts always outrank it.
  */
 export function calculateFallbackRecommendation(input: StockAnalysisInput): AIRecommendation {
   const { price, changePercent, momentum20, volatility20, screenerNames } = input;
 
-  // Map swing-style direction to BUY/HOLD/SELL for the daily tracker vocabulary.
-  const { action, confidence: dirConfidence } = inferSwingDirection({
+  const { direction, confidence: dirConfidence } = inferDailyDirection({
     changePercent,
     momentum20: momentum20 ?? null,
   });
 
-  const direction: RecommendationDirection =
-    action === "LONG" ? "BUY" : action === "SHORT" ? "SELL" : "HOLD";
-
   const { targetPct, stopPct } = volatilityLevels(volatility20 ?? null);
-
-  // Pullback context → more conservative confidence.
-  let confidence = dirConfidence;
-  confidence = clamp(confidence, FALLBACK_MIN_CONFIDENCE, FALLBACK_MAX_CONFIDENCE);
+  const confidence = clamp(dirConfidence, FALLBACK_MIN_CONFIDENCE, FALLBACK_MAX_CONFIDENCE);
 
   const entryPrice = round2(price);
   const { targetPrice, stopLoss } = evaluateRecommendationLevels({
@@ -196,9 +241,9 @@ export function calculateFallbackRecommendation(input: StockAnalysisInput): AIRe
 
   const familyLabel = screenerNames.length > 0 ? screenerNames.join(", ") : "screeners";
   const reasoning =
-    `Technical fallback (AI unavailable): ${flaggedBy(familyLabel)}. ` +
+    `Technical prediction (AI unavailable): ${flaggedBy(familyLabel)}. ` +
     `Momentum 20d ${(momentum20 ?? 0).toFixed(1)}%, volatility ${(volatility20 ?? 0).toFixed(1)}%. ` +
-    `Volatility-sized target ${(targetPct * 100).toFixed(0)}% / stop ${(stopPct * 100).toFixed(0)}%.`;
+    `Directional ${direction} with target ${(targetPct * 100).toFixed(0)}% / stop ${(stopPct * 100).toFixed(0)}%.`;
 
   return {
     recommendation: direction,
@@ -208,7 +253,7 @@ export function calculateFallbackRecommendation(input: StockAnalysisInput): AIRe
     timeHorizon,
     reasoning,
     riskFactors: [
-      "AI analysis unavailable — technical fallback levels",
+      "AI analysis unavailable — prediction/calculated targets",
       "Market volatility",
     ],
   };

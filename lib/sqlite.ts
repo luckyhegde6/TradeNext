@@ -1503,6 +1503,7 @@ export const SCHEMA_SQL = `
     target_price      REAL,
     stop_loss         REAL,
     time_horizon      TEXT,
+    analysis_mode     TEXT,
     reasoning         TEXT,
     risk_factors      TEXT,
     screener_attribution TEXT,
@@ -1788,6 +1789,7 @@ export const SCHEMA_SQL = `
     reasoning           TEXT,
     risk_factors        TEXT,
     screener_attribution TEXT,
+    analysis_mode       TEXT,
     last_checked_at     TEXT,
     created_at          TEXT,
     updated_at          TEXT
@@ -1868,6 +1870,7 @@ export const SCHEMA_SQL = `
     momentum_score    INTEGER,
     analysis          TEXT,
     ai_recommendation TEXT,
+    analysis_mode     TEXT,
     confidence        REAL,
     target_price      REAL,
     stop_loss         REAL,
@@ -2250,10 +2253,17 @@ function ensureRecommendationColumns(db: any): void {
     ],
     daily_recommendation_stock: [
       "tracker_id TEXT",
+      "analysis_mode TEXT",
       "ai_tokens_used INTEGER",
       "ai_execution_ms INTEGER",
       "ai_success INTEGER",
       "ai_error TEXT",
+    ],
+    recommendation_tracker: [
+      "analysis_mode TEXT",
+    ],
+    swing_signal: [
+      "analysis_mode TEXT",
     ],
   };
   try {
@@ -4057,8 +4067,8 @@ export async function syncFromPrisma(opts?: {
         orderBy: { symbol: "asc" },
       });
       return {
-        columns: "id, run_id, tracker_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning, risk_factors, screener_attribution, screener_count, ai_tokens_used, ai_execution_ms, ai_success, ai_error, created_at",
-        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
+        columns: "id, run_id, tracker_id, symbol, price, change_val, change_percent, volume, ai_recommendation, confidence, target_price, stop_loss, time_horizon, analysis_mode, reasoning, risk_factors, screener_attribution, screener_count, ai_tokens_used, ai_execution_ms, ai_success, ai_error, created_at",
+        placeholders: "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?",
         rows: stocks.map((s) => [
           s.id,
           s.runId,
@@ -4073,6 +4083,7 @@ export async function syncFromPrisma(opts?: {
           s.targetPrice,
           s.stopLoss,
           s.timeHorizon,
+          (s as any).analysisMode ?? null,
           s.reasoning,
           s.riskFactors != null ? JSON.stringify(s.riskFactors) : null,
           s.screenerAttribution != null ? JSON.stringify(s.screenerAttribution) : null,
@@ -5256,6 +5267,7 @@ function createFallback(db: Database): SqliteFallback {
             targetPrice: s.target_price,
             stopLoss: s.stop_loss,
             timeHorizon: s.time_horizon,
+            analysisMode: s.analysis_mode ?? null,
             reasoning: s.reasoning,
             riskFactors: s.risk_factors,
             trackerStatus: "active",
@@ -6667,10 +6679,10 @@ function createFallback(db: Database): SqliteFallback {
         db.run(
           `INSERT OR REPLACE INTO daily_recommendation_stock (
              id, run_id, tracker_id, symbol, price, change_val, change_percent, volume,
-             ai_recommendation, confidence, target_price, stop_loss, time_horizon, reasoning,
+             ai_recommendation, confidence, target_price, stop_loss, time_horizon, analysis_mode, reasoning,
              risk_factors, screener_attribution, screener_count, ai_tokens_used,
              ai_execution_ms, ai_success, ai_error, created_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             String(row.id ?? ""),
             String(row.runId ?? row.run_id ?? ""),
@@ -6685,6 +6697,7 @@ function createFallback(db: Database): SqliteFallback {
             row.targetPrice != null ? Number(row.targetPrice) : null,
             row.stopLoss != null ? Number(row.stopLoss) : null,
             row.timeHorizon != null ? String(row.timeHorizon) : null,
+            row.analysisMode != null ? String(row.analysisMode) : row.analysis_mode != null ? String(row.analysis_mode) : null,
             row.reasoning != null ? String(row.reasoning) : null,
             toJsonVal(row.riskFactors),
             toJsonVal(row.screenerAttribution),
@@ -6712,9 +6725,9 @@ function createFallback(db: Database): SqliteFallback {
         db.run(
           `INSERT OR REPLACE INTO recommendation_tracker (
              id, symbol, status, entry_price, current_price, target_price, stop_loss,
-             time_horizon, confidence, ai_recommendation, reasoning, risk_factors,
+             time_horizon, confidence, ai_recommendation, analysis_mode, reasoning, risk_factors,
              screener_attribution, last_checked_at, created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             String(row.id ?? ""),
             String(row.symbol ?? "").toUpperCase(),
@@ -6726,6 +6739,7 @@ function createFallback(db: Database): SqliteFallback {
             row.timeHorizon != null ? String(row.timeHorizon) : null,
             row.confidence != null ? Number(row.confidence) : null,
             row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.analysisMode != null ? String(row.analysisMode) : row.analysis_mode != null ? String(row.analysis_mode) : null,
             row.reasoning != null ? String(row.reasoning) : null,
             toJsonVal(row.riskFactors),
             toJsonVal(row.screenerAttribution),
@@ -6859,9 +6873,9 @@ function createFallback(db: Database): SqliteFallback {
           `INSERT OR REPLACE INTO swing_signal (
              id, job_id, symbol, name, price, change, change_percent, volume, market_cap,
              screener_names, screener_count, families, template_ids, source, indicators,
-             momentum_score, analysis, ai_recommendation, confidence, target_price, stop_loss,
+             momentum_score, analysis, ai_recommendation, analysis_mode, confidence, target_price, stop_loss,
              current_price, return_percent, status, last_checked_at, posted_at, created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             String(row.id ?? ""),
             String(row.jobId ?? row.job_id ?? ""),
@@ -6881,6 +6895,7 @@ function createFallback(db: Database): SqliteFallback {
             row.momentumScore != null ? Number(row.momentumScore) : null,
             toJsonVal(row.analysis),
             row.aiRecommendation != null ? String(row.aiRecommendation) : null,
+            row.analysisMode != null ? String(row.analysisMode) : row.analysis_mode != null ? String(row.analysis_mode) : null,
             row.confidence != null ? Number(row.confidence) : null,
             row.targetPrice != null ? Number(row.targetPrice) : null,
             row.stopLoss != null ? Number(row.stopLoss) : null,
@@ -6937,6 +6952,7 @@ function createFallback(db: Database): SqliteFallback {
               target_price: "targetPrice",
               stop_loss: "stopLoss",
               time_horizon: "timeHorizon",
+              analysis_mode: "analysisMode",
               risk_factors: "riskFactors",
               screener_attribution: "screenerAttribution",
               screener_count: "screenerCount",
@@ -7002,6 +7018,7 @@ function createFallback(db: Database): SqliteFallback {
               stop_loss: "stopLoss",
               time_horizon: "timeHorizon",
               ai_recommendation: "aiRecommendation",
+              analysis_mode: "analysisMode",
               risk_factors: "riskFactors",
               screener_attribution: "screenerAttribution",
               last_checked_at: "lastCheckedAt",
@@ -7213,6 +7230,7 @@ function createFallback(db: Database): SqliteFallback {
               template_ids: "templateIds",
               momentum_score: "momentumScore",
               ai_recommendation: "aiRecommendation",
+              analysis_mode: "analysisMode",
               target_price: "targetPrice",
               stop_loss: "stopLoss",
               current_price: "currentPrice",

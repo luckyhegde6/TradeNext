@@ -32,5 +32,6 @@
 - **Reasoning:** Preserve integrations while surfacing provenance.
 
 ## D8 — SDD gate before implementation
-- **Decision:** Created Spec 43 and Plan 43; implementation (including DB migration/data backfill) requires explicit user approval/permission before code/schema changes.
-- **Reasoning:** Mandatory spec-driven workflow and sensitive DB operations policy. User requested "start implementing" after updating specs/TODOs; awaiting approval to proceed.
+- **Decision:** Created Spec 43 and Plan 43; implementation (including DB migration/data backfill) required explicit user approval/permission before code/schema changes.
+- **Reasoning:** Mandatory spec-driven workflow and sensitive DB operations policy.
+- **Update (2026-11-15):** Spec/plan and DB migration/backfill/verification explicitly approved by user; implementation completed and verified in-session (targeted tests + gates). Spec 43 commit explicitly requested and prepared on `feature/spec-43-prediction-targets`; Tracks 1–4 sequenced after commit.

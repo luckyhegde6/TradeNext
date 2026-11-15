@@ -6,14 +6,14 @@
 
 ## Last Updated
 
-2026-11-15 — **v3.57.0 (PR #155, `feature/spec-42-durable-worker-cron-v2`)**: consolidated all skills to canonical `.agents/skills/<name>/SKILL.md` (format A), removed legacy `.opencode/skills`, added WebMCP skill/agent, and optimized agent/rules/commands/orchestration + session continuation/handoff docs. Landed targeted fixes: daily rec performance no-price `lastCheckedAt` stamping (mirror + best-effort Prisma, breaker-guarded), index/NIFTY TOTAL MARKET fallback+diagnostics, worker index-aware sync errors. **Validation:** targeted Jest 36/36 (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`), `npm run lint` 0 errors, `tsc` baseline unchanged for changed prod libs. **Blocked:** S2 prod Prisma-Remote diagnostics (approval/tool unavailable). Spec 42 implementation remains complete; commit/push/PR update done on explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy; user controls merge/deploy.
+2026-11-15 — **Spec 43 prediction targets & `analysisMode` (v3.58.0, `feature/spec-43-prediction-targets`, commit prep)**: per-stock AI vs Prediction targets across Swing+Daily (DB/schema migration `20261115160000_add_analysis_mode_prediction_targets`, mirror/push sinks, fallback/agents, services/APIs/UI, Telegram/broadcast, exports/Sheets, bounded/idempotent perf backfill). No "AI targets off"/targetless states; daily fallback never HOLD; swing auto prediction on load. **Gates:** targeted Jest 174/174, lint 0 errors, tsc 46 baseline-aware, doc budget OK, quickbuild 202/202. Spec 43 commit requested; Tracks 1–4 sequenced after commit.
 
 ## Current Status
 
-- **Branch:** `feature/spec-42-durable-worker-cron-v2` (PR #155)
-- **Spec 42:** implementation complete (handlers, bounded runner, DR checkpointing, Netlify split, DB Health runtime observability) — no schema/migration/package/env changes in this increment beyond code/docs/skill consolidation.
-- **v3.57.0:** canonical `.agents/skills` source of truth, WebMCP integration docs/agent, orchestration/handoff/continuation rule updates, targeted rec/index/worker fixes.
-- **Blocked follow-up:** S2 prod read-only diagnostics (stale recs/perf `lastCheckedAt`, 2026-11-04 AI-unavailable, `NIFTY TOTAL MARKET`) pending Prisma-Remote approval/tool access.
+- **Branch:** `feature/spec-43-prediction-targets` (includes merged PR #155 / v3.57.0 baseline; Spec 43 implementation uncommitted, commit prep in progress)
+- **Spec 43:** spec/plan approved; implementation present (schema+migration, persistence, fallback/agents, daily+swing propagation, APIs/UI, Telegram/exports/Sheets, perf backfill) + targeted verification green.
+- **Next (approved sequence):** commit Spec 43, then Track 1 (outbound notification tracking) → Track 2/3 (unified notifications + admin UI/history) → Track 4 (sync prepare-for-deploy with `worker_tasks` + workers visibility fix) with PR screenshots.
+- **Blocked/carry-forward:** S2 prod Prisma-Remote diagnostics; Archify/Graphify installs/diagrams require explicit package/tool-install permission; no push/merge/deploy without explicit request (`WORKER_DISPATCH_SECRET` required before deploy).
 
 ## Recent Sessions (summary)
 

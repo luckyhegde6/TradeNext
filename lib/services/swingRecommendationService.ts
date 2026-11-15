@@ -44,11 +44,13 @@ import {
 import type { ScreenerResult } from "@/lib/services/chartinkService";
 import { analyzeSwingStocks, type SwingAnalysisInput } from "@/lib/services/ai/swing-agent";
 import { loadConfig } from "@/lib/services/ai/config";
+import { calculateFallbackSwingAnalysis, ANALYSIS_MODE_PREDICTION } from "@/lib/services/ai/fallbackAnalysis";
 import type {
   SignalFamily,
   SwingIndicators,
   SwingResponse,
   SwingStock,
+  SwingAnalysis,
 } from "@/lib/services/swing-types";
 import { exportSwing } from "@/lib/services/googleSheets/exporter";
 
@@ -214,7 +216,7 @@ export function countSegregation(stocks: SwingStock[]): Record<SignalFamily, num
     range: 0,
   };
   for (const s of stocks) {
-    for (const f of s.families) counts[f] = (counts[f] ?? 0) + 1;
+    for (const f of s.families ?? []) counts[f] = (counts[f] ?? 0) + 1;
   }
   return counts;
 }
@@ -251,6 +253,7 @@ export interface SwingTrackerDraft {
   timeHorizon: typeof SWING_TIME_HORIZON;
   confidence: number;
   aiRecommendation: "BUY" | "SELL" | "HOLD";
+  analysisMode: "AI Targets" | "Prediction Targets";
   reasoning: string | null;
   riskFactors: string[] | null;
   screenerAttribution: {
@@ -283,6 +286,7 @@ export function swingTrackerDraft(stock: SwingStock): SwingTrackerDraft | null {
     timeHorizon: SWING_TIME_HORIZON,
     confidence: a.confidence,
     aiRecommendation: swingActionToRecommendation(a.action),
+    analysisMode: (a.analysisMode ?? stock.analysisMode ?? "Prediction Targets") as "AI Targets" | "Prediction Targets",
     reasoning: a.logic || null,
     riskFactors: a.riskFactors?.length ? a.riskFactors : null,
     screenerAttribution: {
@@ -341,6 +345,7 @@ export async function persistSwingTrackers(
       timeHorizon: draft.timeHorizon,
       confidence: draft.confidence,
       aiRecommendation: draft.aiRecommendation,
+      analysisMode: draft.analysisMode,
       reasoning: draft.reasoning,
       riskFactors: draft.riskFactors,
       screenerAttribution: draft.screenerAttribution,
@@ -429,6 +434,7 @@ export interface SwingSignalAnalysisPatch {
   confidence: number;
   targetPrice: number;
   stopLoss: number;
+  analysisMode: "AI Targets" | "Prediction Targets";
 }
 
 /** Analysis patch for one stock (null when it carries no analysis). PURE. */
@@ -441,6 +447,7 @@ export function swingSignalAnalysisPatch(stock: SwingStock): SwingSignalAnalysis
     confidence: a.confidence,
     targetPrice: a.targetPrice,
     stopLoss: a.stopLoss,
+    analysisMode: (a.analysisMode ?? stock.analysisMode ?? "Prediction Targets") as "AI Targets" | "Prediction Targets",
   };
 }
 
@@ -466,7 +473,10 @@ export async function persistSwingSignals(
   let created = 0;
   for (const s of stocks) {
     if (existing.has(s.symbol.toUpperCase())) continue;
-    const draft = swingSignalDraft(s, jobId);
+    // Spec 43: every posted swing signal must carry actionable prediction/AI targets.
+    const effective = s.analysis ? s : withPredictionAnalysis(s);
+    const draft = swingSignalDraft(effective, jobId);
+    const patch = swingSignalAnalysisPatch(effective);
     sqlite.upsertSwingSignal({
       id: randomUUID(),
       jobId: draft.jobId,
@@ -484,14 +494,15 @@ export async function persistSwingSignals(
       source: draft.source,
       indicators: draft.indicators,
       momentumScore: draft.momentumScore,
-      analysis: null,
-      aiRecommendation: null,
-      confidence: null,
-      targetPrice: null,
-      stopLoss: null,
-      currentPrice: s.price,
+      analysis: patch?.analysis ?? null,
+      aiRecommendation: patch?.aiRecommendation ?? null,
+      confidence: patch?.confidence ?? null,
+      targetPrice: patch?.targetPrice ?? null,
+      stopLoss: patch?.stopLoss ?? null,
+      analysisMode: patch?.analysisMode ?? effective.analysisMode ?? ANALYSIS_MODE_PREDICTION,
+      currentPrice: effective.price,
       returnPercent: null,
-      status: "tracking",
+      status: "active",
       postedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -532,6 +543,7 @@ export async function patchSwingSignalAnalysis(
       confidence: patch.confidence,
       targetPrice: patch.targetPrice,
       stopLoss: patch.stopLoss,
+      analysisMode: patch.analysisMode,
       updatedAt: new Date(),
     });
     patched++;
@@ -649,18 +661,43 @@ async function fetchRecentCloses(
 
 /** Convert a ranked SwingStock into the agent's input shape. */
 function toAnalysisInput(stock: SwingStock): SwingAnalysisInput {
+  const indicators = stock.indicators ?? EMPTY_INDICATORS;
   return {
-    symbol: stock.symbol,
-    price: stock.price,
-    changePercent: stock.changePercent,
-    volume: stock.volume,
-    screenerNames: stock.screenerNames,
-    families: stock.families,
+    symbol: String(stock.symbol ?? "").toUpperCase(),
+    price: Number(stock.price ?? 0),
+    changePercent: Number(stock.changePercent ?? 0),
+    volume: Number(stock.volume ?? 0),
+    screenerNames: Array.isArray(stock.screenerNames) ? stock.screenerNames : [],
+    families: Array.isArray(stock.families) ? stock.families : [],
     marketCap: stock.marketCap,
-    momentum10: stock.indicators.momentum10,
-    momentum20: stock.indicators.momentum20,
-    volatility20: stock.indicators.volatility20,
-    distanceFrom20dHigh: stock.indicators.distanceFrom20dHigh,
+    momentum10: indicators.momentum10 ?? null,
+    momentum20: indicators.momentum20 ?? null,
+    volatility20: indicators.volatility20 ?? null,
+    distanceFrom20dHigh: indicators.distanceFrom20dHigh ?? null,
+  };
+}
+
+/**
+ * Attach deterministic prediction targets to a screener stock (Spec 43).
+ * Always returns an actionable analysis with targets + analysisMode.
+ */
+function withPredictionAnalysis(stock: SwingStock): SwingStock {
+  const normalized: SwingStock = {
+    ...stock,
+    symbol: String(stock.symbol ?? "").toUpperCase(),
+    screenerNames: Array.isArray(stock.screenerNames) ? stock.screenerNames : [],
+    families: Array.isArray(stock.families) ? stock.families : [],
+    indicators: stock.indicators ?? EMPTY_INDICATORS,
+  } as SwingStock;
+  const analysis = {
+    ...calculateFallbackSwingAnalysis(toAnalysisInput(normalized)),
+    analysisMode: ANALYSIS_MODE_PREDICTION as "Prediction Targets",
+  };
+  return {
+    ...normalized,
+    analysis,
+    analysisMode: ANALYSIS_MODE_PREDICTION,
+    analysisError: null,
   };
 }
 
@@ -715,25 +752,63 @@ export function jobToResponse(job: Record<string, unknown>): SwingResponse {
   const templateCount = Number(job.templateCount ?? 0);
   const totalRaw = Number(job.totalRaw ?? 0);
   const errorFromJob = job.error != null ? String(job.error) : null;
+  const payloadError = payload.analysisError != null ? String(payload.analysisError) : null;
+  // Spec 43: served stocks must remain prediction-backed (no targetless states),
+  // including legacy terminal jobs that predate prediction persistence.
+  const stocks = ((payload.stocks ?? []) as SwingStock[]).map((s) => {
+    if (!s?.analysis) return withPredictionAnalysis(s);
+
+    const mode =
+      s.analysis.analysisMode ?? (s as any).analysisMode ?? "AI Targets";
+    const hasTargets =
+      Number.isFinite(Number(s.analysis.targetPrice)) &&
+      Number.isFinite(Number(s.analysis.stopLoss)) &&
+      Number.isFinite(Number(s.analysis.entryPrice));
+
+    // A target-less legacy/invalid analysis must not surface as "done/AI off".
+    if (!hasTargets) return withPredictionAnalysis(s);
+
+    return {
+      ...s,
+      analysis: { ...s.analysis, analysisMode: mode },
+      analysisMode: mode,
+      analysisError: s.analysisError ?? null,
+    };
+  });
+  const anyAi = stocks.some(
+    (s) => s.analysis?.analysisMode === "AI Targets" || (s as any).analysisMode === "AI Targets",
+  );
   const base: SwingResponse = {
     success: true,
     generatedAt: payload.generatedAt ?? new Date().toISOString(),
     templateCount,
     totalRaw,
-    topN: payload.stocks?.length ?? 0,
-    segregation: payload.segregation ?? countSegregation([]),
+    topN: stocks.length,
+    segregation: payload.segregation ?? countSegregation(stocks),
     analysisStatus: "pending",
     analysisError: null,
-    stocks: payload.stocks ?? [],
+    stocks,
   };
   if (status === "done") {
-    return { ...base, analysisStatus: "done", analysisError: payload.analysisError ?? null };
+    return {
+      ...base,
+      analysisStatus: anyAi ? "done" : "predicted",
+      analysisError: payloadError ?? null,
+    };
   }
   if (status === "failed") {
+    // If targets exist (prediction/AI), present them instead of an unavailable targetless state.
+    if (stocks.some((s) => s.analysis)) {
+      return {
+        ...base,
+        analysisStatus: anyAi ? "done" : "predicted",
+        analysisError: payloadError ?? errorFromJob ?? null,
+      };
+    }
     return {
       ...base,
       analysisStatus: "failed",
-      analysisError: errorFromJob ?? payload.analysisError ?? "AI analysis failed",
+      analysisError: errorFromJob ?? payloadError ?? "AI analysis failed",
     };
   }
   // pending | running → the frozen screener feed; the tab polls until done.
@@ -826,11 +901,20 @@ export async function notifySwingTerminal(jobId: string): Promise<boolean> {
       "./recommendationBroadcast"
     );
 
+    const broadcastStocks = stocks.map((s) => ({
+      symbol: s.symbol,
+      price: s.price,
+      analysis: s.analysis as any,
+      analysisMode: (s as any).analysisMode ?? (s.analysis as any)?.analysisMode ?? null,
+    }));
+    const hasActionableTargets = broadcastStocks.some((s) => {
+      const a = s.analysis as any;
+      const dir = a?.action ?? a?.direction;
+      return a && (dir === "LONG" || dir === "SHORT") && Number(a.targetPrice) > 0 && Number(a.stopLoss) > 0;
+    });
     const tgMessage =
-      status === "done"
-        ? buildSwingBroadcast(
-            stocks.map((s) => ({ symbol: s.symbol, price: s.price, analysis: s.analysis })),
-          )
+      status === "done" || hasActionableTargets
+        ? buildSwingBroadcast(broadcastStocks as any)
         : buildSwingUnavailableNotice(
             undefined,
             payload.analysisError ?? (job.error != null ? String(job.error) : null),
@@ -911,8 +995,15 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
       const a = bySymbol.get(s.symbol);
       if (a && a.success && a.analysis) {
         s.analysis = a.analysis;
+        s.analysisMode = a.analysisMode ?? a.analysis.analysisMode ?? "AI Targets";
+        s.analysisError = null;
       } else {
-        s.analysisError = a?.error ?? "Analysis failed";
+        // Keep prediction targets (Spec 43) when AI analysis fails/unavailable.
+        if (!s.analysis) {
+          Object.assign(s, withPredictionAnalysis(s));
+        }
+        s.analysisMode = s.analysis?.analysisMode ?? "Prediction Targets";
+        s.analysisError = a?.error ?? s.analysisError ?? "AI analysis unavailable — prediction targets applied";
       }
     }
     analysisStatus = analysisStatusAfterBatch(stocks) as "done" | "failed";
@@ -941,25 +1032,44 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
   } catch (e) {
     analysisError = e instanceof Error ? e.message : String(e);
     logger.error({
-      msg: "Swing AI analysis failed — marking job failed",
+      msg: "Swing AI analysis failed — applying prediction targets",
       error: analysisError,
       jobId: jobId,
     });
-    analysisStatus = "failed";
-    createAuditLog({
-      action: "SWING_ANALYSIS_FAILED",
-      resource: "swing_analysis",
-      resourceId: jobId,
-      path: "/api/recommendations/swing",
-      errorMessage: analysisError,
-      metadata: { stocks: stocks.length, jobId: jobId },
-    }).catch(() => undefined);
+    // Spec 43: keep prediction targets available even when AI analysis fails.
+    for (const s of stocks) {
+      if (!s.analysis) Object.assign(s, withPredictionAnalysis(s));
+      s.analysisMode = s.analysis?.analysisMode ?? ANALYSIS_MODE_PREDICTION;
+    }
+    analysisStatus = stocks.some((s) => s.analysis) ? "done" : "failed";
+    if (analysisStatus === "failed") {
+      createAuditLog({
+        action: "SWING_ANALYSIS_FAILED",
+        resource: "swing_analysis",
+        resourceId: jobId,
+        path: "/api/recommendations/swing",
+        errorMessage: analysisError,
+        metadata: { stocks: stocks.length, jobId: jobId },
+      }).catch(() => undefined);
+    } else {
+      createAuditLog({
+        action: "SWING_ANALYSIS_COMPLETE",
+        resource: "swing_analysis",
+        resourceId: jobId,
+        path: "/api/recommendations/swing",
+        metadata: {
+          stocks: stocks.length,
+          succeeded: stocks.filter((s) => s.analysis).length,
+          jobId: jobId,
+          mode: ANALYSIS_MODE_PREDICTION,
+          aiError: analysisError,
+        },
+      }).catch(() => undefined);
+    }
   }
 
   // Publish the terminal screener feed even when AI analysis throws or
-  // every stock fails. Previously this lived inside the AI try block, so
-  // provider failure skipped the sheet append entirely. Export is best-effort
-  // and never changes the job outcome.
+  // every stock fails. Export is best-effort and never changes the job outcome.
   const sheetExport = await exportSwing(stocks, jobId);
   logger.info({
     msg: "Google Sheets swing publish finished",
@@ -969,11 +1079,10 @@ export async function processSwingAnalysisJob(job: Record<string, unknown>): Pro
     analysisStatus,
   });
 
-  // v3.10.1: persist AI-analyzed picks as RecommendationTracker rows
-  // (timeHorizon "swing") so they surface in the Performance tab's Swing
-  // filter and the daily perf-check cron tracks them. Non-fatal — the feed
-  // must never fail because persistence hiccuped.
-  if (analysisStatus === "done") {
+  // Persist prediction/AI-analyzed picks as RecommendationTracker rows
+  // (timeHorizon "swing") so they surface in Performance and perf checks can
+  // track them. Non-fatal — the feed must never fail because persistence hiccuped.
+  if (stocks.some((s) => s.analysis)) {
     try {
       const { created, updated } = await persistSwingTrackers(stocks);
       logger.info({ msg: "Swing trackers persisted", created, updated, symbols: stocks.length });
@@ -1198,7 +1307,8 @@ export async function getSwingRecommendations(
     const cacheHidesJob =
       !cached ||
       cached.analysisStatus === "skipped" ||
-      cached.analysisStatus === "failed";
+      cached.analysisStatus === "failed" ||
+      cached.analysisStatus === "predicted";
     if (cacheHidesJob && !breakerOpen) {
       const inFlight = findFreshInFlightSwingJob(sqlite);
       if (inFlight) {
@@ -1262,9 +1372,15 @@ export async function getSwingRecommendations(
       }
 
       if (status === "done" || status === "failed") {
-        // Prior run's AI verdicts — cache 24h as a steady-state accelerator.
+        // Prior run's AI/prediction verdicts — cache 24h as a steady-state accelerator.
         const served = jobToResponse(latestJob);
-        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        if (
+          served.analysisStatus === "done" ||
+          served.analysisStatus === "failed" ||
+          served.analysisStatus === "predicted"
+        ) {
+          staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        }
         // v3.52.0: if the terminal broadcast never left the processing instance,
         // this observation point delivers it (durable marker → exactly once).
         notifySwingTerminal(String(latestJob.id ?? "")).catch(() => undefined);
@@ -1296,7 +1412,13 @@ export async function getSwingRecommendations(
         // Abandoned job hiding an older result — surface the terminal feed and
         // keep the drain ticking so recovery settles the stale row.
         const served = jobToResponse(terminal);
-        staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        if (
+          served.analysisStatus === "done" ||
+          served.analysisStatus === "failed" ||
+          served.analysisStatus === "predicted"
+        ) {
+          staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+        }
         notifySwingTerminal(String(terminal.id ?? "")).catch(() => undefined);
         maybeProcessSwingAnalysis().catch(() => undefined);
         logger.warn({
@@ -1339,8 +1461,13 @@ export async function getSwingRecommendations(
       }
       if (prismaRow) {
         const served = jobToResponse(prismaRow);
-        if (served.analysisStatus === "done" || served.analysisStatus === "failed") {
+        if (
+          served.analysisStatus === "done" ||
+          served.analysisStatus === "failed" ||
+          served.analysisStatus === "predicted"
+        ) {
           staticCache.set(cacheKey, served, SWING_DONE_CACHE_TTL);
+          notifySwingTerminal(String(prismaRow.id ?? "")).catch(() => undefined);
         } else {
           // pending/running — frozen feed; the processor settles it.
           maybeProcessSwingAnalysis().catch(() => undefined);
@@ -1439,14 +1566,18 @@ export async function getSwingRecommendations(
       error: e instanceof Error ? e.message : String(e),
     });
   }
-  const enriched = ranked.map((s) => ({
-    ...s,
-    indicators: indicatorMap.get(s.symbol) ?? EMPTY_INDICATORS,
-  }));
+  const enriched = ranked.map((s) =>
+    withPredictionAnalysis({
+      ...s,
+      indicators: indicatorMap.get(s.symbol) ?? EMPTY_INDICATORS,
+      analysis: null,
+      analysisMode: null,
+      analysisError: null,
+    } as SwingStock),
+  );
 
-  // Empty feed → synchronous skipped response (no job, no AI — nothing to
-  // analyze). The tab renders its honest empty state.
-  if (analyze && enriched.length === 0) {
+  // Empty feed → honest empty response (nothing to analyze).
+  if (enriched.length === 0) {
     const empty: SwingResponse = {
       success: true,
       generatedAt: new Date().toISOString(),
@@ -1454,11 +1585,11 @@ export async function getSwingRecommendations(
       totalRaw: 0,
       topN: 0,
       segregation: countSegregation([]),
-      analysisStatus: "skipped",
+      analysisStatus: "predicted",
       analysisError: null,
       stocks: [],
     };
-    staticCache.set(cacheKey, empty, SWING_DONE_CACHE_TTL);
+    staticCache.set(cacheKey, empty, SWING_FEED_CACHE_TTL);
     return empty;
   }
 
@@ -1560,7 +1691,8 @@ export async function getSwingRecommendations(
     return pending;
   }
 
-  // analyze=false (or empty feed) — synchronous screener-only feed.
+  // analyze=false — synchronous screener-only feed with prediction targets
+  // (Spec 43: no "AI targets off"/targetless state).
   const response: SwingResponse = {
     success: true,
     generatedAt: new Date().toISOString(),
@@ -1568,7 +1700,7 @@ export async function getSwingRecommendations(
     totalRaw: deduped.length,
     topN: enriched.length,
     segregation: countSegregation(enriched),
-    analysisStatus: "skipped",
+    analysisStatus: "predicted",
     analysisError: null,
     stocks: enriched,
   };
@@ -1582,7 +1714,8 @@ export async function getSwingRecommendations(
       analyze,
       totalRaw: deduped.length,
       topN: enriched.length,
-      analysisStatus: "skipped",
+      analysisStatus: "predicted",
+      mode: ANALYSIS_MODE_PREDICTION,
       error: undefined,
     },
   }).catch(() => undefined);

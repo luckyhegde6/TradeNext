@@ -193,13 +193,16 @@ describe("recommendation-agent", () => {
   // ── analyzeStocks — basic flow ───────────────────────────────────────
 
   describe("analyzeStocks", () => {
-    test("returns fallback results when AI is not configured", async () => {
+    test("returns prediction fallback results when AI is not configured", async () => {
       const results = await analyzeStocks([makeStock()], { model: "", apiKey: "", temperature: 0.3, maxTokens: 2048, enabled: false });
       expect(results).toHaveLength(1);
       expect(results[0].success).toBe(true);
-      // changePercent=2.04 > 1.5 but momentum20 is null → OBSERVE → HOLD direction
-      expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
-      expect(results[0].aiRecommendation.confidence).toBe(40);
+      // Spec 43: daily prediction fallback is always directional (never HOLD)
+      expect(results[0].aiRecommendation.recommendation).toBe("BUY");
+      expect(results[0].aiRecommendation.confidence).toBeGreaterThanOrEqual(40);
+      expect(results[0].aiRecommendation.targetPrice).toBeGreaterThan(results[0].price);
+      expect(results[0].aiRecommendation.stopLoss).toBeLessThan(results[0].price);
+      expect(results[0].analysisMode).toBe("Prediction Targets");
       expect(results[0].error).toContain("not configured");
     });
 
@@ -207,10 +210,12 @@ describe("recommendation-agent", () => {
       const stock = makeStock({ price: 2500 });
       const results = await analyzeStocks([stock], { model: "", apiKey: "", temperature: 0.3, maxTokens: 2048, enabled: false });
       expect(results[0].success).toBe(true);
-      // Volatility=5 (default) → targetPct=7.5%, stopPct=5% → target=2687.5, stop=2375
-      expect(results[0].aiRecommendation.targetPrice).toBe(2687.5);
-      expect(results[0].aiRecommendation.stopLoss).toBe(2375);
-      expect(results[0].aiRecommendation.reasoning).toContain("Technical fallback");
+      expect(results[0].analysisMode).toBe("Prediction Targets");
+      // Volatility=5 (default) → targetPct=7.5%, stopPct=5% for BUY
+      expect(results[0].aiRecommendation.recommendation).toBe("BUY");
+      expect(results[0].aiRecommendation.targetPrice).toBeCloseTo(2687.5, 1);
+      expect(results[0].aiRecommendation.stopLoss).toBeCloseTo(2375, 1);
+      expect(results[0].aiRecommendation.reasoning).toContain("Technical prediction");
     });
 
     test("analyzes a single stock successfully", async () => {
@@ -300,16 +305,14 @@ describe("recommendation-agent", () => {
       mockDirectPrompt.mockResolvedValue("I cannot provide analysis for these stocks.");
 
       const results = await analyzeStocks([stock], VALID_AI_CONFIG);
-      // v3.8.0: unusable responses are retried, NOT silently accepted as
-      // HOLD-success. v3.10.1 adds the model fallback chain: primary gets
-      // 2 attempts, then each fallback model ("openrouter/free",
-      // "openrouter/auto", "nvidia/nemotron-3-ultra-550b-a55b:free") gets
-      // one — 5 calls total. The batch is marked failed so monitoring and
-      // admins see the truth.
+      // Unusable responses exhaust retries/fallback chain; Spec 43 returns
+      // prediction targets (directional BUY/SELL, never HOLD) as usable picks.
       expect(results[0].success).toBe(true);
-      // OBSERVE → HOLD direction since momentum20 is null
-      expect(results[0].aiRecommendation.recommendation).toBe("HOLD");
-      expect(results[0].aiRecommendation.confidence).toBe(40);
+      expect(results[0].analysisMode).toBe("Prediction Targets");
+      expect(results[0].aiRecommendation.recommendation).toBe("BUY");
+      expect(results[0].aiRecommendation.confidence).toBeGreaterThanOrEqual(40);
+      expect(results[0].aiRecommendation.targetPrice).toBeGreaterThan(results[0].price);
+      expect(results[0].aiRecommendation.stopLoss).toBeLessThan(results[0].price);
       expect(results[0].error).toContain("Unusable AI response");
       expect(mockDirectPrompt).toHaveBeenCalledTimes(5);
     });
@@ -655,6 +658,7 @@ describe("recommendation-agent", () => {
       tokensUsed: 0,
       executionMs: 0,
       success: true,
+      analysisMode: "AI Targets",
       ...overrides,
     });
 

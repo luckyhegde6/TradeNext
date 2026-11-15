@@ -155,7 +155,7 @@ export default function SwingCard({ stock }: { stock: SwingStock }) {
         ))}
       </div>
 
-      {/* ── AI analysis ───────────────────────────────────────── */}
+      {/* ── Analysis (AI or prediction targets) ───────────────── */}
       {analysis ? (
         <div className="border-t border-gray-700/50 pt-2">
           <div className="flex items-center gap-2 mb-2">
@@ -165,7 +165,9 @@ export default function SwingCard({ stock }: { stock: SwingStock }) {
               {ACTION_META[analysis.action].label}
             </span>
             <span className="text-xs text-gray-400">Conf {analysis.confidence}%</span>
-            <span className="text-xs text-gray-500 ml-auto">Mom {analysis.momentumScore}/100</span>
+            <span className="text-xs text-gray-500 ml-auto">
+              {analysis.analysisMode ?? stock.analysisMode ?? "Targets"}
+            </span>
           </div>
 
           {/* Confidence bar */}
@@ -228,8 +230,8 @@ export default function SwingCard({ stock }: { stock: SwingStock }) {
         <div className="border-t border-gray-700/50 pt-2">
           <p className="text-[11px] text-gray-500">
             {stock.analysisError
-              ? `AI targets unavailable (${stock.analysisError.slice(0, 60)}) — screener signals only`
-              : "AI analysis pending — screener signals only"}
+              ? `Targets unavailable (${stock.analysisError.slice(0, 60)})`
+              : "Prediction targets pending — refresh to load targets"}
           </p>
         </div>
       )}

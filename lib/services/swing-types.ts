@@ -32,7 +32,10 @@ export interface SwingIndicators {
   distanceFrom20dHigh: number | null;
 }
 
-/** AI target prediction for one swing stock. */
+/** Spec 43: provenance for targets/analysis shown to users. */
+export type SwingAnalysisMode = "AI Targets" | "Prediction Targets";
+
+/** AI/prediction target for one swing stock. */
 export interface SwingAnalysis {
   action: SwingAction;
   /** 0–100 conviction. */
@@ -46,9 +49,11 @@ export interface SwingAnalysis {
   /** 0–100 AI-rated momentum setup quality. */
   momentumScore: number;
   riskFactors: string[];
+  /** Spec 43: how this target/analysis was produced. */
+  analysisMode?: SwingAnalysisMode;
 }
 
-/** One stock in the swing tab (screeners + families + indicators + AI). */
+/** One stock in the swing tab (screeners + families + indicators + analysis). */
 export interface SwingStock {
   symbol: string;
   name: string;
@@ -70,7 +75,10 @@ export interface SwingStock {
   /** Pre-AI composite rank score (0–100). */
   momentumScore: number;
   indicators: SwingIndicators;
+  /** Spec 43: prediction or AI targets are always present for actionable picks. */
   analysis: SwingAnalysis | null;
+  /** Per-stock provenance (mirrors analysis.analysisMode when present). */
+  analysisMode?: SwingAnalysisMode | null;
   analysisError: string | null;
 }
 
@@ -78,12 +86,13 @@ export interface SwingStock {
  * GET /api/recommendations/swing response.
  *
  * analysisStatus lifecycle:
- *   - "pending"  the screener feed is live but the AI target analysis is still
- *                running in the background (the HTTP request returns fast so it
- *                can never hit the platform request-time wall — Netlify 30s).
- *   - "done"     ≥1 stock carries AI targets (analysisStatusAfterBatch).
- *   - "failed"   every stock failed analysis — analysisError explains why.
- *   - "skipped"  analysis was not requested (analyze=0) or the feed was empty.
+ *   - "pending"    the screener feed is live but the AI target analysis is still
+ *                  running in the background (the HTTP request returns fast so it
+ *                  can never hit the platform request-time wall — Netlify 30s).
+ *   - "done"       ≥1 stock carries AI targets (analysisStatusAfterBatch).
+ *   - "failed"     every stock failed analysis — analysisError explains why.
+ *   - "skipped"    legacy screener-only/no-feed state (kept for compatibility).
+ *   - "predicted"  Spec 43: screener-only load has prediction targets (no AI run).
  */
 export interface SwingResponse {
   success: boolean;
@@ -94,7 +103,7 @@ export interface SwingResponse {
   topN: number;
   /** Family → count of stocks in the top-N feed flagged with it. */
   segregation: Record<SignalFamily, number>;
-  analysisStatus: "done" | "skipped" | "pending" | "failed";
+  analysisStatus: "done" | "skipped" | "pending" | "failed" | "predicted";
   /** Human-readable reason when the AI analysis failed (analysisStatus === "failed"). */
   analysisError?: string | null;
   stocks: SwingStock[];

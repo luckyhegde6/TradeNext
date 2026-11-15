@@ -615,12 +615,13 @@ async function handleSwing(): Promise<BotCommandResult> {
     const fmtPct = (n: number) => (n >= 0 ? `+${n.toFixed(1)}%` : `${n.toFixed(1)}%`);
 
     const lines = response.stocks.slice(0, 10).map((stock, i) => {
-      const analysis = stock.analysis;
+      const analysis = stock.analysis as any;
       const action = analysis?.action || "OBSERVE";
       const emoji = action === "LONG" ? "🟢" : action === "SHORT" ? "🔴" : "🟡";
       const conf = analysis ? ` ${analysis.confidence}%` : "";
+      const mode = analysis?.analysisMode || (stock as any).analysisMode || "";
       const levels = analysis
-        ? `\n   Entry ₹${analysis.entryPrice.toFixed(0)} → Target ₹${analysis.targetPrice.toFixed(0)} / Stop ₹${analysis.stopLoss.toFixed(0)}`
+        ? `\n   Entry ₹${analysis.entryPrice.toFixed(0)} → Target ₹${analysis.targetPrice.toFixed(0)} / Stop ₹${analysis.stopLoss.toFixed(0)}${mode ? ` (${mode})` : ""}`
         : "";
       const families = stock.families?.length ? ` _${stock.families.join(", ")}_` : "";
 
@@ -629,11 +630,13 @@ async function handleSwing(): Promise<BotCommandResult> {
 
     const status = response.analysisStatus === "done"
       ? "✅ AI targets ready"
-      : response.analysisStatus === "pending"
-        ? "⏳ AI targets generating…"
-        : response.analysisStatus === "failed"
-          ? "⚠️ AI targets unavailable"
-          : "";
+      : response.analysisStatus === "predicted" || response.analysisStatus === "skipped"
+        ? "✅ Prediction targets ready"
+        : response.analysisStatus === "pending"
+          ? "⏳ AI targets generating…"
+          : response.analysisStatus === "failed"
+            ? "⚠️ Targets unavailable"
+            : "";
 
     let text = `🌊 *Swing Trading Signals* — Top ${Math.min(response.stocks.length, 10)}\n\n`
       + lines.join("\n\n")

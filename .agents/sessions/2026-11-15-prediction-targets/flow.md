@@ -18,7 +18,23 @@
 - **TODOs:** `TODO.md` and `.agents/session-todos.md` updated with detailed Spec 43 tracking and approval gate.
 - **Session memory:** `.agents/sessions/2026-11-15-prediction-targets/decisions.md`, `.agents/sessions/2026-11-15-prediction-targets/flow.md`.
 
-## Pending (blocked on approval)
-- Explicit approval of Spec 43 + Plan 43.
-- Explicit permission for DB schema migration (Prisma/SQLite mirror/push sinks) and data backfill.
-- Implementation phases 1–6 after approval (no code/schema changes made yet in this step).
+## Implementation progress (this session, uncommitted)
+- Resumed on `feature/spec-43-prediction-targets` (`0e9c64f`, planning/docs). Spec 43 implementation is present across schema/migration, SQLite mirror/push sinks, fallback/agents, daily+swing prediction/perf persistence+propagation, broadcast/Telegram/perf consumers, Google Sheets tabs/rows, recommendation APIs/UI, and tests.
+- Stabilized Swing prediction-backed serving:
+  - `lib/services/swingRecommendationService.ts`: `jobToResponse` normalizes target-less/legacy analyses to prediction-backed results with `analysisMode`, treats terminal `done/failed/predicted` feeds as cacheable/servable (incl. Prisma-mirror-empty and stale-terminal paths), and re-notifies terminal jobs where applicable.
+  - `lib/__tests__/swingRecommendationService.test.ts`: deterministic mirror-empty-path stock payload and async `flushSwingAnalysis()` cleanup in `beforeEach`.
+- Fixed regressions uncovered during gates: `lib/__tests__/recommendationsPlanLimitFallbacks.test.ts` updated for `analysisMode: null` (21/21 pass); `TODO.md` trimmed to restore injected-doc budget (doc-size gate 14/14 pass, total 95.7 KB). Cleaned session temp/junk files and stopped session-started dev server processes on `:3000`.
+- **Verification:** targeted Spec 43 suites **174/174 pass** (`dailyRecommendationService` 58, `swingRecommendationService` 68, `swingPerformanceService` 27, `recommendationsPlanLimitFallbacks` 21). `npm run lint` **0 errors / 1227 warnings**. `npx tsc --noEmit` **46 errors, baseline-aware (no Spec 43-modified prod/service/component or non-test errors identified)**. `node scripts/dev-checks/check-doc-sizes.mjs` **OK**. UI screenshot capture attempted for PR evidence; local dev run had DB-unavailable errors and capture produced `e2e-screenshots/spec43/error.png` only.
+
+## Pending (before Spec 43 commit)
+- Confirm remaining Spec 43 behavior/propagation gaps (per-stock/mixed runs, daily execute/coordinator/batch/finalizer and swing serve/job/status/auto-seed/admin-consumer paths, Telegram/admin/export/Sheets/perf backfill store coverage, idempotence/bounds, no targetless/AI-off states) and add targeted tests only for confirmed gaps.
+- Reconfirm gates as needed: full `npm run test`, `npm run quickbuild` (prior runs indicated green in-session; capture final evidence for commit/docs), and improve UI screenshot evidence if feasible in local environment.
+- Update required docs/session memory for Spec 43: `AGENTS.md`, `.agents/CHANGELOG.md` (+ changelog detail file), `TODO.md`, `Primer.md`, `Lessons.md` (if warranted), `agent-memory.md`, `HANDOFF.md`, `.agents/handoffs/active/latest.md`, session `decisions.md`/`flow.md`/todos.
+- Stage and perform **Spec 43 commit** on `feature/spec-43-prediction-targets` (explicitly requested).
+
+## After Spec 43 commit (approved sequence)
+- Track 1: per-recipient/chatId outbound-notification tracking in structured logs + DB hooks for all outbound notifications.
+- Track 2: unified notification persistence (schema/migration + SQLite mirror/push sinks) + manage/retry/cancel/bulk/filters/detail/audit.
+- Track 3: `/admin/utils/notifications` + unified history/cross-links + announcement send records.
+- Track 4: synchronous “Prepare for Deploy” with checks + `worker_tasks` record; fix `/admin/utils/workers` showing 0.
+- Capture PR screenshots for Tracks 1–4/UI changes. S2 diagnostics remain blocked pending approval/tool access. Archify/Graphify installs/diagrams pending explicit package/tool-install permission.

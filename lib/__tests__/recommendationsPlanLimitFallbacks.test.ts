@@ -288,6 +288,7 @@ describe("Spec 01 — getPerformanceList (Performance fallback)", () => {
       entryPrice: 400, currentPrice: 440, targetPrice: 450, stopLoss: 380,
       returnPercent: 10, daysTracked: expect.any(Number),
       aiRecommendation: "BUY", confidence: 88, reasoning: null,
+      analysisMode: null,
       lastCheckedAt: "2026-09-20T04:30:00.000Z",
       createdAt: "2026-08-20T04:30:00.000Z",
     });

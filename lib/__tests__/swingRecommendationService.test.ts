@@ -660,8 +660,15 @@ describe("getSwingRecommendations audit logging", () => {
     ...overrides,
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    // Drain any background swing processor/notify side effects leaked by prior tests.
+    try {
+      const { flushSwingAnalysis } = await import("@/lib/services/swingRecommendationService");
+      await flushSwingAnalysis();
+    } catch {
+      // ignore if module not yet loaded
+    }
     swingJobs.length = 0;
     swingSignals.length = 0;
     prisma.$queryRaw.mockResolvedValue([]);
@@ -671,28 +678,31 @@ describe("getSwingRecommendations audit logging", () => {
     staticCache.flushAll();
   });
 
-  it("audits run start + complete when analysis is skipped", async () => {
+  it("audits run start + complete for screener-only prediction feed", async () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
     const response = await getSwingRecommendations({ analyze: false, forceRefresh: true });
 
-    expect(response.analysisStatus).toBe("skipped");
+    expect(response.analysisStatus).toBe("predicted");
+    expect(response.stocks[0]?.analysis).not.toBeNull();
+    expect(response.stocks[0]?.analysisMode).toBe("Prediction Targets");
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_RUN_START");
     expect(actions).toContain("SWING_RUN_COMPLETE");
     expect(actions).not.toContain("SWING_ANALYSIS_START");
-    expect(swingJobs).toHaveLength(0); // no job for analyze=false
+    expect(swingJobs).toHaveLength(0); // no AI job for analyze=false
   });
 
-  it("serves the in-flight job to an analyze=false poll even when a skipped payload is cached (Spec 33 follow-up)", async () => {
+  it("serves the in-flight job to an analyze=false poll even when a prediction payload is cached (Spec 33/43 follow-up)", async () => {
     const { getSwingRecommendations } = await import(
       "@/lib/services/swingRecommendationService"
     );
 
-    // 1. Auto warm-up caches the screener-only feed → header "AI targets off".
+    // 1. Auto warm-up caches screener-only prediction targets.
     const warm = await getSwingRecommendations({ analyze: false, forceRefresh: true });
-    expect(warm.analysisStatus).toBe("skipped");
+    expect(warm.analysisStatus).toBe("predicted");
+    expect(warm.stocks[0]?.analysis).not.toBeNull();
     expect(runChartinkUnifiedScreeners).toHaveBeenCalledTimes(1);
 
     // 2. A manual Refresh started a durable job that is still pending.
@@ -703,9 +713,7 @@ describe("getSwingRecommendations audit logging", () => {
     });
     runChartinkUnifiedScreeners.mockRejectedValue(new Error("poll must not scan"));
 
-    // 3. Regression: the cached `skipped` payload must NOT answer the poll —
-    //    the pending banner silently flipped to "AI targets off" ~15 s after
-    //    Refresh because the cache short-circuit ran before the job lookup.
+    // 3. Cached prediction payload must NOT hide an in-flight AI-upgrade job.
     const polled = await getSwingRecommendations({ analyze: false });
     expect(polled.analysisStatus).toBe("pending");
     expect(polled.stocks).toHaveLength(1);
@@ -713,7 +721,7 @@ describe("getSwingRecommendations audit logging", () => {
     expect(swingJobs).toHaveLength(1); // no second job created
   });
 
-  it("creates a durable pending job and settles it to failed with a readable error", async () => {
+  it("creates a durable pending job and keeps prediction targets when AI analysis is unusable", async () => {
     analyzeSwingStocks.mockResolvedValue([
       {
         symbol: "RELIANCE",
@@ -731,36 +739,37 @@ describe("getSwingRecommendations audit logging", () => {
       "@/lib/services/swingRecommendationService"
     );
 
-    // Request returns immediately with the screener feed + pending status —
-    // the whole point of the request-time split (no 30s wall).
+    // Request returns immediately with pending status, but prediction targets are
+    // already present (Spec 43: no targetless pending feed).
     const response = await getSwingRecommendations({ analyze: true, forceRefresh: true });
     expect(response.analysisStatus).toBe("pending");
     expect(response.stocks).toHaveLength(1);
-    expect(response.stocks[0].analysis).toBeNull();
+    expect(response.stocks[0].analysis).not.toBeNull();
+    expect(response.stocks[0].analysisMode).toBe("Prediction Targets");
 
     // The job row is the durable source of truth.
     expect(swingJobs).toHaveLength(1);
     expect(swingJobs[0].status).toBe("running");
     expect(swingJobs[0].stockCount).toBe(1);
 
-    // v3.14.0: the posted feed is snapshotted into SwingSignal at posting —
-    // date-of-posting price baseline with NO AI levels yet.
+    // Posted signal is snapshotted with prediction targets at creation.
     expect(swingSignals).toHaveLength(1);
     expect(swingSignals[0].jobId).toBe(swingJobs[0].id);
     expect(swingSignals[0].symbol).toBe("RELIANCE");
-    expect(swingSignals[0].status).toBe("tracking");
-    expect(swingSignals[0].analysis).toBeNull();
-    expect(swingSignals[0].aiRecommendation).toBeNull();
-    expect(swingSignals[0].targetPrice).toBeNull();
+    expect(swingSignals[0].status).toBe("active");
+    expect(swingSignals[0].analysis).not.toBeNull();
+    expect(swingSignals[0].analysisMode).toBe("Prediction Targets");
+    expect(swingSignals[0].targetPrice).not.toBeNull();
+    expect(swingSignals[0].stopLoss).not.toBeNull();
 
-    // Background settles: failed status + readable error land in cache + DB.
+    // Background settles: prediction targets remain usable (no targetless failure).
     await flushSwingAnalysis();
     const cached = staticCache.get("swing:recommendations:ai") as SwingResponse;
-    expect(cached.analysisStatus).toBe("failed");
-    expect(cached.analysisError).toContain("not valid JSON");
-    expect(swingJobs[0].status).toBe("failed");
-    expect(swingJobs[0].analyzedCount).toBe(0);
-    expect(swingJobs[0].error).toContain("not valid JSON");
+    expect(cached.analysisStatus).toBe("done");
+    expect(cached.stocks[0].analysis).not.toBeNull();
+    expect(cached.stocks[0].analysisMode).toBe("Prediction Targets");
+    expect(swingJobs[0].status).toBe("done");
+    expect(swingJobs[0].analyzedCount).toBe(1);
     expect(swingJobs[0].completedAt).toBeInstanceOf(Date);
     const { exportSwing } = jest.requireMock("@/lib/services/googleSheets/exporter") as {
       exportSwing: jest.Mock;
@@ -771,7 +780,6 @@ describe("getSwingRecommendations audit logging", () => {
 
     const actions = createAuditLog.mock.calls.map((c) => c[0].action);
     expect(actions).toContain("SWING_ANALYSIS_START");
-    expect(actions).toContain("SWING_ANALYSIS_FAILED");
     expect(actions).toContain("SWING_RUN_COMPLETE");
   });
 
@@ -847,8 +855,10 @@ describe("getSwingRecommendations audit logging", () => {
     runChartinkUnifiedScreeners.mockRejectedValue(new Error("must not scan"));
 
     const response = await getSwingRecommendations({ analyze: true }); // no force
-    expect(response.analysisStatus).toBe("done");
+    expect(response.analysisStatus).toBe("predicted");
     expect(response.stocks).toHaveLength(1);
+    expect(response.stocks[0]?.analysis).not.toBeNull();
+    expect(response.stocks[0]?.analysisMode).toBe("Prediction Targets");
     expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
     // Cache warmed for steady-state polls.
     expect(staticCache.get("swing:recommendations:ai")).toBeDefined();
@@ -886,8 +896,9 @@ describe("getSwingRecommendations audit logging", () => {
     );
     runChartinkUnifiedScreeners.mockRejectedValue(new Error("scan should not run"));
     const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
-    expect(res.analysisStatus).toBe("done");
+    expect(res.analysisStatus).toBe("predicted");
     expect(res.stocks).toHaveLength(1);
+    expect(res.stocks[0]?.analysisMode).toBe("Prediction Targets");
     expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
     expect(swingJobs).toHaveLength(1); // no new job created
   });
@@ -915,8 +926,9 @@ describe("getSwingRecommendations audit logging", () => {
       "@/lib/services/swingRecommendationService"
     );
     const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
-    expect(res.analysisStatus).toBe("done");
+    expect(res.analysisStatus).toBe("predicted");
     expect(res.stocks).toHaveLength(1);
+    expect(res.stocks[0]?.analysisMode).toBe("Prediction Targets");
     expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
     expect(swingJobs).toHaveLength(2); // no new job created
     expect(checkSwingPerformance).not.toHaveBeenCalled();
@@ -932,7 +944,25 @@ describe("getSwingRecommendations audit logging", () => {
         createdAt: new Date(Date.now() - 60 * 60 * 1000),
         status: "done",
         payload: {
-          stocks: [fakeUnified],
+          stocks: [
+            {
+              symbol: "RELIANCE",
+              name: "Reliance Industries",
+              price: 2500,
+              change: 12.5,
+              changePercent: 0.5,
+              volume: 1_000_000,
+              screenerNames: ["Swing Breakout"],
+              screenerCount: 1,
+              families: ["breakout"],
+              templateIds: ["swing.breakout"],
+              source: "chartink_db",
+              momentumScore: 60,
+              indicators: { momentum10: 5, momentum20: 12, volatility20: 3, distanceFrom20dHigh: 2 },
+              analysis: null,
+              analysisError: null,
+            },
+          ],
           analysisStatus: "done",
           analysisError: null,
         },
@@ -943,8 +973,9 @@ describe("getSwingRecommendations audit logging", () => {
     );
     const res = await getSwingRecommendations({ analyze: true, forceRefresh: false });
     expect(prisma.swingAnalysisJob.findFirst).toHaveBeenCalledTimes(1);
-    expect(res.analysisStatus).toBe("done");
+    expect(res.analysisStatus).toBe("predicted");
     expect(res.stocks).toHaveLength(1);
+    expect(res.stocks[0]?.analysisMode).toBe("Prediction Targets");
     expect(runChartinkUnifiedScreeners).not.toHaveBeenCalled();
     expect(swingJobs).toHaveLength(0);
     expect(staticCache.get("swing:recommendations:ai")).toBeDefined();
@@ -1058,10 +1089,11 @@ describe("getSwingRecommendations audit logging", () => {
     await flushSwingAnalysis();
 
     expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
-    expect(swingJobs[0].status).toBe("failed"); // empty/boom batch → failed
+    // Spec 43: unusable AI results keep prediction targets, so batch completes with targets.
+    expect(swingJobs[0].status).toBe("done");
   });
 
-  it("recovers a stale running job: retries once, then fails (attempts exhausted)", async () => {
+  it("recovers a stale running job: retries once, then exhausts (attempts exhausted)", async () => {
     const { maybeProcessSwingAnalysis } = await import(
       "@/lib/services/swingRecommendationService"
     );
@@ -1089,8 +1121,8 @@ describe("getSwingRecommendations audit logging", () => {
     });
     const stale = swingJobs.find((j) => j.id === "job-stale")!;
     await maybeProcessSwingAnalysis();
-    // Retried (recovery → pending) then claimed again → attemptCount 2 → failed.
-    expect(swingJobs[0].status).toBe("failed");
+    // Retried (recovery → pending) then claimed again → processed with prediction targets.
+    expect(swingJobs[0].status).toBe("done");
     expect(swingJobs[0].attemptCount).toBe(2);
     expect(analyzeSwingStocks).toHaveBeenCalledTimes(1);
 
@@ -1528,14 +1560,15 @@ describe("swing signal persistence (SQLite mirror)", () => {
     ]);
     expect(res1.created).toBe(2);
 
-    // Idempotent re-persist of the same job+symbol (mirrors @@unique +
-    // skipDuplicates) — creates nothing new.
+    // Idempotent re-persist of the same job+symbol — creates nothing new.
     const res2 = await persistSwingSignals("job-1", [makeSwingStock("RELIANCE")]);
     expect(res2.created).toBe(0);
     expect(swingSignals).toHaveLength(2);
-    expect(swingSignals[0]).toMatchObject({ jobId: "job-1", symbol: "RELIANCE", status: "tracking" });
-    expect(swingSignals[0].analysis).toBeNull();
-    expect(swingSignals[0].aiRecommendation).toBeNull();
+    expect(swingSignals[0]).toMatchObject({ jobId: "job-1", symbol: "RELIANCE", status: "active" });
+    // Spec 43: prediction targets persisted at posting time.
+    expect(swingSignals[0].analysis).not.toBeNull();
+    expect(swingSignals[0].analysisMode).toBe("Prediction Targets");
+    expect(swingSignals[0].aiRecommendation).not.toBeNull();
   });
 
   it("persists nothing for an empty feed", async () => {
@@ -1564,7 +1597,7 @@ describe("swing signal persistence (SQLite mirror)", () => {
           riskFactors: [],
         },
       }),
-      makeSwingStock("TATASTEEL"), // no analysis → skipped
+      makeSwingStock("TATASTEEL"), // no analysis → skipped (keeps prediction targets)
     ]);
 
     expect(patched.patched).toBe(1);
@@ -1575,11 +1608,13 @@ describe("swing signal persistence (SQLite mirror)", () => {
     expect(rel.stopLoss).toBe(2375);
     expect(rel.updatedAt).toBeInstanceOf(Date);
 
-    // Unpatched symbols keep the posting snapshot (level-less → can only expire).
+    // Spec 43: unpatched symbols keep their posting prediction targets/mode.
     const tata = swingSignals.find((s) => s.symbol === "TATASTEEL")!;
-    expect(tata.aiRecommendation).toBeNull();
-    expect(tata.targetPrice).toBeNull();
-    expect(tata.stopLoss).toBeNull();
+    expect(tata.analysis).not.toBeNull();
+    expect(tata.analysisMode).toBe("Prediction Targets");
+    expect(tata.aiRecommendation).not.toBeNull();
+    expect(tata.targetPrice).not.toBeNull();
+    expect(tata.stopLoss).not.toBeNull();
   });
 });
 
@@ -1598,9 +1633,9 @@ describe("jobToResponse", () => {
     totalRaw: 120,
   };
 
-  it("maps done jobs to analysisStatus done with stock payloads", () => {
+  it("maps done jobs with no AI targets to prediction-ready payloads (Spec 43)", () => {
     const res = jobToResponse({ ...baseJob, status: "done" });
-    expect(res.analysisStatus).toBe("done");
+    expect(res.analysisStatus).toBe("predicted");
     expect(res.templateCount).toBe(34);
     expect(res.totalRaw).toBe(120);
     expect(res.stocks).toEqual([]);

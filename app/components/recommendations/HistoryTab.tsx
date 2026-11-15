@@ -28,6 +28,8 @@ interface TopStock {
   currentPrice: number | null;
   /** Tracker lifecycle status: active | target_achieved | stop_loss_hit | expired. */
   trackerStatus: string | null;
+  /** Spec 43: per-stock provenance ("AI Targets" | "Prediction Targets"). */
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 interface HistoryTabProps {
@@ -252,6 +254,18 @@ export default function HistoryTab({ loading }: HistoryTabProps) {
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${status.cls}`}>
                       {status.label}
                     </span>
+                    {stock.analysisMode && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                          stock.analysisMode === "AI Targets"
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            : "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                        }`}
+                        title="How targets were produced"
+                      >
+                        {stock.analysisMode}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">

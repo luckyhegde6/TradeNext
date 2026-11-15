@@ -25,6 +25,8 @@ export interface BroadcastStock {
   };
   /** Screener confluence tags that flagged this stock (fallback/AI-down ranking signal). */
   screenerNames?: string[];
+  /** Spec 43: per-stock target provenance. */
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 /** Options for the daily recommendations broadcast builder. */
@@ -50,7 +52,11 @@ export interface SwingBroadcastStock {
     stopLoss?: number;
     reasoning?: string;
     logic?: string;
+    /** Spec 43: per-stock target provenance. */
+    analysisMode?: "AI Targets" | "Prediction Targets" | null;
   } | null;
+  /** Spec 43: per-stock target provenance (mirrors analysis.analysisMode). */
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
 }
 
 export const MAX_BROADCAST_PICKS = 8;
@@ -134,7 +140,8 @@ export function buildRecommendationBroadcast(
     const sl = r.aiRecommendation.stopLoss
       ? `SL ₹${r.aiRecommendation.stopLoss.toFixed(2)}`
       : "";
-    const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+    const mode = r.analysisMode ? r.analysisMode : "";
+    const details = [price, target, sl, conf, mode].filter(Boolean).join(" | ");
     return `${icon} *${r.symbol}* — ${r.aiRecommendation.recommendation}\n  ${details}`;
   });
 
@@ -209,7 +216,8 @@ export function buildSwingBroadcast(
     const price = s.price ? `₹${s.price.toFixed(2)}` : "";
     const target = a.targetPrice ? `Tgt ₹${a.targetPrice.toFixed(2)}` : "";
     const sl = a.stopLoss ? `SL ₹${a.stopLoss.toFixed(2)}` : "";
-    const details = [price, target, sl, conf].filter(Boolean).join(" | ");
+    const mode = a.analysisMode ?? s.analysisMode ?? "";
+    const details = [price, target, sl, conf, mode].filter(Boolean).join(" | ");
     return `${icon} *${s.symbol}* — ${dir}\n  ${details}`;
   });
 

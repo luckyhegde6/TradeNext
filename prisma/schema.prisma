@@ -1389,6 +1389,7 @@ model RecommendationTracker {
   timeHorizon         String // short | medium | long
   confidence          Float
   aiRecommendation    String // BUY | HOLD | SELL
+  analysisMode        String? // "AI Targets" | "Prediction Targets" (Spec 43)
   reasoning           String?
   riskFactors         Json?
   screenerAttribution Json? // Array of screener names that found this stock
@@ -1451,6 +1452,7 @@ model DailyRecommendationStock {
   targetPrice         Float?
   stopLoss            Float?
   timeHorizon         String? // short | medium | long
+  analysisMode        String? // "AI Targets" | "Prediction Targets" (Spec 43)
   reasoning           String?
   riskFactors         Json?
   // Execution metadata
@@ -1531,6 +1533,7 @@ model SwingSignal {
   momentumScore    Int       @default(0)
   analysis         Json? // SwingAnalysis snapshot (patched at job completion)
   aiRecommendation String? // BUY | SELL | HOLD (derived from analysis.action)
+  analysisMode     String? // "AI Targets" | "Prediction Targets" (Spec 43)
   confidence       Float?
   targetPrice      Float?
   stopLoss         Float?

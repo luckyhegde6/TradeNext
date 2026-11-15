@@ -1286,6 +1286,7 @@ describe("dailyRecommendationService", () => {
       currentPrice: 2400,
       targetPrice: 2750,
       stopLoss: 2280,
+      analysisMode: "AI Targets",
       createdAt: new Date(),
       ...overrides,
     });
@@ -1359,7 +1360,7 @@ describe("dailyRecommendationService", () => {
       );
       expect(mockPrisma.recommendationTracker.update).toHaveBeenCalledWith({
         where: { id: "t1" },
-        data: { lastCheckedAt: expect.any(Date) },
+        data: expect.objectContaining({ lastCheckedAt: expect.any(Date) }),
       });
     });
 

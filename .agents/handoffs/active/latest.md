@@ -1,62 +1,48 @@
 ---
 handoff_version: "1.1"
-session_id: "sess-20261115-v3.57.0-skills-webmcp-fixes"
+session_id: "sess-20261115-spec43-prediction-targets"
 agent: "system"
-timestamp: "2026-11-15T00:00:00Z"
-status: "completed"
+timestamp: "2026-11-15T17:35:00Z"
+status: "in_progress"
 priority: "high"
-parent_session: "sess-20261108-spec42-impl"
+parent_session: "sess-20261115-v3.57.0-skills-webmcp-fixes"
 child_sessions: []
-checkpoint: "v3.57.0"
+checkpoint: "spec43-commit-prep"
 ---
 
-# Live Resume — v3.57.0 skills consolidation + WebMCP + rec/index fixes (PR #155)
+# Live Resume — Spec 43 prediction targets & `analysisMode` (commit prep)
 
-> Updated: 2026-11-15
-> Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
-> Base/main context: Spec 42 implementation already complete on this branch; this session added tooling/docs consolidation and targeted reliability fixes.
+> Branch: `feature/spec-43-prediction-targets` (post PR #155 / v3.57.0)  
+> Spec/Plan: `.agents/specs/43-prediction-targets-analysis-mode.md`, `.agents/plans/43-prediction-targets-analysis-mode.md`
 
 ## Context
-- Task: consolidate all skills to canonical `.agents/skills` (format A), add WebMCP support, optimize agent/rules/commands/orchestration and session handoff/continuation handling, validate 3 uncommitted lib fixes, update docs, commit/push/update PR (explicit user request).
-- Prior blockers: Prisma-Remote prod diagnostics (S2) required approval/tool access; not completed. No prod DB mutations.
+- Spec 43 approved (DB migration/backfill + verification). User requested: proceed with steps 1–4 and then **commit Spec 43**, then implement Tracks 1–4 incrementally with PR screenshots.
+- Sequence after Spec 43 commit: Track 1 per-recipient/chatId outbound-notification tracking (logs+DB, all channels) → Track 2 unified notification persistence (schema/migration+mirror/push sinks, manage/retry/cancel/bulk/filters/audit) → Track 3 `/admin/utils/notifications` + unified history/cross-links/announcement send records → Track 4 synchronous “Prepare for Deploy” with checks + `worker_tasks` record and workers-showing-0 fix.
 
 ## Progress
-- [x] Migrated/normalized skills to `.agents/skills/<name>/SKILL.md` (+ refs as needed), removed legacy `.opencode/skills`, removed obsolete `.agents/skills/*.md` mirrors.
-- [x] Added WebMCP artifacts: `.agents/skills/webmcp/SKILL.md`, `.agents/agents/webmcp-integrator.md`.
-- [x] Updated agent profiles, rules, commands, matrix/index/docs, `AGENTS.md`, and `.opencode/opencode.json` references to canonical `.agents/skills`.
-- [x] Kept/validated lib fixes: `lib/index-service.ts`, `lib/services/dailyRecommendationService.ts`, `lib/services/worker/worker-service.ts`.
-- [x] Targeted Jest: **36/36 pass** (`worker-service`, `historicalPriceSyncService`, `googleSheetsRescanTask`). `npm run lint`: **0 errors**. `npx tsc --noEmit`: pre-existing baseline test/type errors remain (no changed prod-lib errors identified).
-- [x] Docs/session updates: `versions-v3.57.md`, `versions-index.md`, `.agents/CHANGELOG.md`, `AGENTS.md`, `TODO.md`, `Primer.md`, `Lessons.md` (168), `agent-memory.md`, `.agents/session-todos.md`, `HANDOFF.md`, session `decisions.md`/`flow.md`.
-- [x] Commit/push/PR update executed per explicit user request (see git/PR state after this session).
-
-## Subagent Status
-| Stream | Agent | Outcome | Budget | Tier B fallback |
-|--------|-------|---------|--------|-----------------|
-| Skills migration + refs updates | build | completed | session | n/a |
-| Docs/rules/commands/orchestration updates | build | completed | session | n/a |
-| Targeted validation (jest/lint/tsc) | build | completed (targeted) | session | full CI via PR checks |
-| Prod Prisma-Remote diagnostics (S2) | build | blocked (approval/tool unavailable) | ops-limited | retry when approved |
+- [x] Spec/plan/session created and approved; implementation present (schema+migration `20261115160000_add_analysis_mode_prediction_targets`, mirror/push sinks, fallback/agents, daily+swing prediction/perf persistence+propagation, APIs/UI, Telegram/broadcast, exports/Google Sheets).
+- [x] Stabilized swing prediction-backed serving/tests (`jobToResponse` normalization/terminal serve-cache-notify, deterministic mirror-empty test, async flush cleanup).
+- [x] Fixed gate regressions: `recommendationsPlanLimitFallbacks` updated for `analysisMode`; doc budget restored (TODO trimmed). Temp files cleaned; session-started dev servers stopped.
+- [x] Verification: targeted Jest **174/174 pass**; `npm run lint` **0 errors / 1227 warnings**; `npx tsc --noEmit` **46 baseline-aware**; doc budget **OK**; `npm run quickbuild` **202/202**.
+- [~] Docs/session memory updated for Spec 43 (changelog detail/index, AGENTS, Primer, session todos/flow, HANDOFF/latest); agent-memory/Lessons review in progress as needed.
+- [ ] **Stage and commit Spec 43** (explicitly requested) — pending final review.
 
 ## Decisions
-- Canonical skills are `.agents/skills/<name>/SKILL.md` only (format A); no `.opencode/skills`.
-- Preserve richer canonical `nse-integration` content in `.agents`.
-- Record S2 as blocked rather than guessing; no prod mutations.
+- `analysisMode` per stock: `"AI Targets"` | `"Prediction Targets"`; historical rows with targets/analysis treated as AI targets per migration intent.
+- Daily fallback/prediction never `HOLD` on weak signals (BUY/SELL); Swing keeps `LONG/SHORT/OBSERVE` with targets; screener-only swing loads auto-produce prediction targets.
+- Perf checks generate/persist missing prediction targets/mode (bounded/idempotent). Telegram/exports/Sheets include mode.
 
-## Blockers
-- **S2 prod diagnostics blocked:** Prisma-Remote approval/tool access unavailable in this session; reported prod symptoms (stale recs/perf `lastCheckedAt`, 2026-11-04 AI-unavailable run, `NIFTY TOTAL MARKET` 404) not re-verified against prod DB/logs.
-
-## Handoff Summary
-- **Scope:** v3.57.0 skills consolidation + WebMCP + targeted rec/index/worker fixes and docs on PR #155 branch.
-- **Verified:** targeted Jest 36/36, lint 0 errors; tsc baseline unchanged for changed prod libs.
-- **Not verified:** prod DB state for reported symptoms (S2 blocked).
-- **Risk/ops:** `WORKER_DISPATCH_SECRET` must be configured in Netlify dashboard before deploy; user controls merge/deploy.
+## Blockers / notes
+- No push/merge/deploy without explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy (Spec 42 carry-forward).
+- S2 prod Prisma-Remote diagnostics blocked (approval/tool unavailable). Archify/Graphify installs/diagrams require explicit package/tool-install permission.
+- Local UI screenshot evidence limited by DB-unavailable dev environment (`e2e-screenshots/spec43/error.png`).
 
 ## Next Steps
-1. Monitor PR #155 checks and address any CI feedback.
-2. Retry S2 Prisma-Remote read-only diagnostics (ops-limited) once approval/tool access is available.
-3. Merge/deploy only on explicit user action; ensure `WORKER_DISPATCH_SECRET` is set in Netlify.
+1. Complete final doc/memory touch-ups if needed, review `git status`, stage Spec 43 changes, and create the Spec 43 commit.
+2. Begin Track 1 outbound-notification tracking (per recipient/chatId, logs+DB, all channels) with tests.
+3. Implement Tracks 2–4 and capture PR screenshots per approved sequence.
 
 ## Resume from
-- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/changelog/versions-v3.57.md`
-- `.agents/sessions/2026-11-15-skills-consolidation/{decisions.md,flow.md}`
-- Branch: `feature/spec-42-durable-worker-cron-v2` (PR #155)
+- `HANDOFF.md`, `.agents/session-todos.md`, `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`
+- `.agents/changelog/versions-v3.58.md`, `.agents/CHANGELOG.md`, `.agents/changelog/versions-index.md`, `AGENTS.md`, `Primer.md`
+- Branch: `feature/spec-43-prediction-targets`

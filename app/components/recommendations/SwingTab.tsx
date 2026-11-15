@@ -18,20 +18,19 @@ const FAMILY_LABELS: Record<SignalFamily, string> = {
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 /**
- * AI-target generation must NOT auto-fire on page load — it burns NSE
- * requests + OpenRouter tokens (34 screeners + 4×AI batches, 30s+). The
- * plain (mount + poll) fetcher is screener-only (`analyze=0` → instant, no
- * AI, honest "AI targets off" badge); the manual Refresh button is the ONLY
- * path that requests AI targets (`analyze=1&force=1` → durable job + bg AI).
+ * Screener-only load (`analyze=0`) returns prediction targets immediately
+ * (Spec 43: no "AI targets off"). Manual Refresh requests AI analysis
+ * (`analyze=1&force=1` → durable job + background AI).
  */
 const AUTO_FEED_URL = "/api/recommendations/swing?analyze=0";
 const REFRESH_FEED_URL = "/api/recommendations/swing?analyze=1&force=1";
 
 const ANALYSIS_STATUS_META: Record<SwingResponse["analysisStatus"], { label: string; classes: string }> = {
-  done: { label: "AI targets ready", classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
-  skipped: { label: "AI targets off", classes: "bg-gray-700/40 text-gray-400 border-gray-600" },
+  done: { label: "Targets ready", classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  predicted: { label: "Prediction targets", classes: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  skipped: { label: "Prediction targets", classes: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   pending: { label: "AI targets generating…", classes: "bg-sky-500/15 text-sky-300 border-sky-500/30 animate-pulse" },
-  failed: { label: "AI targets failed", classes: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  failed: { label: "Targets unavailable", classes: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
 };
 
 export default function SwingTab() {
@@ -149,13 +148,13 @@ export default function SwingTab() {
         </button>
       </div>
 
-      {/* ── AI failure reason (honest, human-readable) ─────────────────── */}
-      {data.analysisStatus === "failed" && data.analysisError && (
+      {/* ── Analysis issue reason (honest, human-readable) ─────────────── */}
+      {data.analysisError && data.analysisStatus !== "predicted" && (
         <p
           className="text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2"
           title={data.analysisError}
         >
-          ⚠️ AI targets failed — {data.analysisError.slice(0, 160)}
+          ⚠️ Analysis note — {data.analysisError.slice(0, 160)}
           {data.analysisError.length > 160 ? "…" : ""}
         </p>
       )}
@@ -201,8 +200,8 @@ export default function SwingTab() {
       )}
 
       <p className="text-[10px] text-gray-600">
-        Signal families are derived from the flagging screeners&apos; logic. AI targets are directional
-        predictions — not investment advice. Generated {new Date(data.generatedAt).toLocaleString()}.
+        Signal families are derived from the flagging screeners&apos; logic. Targets are directional
+        predictions (AI or calculated) — not investment advice. Generated {new Date(data.generatedAt).toLocaleString()}.
       </p>
     </div>
   );

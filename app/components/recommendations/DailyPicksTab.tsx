@@ -27,6 +27,7 @@ interface Stock {
   timeHorizon: string;
   reasoning: string;
   riskFactors: string[];
+  analysisMode?: "AI Targets" | "Prediction Targets" | null;
   // Tracker status for highlighting
   trackerStatus?: string;
   entryPrice?: number;
@@ -407,7 +408,7 @@ export default function DailyPicksTab({
                   {trackerBadge.label}
                 </div>
               )}
-              <RecommendationCard {...stock} />
+              <RecommendationCard {...stock} analysisMode={stock.analysisMode ?? null} />
               {/* Date stamp */}
               {daysSince !== null && (
                 <div className="text-[10px] text-gray-500 mt-1 px-1">
@@ -454,7 +455,7 @@ export default function DailyPicksTab({
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {holdStocks.map((stock) => (
                 <div key={stock.symbol} className="relative opacity-75">
-                  <RecommendationCard {...stock} />
+                  <RecommendationCard {...stock} analysisMode={stock.analysisMode ?? null} />
                 </div>
               ))}
             </div>

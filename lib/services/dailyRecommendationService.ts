@@ -18,7 +18,11 @@ import {
   type StockAnalysisInput,
   type StockAnalysisResult,
 } from "./ai/recommendation-agent";
-import { calculateFallbackRecommendation } from "./ai/fallbackAnalysis";
+import {
+  calculateFallbackRecommendation,
+  ANALYSIS_MODE_AI,
+  ANALYSIS_MODE_PREDICTION,
+} from "./ai/fallbackAnalysis";
 import { loadConfig, hasValidConfig, type AIConfig, getDefaultConfig } from "./ai/config";
 import { runAiConnectionTest } from "./ai/connectionTestService";
 import { getRecommendationContext } from "./ai/recommendation-context";
@@ -516,27 +520,26 @@ export async function runDailyRecommendations(
       }
     }
 
-    // Zero-verdict sentinel for the catch path and the pre-flight skip.
-    // NOTE (v3.11.1): these rows used to be NEVER persisted (success:false),
-    // which discarded the entire run when AI failed. Now they carry real
-    // technical-analysis fallback targets (success:true) so the run completes
-    // normally and the performance check can evaluate target/SL hits.
-    const holdFallback = (reason: string, errorMsg: string): StockAnalysisResult[] =>
+    // Prediction fallback for pre-flight skip / circuit-open / total AI failure.
+    // Spec 43: fallback/prediction must remain actionable (directional BUY/SELL,
+    // never HOLD on weak signals) with persisted targets and analysisMode.
+    const predictionFallback = (_reason: string, errorMsg: string): StockAnalysisResult[] =>
       aiInput.map((s) => ({
         ...s,
         aiRecommendation: calculateFallbackRecommendation(s),
         tokensUsed: 0,
         executionMs: 0,
         success: true,
+        analysisMode: ANALYSIS_MODE_PREDICTION,
         error: errorMsg,
       }));
 
     if (skipAi) {
       // Fail fast — zero AI calls. runAiConnectionTest already audited and
       // notified admins on the total failure.
-      aiResults = holdFallback(
-        "AI pre-flight failed on all models — defaulting to HOLD",
-        "AI pre-flight failed on all models",
+      aiResults = predictionFallback(
+        "AI pre-flight failed — prediction targets applied",
+        "AI pre-flight failed — prediction targets applied",
       );
     } else {
       try {
@@ -583,10 +586,10 @@ export async function runDailyRecommendations(
           tokensUsed: 0,
         });
 
-        aiResults = holdFallback(
+        aiResults = predictionFallback(
           isCircuitOpen
-            ? "AI circuit breaker open — defaulting to HOLD"
-            : "AI analysis failed — defaulting to HOLD",
+            ? "AI circuit breaker open — prediction targets applied"
+            : "AI analysis failed — prediction targets applied",
           isCircuitOpen
             ? "Circuit breaker open"
             : e instanceof Error
@@ -598,13 +601,10 @@ export async function runDailyRecommendations(
 
     // 8 & 9 & 10. Batch update stock entries, trackers, and record predictions
     //
-    // (v3.11.1) NEVER persist synthetic fallback verdicts as real analysis:
-    // holdFallback batches (success:false) used to overwrite Today's Picks
-    // with meaningless HOLD/conf-50 rows whenever AI failed, hiding the last
-    // good run. Persist ONLY stocks with a real AI verdict (success:true);
-    // if ZERO stocks succeeded, mark the run failed with no entries so
-    // getLatestRecommendations (uniqueStocks > 0) falls back to the last
-    // good run and the API surfaces an "AI unavailable" notice.
+    // Spec 43: persist usable picks with targets and analysisMode. Prediction
+    // fallbacks are actionable (directional BUY/SELL) and are treated as
+    // successful persisted results (not discarded). Only if there are truly no
+    // results to persist do we fail without picks.
     const successfulResults = aiResults.filter((r) => r.success);
     // v3.52.0: `analyzeStocks()` already ranks the COMBINED batch results, but
     // re-assert it here so ANY caller/path (circuit-breaker fallback, cached
@@ -619,7 +619,7 @@ export async function runDailyRecommendations(
       if (scoreB !== scoreA) return scoreB - scoreA;
       return (b.marketCap ?? 0) - (a.marketCap ?? 0);
     });
-    const aiFailed = aiResults.length - successfulResults.length;
+    const aiFailed = aiResults.filter((r) => !r.success).length;
 
     if (successfulResults.length === 0 && aiResults.length > 0) {
       // No real AI verdicts means there are intentionally no daily-rec rows
@@ -750,6 +750,7 @@ export async function runDailyRecommendations(
         targetPrice: aiResult.aiRecommendation.targetPrice,
         stopLoss: aiResult.aiRecommendation.stopLoss,
         timeHorizon: aiResult.aiRecommendation.timeHorizon,
+        analysisMode: aiResult.analysisMode ?? (aiResult.error ? ANALYSIS_MODE_PREDICTION : ANALYSIS_MODE_AI),
         reasoning: aiResult.aiRecommendation.reasoning,
         riskFactors: aiResult.aiRecommendation.riskFactors,
         aiTokensUsed: aiResult.tokensUsed,
@@ -768,6 +769,7 @@ export async function runDailyRecommendations(
           targetPrice: aiResult.aiRecommendation.targetPrice,
           stopLoss: aiResult.aiRecommendation.stopLoss,
           timeHorizon: aiResult.aiRecommendation.timeHorizon,
+          analysisMode: aiResult.analysisMode ?? (aiResult.error ? ANALYSIS_MODE_PREDICTION : ANALYSIS_MODE_AI),
           reasoning: aiResult.aiRecommendation.reasoning,
           riskFactors: aiResult.aiRecommendation.riskFactors,
           currentPrice: aiResult.price,
@@ -1416,7 +1418,8 @@ async function runBatchPhase(
       tokensUsed: 0,
       executionMs: 0,
       success: true,
-      error: "AI pre-flight failed on all models — defaulting to HOLD",
+      analysisMode: ANALYSIS_MODE_PREDICTION,
+      error: "AI pre-flight failed — prediction targets applied",
     } as StockAnalysisResult));
   } else {
     try {
@@ -1440,7 +1443,8 @@ async function runBatchPhase(
         tokensUsed: 0,
         executionMs: 0,
         success: true,
-        error: "AI analysis failed — defaulting to HOLD",
+        analysisMode: ANALYSIS_MODE_PREDICTION,
+        error: "AI analysis failed — prediction targets applied",
       } as StockAnalysisResult));
     }
   }
@@ -1463,6 +1467,7 @@ async function runBatchPhase(
       targetPrice: aiResult.aiRecommendation.targetPrice,
       stopLoss: aiResult.aiRecommendation.stopLoss,
       timeHorizon: aiResult.aiRecommendation.timeHorizon,
+      analysisMode: aiResult.analysisMode ?? (aiResult.error ? ANALYSIS_MODE_PREDICTION : ANALYSIS_MODE_AI),
       reasoning: aiResult.aiRecommendation.reasoning,
       riskFactors: aiResult.aiRecommendation.riskFactors,
       aiTokensUsed: aiResult.tokensUsed,
@@ -1480,6 +1485,7 @@ async function runBatchPhase(
         targetPrice: aiResult.aiRecommendation.targetPrice,
         stopLoss: aiResult.aiRecommendation.stopLoss,
         timeHorizon: aiResult.aiRecommendation.timeHorizon,
+        analysisMode: aiResult.analysisMode ?? (aiResult.error ? ANALYSIS_MODE_PREDICTION : ANALYSIS_MODE_AI),
         reasoning: aiResult.aiRecommendation.reasoning,
         riskFactors: aiResult.aiRecommendation.riskFactors,
         currentPrice: aiResult.price,
@@ -1637,16 +1643,7 @@ async function runFinalizerPhase(
   // Only stocks with real AI verdicts are "successful".
   const successfulResults = allStockEntries.filter(
     (e) => e.aiSuccess === true && e.aiRecommendation,
-  ) as Array<{
-    symbol: string;
-    aiRecommendation: string;
-    confidence: number;
-    price: number;
-    targetPrice?: number;
-    stopLoss?: number;
-    screenerNames?: unknown;
-    marketCap?: unknown;
-  }>;
+  ) as Array<Record<string, any>>;
 
   // v3.52.0 ranking: confidence desc → screener score → market cap → symbol.
   successfulResults.sort((a, b) => {
@@ -1764,19 +1761,24 @@ async function runFinalizerPhase(
   // Publish to Google Sheets (fire-and-forget, non-throwing).
   try {
     const { exportDailyRecs } = await import("./googleSheets/exporter");
-    const sheetStocks: DailyRecStockInput[] = topPicks.map((r) => ({
-      symbol: r.symbol,
-      price: r.price,
-      change: 0,
-      changePercent: 0,
-      volume: 0,
-      screenerNames: Array.isArray(r.screenerNames) ? (r.screenerNames as string[]) : [],
+    const sheetStocks: DailyRecStockInput[] = topPicks.map((r: any) => ({
+      symbol: String(r.symbol),
+      price: Number(r.price ?? 0),
+      change: Number(r.change ?? 0),
+      changePercent: Number(r.changePercent ?? 0),
+      volume: Number(r.volume ?? 0),
+      screenerNames: Array.isArray(r.screenerAttribution) ? r.screenerAttribution : (Array.isArray(r.screenerNames) ? r.screenerNames : []),
+      success: r.aiSuccess !== false,
       aiRecommendation: {
-        recommendation: r.aiRecommendation as "BUY" | "HOLD" | "SELL",
-        confidence: r.confidence,
-        targetPrice: r.targetPrice ?? null,
-        stopLoss: r.stopLoss ?? null,
+        recommendation: String(r.aiRecommendation ?? "HOLD") as "BUY" | "HOLD" | "SELL",
+        confidence: Number(r.confidence ?? 0),
+        targetPrice: r.targetPrice != null ? Number(r.targetPrice) : null,
+        stopLoss: r.stopLoss != null ? Number(r.stopLoss) : null,
+        timeHorizon: r.timeHorizon != null ? String(r.timeHorizon) : null,
+        reasoning: r.reasoning != null ? String(r.reasoning) : null,
       } as import("./googleSheets/rows").DailyRecVerdict | null,
+      analysisMode: (r.analysisMode as "AI Targets" | "Prediction Targets" | null | undefined)
+        ?? (r.aiSuccess === false ? "Prediction Targets" : "AI Targets"),
     }));
     const sheetExport = await exportDailyRecs(
       { runId, runDate: new Date(startTime).toISOString() },
@@ -1833,19 +1835,23 @@ async function runFinalizerPhase(
           stopLoss: number;
         };
         screenerNames?: string[];
-      }> = topPicks.map((r) => ({
-        symbol: r.symbol,
-        price: r.price,
+        analysisMode?: "AI Targets" | "Prediction Targets" | null;
+      }> = topPicks.map((r: any) => ({
+        symbol: String(r.symbol),
+        price: Number(r.price ?? 0),
         aiRecommendation: {
-          recommendation: r.aiRecommendation as "BUY" | "HOLD" | "SELL",
-          confidence: r.confidence,
-          targetPrice: r.targetPrice ?? 0,
-          stopLoss: r.stopLoss ?? 0,
+          recommendation: String(r.aiRecommendation ?? "HOLD") as "BUY" | "HOLD" | "SELL",
+          confidence: Number(r.confidence ?? 0),
+          targetPrice: r.targetPrice != null ? Number(r.targetPrice) : 0,
+          stopLoss: r.stopLoss != null ? Number(r.stopLoss) : 0,
         },
-        screenerNames: Array.isArray(r.screenerNames) ? (r.screenerNames as string[]) : [],
+        screenerNames: Array.isArray(r.screenerAttribution) ? r.screenerAttribution : (Array.isArray(r.screenerNames) ? r.screenerNames : []),
+        analysisMode: (r.analysisMode as "AI Targets" | "Prediction Targets" | null | undefined)
+          ?? (r.aiSuccess === false ? "Prediction Targets" : "AI Targets"),
       }));
+      const aiDown = tgStocks.length > 0 && tgStocks.every((s) => s.analysisMode === "Prediction Targets");
       const tgMessage = buildRecommendationBroadcast(tgStocks, undefined, {
-        aiDown: false,
+        aiDown,
       });
       const sent = await broadcastToSubscribers("📈 Daily Recommendations", tgMessage, {
         prependTitle: false,
@@ -1938,7 +1944,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // Batch fetch all tracking trackers and their latest prices in one query each
   // Instead of N individual price queries, we do 1 query with DISTINCT ON
   const activeTrackers = await prisma.recommendationTracker.findMany({
-    where: { status: "tracking" },
+    where: { status: { in: ["tracking", "active"] } },
   });
 
   if (activeTrackers.length === 0) {
@@ -2049,8 +2055,60 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
   // the SQLite mirror; only AI event logs are still batched below
   const eventLogs: Promise<unknown>[] = [];
 
+  // Spec 43: bounded/idempotent prediction+mode backfill for eligible rows.
+  const PERF_BACKFILL_LIMIT = 200;
+  let backfilled = 0;
+
   for (const tracker of activeTrackers) {
     checked++;
+
+    // Backfill mode/targets when missing or when legacy targeted rows lack mode.
+    let trackerForEval: any = tracker;
+    const hasTargets = Number(tracker.targetPrice) > 0 && Number(tracker.stopLoss) > 0;
+    const hasMode = typeof (tracker as any).analysisMode === "string" && (tracker as any).analysisMode;
+    if (backfilled < PERF_BACKFILL_LIMIT && (!hasTargets || !hasMode)) {
+      try {
+        if (hasTargets || (tracker as any).reasoning || (tracker as any).aiRecommendation) {
+          // Historical/legacy row with analysis/targets but missing mode -> AI Targets.
+          if (!hasMode && (hasTargets || (tracker as any).reasoning)) {
+            trackerForEval = { ...tracker, analysisMode: ANALYSIS_MODE_AI };
+            sqlite?.upsertRecommendationTracker(trackerForEval);
+            backfilled++;
+          }
+        }
+        if (!hasTargets) {
+          const pred = calculateFallbackRecommendation({
+            symbol: tracker.symbol,
+            price: Number(tracker.entryPrice ?? tracker.currentPrice ?? 0),
+            change: 0,
+            changePercent: 0,
+            volume: 0,
+            screenerNames: Array.isArray((tracker as any).screenerAttribution)
+              ? ((tracker as any).screenerAttribution as string[])
+              : [],
+          } as any);
+          trackerForEval = {
+            ...tracker,
+            analysisMode: ANALYSIS_MODE_PREDICTION,
+            aiRecommendation: pred.recommendation,
+            confidence: pred.confidence,
+            targetPrice: pred.targetPrice,
+            stopLoss: pred.stopLoss,
+            reasoning: tracker.reasoning ?? pred.reasoning,
+            riskFactors: (tracker as any).riskFactors ?? pred.riskFactors,
+          };
+          sqlite?.upsertRecommendationTracker(trackerForEval);
+          backfilled++;
+        }
+      } catch (e) {
+        logger.warn({
+          msg: "Perf check: prediction/mode backfill failed (non-fatal)",
+          symbol: tracker.symbol,
+          trackerId: tracker.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
 
     const currentPrice = priceMap.get(tracker.symbol);
     if (currentPrice === undefined) {
@@ -2060,16 +2118,22 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
       // last checked" reflects the actual check run (not a stale prior date),
       // while leaving currentPrice/status unchanged.
       sqlite?.upsertRecommendationTracker({
-        ...tracker,
+        ...trackerForEval,
         lastCheckedAt: checkedAt,
       });
-      // Best-effort Prisma-backed stamp for prod topologies where reads come
-      // from Prisma and mirror push is delayed/insufficient (non-fatal).
+      // Best-effort Prisma-backed stamp/backfill for prod topologies where reads
+      // come from Prisma and mirror push is delayed/insufficient (non-fatal).
       try {
         if (!isPlanLimitBreakerOpen()) {
+          const prismaBackfillData: Record<string, unknown> = { lastCheckedAt: checkedAt };
+          if ((trackerForEval as any).analysisMode) prismaBackfillData.analysisMode = (trackerForEval as any).analysisMode;
+          if (Number((trackerForEval as any).targetPrice) > 0) prismaBackfillData.targetPrice = Number((trackerForEval as any).targetPrice);
+          if (Number((trackerForEval as any).stopLoss) > 0) prismaBackfillData.stopLoss = Number((trackerForEval as any).stopLoss);
+          if ((trackerForEval as any).aiRecommendation) prismaBackfillData.aiRecommendation = (trackerForEval as any).aiRecommendation;
+          if ((trackerForEval as any).confidence != null) prismaBackfillData.confidence = (trackerForEval as any).confidence;
           await prisma.recommendationTracker.update({
             where: { id: tracker.id },
-            data: { lastCheckedAt: checkedAt },
+            data: prismaBackfillData,
           });
         }
       } catch (error) {
@@ -2097,13 +2161,11 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     // inverted (target below entry, stop above), so the price crossing check
     // must flip too. BUY/HOLD: price >= target → achieved; price <= stop → hit.
     // SELL: price <= target → achieved; price >= stop → hit.
-    const isSell = tracker.aiRecommendation === "SELL";
-    const targetReached = isSell
-      ? currentPrice <= tracker.targetPrice
-      : currentPrice >= tracker.targetPrice;
-    const stopReached = isSell
-      ? currentPrice >= tracker.stopLoss
-      : currentPrice <= tracker.stopLoss;
+    const isSell = (trackerForEval.aiRecommendation ?? tracker.aiRecommendation) === "SELL";
+    const targetPrice = Number(trackerForEval.targetPrice ?? tracker.targetPrice ?? 0);
+    const stopLoss = Number(trackerForEval.stopLoss ?? tracker.stopLoss ?? 0);
+    const targetReached = targetPrice > 0 && (isSell ? currentPrice <= targetPrice : currentPrice >= targetPrice);
+    const stopReached = stopLoss > 0 && (isSell ? currentPrice >= stopLoss : currentPrice <= stopLoss);
 
     if (targetReached) {
       newStatus = "target_achieved";
@@ -2120,7 +2182,7 @@ export async function checkRecommendationPerformance(): Promise<PerformanceCheck
     // per-run status flip (if any) + freshest close. Prisma is updated only by
     // the 6h push sinks.
     sqlite?.upsertRecommendationTracker({
-      ...tracker,
+      ...trackerForEval,
       ...(newStatus ? { status: newStatus } : {}),
       currentPrice,
       lastCheckedAt: new Date(),

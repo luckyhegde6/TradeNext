@@ -193,6 +193,7 @@ export async function GET(req: NextRequest) {
       timeHorizon: s.timeHorizon ?? "medium",
       reasoning: s.reasoning ?? null,
       riskFactors: s.riskFactors ?? null,
+      analysisMode: (s as any).analysisMode ?? (s as any).tracker?.analysisMode ?? null,
       // Tracker status for highlighting
       trackerStatus: s.tracker?.status ?? "active",
       entryPrice: s.tracker?.entryPrice ?? s.price,
