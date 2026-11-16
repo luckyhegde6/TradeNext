@@ -12,9 +12,8 @@
 # Spec 42 — standalone Netlify Functions for durable worker/cron execution.
 # Scheduled Function: one-minute UTC wake-up, dispatches to the background runner.
 # Background Function: bounded runner (≤15 min platform cap, target ≤13 min).
-[[functions]]
-  function = "worker-dispatch"
-  schedule = "* * * * *"
+# Schedule is declared in the function's exported `config` (netlify/functions/worker-dispatch.mjs).
+# Netlify config parsing rejects [[functions]] array syntax in this file format.
 
 # Improve caching for static assets
 [[headers]]

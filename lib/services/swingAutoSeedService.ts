@@ -29,6 +29,11 @@ export function isSwingSeededForUser(userId: number): boolean {
   return seededUserIds.has(userId);
 }
 
+/** @internal test-only: reset in-memory seed guard between tests. */
+export function _resetSeedStateForTests(): void {
+  seededUserIds.clear();
+}
+
 /**
  * Durable probe — are swing AI targets stored, in progress, or already
  * attempted for this user?
