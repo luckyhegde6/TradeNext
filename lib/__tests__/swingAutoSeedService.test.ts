@@ -3,6 +3,7 @@
 // Unit tests only: swingRecommendationService + audit mocked, decision client
 // injected via _setDecisionClient seams, no DB.
 import {
+  _resetSeedStateForTests,
   autoTriggerOnce,
   gateAutoGenerate,
   hasStoredSwingTargetsForUser,
@@ -27,6 +28,20 @@ jest.mock("@/lib/services/swingRecommendationService", () => ({
 }));
 jest.mock("@/lib/audit", () => ({
   createAuditLog: jest.fn().mockResolvedValue(undefined),
+}));
+// Keep durable probe deterministic in local/dev environments with real mirror/DB state.
+jest.mock("@/lib/sqlite", () => ({
+  getSqliteFallback: () => ({
+    getSwingAnalysisJobs: () => [],
+  }),
+}));
+jest.mock("@/lib/prisma", () => ({
+  __esModule: true,
+  default: {
+    swingAnalysisJob: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+  },
 }));
 
 const mockGetSwing = jest.mocked(getSwingRecommendations);
@@ -70,6 +85,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetSwing.mockResolvedValue(null as never);
   _resetDecisionClient();
+  _resetSeedStateForTests();
 });
 
 afterEach(() => {
