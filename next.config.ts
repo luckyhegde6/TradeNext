@@ -9,6 +9,13 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Netlify/Next functions bundling (NFT) can fail tracing sharp's nested
+  // semver preload file in the standalone output:
+  //   ".next/standalone/node_modules/sharp/node_modules/semver/preload.js does not exist"
+  // Exclude this optional preload path from output file tracing.
+  outputFileTracingExcludes: {
+    "*": ["**/node_modules/sharp/node_modules/semver/preload.js"],
+  },
   // Configure server-side packages for NSE API routes
   serverExternalPackages: [
     'node-fetch',
