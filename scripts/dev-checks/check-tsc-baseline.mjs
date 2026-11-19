@@ -98,14 +98,19 @@ function runTsc() {
     args = seamArgs;
   }
   try {
-    return execFileSync(bin, args, {
+    const out = execFileSync(bin, args, {
       cwd: ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 1200000,
     });
+    return { raw: `${out ?? ""}`, ran: true };
   } catch (err) {
-    return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    const raw = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    // execFileSync throws on non-zero exit (tsc errors) AND on spawn failures (ENOENT, etc.).
+    // A spawn failure has no tsc diagnostic output and typically has err.code/err.errno set.
+    const spawnFailed = !!err.code && !/error TS\d+/.test(raw) && !/Found \d+ error/i.test(raw);
+    return { raw, ran: !spawnFailed };
   } finally {
     rmSync(gateTsconfig, { force: true });
   }
@@ -172,10 +177,10 @@ function emitJson(payload) {
   if (asJson) console.log(JSON.stringify(payload, null, 2));
 }
 
-const raw = runTsc();
+const { raw, ran } = runTsc();
 
 // tsc never ran (missing deps / wrong cwd) — distinguish from "clean".
-if (!/error TS\d+/.test(raw) && !/Found \d+ error/i.test(raw) && raw.trim() === "") {
+if (!ran) {
   const message =
     "FAIL: `tsc` produced no output — is TypeScript installed? (npm ci / npx tsc --version)";
   emitJson({ ok: false, error: message, exitCode: 2 });
