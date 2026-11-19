@@ -7,7 +7,7 @@
  * them against a committed baseline, and fails on regression.
  *
  * Baseline: scripts/dev-checks/tsc-baseline.json (committed, so CI enforces the same number)
- *   { "total": 46, "prod": 0, "recorded": "YYYY-MM-DD" }
+ *   { "total": 0, "prod": 0, "recorded": "YYYY-MM-DD" }
  *
  * `total`  = every `error TS…` line
  * `prod`   = those NOT inside __tests__/ (the pre-commit hook's notion of "production files")
@@ -104,13 +104,13 @@ function runTsc() {
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 1200000,
     });
-    return { raw: `${out ?? ""}`, ran: true };
+    return { raw: `${out ?? ""}`, ran: true, status: 0 };
   } catch (err) {
     const raw = `${err.stdout ?? ""}${err.stderr ?? ""}`;
     // execFileSync throws on non-zero exit (tsc errors) AND on spawn failures (ENOENT, etc.).
     // A spawn failure has no tsc diagnostic output and typically has err.code/err.errno set.
     const spawnFailed = !!err.code && !/error TS\d+/.test(raw) && !/Found \d+ error/i.test(raw);
-    return { raw, ran: !spawnFailed };
+    return { raw, ran: !spawnFailed, status: err.status ?? 1 };
   } finally {
     rmSync(gateTsconfig, { force: true });
   }
@@ -118,7 +118,7 @@ function runTsc() {
 const TSC_TIMEOUT_MS = 600_000;
 
 /** Fallback used when the baseline file is absent (documented default). */
-const DEFAULT_BASELINE = { total: 46, prod: 0 };
+const DEFAULT_BASELINE = { total: 0, prod: 0 };
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
@@ -177,7 +177,7 @@ function emitJson(payload) {
   if (asJson) console.log(JSON.stringify(payload, null, 2));
 }
 
-const { raw, ran } = runTsc();
+const { raw, ran, status } = runTsc();
 
 // tsc never ran (missing deps / wrong cwd) — distinguish from "clean".
 if (!ran) {
@@ -185,6 +185,14 @@ if (!ran) {
     "FAIL: `tsc` produced no output — is TypeScript installed? (npm ci / npx tsc --version)";
   emitJson({ ok: false, error: message, exitCode: 2 });
   console.error(message);
+  process.exit(2);
+}
+
+// A non-zero exit with no diagnostics is not a clean run (it may indicate a crash/config issue).
+if (status !== 0 && !/error TS\d+/.test(raw) && !/Found \d+ error/i.test(raw) && raw.trim() === "") {
+  const message = "tsc-baseline: tsc failed to produce output: (no output)";
+  emitJson({ ok: false, error: message, exitCode: 2 });
+  process.stderr.write(`${message}\n`);
   process.exit(2);
 }
 

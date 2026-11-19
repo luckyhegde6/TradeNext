@@ -198,33 +198,34 @@ describe("check-tsc-baseline.mjs", () => {
     expect(JSON.parse(readFileSync(h.baselinePath, "utf8"))).toMatchObject({ total: 2, prod: 1 });
   });
 
-  it("falls back to the documented default baseline (46 / 0) when the file is absent", () => {
-    const over = ws({ baseline: null, output: Array.from({ length: 47 }, (_, i) => testErr(i + 1)) });
-    const at = ws({ baseline: null, output: Array.from({ length: 46 }, (_, i) => testErr(i + 1)) });
+  it("falls back to the documented default baseline (0 / 0) when the file is absent", () => {
+    const over = ws({ baseline: null, output: [testErr(1)] });
+    const at = ws({ baseline: null, output: [] });
 
     expect(run(over.script, ["--json"], over.dir, over.tscCmd).status).toBe(1);
     expect(run(at.script, ["--json"], at.dir, at.tscCmd).status).toBe(0);
   });
 
   it("exits 2 when tsc produces no output (could not run)", () => {
-    const h = ws({ baseline: { total: 0, prod: 0 }, output: [] });
+    // A crashed tsc (non-zero exit, empty stdout) must be treated as "could not run", not a clean 0.
+    const h = ws({ baseline: { total: 0, prod: 0 }, output: [], tscExit: 1 });
 
     const result = run(h.script, [], h.dir, h.tscCmd);
 
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("produced no output");
+    expect(result.stderr).toContain("tsc failed to produce output");
   });
 });
 
 describe("committed tsc baseline", () => {
-  it("is well-formed and pinned to the recorded Phase 0 numbers", () => {
+  it("is well-formed and pinned to the recorded baseline", () => {
     const baseline = JSON.parse(readFileSync(REAL_BASELINE_PATH, "utf8"));
 
     expect(typeof baseline.total).toBe("number");
     expect(typeof baseline.prod).toBe("number");
     expect(baseline.recorded).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     // Update these together via `--update` if the baseline is ever intentionally re-recorded.
-    expect(baseline.total).toBe(46);
+    expect(baseline.total).toBe(0);
     expect(baseline.prod).toBe(0);
   });
 
