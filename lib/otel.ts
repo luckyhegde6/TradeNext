@@ -19,7 +19,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import * as api from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { PrismaInstrumentation, registerInstrumentations } from "@prisma/instrumentation";
@@ -40,7 +40,7 @@ export function otelSetup(): boolean {
 
   try {
     // Context manager required for PrismaInstrumentation async span context.
-    const contextManager = new AsyncHooksContextManager().enable();
+    const contextManager = new AsyncLocalStorageContextManager().enable();
     api.context.setGlobalContextManager(contextManager);
 
     const provider = new NodeTracerProvider({

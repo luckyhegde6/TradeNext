@@ -7,6 +7,7 @@
   publish = ".next"
 
 [build.environment]
+  NODE_VERSION = "22"
   SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.githooks,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md,scripts/check-remote-db.ts,e2e,.github/workflows/playwright.yml,.env.example,lib/__tests__/sqlite.test.ts,public/sql-wasm.wasm"
 
 # Spec 42 — standalone Netlify Functions for durable worker/cron execution.

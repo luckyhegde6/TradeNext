@@ -139,7 +139,7 @@ describe("evaluateCondition", () => {
   it("returns false for undefined fields", () => {
     const stock = mockStock();
     expect(evaluateCondition(
-      { id: "1", field: "nonexistent_field", condition: { operator: "gt", value: 10 } },
+      { id: "1", field: "nonexistent_field" as any, condition: { operator: "gt", value: 10 } },
       stock
     )).toBe(false);
   });
@@ -340,7 +340,7 @@ describe("validateFilterGroup", () => {
     const group: FilterGroup = {
       id: "g1",
       logic: "AND",
-      conditions: [{ id: "c1", field: "nonexistent", condition: { operator: "gt", value: 100 } }],
+      conditions: [{ id: "c1", field: "nonexistent" as any, condition: { operator: "gt", value: 100 } }],
       groups: [],
     };
     const errors = validateFilterGroup(group);

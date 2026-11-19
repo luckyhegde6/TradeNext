@@ -38,6 +38,11 @@
   ],
   "exclude": [
     "node_modules",
-    "tests"
+    "tests",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
   ]
 }
