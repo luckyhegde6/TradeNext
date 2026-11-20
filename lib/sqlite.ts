@@ -801,9 +801,20 @@ async function getSqlJs(): Promise<any> {
   const SQL =
     wasmBytes
       ? await initSqlJs({
-          wasmBinary: wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength),
+          wasmBinary: wasmBytes.buffer.slice(
+            wasmBytes.byteOffset,
+            wasmBytes.byteOffset + wasmBytes.byteLength,
+          ),
+          // sql.js v1.17+ types require this option; false opts into the current
+          // (non-legacy) extension-function behavior.
+          useOldExtensionFunctions: false,
         })
-      : await initSqlJs({ locateFile: resolveSqlWasm });
+      : await initSqlJs({
+          locateFile: resolveSqlWasm,
+          // sql.js v1.17+ types require this option; false opts into the current
+          // (non-legacy) extension-function behavior.
+          useOldExtensionFunctions: false,
+        });
   _SQL = SQL;
   return SQL;
 }
