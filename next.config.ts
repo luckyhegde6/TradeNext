@@ -34,7 +34,11 @@ const nextConfig: NextConfig = {
     // package), which made the DB-health SQLite backup show "Not Ready" in
     // production while working in dev/tests. Keep it external so the WASM
     // is resolvable from node_modules/sql.js/dist on the runtime server.
-    'sql.js'
+    'sql.js',
+    // Deploy fix (functions >250MB — worker-runner-background): keep the
+    // Prisma client + CLI out of server bundles.
+    'prisma',
+    '@prisma/client'
   ],
   // Ensure proper headers for production
   async headers() {

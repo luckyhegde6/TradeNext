@@ -5,7 +5,10 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Deploy fix: Netlify bundles the Linux/rhel target — ship only the
+  // rhel-openssl-3.0.x engine binary (other targets inflate the function artifacts >250MB).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
