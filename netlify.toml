@@ -16,6 +16,14 @@
 # Schedule is declared in the function's exported `config` (netlify/functions/worker-dispatch.mjs).
 # Netlify config parsing rejects [[functions]] array syntax in this file format.
 
+# Function-bundle optimization: `worker-runner-background` (Spec 42 durable worker
+# runner) bundles the worker engine + Prisma client; with the default bundler the
+# built artifact exceeded Netlify's function upload limit (HTTP 400: "could not
+# parse form file: http: request body too large"). esbuild is the documented
+# bundler for shrinking function artifacts (Netlify Functions → Bundle docs).
+[functions]
+  node_bundler = "esbuild"
+
 # Improve caching for static assets
 [[headers]]
   for = "/_next/static/*"
