@@ -20,6 +20,7 @@ These docs are the **single source of truth** for the subsystems they cover. If 
 | [Security & Workers](./security-workers.md) | Legacy deep-dive: Netlify 502 fix (v1.8.2), cookies/sessions (v1.8.0), cron/workers (v1.7.0), historical sync (v1.6.x) | `middleware.ts`, `lib/auth.ts`, `lib/services/worker/*` |
 | [Serverless Logging](./serverless-logging.md) | HISTORICAL — superseded by v3.11.3. Blob-store mirroring, `/tmp` logs, `isServerless()` branches. File logs + DB `ServerLog` table are now the single source of truth | `lib/logger.ts`, `lib/services/db-logger.ts`, `lib/services/worker/worker-logger.ts` |
 | [DB Health & SQLite Backup](./monitoring-and-logging.md#sqlite-backup-layer) | SQLite backup layer (sql.js), 10-table sync from Prisma, recovery probe, admin DB health API + dashboard, route fallback chains | `lib/sqlite.ts`, `app/api/admin/db-health/route.ts`, `app/admin/utils/db-health/page.tsx`, `instrumentation.ts` |
+| [Netlify MCP + Deploy Debugging](./netlify-mcp-debug.md) | Netlify MCP (remote/local install, tools, skills), deploy-debugging playbook (deploys list, logs, function-upload failures), TradeNext deploy findings (newest deploy error + build-exit-2 root cause) | `netlify.toml` `[functions]`, `lib/services/worker/netlify-runner.ts` |
 
 ## How to Use These Docs
 
