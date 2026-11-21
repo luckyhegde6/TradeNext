@@ -37,7 +37,7 @@
 | **Backend** | Next.js API Routes (Node.js) |
 | **Database** | PostgreSQL 14 + TimescaleDB |
 | **Backup DB** | SQLite (sql.js, in-memory, pure-JS) |
-| **ORM** | Prisma 7 |
+| **ORM** | Prisma 7.10.1 (current) — Prisma 8.0.0-rc.34 upgrade planned, not implemented (see Spec 44) |
 | **Authentication** | NextAuth.js (Credentials) |
 | **Caching** | Node-cache (in-memory), optional Redis |
 | **Testing** | Jest, Playwright |
@@ -46,6 +46,10 @@
 ---
 
 ## 3. Database Schema
+
+> **Current ORM runtime**: PostgreSQL with Prisma 7.10.1 + `@prisma/adapter-pg`/Accelerate paths and centralized resilience in `lib/prisma.ts` (ops counting/write budget, plan-limit breaker, per-query timeout, DB error telemetry, opt-in OTel/query logging). SQLite (`sql.js`) provides mirror/read-fallback and write-behind resilience (`data/sqlite-backup.db`).
+>
+> **Planned (Spec 44, docs/planning only)**: upgrade to Prisma 8.0.0-rc.34 (contract + generated ORM + Prisma 8 migration workflow) with parity-preserving runtime behavior. See `.agents/specs/44-prisma-8-upgrade.md`, `.agents/plans/44-prisma-8-upgrade.md`, `.agents/docs/prisma-8-upgrade.md`.
 
 ### Core Models
 
@@ -494,3 +498,9 @@ services:
 - Background workers for data ingestion (Implemented v1.9.0)
 - AI/ML service integration
 - Dynamic server-side logging in `.next/server_logs`
+
+### Prisma 8 Upgrade Planning (Spec 44, 2026-11-21)
+- **Status**: planning/docs complete in this branch; implementation gated on approved spec/plan and separate execution phase.
+- **Goal**: migrate Prisma 7.10.1 → 8.0.0-rc.34 with contract/config/runtime/query/migration workflow conversion while preserving critical resilience/observability behavior in `lib/prisma.ts` (ops/write-budget, breaker, timeout, error classification/telemetry, OTel/logging, caching semantics).
+- **Key risks**: migration-history handoff, 100+ importer/call-site refactor, extension/API parity (`$allOperations`, `cacheStrategy`), and Netlify/build artifact integration.
+- **References**: `.agents/specs/44-prisma-8-upgrade.md`, `.agents/plans/44-prisma-8-upgrade.md`, `.agents/docs/prisma-8-upgrade.md`, `.agents/sessions/2026-11-21-prisma8-upgrade/{decisions.md,flow.md}`.

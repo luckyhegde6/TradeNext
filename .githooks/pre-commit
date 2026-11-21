@@ -3,11 +3,31 @@
 # Validates code quality, secrets, and staged artifacts before commit.
 # NOTE: Must NOT modify tracked files — only read-only checks (Lessons.md).
 # Enable via: git config core.hooksPath .githooks
+#
+# Env toggles (all optional):
+#   PRECOMMIT_SKIP_BASELINE=1   Skip tsc-baseline gate (not recommended)
+#   PRECOMMIT_SKIP_TESTS=1      Skip Jest unit/component tests
+#   PRECOMMIT_SKIP_BUILD=1      Skip quickbuild + warning gate
+#   PRECOMMIT_SKIP_E2E=1        Skip Playwright e2e (default: skipped unless PRECOMMIT_RUN_E2E=1)
+#   PRECOMMIT_RUN_E2E=1         Run Playwright tests (heavy; requires browsers/DB/dev server setup)
+#   PRECOMMIT_FULL=1            Run tests + quickbuild warning gate (and enable e2e only if PRECOMMIT_RUN_E2E=1)
 
 echo ""
 echo "=== Pre-Commit Checklist ==="
 
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
+FAIL=0
+WARN_COUNT=0
+
+warn() {
+  echo "  WARNING: $*"
+  WARN_COUNT=$((WARN_COUNT + 1))
+}
+
+fail() {
+  echo "  CRITICAL: $*"
+  FAIL=1
+}
 
 # 1. Main-branch guard (WARN only — TradeNext allows direct-to-main for solo work)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
@@ -20,7 +40,7 @@ fi
 CONSOLE_LOG_COUNT=$(git diff --cached -G"console\.log" -- '*.ts' '*.tsx' -- ':!jest.setup.ts' ':!*test*' 2>/dev/null | grep -c "console\.log" 2>/dev/null)
 test -z "$CONSOLE_LOG_COUNT" && CONSOLE_LOG_COUNT=0
 if [ "$CONSOLE_LOG_COUNT" -gt 0 ] 2>/dev/null; then
-    echo "  WARNING: Found $CONSOLE_LOG_COUNT console.log statements. Use logger from @/lib/logger instead."
+    warn "Found $CONSOLE_LOG_COUNT console.log statements. Use logger from @/lib/logger instead."
 fi
 
 # 3. Check for hardcoded secrets (BLOCKING)
@@ -28,30 +48,23 @@ SECRET_PATTERN='(password|secret|api_key|apiKey|auth_token|sk_live|sk-[A-Za-z0-9
 SECRET_COUNT=$(git diff --cached -G"$SECRET_PATTERN" 2>/dev/null | grep -c -E "$SECRET_PATTERN" 2>/dev/null)
 test -z "$SECRET_COUNT" && SECRET_COUNT=0
 if [ "$SECRET_COUNT" -gt 0 ] 2>/dev/null; then
-    echo "  CRITICAL: Potential hardcoded secrets detected in staged changes!"
-    echo "  Please review and remove before committing."
-    exit 1
+    fail "Potential hardcoded secrets detected in staged changes! Please review and remove before committing."
 fi
 
 # 4. Check for junk artifacts (WARN)
 JUNK=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)(dev-server\.log|next-dev\.log|screenshot-[0-9]+\.png|.*\.playwright[^/]*\.yaml)$|^[^/]*\.yaml$' 2>/dev/null)
 if [ -n "$JUNK" ]; then
-    echo "  WARNING: Possible junk artifacts staged (delete or gitignore):"
+    warn "Possible junk artifacts staged (delete or gitignore):"
     echo "$JUNK" | sed 's/^/    - /'
 fi
 
-# 5. TypeScript check (WARN — known pre-existing test-file type errors)
+# 5. TypeScript production check (WARN — quick signal; baseline gate below is authoritative)
 if command -v npx >/dev/null 2>&1; then
     TSC_OUT=$(npx tsc --noEmit -p tsconfig.json 2>/dev/null)
-    TSC_ERR_COUNT=$(echo "$TSC_OUT" | grep -c "error TS" 2>/dev/null)
-    # Count only NON-test errors (test files have pre-existing matcher errors).
-    # Exclude `.next/` the same way the tsc-baseline GATE does: generated dev-server
-    # route-type bundles are gitignored and can be truncated mid-write (TS1128/TS1185),
-    # which would otherwise show up as a spurious PRODUCTION error at commit time.
     PROD_ERR_COUNT=$(echo "$TSC_OUT" | grep "error TS" 2>/dev/null | grep -v -E "__tests__|__test__" | grep -v -E "(^|[\\/])\.next[\\/]" | grep -c "error TS" 2>/dev/null)
     test -z "$PROD_ERR_COUNT" && PROD_ERR_COUNT=0
     if [ "$PROD_ERR_COUNT" -gt 0 ] 2>/dev/null; then
-        echo "  WARNING: $PROD_ERR_COUNT TypeScript error(s) in production code (npx tsc --noEmit -p tsconfig.json)."
+        warn "$PROD_ERR_COUNT TypeScript error(s) in production code (npx tsc --noEmit -p tsconfig.json)."
         echo "$TSC_OUT" | grep "error TS" | grep -v -E "__tests__|__test__" | grep -v -E "(^|[\\/])\.next[\\/]" | head -5 | sed 's/^/    /'
     else
         echo "  TypeScript: production files clean"
@@ -63,50 +76,166 @@ ENV_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)\.env($|\
 if [ -n "$ENV_STAGED" ]; then
     echo "  CRITICAL: .env files staged — never commit real credentials!"
     echo "$ENV_STAGED" | sed 's/^/    /'
-    exit 1
+    FAIL=1
 fi
 
 # 7. Literal credentials in code/docs (BLOCKING — v3.5.7 rule)
-#    The join default password must come from the DEFAULT_PASSWORD env var,
-#    never hardcoded in the repo. Docs/commit messages reference env var
-#    NAMES only. (Public demo creds live in seed/e2e/check-remote-db — allowlisted.)
-#    NOTE: .githooks/* is exempted below — the hook files themselves must
-#    enforce the block-list without storing the value contiguously.
-#    NOTE: only count ADDED lines (grep '^+') — removals of literals (the
-#    hygiene fix itself) must never be blocked by their own deleted lines.
-#    The block-list literal is assembled from fragments at runtime so no
-#    contiguous credential value exists in this file.
 J1=12; J2=34; J3=56; J4=78; JOIN_LIT="${J1}${J2}${J3}${J4}"
 JOIN_DEFAULT_HITS=$(git diff --cached -G"${JOIN_LIT}" -- ':!.githooks/*' 2>/dev/null | grep '^+' | grep -c "${JOIN_LIT}" 2>/dev/null)
 test -z "$JOIN_DEFAULT_HITS" && JOIN_DEFAULT_HITS=0
 if [ "$JOIN_DEFAULT_HITS" -gt 0 ] 2>/dev/null; then
-    echo "  CRITICAL: Join default password literal detected in staged changes."
-    echo "  Read it from DEFAULT_PASSWORD env var; redact all docs and commit messages."
-    exit 1
+    fail "Join default password literal detected in staged changes. Read it from DEFAULT_PASSWORD env var; redact docs/commit messages."
 fi
 
 DOC_PW_HITS=$(git diff --cached -G'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' -- '*.md' 2>/dev/null | grep '^+' | grep -c -E 'password[[:space:]]*[:=][[:space:]]*["'"'"'"][^"'"'"'"]{3,}["'"'"'"]' 2>/dev/null)
 test -z "$DOC_PW_HITS" && DOC_PW_HITS=0
 if [ "$DOC_PW_HITS" -gt 0 ] 2>/dev/null; then
-    echo "  CRITICAL: Literal password assignment detected in staged *.md files."
-    echo "  Reference env var NAMES in docs; never paste actual password values."
-    exit 1
+    fail "Literal password assignment detected in staged *.md files. Reference env var NAMES only."
 fi
 
-# 8. Context budget (ADVISORY — v3.40.0 / W7)
-#    Injected instruction files are re-sent on EVERY request; a bloated set re-triggers the
-#    compaction loop. Advisory here; the blocking gate is the CI job `context-budget`.
+# 8. Context budget (ADVISORY) + CI context-budget parity
 if command -v node >/dev/null 2>&1 && [ -f "scripts/dev-checks/check-doc-sizes.mjs" ]; then
     DOC_OUT=$(node scripts/dev-checks/check-doc-sizes.mjs 2>&1)
     DOC_RC=$?
     if [ "$DOC_RC" -ne 0 ]; then
-        echo "  WARNING: injected context budget exceeded (advisory):"
-        echo "$DOC_OUT" | grep -E "OVER|TOTAL|FAIL" | sed 's/^/    /'
+        warn "Injected context budget check failed (CI 'context-budget'):"
+        echo "$DOC_OUT" | grep -E "OVER|TOTAL|FAIL|WARN" | sed 's/^/    /'
     else
         echo "  Context budget: OK ($(echo "$DOC_OUT" | grep 'TOTAL' | sed 's/^ *//'))"
     fi
 fi
 
-echo "  Pre-commit checks passed"
+# 9. Quality Gate / tsc-baseline (BLOCKING on regression, mirrors CI tsc-baseline job)
+if [ "${PRECOMMIT_SKIP_BASELINE:-0}" = "1" ]; then
+    warn "Skipped tsc-baseline gate (PRECOMMIT_SKIP_BASELINE=1)."
+elif command -v node >/dev/null 2>&1 && [ -f "scripts/dev-checks/check-tsc-baseline.mjs" ]; then
+    echo "  Running tsc-baseline gate (CI: Quality Gate / tsc-baseline)..."
+    BASELINE_OUT=$(node scripts/dev-checks/check-tsc-baseline.mjs 2>&1)
+    BASELINE_RC=$?
+    if [ "$BASELINE_RC" -ne 0 ]; then
+        echo "$BASELINE_OUT" | sed 's/^/    /'
+        fail "TypeScript baseline regression detected. Fix errors or intentionally re-record baseline (--update)."
+    else
+        echo "  tsc-baseline: OK"
+    fi
+else
+    warn "tsc-baseline script not found; skipped."
+fi
+
+# 10. Quality Gate / quality-gate checks (mirrors CI quality-gate job where practical)
+
+# 10a. Forbidden patterns (BLOCKING like CI)
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  :
+fi
+if command -v grep >/dev/null 2>&1; then
+    # Prisma used outside API/server (app/ excluding app/api)
+    if grep -R "new PrismaClient" app/ --exclude-dir=api >/dev/null 2>&1; then
+        fail "Forbidden pattern: 'new PrismaClient' found in app/ outside app/api."
+    fi
+    # Public env contains secret-like key
+    if grep -R "process\.env\.NEXT_PUBLIC_.*KEY" . --exclude-dir=.github --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git >/dev/null 2>&1; then
+        fail "Forbidden pattern: secret-like NEXT_PUBLIC_*KEY usage detected."
+    fi
+    echo "  Forbidden patterns: OK"
+fi
+
+# 10b. Swagger existence (BLOCKING like CI)
+if [ ! -f "app/api/openapi/route.ts" ]; then
+    fail "Swagger/OpenAPI route missing: app/api/openapi/route.ts"
+else
+    echo "  Swagger route: OK"
+fi
+
+# 10c. Logger usage check (BLOCKING like CI)
+if ! grep -R "lib/logger" app/api lib >/dev/null 2>&1; then
+    fail "Logger not used in server code (expected references to lib/logger in app/api or lib)."
+else
+    echo "  Logger usage: OK"
+fi
+
+# 10d. Jest tests (CI: quality-gate "Run tests") — heavy; default run unless skipped
+RUN_TESTS=1
+if [ "${PRECOMMIT_SKIP_TESTS:-0}" = "1" ]; then
+    RUN_TESTS=0
+fi
+if [ "$RUN_TESTS" -eq 1 ] && command -v npm >/dev/null 2>&1; then
+    echo "  Running Jest tests (CI: Quality Gate / quality-gate 'Run tests')..."
+    if npm run test -- --watchAll=false --passWithNoTests >/tmp/tradenext-precommit-jest.log 2>&1; then
+        echo "  Jest tests: OK"
+    else
+        echo "    (last 40 lines)"
+        tail -n 40 /tmp/tradenext-precommit-jest.log 2>/dev/null | sed 's/^/    /'
+        fail "Jest tests failed. Fix tests or rerun with PRECOMMIT_SKIP_TESTS=1 (not recommended)."
+    fi
+elif [ "$RUN_TESTS" -eq 0 ]; then
+    warn "Skipped Jest tests (PRECOMMIT_SKIP_TESTS=1)."
+fi
+
+# 10e. Build + Turbopack warning gate (CI: quality-gate) — heavy; run with PRECOMMIT_FULL=1 unless explicitly skipped
+RUN_BUILD=0
+if [ "${PRECOMMIT_FULL:-0}" = "1" ]; then
+    RUN_BUILD=1
+fi
+if [ "${PRECOMMIT_SKIP_BUILD:-0}" = "1" ]; then
+    RUN_BUILD=0
+fi
+if [ "$RUN_BUILD" -eq 1 ] && command -v npm >/dev/null 2>&1; then
+    echo "  Running quickbuild + warning gate (CI: Quality Gate / quality-gate)..."
+    if npm run quickbuild >/tmp/tradenext-precommit-build.log 2>&1; then
+        BUILD_WARN=$(awk 'tolower($0) ~ /warn/ && $0 !~ /^npm warn/ {c++} END {print c+0}' /tmp/tradenext-precommit-build.log 2>/dev/null)
+        test -z "$BUILD_WARN" && BUILD_WARN=0
+        if [ "$BUILD_WARN" -ne 0 ] 2>/dev/null; then
+            echo "    build warnings: $BUILD_WARN (expected 0)"
+            grep -i "warn" /tmp/tradenext-precommit-build.log 2>/dev/null | grep -v "^npm warn" | head -10 | sed 's/^/    /'
+            fail "Build produced warning(s)."
+        else
+            echo "  quickbuild warning gate: OK"
+        fi
+    else
+        tail -n 60 /tmp/tradenext-precommit-build.log 2>/dev/null | sed 's/^/    /'
+        fail "quickbuild failed."
+    fi
+elif [ "${PRECOMMIT_FULL:-0}" != "1" ]; then
+    echo "  quickbuild warning gate: skipped (set PRECOMMIT_FULL=1 to run, or PRECOMMIT_SKIP_BUILD=1 to silence)."
+fi
+
+# 11. Playwright Tests / test (CI: Playwright Tests workflow, job 'test') — very heavy; opt-in
+if [ "${PRECOMMIT_RUN_E2E:-0}" = "1" ] && [ "${PRECOMMIT_SKIP_E2E:-0}" != "1" ]; then
+    if command -v npx >/dev/null 2>&1; then
+        echo "  Running Playwright tests (CI: Playwright Tests / test)..."
+        if npx playwright test >/tmp/tradenext-precommit-e2e.log 2>&1; then
+            echo "  Playwright tests: OK"
+        else
+            tail -n 80 /tmp/tradenext-precommit-e2e.log 2>/dev/null | sed 's/^/    /'
+            fail "Playwright tests failed."
+        fi
+    else
+        warn "npx not available; cannot run Playwright tests."
+    fi
+else
+    echo "  Playwright Tests / test: skipped (set PRECOMMIT_RUN_E2E=1 to run; requires browsers/DB/dev-server setup)."
+fi
+
+# 12. Document update check (ADVISORY — mandatory doc updates per repo rules)
+STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+CODE_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(app/|lib/|prisma/|scripts/|netlify/|e2e/|middleware\.|next\.config\.|package\.json|instrumentation\.)' | grep -vE '\.(md|MD)$' 2>/dev/null || true)
+DOCS_STAGED=$(echo "$STAGED_FILES" | grep -E '^(AGENTS\.md|TODO\.md|Primer\.md|agent-memory\.md|Lessons\.md|HANDOFF\.md|\.agents/session-todos\.md|\.agents/CHANGELOG\.md|CHANGELOG\.md|\.agents/changelog/|README\.md)' 2>/dev/null || true)
+if [ -n "$CODE_CHANGED" ] && [ -z "$DOCS_STAGED" ]; then
+    warn "Code/config changes staged but no core documentation files staged (AGENTS/TODO/Primer/agent-memory/Lessons/HANDOFF/session-todos/CHANGELOG). Review repo doc-update rules before commit."
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+    echo ""
+    echo "  Pre-commit checks FAILED (see CRITICAL items above)."
+    echo ""
+    exit 1
+fi
+
+if [ "$WARN_COUNT" -gt 0 ] 2>/dev/null; then
+    echo "  Pre-commit checks passed with warnings ($WARN_COUNT)."
+else
+    echo "  Pre-commit checks passed"
+fi
 echo ""
-exit 0
+exit 0

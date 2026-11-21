@@ -13,9 +13,12 @@ const nextConfig: NextConfig = {
   // in the standalone output (path varies by hoisting/layout), e.g.:
   //   ".next/standalone/node_modules/semver/preload.js does not exist"
   //   ".next/standalone/node_modules/sharp/node_modules/semver/preload.js does not exist"
-  // Exclude this optional preload path from output file tracing at all locations.
+  // Exclude this optional preload path from output file tracing. Include "next-server"
+  // because the standalone production server trace does not match route globs (Next.js docs).
   outputFileTracingExcludes: {
     "*": ["**/node_modules/semver/preload.js"],
+    "/*": ["**/node_modules/semver/preload.js"],
+    "next-server": ["**/node_modules/semver/preload.js"],
   },
   // Configure server-side packages for NSE API routes
   serverExternalPackages: [

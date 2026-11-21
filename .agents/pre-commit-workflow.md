@@ -101,19 +101,63 @@ Refs: #issue-number (if applicable)
 - `docs`: Documentation
 - `deps`: Dependencies
 
+## Versioned Pre-Commit Hook (`.githooks/pre-commit`)
+
+Enable once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+### Included checks (CI parity where practical)
+
+| Check | Behavior | CI mapping / notes |
+|------|----------|-------------------|
+| Main-branch guard, console.log, junk artifacts | Warn | Local hygiene |
+| Hardcoded secrets / staged `.env` / credential literals in code & docs | **Block** | Security gate |
+| TypeScript production quick check | Warn | Fast signal (non-baseline) |
+| Injected context budget (`check-doc-sizes.mjs`) | Warn on failure | CI: `Quality Gate / context-budget` |
+| TypeScript baseline (`check-tsc-baseline.mjs`) | **Block on regression** | CI: `Quality Gate / tsc-baseline` |
+| Forbidden patterns (`new PrismaClient` outside `app/api`, `NEXT_PUBLIC_*KEY`) | **Block** | CI: `quality-gate` forbidden patterns |
+| Swagger route exists (`app/api/openapi/route.ts`) | **Block** | CI: `quality-gate` swagger check |
+| Logger usage in server code (`lib/logger` in `app/api`/`lib`) | **Block** | CI: `quality-gate` logger check |
+| Jest tests (`npm run test -- --watchAll=false --passWithNoTests`) | **Block on failure** (default run) | CI: `Quality Gate / quality-gate` "Run tests" |
+| Build + Turbopack warning gate (`npm run quickbuild`) | **Block on failure/warnings** when enabled | CI: `quality-gate` build warning gate (opt-in locally via `PRECOMMIT_FULL=1`) |
+| Playwright tests (`npx playwright test`) | **Block on failure** when enabled | CI: `Playwright Tests / test` (opt-in locally via `PRECOMMIT_RUN_E2E=1`) |
+| Document update heuristic | Warn | Advisory reminder for AGENTS/TODO/Primer/agent-memory/Lessons/HANDOFF/session-todos/CHANGELOG when code/config changes are staged without core docs |
+
+### Environment toggles
+
+```bash
+# Skip specific checks (use sparingly; not recommended for baseline/tests)
+PRECOMMIT_SKIP_BASELINE=1 git commit -m "..."
+PRECOMMIT_SKIP_TESTS=1 git commit -m "..."
+PRECOMMIT_SKIP_BUILD=1 git commit -m "..."      # only relevant with PRECOMMIT_FULL=1
+PRECOMMIT_SKIP_E2E=1 git commit -m "..."        # only relevant with PRECOMMIT_RUN_E2E=1
+
+# Enable heavy checks
+PRECOMMIT_FULL=1 git commit -m "..."            # runs quickbuild + warning gate
+PRECOMMIT_RUN_E2E=1 git commit -m "..."         # runs Playwright Tests / test (requires local browsers + DB/dev server setup)
+```
+
 ## Quick Commands
 
 ```bash
 # Enable versioned hooks (one-time per clone)
 git config core.hooksPath .githooks
 
-# Run all checks
-npx tsc --noEmit -p tsconfig.json   # TypeScript type check
-npm run lint                        # ESLint
-npm run test                        # Jest
-npm run quickbuild                  # Production build (Netlify deploy gate)
-git status                          # Review staged files
-```
+# Run CI-parity checks manually
+node scripts/dev-checks/check-doc-sizes.mjs   # context budget
+node scripts/dev-checks/check-tsc-baseline.mjs # tsc-baseline gate
+npm run test -- --watchAll=false --passWithNoTests
+npm run quickbuild                             # build + warning gate parity
+npx playwright test                            # Playwright Tests / test (requires env setup)
+
+# Other checks
+npx tsc --noEmit -p tsconfig.json              # TypeScript type check
+npm run lint                                   # ESLint
+git status                                     # Review staged files
+```
 
 ## References
 
