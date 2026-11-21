@@ -26,6 +26,7 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | **e2e-agent** | playwright-e2e | playwright-debug, playwright-cli, playwright (MCP) | — | user flow validation, responsive |
 | **code-reviewer** | — | bug-finder, playwright-debug | — | code quality + security review |
 | **devops** | — | server-log-analysis | — | deployment, CI/CD, infra |
+| **deploy-agent** | — | server-log-analysis | — | Netlify deployment diagnostics & lifecycle (status/logs/deploys via Netlify CLI + MCP, function-size deploy failures) |
 | **integrator** | nse-integration | — | `/nse-integration` | NSE/API contracts, cross-module wiring |
 | **observability** | server-log-analysis | — | `/server-log` | monitoring, logging, health, perf |
 | **webmcp-integrator** | webmcp | nse-integration, docs-workflow | — | in-browser agent tool surfaces (`document.modelContext`) |

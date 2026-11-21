@@ -23,6 +23,14 @@
 # bundler for shrinking function artifacts (Netlify Functions → Bundle docs).
 [functions]
   node_bundler = "esbuild"
+  # Externalize the heavy runtime deps from the worker-runner-background
+  # function artifact — esbuild minification does not shrink the Prisma
+  # client/engine binaries it statically pulls in via lib/services/worker/
+  # netlify-runner -> worker-engine/worker-service/@/lib/prisma. Without this
+  # the built function still exceeds Netlify's function upload limit
+  # ("could not parse form file: http: request body too large"). External
+  # modules resolve from the deployed site's node_modules at runtime.
+  external_node_modules = ["prisma", "@prisma/client", "@prisma/engines"]
 
 # Improve caching for static assets
 [[headers]]
