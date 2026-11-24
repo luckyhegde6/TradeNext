@@ -158,6 +158,12 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `server-log-analysis` | observability | `/server-log` | server log triage/clean/format (Netlify raw logs, DB layers, cleaning protocol, incident playbook) |
 | `webmcp` | webmcp-integrator | — | implement WebMCP (`document.modelContext`) tool surfaces in web pages (client-only, secure, schema-driven) |
 | — | orchestrator | `/orchestrate` | decompose ≥2 independent workstreams → parallel dispatch (Tier A) or chunked-sequential (Tier B); monitors health, persists handoff/continuation state |
+| `design-diagram` | — | — | architecture/flow/sequence/data-flow/class diagrams as standalone HTML |
+| `graphify` | — | — | codebase knowledge graph (`graphify-out/`) — see matrix |
+| `hallmark` | — | — | high-design, pro-typography HTML pages — see `nutlope/hallmark` |
+| `matt-pocs` | — | — | time-boxed POC spikes with smoke/timing + `VERDICT.md` |
+| `ponytail` | — | — | minimal-code style — smallest implementation |
+| `superpowers` | — | — | productive rhythm (rhythm source: `obra/superpowers`) |
 
 **Adding a new skill**: create `.agents/skills/<name>/SKILL.md` (+ optional `references/`) → add/update agent profile + command → wire `opencode.json` if needed → update `.agents/AGENT-SKILL-MATRIX.md` and this table. Do **not** add skills under `.opencode/skills` (avoid confusion; `.agents/skills` is canonical).
 

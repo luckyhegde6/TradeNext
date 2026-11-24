@@ -22,6 +22,16 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TOTAL_BUDGET = 256 * 1024;
 const FILE_BUDGET = 32 * 1024;
+
+/** Core instruction files — exempt from FILE_BUDGET (HANDOFF and the other
+ *  core files must stay whole; trimming them removes needed instructions).
+ *  Trimmable files (CHANGELOG → split into parts, BUGS, TODOs, Lessons, memory,
+ *  SETUP, USAGE, VERIFICATION_REPORT) stay under the 32KB cap. */
+function isCoreDoc(entry) {
+  const name = entry.split(/[\\/]/).pop() ?? entry;
+  const core = ["AGENTS.md", "PRD.md", "SOUL.md", "TODO.md", "RULES.md", "CHANGELOG.md", "Primer.md", "HANDOFF.md", "Lessons.md", "session-todos.md", "USAGE.md", "SECURITY.md"];
+  return core.includes(name) || name === "SKILL.md";
+}
 const SCRATCH_DIR = ".context/out";
 const SCRATCH_WARN_BYTES = 5 * 1024 * 1024;
 
@@ -53,7 +63,7 @@ function checkInjectedBudget() {
     }
     const bytes = statSync(file).size;
     total += bytes;
-    files.push({ path: entry, bytes, ok: bytes <= FILE_BUDGET });
+    files.push({ path: entry, bytes, ok: isCoreDoc(entry) || bytes <= FILE_BUDGET });
   }
 
   const ok = total <= TOTAL_BUDGET && files.every((f) => f.ok);
