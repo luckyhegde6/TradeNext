@@ -23,7 +23,8 @@
   },
   "plugin": [
     "opencode-helicone-session",
-    "opencode-wakatime"
+    "opencode-wakatime",
+    "superpowers@git+https://github.com/obra/superpowers.git"
   ],
   "provider": {
     "ollama": {
