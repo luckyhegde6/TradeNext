@@ -53,6 +53,16 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | ux-enhancer | `.agents/skills/ux-enhancer/` | UI/UX audit and enhancement |
 | webmcp | `.agents/skills/webmcp/` | WebMCP (`document.modelContext`) tool design and integration |
 | wiki-creator | `.agents/skills/wiki-creator/` | publish/maintain GitHub wiki pages |
+| design-diagram | `.agents/skills/design-diagram/` | architecture/workflow/sequence/data-flow/class/ERD diagrams as standalone HTML (dark+light themes) |
+| graphify | `.agents/skills/graphify/` | codebase knowledge graph (god nodes, community detection) → `graphify-out/` artifacts |
+| hallmark | `.agents/skills/hallmark/` | high-design, pro-typography HTML page builder (self-hosted fonts) |
+| matt-pocs | `.agents/skills/matt-pocs/` | time-boxed POC spikes (smoke + timing, VERDICT.md, deploy gated on verdict) |
+| ponytail | `.agents/skills/ponytail/` | minimal-code style — smallest implementation, nothing speculative |
+| superpowers | `.agents/skills/superpowers/` | productive rhythm: small steps, verify-before-claim, commit, hand off |
+| taste | `.agents/skills/taste/` | visual taste — professional, clean, responsive, accessible UI |
+| unslop | `.agents/skills/unslop/` | human-sounding writing style (anti-AI-slop, varied prose) |
+| impeccable | `.agents/skills/impeccable/` | UX-polish audit (states, responsive, dark mode, a11y, fixes) |
+| cloudflare-security-audit | `.agents/skills/cloudflare-security-audit/` | pre-commit/pre-PR static security audit of web-exposed code (XSS, serverless, AI calls) |
 
 ## Command inventory
 

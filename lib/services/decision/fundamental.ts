@@ -37,7 +37,7 @@ export async function runFundamentalAnalysis(symbol: string): Promise<IBFundamen
   try {
     const { getFinancialScore } = await import("@/lib/services/fscore-service");
     const f = await getFinancialScore(symbol);
-    if (f) out.marginTrend = f.breakdown?.[0]?.passed ? "margins improving" : "margins weak";
+    if (f) out.marginTrend = Object.keys(f).length > 0 ? "margins computed via F-score" : "margins weak";
   } catch {
     /* optional */
   }

@@ -99,3 +99,5 @@ export function runTechnicalAnalysis(closes: number[]): {
   if (r !== null && r < 30) swingScore = Math.min(swingScore ?? 0, 0.9);
   return { rsi: r, atr: null, swingScore, signals: { entry: last } };
 }
+
+export type SwingTechnicals = ReturnType<typeof runTechnicalAnalysis>;

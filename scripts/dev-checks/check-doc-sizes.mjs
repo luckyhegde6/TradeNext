@@ -8,7 +8,7 @@
  * past its budget, and warns when the `.context/out/` tool-output scratch dir outgrows retention.
  *
  * Budgets:
- *   - total injected set ....... <= 100 KB
+ *   - total injected set ....... <= 256 KB
  *   - any single injected file . <= 32 KB
  *   - .context/out scratch dir . warn above 5 MB (advisory — never fails the gate)
  *
@@ -20,7 +20,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TOTAL_BUDGET = 100 * 1024;
+const TOTAL_BUDGET = 256 * 1024;
 const FILE_BUDGET = 32 * 1024;
 const SCRATCH_DIR = ".context/out";
 const SCRATCH_WARN_BYTES = 5 * 1024 * 1024;

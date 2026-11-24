@@ -39,7 +39,7 @@ export async function analyzeStock(symbol: string): Promise<DecisionConclusion> 
     await fetchSecurityWiseHistoricalData(symbol, dateFromDaysAgo(HIST_DAYS), dateFromDaysAgo(0)),
   );
   const closes = bars.map((b) => b.close);
-  const toN = (n: number | undefined) => (n !== undefined ? Math.round((n + Number.EPSILON) * 100) / 100 : undefined);
+  const toN = (n: number | null | undefined) => (n !== undefined && n !== null ? Math.round((n + Number.EPSILON) * 100) / 100 : undefined);
 
   const [fundamentals, tech, risk] = await Promise.all([
     runFundamentalAnalysis(symbol),
