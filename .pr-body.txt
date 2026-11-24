@@ -1,1 +1,0 @@
-Pure new decision engine (IB + PM + swing perspectives). Removal of the old Laya/decision engine. New skills. Netlify plugin 5.16.9 + edge-runtime Windows path patch. Doc budget 256KB, AGENTS.md slimmed.
