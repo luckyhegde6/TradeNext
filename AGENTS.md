@@ -164,6 +164,8 @@ TradeNext uses a layered skills/agents/commands system. Mapping matrix: `.agents
 | `server-log-analysis` | observability | `/server-log` | server log triage/clean/format (Netlify raw logs, DB layers, cleaning protocol, incident playbook) |
 | `webmcp` | webmcp-integrator | — | implement WebMCP (`document.modelContext`) tool surfaces in web pages (client-only, secure, schema-driven) |
 | — | orchestrator | `/orchestrate` | decompose ≥2 independent workstreams → parallel dispatch (Tier A) or chunked-sequential (Tier B); monitors health, persists handoff/continuation state |
+| `gh` | — | — | GitHub CLI workflow (PR create/review conventions + learnings — see matrix) |
+| `shell` | — | — | Windows cmd.exe shell workflow — quoting/pipe traps, no `grep`/`head`/`tail`, use the `grep`/`read` tools on output files |
 | `design-diagram` | — | — | architecture/flow/sequence/data-flow/class diagrams as standalone HTML |
 | `graphify` | — | — | codebase knowledge graph (`graphify-out/`) — see matrix |
 | `hallmark` | — | — | high-design, pro-typography HTML pages — see `nutlope/hallmark` |

@@ -53,6 +53,8 @@ Maps TradeNext's agents to the skills they load and the commands that invoke the
 | ux-enhancer | `.agents/skills/ux-enhancer/` | UI/UX audit and enhancement |
 | webmcp | `.agents/skills/webmcp/` | WebMCP (`document.modelContext`) tool design and integration |
 | wiki-creator | `.agents/skills/wiki-creator/` | publish/maintain GitHub wiki pages |
+| gh | `.agents/skills/gh/` | GitHub CLI workflow (PR create/review conventions, learnings) |
+| shell | `.agents/skills/shell/` | Windows cmd.exe shell workflow — quoting/pipe traps (use `grep`/`read`/`glob` tools on output files) |
 | design-diagram | `.agents/skills/design-diagram/` | architecture/workflow/sequence/data-flow/class/ERD diagrams as standalone HTML (dark+light themes) |
 | graphify | `.agents/skills/graphify/` | codebase knowledge graph (god nodes, community detection) → `graphify-out/` artifacts |
 | hallmark | `.agents/skills/hallmark/` | high-design, pro-typography HTML page builder (self-hosted fonts) |

@@ -1,42 +1,28 @@
-## 🔍 Pre-PR Self-Check (Required)
+# Pull Request — [title]
 
-### Architecture
-- [ ] No Prisma usage in client components
-- [ ] Business logic moved to `lib/services`
-- [ ] External integrations isolated
+## Review Ready
 
-### API & Swagger
-- [ ] All new/changed routes documented in `/api/openapi`
-- [ ] Request & response schemas defined
-- [ ] Admin routes marked and protected
+- **Scope** — 1 isolated change: describe in one line.
+- **Self-reviews & AI strips leftovers** — the diff was read end-to-end; no AI/exploratory leftovers, no speculative extras.
+- **Documentation** — architectural "WHY" only (state the reason, not the diff restated).
+- **Trade-offs & blast radius** — alternatives considered; who is affected (users / ops / deploy); rollback notes.
+- **Failure paths & edge testing** — how failure is covered (tests, manual cases, degraded mode).
 
-### Security
-- [ ] Admin-only routes protected (NextAuth or ADMIN_KEY)
-- [ ] No secrets exposed to client
-- [ ] Inputs validated (Zod or equivalent)
+## Diff Owner
 
-### Performance
-- [ ] Pagination/limits applied
-- [ ] Caching added where appropriate
-- [ ] No N+1 queries introduced
+- **Trace** — state flow: where data comes in, what is stored, what goes out.
+- **Concurrency & edge paths** — races, timeouts, duplicates, empty inputs.
+- **Stripped abstractions** — anything not needed is removed.
+- **Ship-only-debuggable** — every line is traceable in the repo logs.
 
-### Logging & Observability
-- [ ] `lib/logger.ts` used
-- [ ] Start, success, and error logged
+## Context Engineered
 
-### UI / UX
-- [ ] Loading states present
-- [ ] Error & empty states handled
-- [ ] Responsive layout verified
+- **Spec / Plan anchor** — linked spec + plan (or "n/a — small fix").
+- **Boundaries** — data and module boundaries locked; scope of influence.
+- **Conventions & non-goals** — conventions followed; non-goals called out.
+- **Verification check-ups** — how verified: `npx tsc --noEmit`, `npm run test -- <suite>`, e2e, manual.
 
-### Docs & Readability
-- [ ] README updated if behavior changed
-- [ ] Code readable without external context
+## Impact
 
-### Interview Readiness
-- [ ] Feature can be explained in a system-design interview
-- [ ] Trade-offs are clear and defensible
-
----
-
-🚨 **PRs failing this checklist should not be merged.**
+- **Feature / change highlight** — what changed.
+- **Impact** — behavior, performance, function-size, deploy effects.

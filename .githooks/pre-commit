@@ -12,6 +12,18 @@
 #   PRECOMMIT_RUN_E2E=1         Run Playwright tests (heavy; requires browsers/DB/dev server setup)
 #   PRECOMMIT_FULL=1            Run tests + quickbuild warning gate (and enable e2e only if PRECOMMIT_RUN_E2E=1)
 
+# 0. Doc/config-only fast path (user request): when no staged files match a
+# code pattern, skip every precommit check — commits for .md/.agents/.github
+# changes stay instant. Code changes (app/, lib/, scripts/, prisma/, netlify/,
+# e2e/, middleware, next.config, package.json, instrumentation) run the full hook.
+CODE_CHANGED=$(git diff --cached --name-only 2>/dev/null | grep -E '^(app/|lib/|prisma/|scripts/|netlify/|e2e/|middleware\.|next\.config\.|package\.json|instrumentation\.)' 2>/dev/null || true)
+if [ -z "$CODE_CHANGED" ]; then
+    echo ""
+    echo "  Doc/config-only changes detected — skipping precommit checks (fast path)."
+    echo ""
+    exit 0
+fi
+
 echo ""
 echo "=== Pre-Commit Checklist ==="
 
