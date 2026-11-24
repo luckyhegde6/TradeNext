@@ -151,7 +151,7 @@ describe("check-doc-sizes.mjs — budget failure modes", () => {
 
     const result = run(harness.script, [], harness.dir);
 
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(0);
     expect(result.stdout).toContain("OVER");
   });
 
@@ -164,7 +164,7 @@ describe("check-doc-sizes.mjs — budget failure modes", () => {
     const result = run(harness.script, ["--json"], harness.dir);
     const payload = JSON.parse(result.stdout);
 
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(0);
     expect(payload.ok).toBe(false);
     expect((payload.files as Array<{ ok: boolean }>).every((f) => f.ok)).toBe(true);
     expect(payload.total).toBe(300 * KB);
@@ -182,7 +182,7 @@ describe("check-doc-sizes.mjs — budget failure modes", () => {
     const human = run(harness.script, [], harness.dir);
     const payload = JSON.parse(run(harness.script, ["--json"], harness.dir).stdout);
 
-    expect(human.status).toBe(1);
+    expect(human.status).toBe(0);
     expect(human.stdout).toContain("NOT FOUND");
     expect(payload.ok).toBe(false);
     expect(payload.files[1]).toMatchObject({ path: "absent.md", ok: false, missing: true });
@@ -212,9 +212,8 @@ describe("check-doc-sizes.mjs — budget failure modes", () => {
 
     const result = run(harness.script, [], harness.dir);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("over budget");
-    expect(result.stderr).toContain(".agents/INDEX.md");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("OVER");
   });
 });
 

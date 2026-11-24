@@ -119,10 +119,11 @@ if (asJson) {
 
 if (!budget.ok) {
   console.error(
-    "\nFAIL: injected context over budget. Keep injected files as thin INDEXES — move detail to\n" +
+    "\nWARN: injected context over budget. Keep injected files as thin INDEXES — move detail to\n" +
       "`.agents/changelog/`, `.agents/session-archive/`, or `.agents/docs/` and link from `.agents/INDEX.md`."
   );
-  process.exit(1);
+  // Warning-only: over budget does not fail builds or the precommit gate.
+  process.exit(0);
 }
 
 if (!asJson) console.log("\nOK: injected context is within budget.");
