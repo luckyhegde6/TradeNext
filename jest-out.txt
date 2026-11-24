@@ -1,0 +1,88 @@
+
+> tradenext@1.0.0 test
+> jest googleSheets
+
+FAIL lib/__tests__/googleSheetsAdminRoutes.test.ts (20.329 s)
+  ● GET /api/admin/google-sheets/status › never reports unreadable rows for the excluded in-memory tab
+
+    TypeError: Cannot read properties of undefined (reading 'unreadableSeqs')
+
+    [0m [90m 205 |[39m     [36mconst[39m body [33m=[39m [36mawait[39m ([36mawait[39m statusRoute[33m.[39m[33mGET[39m())[33m.[39mjson()[33m;[39m
+     [90m 206 |[39m     [36mconst[39m decisions [33m=[39m body[33m.[39msync[33m.[39mtabs[33m.[39mfind((t[33m:[39m { tab[33m:[39m string }) [33m=>[39m t[33m.[39mtab [33m===[39m [32m"decisions"[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 207 |[39m     expect(decisions[33m.[39munreadableSeqs)[33m.[39mtoEqual([])[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 208 |[39m     [90m// And the excluded tab is not even scanned.[39m
+     [90m 209 |[39m     expect(getUnreadableSeqs)[33m.[39mnot[33m.[39mtoHaveBeenCalledWith([32m"decisions"[39m)[33m;[39m
+     [90m 210 |[39m   })[33m;[39m[0m
+
+      at Object.unreadableSeqs (lib/__tests__/googleSheetsAdminRoutes.test.ts:207:22)
+
+  ● POST /api/admin/google-sheets/sync › syncs all tabs when none are named
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: ArrayContaining ["swing", "daily-rec", "screener", "custom", "decisions"]
+    Received: ["swing", "daily-rec", "screener", "custom", "metrics"]
+
+    [0m [90m 258 |[39m     [36mawait[39m syncRoute[33m.[39m[33mPOST[39m(post({}))[33m;[39m
+     [90m 259 |[39m     [36mconst[39m [tabs] [33m=[39m (syncTabs [36mas[39m jest[33m.[39m[33mMock[39m)[33m.[39mmock[33m.[39mcalls[[35m0[39m][33m;[39m
+    [31m[1m>[22m[39m[90m 260 |[39m     expect(tabs)[33m.[39mtoEqual(expect[33m.[39marrayContaining([[32m"swing"[39m[33m,[39m [32m"daily-rec"[39m[33m,[39m [32m"screener"[39m[33m,[39m [32m"custom"[39m[33m,[39m [32m"decisions"[39m]))[33m;[39m
+     [90m     |[39m                  [31m[1m^[22m[39m
+     [90m 261 |[39m   })[33m;[39m
+     [90m 262 |[39m
+     [90m 263 |[39m   it([32m"tolerates an empty body"[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.toEqual (lib/__tests__/googleSheetsAdminRoutes.test.ts:260:18)
+
+FAIL lib/__tests__/googleSheetsSync.test.ts
+  ● syncTab — exclusions and guards › skips the decisions tab with an explanation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "skipped"
+    Received: "failed"
+
+    [0m [90m 459 |[39m   it([32m"skips the decisions tab with an explanation"[39m[33m,[39m [36masync[39m () [33m=>[39m {
+     [90m 460 |[39m     [36mconst[39m r [33m=[39m [36mawait[39m syncTab([32m"decisions"[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 461 |[39m     expect(r[33m.[39mstatus)[33m.[39mtoBe([32m"skipped"[39m)[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 462 |[39m     expect(r[33m.[39mdetail)[33m.[39mtoMatch([35m/excluded/[39m)[33m;[39m
+     [90m 463 |[39m     expect(mockExport)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 464 |[39m   })[33m;[39m[0m
+
+      at Object.toBe (lib/__tests__/googleSheetsSync.test.ts:461:22)
+
+FAIL lib/__tests__/googleSheetsTracking.test.ts (5.974 s)
+  ● row encoders match the tab column contracts › decisionRow maps the trace fields
+
+    ReferenceError: decisionRow is not defined
+
+    [0m [90m 277 |[39m
+     [90m 278 |[39m   test([32m"decisionRow maps the trace fields"[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 279 |[39m     [36mconst[39m row [33m=[39m decisionRow({
+     [90m     |[39m                 [31m[1m^[22m[39m
+     [90m 280 |[39m       timestamp[33m:[39m [32m"T"[39m[33m,[39m
+     [90m 281 |[39m       kind[33m:[39m [32m"poc-a-screener"[39m[33m,[39m
+     [90m 282 |[39m       mode[33m:[39m [32m"laya"[39m[33m,[39m[0m
+
+      at Object.decisionRow (lib/__tests__/googleSheetsTracking.test.ts:279:17)
+
+  ● producer wrappers › every wrapper is a no-op when disabled
+
+    ReferenceError: exportDecision is not defined
+
+    [0m [90m 540 |[39m       exportCustomScan({ runAt[33m:[39m [32m"T"[39m[33m,[39m configId[33m:[39m [32m"c"[39m[33m,[39m configName[33m:[39m [32m"n"[39m[33m,[39m userId[33m:[39m [32m"1"[39m[33m,[39m filters[33m:[39m {}[33m,[39m matchCount[33m:[39m [35m0[39m }[33m,[39m [])
+     [90m 541 |[39m     )[33m.[39mresolves[33m.[39mtoBe([32m"disabled"[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 542 |[39m     [36mawait[39m expect(exportDecision(entry))[33m.[39mresolves[33m.[39mtoBe([32m"disabled"[39m)[33m;[39m
+     [90m     |[39m     [31m[1m^[22m[39m
+     [90m 543 |[39m     expect(mockAuth[33m.[39mgetSheetsClient)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 544 |[39m   })[33m;[39m
+     [90m 545 |[39m[0m
+
+      at Object.<anonymous> (lib/__tests__/googleSheetsTracking.test.ts:542:5)
+
+Test Suites: 3 failed, 7 passed, 10 total
+Tests:       5 failed, 266 passed, 271 total
+Snapshots:   0 total
+Time:        42.176 s, estimated 43 s
+Ran all test suites matching googleSheets.

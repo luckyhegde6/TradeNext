@@ -1,0 +1,13 @@
+.next/dev/types/validator.ts(143,39): error TS2307: Cannot find module '../../../app/admin/decision/page.js' or its corresponding type declarations.
+.next/dev/types/validator.ts(151,69): error TS2344: Type '__InvalidParamMatchingKeys' does not satisfy the constraint 'never'.
+  Type 'string' is not assignable to type 'never'.
+.next/dev/types/validator.ts(1512,39): error TS2307: Cannot find module '../../../app/api/admin/decision/monitoring/route.js' or its corresponding type declarations.
+.next/dev/types/validator.ts(1522,39): error TS2307: Cannot find module '../../../app/api/admin/decision/ping/route.js' or its corresponding type declarations.
+.next/dev/types/validator.ts(2362,39): error TS2307: Cannot find module '../../../app/api/decision/evaluate/route.js' or its corresponding type declarations.
+.next/types/validator.ts(143,39): error TS2307: Cannot find module '../../app/admin/decision/page.js' or its corresponding type declarations.
+.next/types/validator.ts(151,69): error TS2344: Type '__InvalidParamMatchingKeys' does not satisfy the constraint 'never'.
+  Type 'string' is not assignable to type 'never'.
+.next/types/validator.ts(1512,39): error TS2307: Cannot find module '../../app/api/admin/decision/monitoring/route.js' or its corresponding type declarations.
+.next/types/validator.ts(1522,39): error TS2307: Cannot find module '../../app/api/admin/decision/ping/route.js' or its corresponding type declarations.
+.next/types/validator.ts(2362,39): error TS2307: Cannot find module '../../app/api/decision/evaluate/route.js' or its corresponding type declarations.
+lib/services/googleSheets/syncService.ts(52,54): error TS2322: Type '"decisions"' is not assignable to type 'TrackerTab'.

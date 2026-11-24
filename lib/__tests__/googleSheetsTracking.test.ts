@@ -27,7 +27,6 @@ import {
   cell,
   customScanRow,
   dailyRecRow,
-  decisionRow,
   screenerRow,
   swingRow,
   type DailyRecStockInput,
@@ -37,13 +36,11 @@ import { TRACKER_TABS, ensureHeaders, isTrackerTab, _resetHeaderGuard } from "@/
 import {
   exportCustomScan,
   exportDailyRecs,
-  exportDecision,
   exportRows,
   exportScreeners,
   exportSwing,
 } from "@/lib/services/googleSheets/exporter";
 import { touchLastSync } from "@/lib/services/googleSheets/configService";
-import type { DecisionTraceEntry } from "@/lib/services/decision/monitoring";
 import type { SwingStock } from "@/lib/services/swing-types";
 
 const mockAuth = jest.requireMock("@/lib/services/googleSheets/auth") as {
@@ -148,15 +145,6 @@ describe("row encoders match the tab column contracts", () => {
       { runAt: "2026-09-25", configId: "c1", configName: "n", userId: "1", filters: {}, matchCount: 1 }
     );
     expect(custom).toHaveLength(TRACKER_TABS.custom.length);
-
-    const decision = decisionRow({
-      timestamp: "2026-09-25T00:00:00.000Z",
-      kind: "ping",
-      mode: "none",
-      status: "success",
-      latencyMs: 1,
-    } as DecisionTraceEntry);
-    expect(decision).toHaveLength(TRACKER_TABS.decisions.length);
   });
 
   test("swingRow maps the AI verdict into its own columns", () => {
@@ -286,29 +274,6 @@ describe("row encoders match the tab column contracts", () => {
     expect(noPrice[6]).toBe("OnlyName"); // symbol falls back to name
     expect(noPrice[9]).toBe("");
   });
-
-  test("decisionRow maps the trace fields", () => {
-    const row = decisionRow({
-      timestamp: "T",
-      kind: "poc-a-screener",
-      mode: "laya",
-      provider: "local",
-      status: "success",
-      latencyMs: 12,
-      attempts: 1,
-      questionCount: 4,
-      questionTypes: ["choice"],
-      gate: "act",
-      reason: "trending",
-      scoredCount: 10,
-      noulAmount: 0.25,
-      allowed: true,
-    } as DecisionTraceEntry);
-    expect(row[1]).toBe("poc-a-screener");
-    expect(row[5]).toBe("12");
-    expect(row[10]).toBe("act");
-    expect(row[15]).toBe("true");
-  });
 });
 
 // ─── Header ensure ───────────────────────────────────────────────────────
@@ -316,7 +281,6 @@ describe("row encoders match the tab column contracts", () => {
 describe("isTrackerTab", () => {
   test("accepts the 5 real tabs and rejects anything else", () => {
     for (const tab of Object.keys(TRACKER_TABS)) expect(isTrackerTab(tab)).toBe(true);
-    expect(isTrackerTab("Decisions")).toBe(false);
     expect(isTrackerTab("__proto__")).toBe(false);
   });
 });
@@ -332,7 +296,7 @@ describe("ensureHeaders", () => {
 
   test("treats an all-blank first row as empty and writes headers", async () => {
     valuesGet.mockResolvedValue({ data: { values: [["", ""]] } });
-    await expect(ensureHeaders("decisions")).resolves.toBe(true);
+    await expect(ensureHeaders("custom")).resolves.toBe(true);
     expect(valuesUpdate).toHaveBeenCalledTimes(1);
   });
 
@@ -446,13 +410,6 @@ describe("exportRows", () => {
     );
   });
 
-  test("skips the SUCCESS audit for the high-frequency decisions tab", async () => {
-    await exportRows("decisions", [["a"]]);
-    expect(mockCreateAuditLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({ action: "GOOGLE_SHEETS_APPEND_SUCCESS" })
-    );
-  });
-
   test("retries once after a 429 and succeeds", async () => {
     valuesAppend.mockRejectedValueOnce(httpError(429)).mockResolvedValueOnce({ data: {} });
     await expect(exportRows("swing", [["a"]])).resolves.toBe("enabled");
@@ -544,35 +501,14 @@ describe("producer wrappers", () => {
     expect(arg.requestBody.values[0][6]).toBe("SBIN");
   });
 
-  test("exportDecision writes the decisions tab", async () => {
-    await expect(
-      exportDecision({
-        timestamp: "T",
-        kind: "ping",
-        mode: "none",
-        status: "success",
-        latencyMs: 1,
-      } as DecisionTraceEntry)
-    ).resolves.toBe("enabled");
-    expect(valuesAppend.mock.calls[0][0].range).toBe("decisions!A1");
-  });
-
-  test("every wrapper is a no-op when disabled", async () => {
+    test("every wrapper is a no-op when disabled", async () => {
     arm(false);
-    const entry: DecisionTraceEntry = {
-      timestamp: "T",
-      kind: "ping",
-      mode: "none",
-      status: "success",
-      latencyMs: 1,
-    };
     await expect(exportSwing([{ symbol: "S" } as SwingStock])).resolves.toBe("disabled");
     await expect(exportDailyRecs({ runId: "r", runDate: "d" }, [])).resolves.toBe("disabled");
     await expect(exportScreeners([])).resolves.toBe("disabled");
     await expect(
       exportCustomScan({ runAt: "T", configId: "c", configName: "n", userId: "1", filters: {}, matchCount: 0 }, [])
     ).resolves.toBe("disabled");
-    await expect(exportDecision(entry)).resolves.toBe("disabled");
     expect(mockAuth.getSheetsClient).not.toHaveBeenCalled();
   });
 

@@ -32,7 +32,6 @@ jest.mock("@/lib/services/googleSheets/syncService", () => ({
   getBacklogCounts: jest.fn(() => ({ swing: { queued: 3, retained: 11 } })),
   getUnreadableSeqs: jest.fn((tab: string) => (tab === "swing" ? [9, 12] : [])),
   readTabCursor: jest.fn(() => 42),
-  EXCLUDED_TABS: ["decisions"],
   SYNC_CONFIRM_THRESHOLD: 100,
   SYNC_ROW_CAP: 200,
   UNREADABLE_REPORT_CAP: 200,
@@ -121,7 +120,7 @@ beforeEach(() => {
     sheetIdMasked: "secr••••alue",
     oauthConfigured: { clientId: true, clientSecret: true, refreshToken: false },
     trackingEnabled: true,
-    perTab: ["swing", "daily-rec", "screener", "custom", "decisions"].map((tab) => ({
+    perTab: ["swing", "daily-rec", "screener", "custom"].map((tab) => ({
       tab,
       headerState: "unknown",
       lastMark: null,
@@ -201,12 +200,11 @@ describe("GET /api/admin/google-sheets/status", () => {
     expect(daily).toMatchObject({ queued: 0, retained: 0, unreadable: 0, unreadableSeqs: [] });
   });
 
-  it("never reports unreadable rows for the excluded in-memory tab", async () => {
+  it("no longer reports the removed decisions tab", async () => {
     const { getUnreadableSeqs } = jest.requireMock("@/lib/services/googleSheets/syncService");
     const body = await (await statusRoute.GET()).json();
     const decisions = body.sync.tabs.find((t: { tab: string }) => t.tab === "decisions");
-    expect(decisions.unreadableSeqs).toEqual([]);
-    // And the excluded tab is not even scanned.
+    expect(decisions).toBeUndefined();
     expect(getUnreadableSeqs).not.toHaveBeenCalledWith("decisions");
   });
 
@@ -258,7 +256,7 @@ describe("POST /api/admin/google-sheets/sync", () => {
   it("syncs all tabs when none are named", async () => {
     await syncRoute.POST(post({}));
     const [tabs] = (syncTabs as jest.Mock).mock.calls[0];
-    expect(tabs).toEqual(expect.arrayContaining(["swing", "daily-rec", "screener", "custom", "decisions"]));
+    expect(tabs).toEqual(expect.arrayContaining(["swing", "daily-rec", "screener", "custom", "metrics"]));
   });
 
   it("tolerates an empty body", async () => {

@@ -11,7 +11,6 @@
  * structural input keeps this file free of runtime imports and of any coupling
  * that would make a producer refactor break the sheet.
  */
-import type { DecisionTraceEntry } from "@/lib/services/decision/monitoring";
 import type { SwingStock } from "@/lib/services/swing-types";
 
 /**
@@ -175,9 +174,6 @@ export interface ScreenerRowInput {
   volume: number;
   screenerNames?: string[];
   source?: string;
-  /** POC A composite score — present only when DECISION_POC_ENABLED=true. */
-  decisionScore?: number;
-  decisionGate?: string;
 }
 
 /** Run identity stamped on every row of one unified screener pass. */
@@ -203,8 +199,6 @@ export function screenerRow(
     cell(result.screenerNames),
     cell(ctx.category),
     cell(result.source),
-    cell(result.decisionScore),
-    cell(result.decisionGate),
   ];
 }
 
@@ -254,30 +248,6 @@ export function customScanRow(
     cell(pct),
     cell(item.volume),
     cell(item),
-  ];
-}
-
-// ─── decisions ───────────────────────────────────────────────────────────
-
-/** One decision-engine trace → `decisions` row (16 columns). */
-export function decisionRow(entry: DecisionTraceEntry): string[] {
-  return [
-    cell(entry.timestamp),
-    cell(entry.kind),
-    cell(entry.mode),
-    cell(entry.provider),
-    cell(entry.status),
-    cell(entry.latencyMs),
-    cell(entry.attempts),
-    cell(entry.error),
-    cell(entry.questionCount),
-    cell(entry.questionTypes),
-    cell(entry.gate),
-    cell(entry.reason),
-    cell(entry.scoredCount),
-    cell(entry.gateDistribution),
-    cell(entry.noulAmount),
-    cell(entry.allowed),
   ];
 }
 

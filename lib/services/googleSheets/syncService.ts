@@ -48,9 +48,6 @@ export const SYNC_CONFIRM_THRESHOLD = 100;
 /** Rows kept in the ledger after a drain before pruning. Bounds unbounded growth. */
 const LEDGER_KEEP = 5000;
 
-/** Tabs the spec excludes from sync: a bounded in-memory ring buffer, by design. */
-export const EXCLUDED_TABS: readonly TrackerTab[] = ["decisions"];
-
 export type SyncTabStatus =
   | "drained"
   | "empty"
@@ -115,10 +112,9 @@ export const UNREADABLE_REPORT_CAP = 200;
  * Scans from seq 0, NOT from the drain cursor. A row that is unreadable but sits
  * behind the cursor is the worst case — the drain walks straight past it and
  * reports success, so it is exactly the row an operator must be told about.
- * Excluded tabs are in-memory only and have no ledger rows.
  */
 export function getUnreadableSeqs(tab: TrackerTab, limit = UNREADABLE_REPORT_CAP): number[] {
-  if (!isTrackerTab(tab) || EXCLUDED_TABS.includes(tab)) return [];
+  if (!isTrackerTab(tab)) return [];
   const sqlite = getSqliteFallback();
   if (!sqlite) return [];
   // afterSeq 0 = every undelivered row, cursor position deliberately ignored.
@@ -141,16 +137,6 @@ export function getUnreadableSeqs(tab: TrackerTab, limit = UNREADABLE_REPORT_CAP
 export async function syncTab(tab: TrackerTab, confirmed = false): Promise<SyncTabResult> {
   if (!isTrackerTab(tab) || !(tab in TRACKER_TABS)) {
     return { tab, status: "failed", rows: 0, remaining: 0, cursor: null, detail: "unknown tab" };
-  }
-  if (EXCLUDED_TABS.includes(tab)) {
-    return {
-      tab,
-      status: "skipped",
-      rows: 0,
-      remaining: 0,
-      cursor: null,
-      detail: "excluded by spec (in-memory only, not syncable)",
-    };
   }
 
   const sqlite = getSqliteFallback();

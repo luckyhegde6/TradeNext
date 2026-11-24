@@ -12,7 +12,6 @@
 //   fromSync drain     -> NEVER recorded (the drain owns those rows; recording
 //                         would duplicate every replayed row and, on a failing
 //                         drain, grow the backlog without bound)
-//   decisions tab      -> NEVER recorded (excluded from syncing by spec)
 //   SQLite failure     -> never throws into the producer, result unchanged
 //
 // Zero network: the auth seam is mocked. Zero Prisma: the config service is
@@ -35,10 +34,6 @@ jest.mock("@/lib/logger", () => ({
 // The exporter + configService read the mirror through this one seam, so mocking
 // it gives deterministic control over BOTH the ledger writes and the config row.
 jest.mock("@/lib/sqlite", () => ({ getSqliteFallback: jest.fn() }));
-
-jest.mock("@/lib/services/decision/monitoring", () => ({
-  registerDecisionTraceSink: jest.fn(),
-}));
 
 import {
   exportCustomScan,
@@ -234,13 +229,6 @@ describe("export ledger capture: what is deliberately not recorded", () => {
     const result = await exportRowsFromSync("swing", [["A"]]);
 
     expect(result).toBe("failed");
-    expect(insertLedger).not.toHaveBeenCalled();
-  });
-
-  test("the decisions tab is never recorded", async () => {
-    const result = await exportRows("decisions", [["x"]], "run-d");
-
-    expect(result).toBe("enabled");
     expect(insertLedger).not.toHaveBeenCalled();
   });
 

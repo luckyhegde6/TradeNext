@@ -1,0 +1,1 @@
+app/api/admin/google-sheets/status/route.ts(5,3): error TS2305: Module '"@/lib/services/googleSheets/syncService"' has no exported member 'EXCLUDED_TABS'.
