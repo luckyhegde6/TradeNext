@@ -96,3 +96,10 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# graphify-out/ — generated knowledge graph (per graphify skill)
+graphify-out/
+
+# Temp files — never commit
+.pr-body.txt
+*.tmp
