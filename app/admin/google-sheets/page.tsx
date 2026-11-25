@@ -15,7 +15,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import type { HeaderState } from "@/lib/services/googleSheets/tabs";
 
-type TabName = "swing" | "daily-rec" | "screener" | "custom" | "decisions" | "metrics";
+type TabName = "swing" | "daily-rec" | "screener" | "custom" | "metrics";
 
 interface TabStatus {
   tab: TabName;
@@ -478,7 +478,7 @@ export default function AdminGoogleSheetsPage() {
         <div>
           <h1 className="text-2xl font-bold">Google Sheets Tracking</h1>
           <p className="text-sm text-gray-600 dark:text-slate-300">
-            Append-only export of recommendations, screeners and decisions to a spreadsheet you own.
+            Append-only export of recommendations, screeners, custom scans and metrics to a spreadsheet you own.
           </p>
         </div>
         <button

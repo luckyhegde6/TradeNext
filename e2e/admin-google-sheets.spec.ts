@@ -48,7 +48,7 @@ test.skip(
 );
 
 /** A status payload with the six-tab registry and a real-looking cursor. */
-const TABS = ['swing', 'daily-rec', 'screener', 'custom', 'decisions', 'metrics'] as const;
+const TABS = ['swing', 'daily-rec', 'screener', 'custom', 'metrics'] as const;
 
 /**
  * Mirrors `SheetsStatus` in lib/services/googleSheets/statusService.ts exactly.

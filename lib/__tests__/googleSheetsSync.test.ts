@@ -456,13 +456,6 @@ describe("syncTab — confirmation gate and caps", () => {
 });
 
 describe("syncTab — exclusions and guards", () => {
-  it("skips the decisions tab with an explanation", async () => {
-    const r = await syncTab("decisions");
-    expect(r.status).toBe("skipped");
-    expect(r.detail).toMatch(/excluded/);
-    expect(mockExport).not.toHaveBeenCalled();
-  });
-
   it("fails cleanly when the SQLite mirror is not ready", async () => {
     (getSqliteFallback as jest.Mock).mockReturnValueOnce(null);
     const r = await syncTab("swing");

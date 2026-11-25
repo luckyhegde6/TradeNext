@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getStatus } from "@/lib/services/googleSheets/statusService";
 import {
-  EXCLUDED_TABS,
   getBacklogCounts,
   getUnreadableSeqs,
   readTabCursor,
@@ -48,7 +47,7 @@ export async function GET() {
         confirmThreshold: SYNC_CONFIRM_THRESHOLD,
         unreadableCap: UNREADABLE_REPORT_CAP,
         tabs: status.perTab.map((t) => {
-          const unreadableSeqs = EXCLUDED_TABS.includes(t.tab) ? [] : getUnreadableSeqs(t.tab);
+          const unreadableSeqs = getUnreadableSeqs(t.tab);
           const perTab = counts[t.tab];
           return {
             tab: t.tab,

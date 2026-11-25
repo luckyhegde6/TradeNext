@@ -10,8 +10,8 @@
  * Design notes:
  * - `googleapis` is imported DYNAMICALLY inside the lazy init, so importing this
  *   module (or the googleSheets barrel) costs nothing and the Next build graph
- *   never pulls the CJS SDK unless tracking is actually armed. Mirrors the
- *   `lib/services/laya/tokenizer.ts` lazy-singleton pattern.
+ *   never pulls the CJS SDK unless tracking is actually armed. Follows the
+ *   repo's lazy-singleton pattern.
  * - Singletons live on `global` so a dev-mode module reload (and the Jest module
  *   registry) reuses one client instead of rebuilding it per call.
  * - Types are imported type-only from `googleapis` (which re-exports `Auth` from

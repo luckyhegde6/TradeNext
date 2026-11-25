@@ -20,11 +20,11 @@ import { resolveSheetId } from "./configService";
  * The TradeNext Tracker spreadsheet tabs.
  *
  * Spec 19 shipped 5 tabs (swing / daily-rec / screener / custom / decisions).
- * Spec 20 appends `metrics` as the 5th SYNCABLE tab — it sits after `decisions`
- * in the union only because the union is append-only, and `decisions` is
- * excluded from sync, so `metrics` is the 5th tab a drain can actually reach.
+ * Spec 20 appends `metrics` as the 5th SYNCABLE tab — after the decision
+ * engine was removed, `decisions` is gone and the syncable set is
+ * swing / daily-rec / screener / custom / metrics.
  *
- * The 5 spec-19 contracts are frozen at 24/16/12/13/16 columns and MUST NOT
+ * The spec-19 contracts are frozen at 24/16/12/13/16 columns and MUST NOT
  * change: the sheets are append-only, so a column inserted anywhere but the end
  * silently shifts every historical row under the wrong header (Lesson 141).
  */
@@ -33,7 +33,6 @@ export type TrackerTab =
   | "daily-rec"
   | "screener"
   | "custom"
-  | "decisions"
   | "metrics";
 
 /** Every valid tab, for "sync all" iteration. */
@@ -42,7 +41,6 @@ export const TRACKER_TAB_KEYS = [
   "daily-rec",
   "screener",
   "custom",
-  "decisions",
   "metrics",
 ] as const;
 
@@ -66,17 +64,11 @@ export const TRACKER_TABS: Record<TrackerTab, readonly string[]> = {
   ],
   screener: [
     "capturedAt", "runId", "symbol", "name", "close", "changePercent",
-    "volume", "screenerNames", "category", "source", "decisionScore",
-    "decisionGate",
+    "volume", "screenerNames", "category", "source",
   ],
   custom: [
     "runAt", "configId", "configName", "userId", "filters", "matchCount",
     "symbol", "name", "price", "change", "pChange", "volume", "data",
-  ],
-  decisions: [
-    "timestamp", "kind", "mode", "provider", "status", "latencyMs",
-    "attempts", "error", "questionCount", "questionTypes", "gate", "reason",
-    "scoredCount", "gateDistribution", "noulAmount", "allowed",
   ],
   // Spec 20 — 11 columns. A KPI SNAPSHOT, not a per-stock row: one row per
   // "Append KPI snapshot" click, so the sheet becomes a time series of portfolio

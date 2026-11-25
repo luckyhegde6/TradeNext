@@ -47,7 +47,6 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
-    "@huggingface/tokenizers": "^0.2.0",
     "@netlify/blobs": "^11.1.9",
     "@next/third-parties": "^16.4.6",
     "@openrouter/agent": "^1.2.1",
@@ -88,7 +87,6 @@
     "node-cron": "^4.6.0",
     "node-fetch": "^3.3.2",
     "nodemailer": "^10.6.0",
-    "onnxruntime-node": "^1.31.1",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "postcss": "^8.5.33",
@@ -108,7 +106,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@netlify/plugin-nextjs": "5.15.8",
+    "@netlify/plugin-nextjs": "^5.16.9",
     "@playwright/test": "^1.65.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",

@@ -1,3 +1,22 @@
+## Current (2026-11-24 — Laya decision-engine removal — removal done, verification green)
+
+### [x] Remove the Laya + decision engine (2026-11-24)
+- [x] Deleted: `lib/services/laya/**` (mock ONNX agent/tokenizer/weights), `lib/services/decision/**`, `app/api/decision/evaluate`, `app/api/admin/decision/{ping,monitoring}`, `app/admin/decision/`, decision tests, `scripts/dev-checks/{laya-agent,laya-forward}.ts`, `scripts/spike-laya/`, `scripts/fetch-laya-weights.mjs`, code docs.
+- [x] Removed decision UI: admin nav "Decision Engine" + `/admin/decision` page, AI Monitoring "Decision Engine" tab, Google Sheets `decisions` tab (rows/tabs/exporter/syncService/status route) + decision rows/exports/sinks.
+- [x] Removed decision env knobs, `onnxruntime-node` + `@huggingface/tokenizers` deps, `.gitignore` Laya rules. Docs (`docs/laya.md`, `docs/designDoc/ph22-*.md`) kept per user.
+- [x] Verification: `npm run test -- googleSheets` → 10 suites / 269 passed; stale `.next` deleted; `npx tsc --noEmit` — the only prior error (stale status-route import) is fixed.
+
+### [x] New decision engine build — `lib/services/decision/` (IB + PM + expert swing trader, 1st-system math-first, no PoC) — unit tests 1 suite / 8 passed
+### Plan — Redesign the decision engine (Pure implementation — 1st-system design, mathematical prediction models — IB + PM + expert swing trader — technical + fundamental analysis — data from NSE APIs; not a PoC) — [x] engine built (types/technical/fundamental/portfolio/engine/index) + tests green; wiring to daily recs/swing/stock analysis = follow-up.
+- [ ] **Perspectives (independent, first-principles):**
+  - **IB:** fundamentals — company profile + financials + corporate actions via NSE data (`nseFetch`/existing services) → debt-equity, ROE/ROIC, margins, P/E, sector comparables → view.
+  - **PM:** risk math from OHLCV (volatility/ATV, max drawdown, Sharpe) + position sizing — reuse `lib/services/rebalancerService` + portfolio risk metrics.
+  - **Swing trader:** technical indicators (MA/EMA/RSI/MACD/ATR/Bollinger) from daily OHLCV + swing levels, entry/target/SL from ATR.
+- [ ] **Pure engine:** `lib/services/decision/` recreated — `analyzeStock(symbol): DecisionConclusion` (verdict BUY/HOLD/SELL, rationale, confidence) — deterministic math; no mocks/PoC.
+- [ ] **Wire:** daily recommendations + swing + stock-analysis flows call the engine.
+- [ ] **Tests:** pure unit tests (indicators, fusion, verdict thresholds).
+- [ ] **Docs/branch:** new branch, session-todos/rules/AGENTS.md/CHANGELOG updates.
+
 ## Current (2026-11-21 — Netlify deploy fix — branch: fix/netlify-worker-runner-function-size, based on latest main)
 
 Branch: `fix/netlify-worker-runner-function-size` (created 2026-11-21 from latest `origin/main` @ `899fee6`).

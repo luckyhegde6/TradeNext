@@ -12,15 +12,14 @@
  *      logged, audited (best-effort), and reported as `"failed"`.
  *
  * On the audit asymmetry: `GOOGLE_SHEETS_APPEND_SUCCESS` is emitted for the
- * four low-frequency run-level tabs but NOT for `decisions`, which fires once
- * per engine evaluation — auditing that would be one Prisma write per trace and
- * would blow the plan-limit write budget that the rest of the repo works hard to
- * protect (v3.19+ write-behind discipline). Success is still logged via pino.
+ * run-level tabs — auditing per-row writes would be one Prisma write per row
+ * and would blow the plan-limit write budget that the rest of the repo works
+ * hard to protect (v3.19+ write-behind discipline). Success is still logged via
+ * pino.
  *
  * Ledger capture (spec 20 §5.B) is NOT subject to that asymmetry in the same way,
  * because the SQLite ledger is the write-behind mirror, not Prisma: one local
- * insert per export attempt, no Prisma op. `decisions` is still excluded because
- * the spec excludes it from syncing and its ring buffer is already bounded.
+ * insert per export attempt, no Prisma op.
  */
 import logger from "@/lib/logger";
 import { getSqliteFallback } from "@/lib/sqlite";
@@ -31,7 +30,6 @@ import {
   cell,
   customScanRow,
   dailyRecRow,
-  decisionRow,
   metricsRow,
   screenerRow,
   swingRow,
@@ -42,8 +40,6 @@ import {
   type ScreenerRowContext,
   type ScreenerRowInput,
 } from "./rows";
-import { registerDecisionTraceSink } from "@/lib/services/decision/monitoring";
-import type { DecisionTraceEntry } from "@/lib/services/decision/monitoring";
 import type { SwingStock } from "@/lib/services/swing-types";
 
 /** Outcome of an export. Never an exception — producers only ever see this. */
@@ -128,7 +124,7 @@ function recordLedger(
   runId: string | null,
   fromSync: boolean,
 ): void {
-  if (fromSync || tab === "decisions" || !rows.length) return;
+  if (fromSync || !rows.length) return;
   try {
     const sqlite = getSqliteFallback();
     if (!sqlite) return; // mirror not ready — nothing to do, and no throw
@@ -228,10 +224,7 @@ async function exportRowsInternal(
       });
     }
     logger.info({ msg: "Google Sheets rows appended", tab, rows: rows.length });
-    // See header note: skip the success audit for the high-frequency `decisions` tab.
-    if (tab !== "decisions") {
-      await audit("GOOGLE_SHEETS_APPEND_SUCCESS", tab, rows.length);
-    }
+    await audit("GOOGLE_SHEETS_APPEND_SUCCESS", tab, rows.length);
     // Recorded as DELIVERED: the rows are on the sheet, so this is an audit row
     // only. The drain's `delivered = 0` filter can never replay it.
     recordLedger(tab, rows, "appended", true, runId, fromSync);
@@ -351,26 +344,6 @@ export async function exportCustomScan(
 }
 
 /**
- * One decision-engine trace → `decisions`.
- *
- * Registered as the decision trace sink (see `registerDecisionSheetSink`), so
- * all four trace kinds (evaluate / ping / poc-a-screener /
- * poc-b-autoseed-gate) export from this single function.
- */
-export async function exportDecision(entry: DecisionTraceEntry): Promise<ExportResult> {
-  if (!isTrackingActive()) return "disabled";
-  try {
-    return await exportRows("decisions", [[...decisionRow(entry)]]);
-  } catch (err) {
-    logger.error({
-      msg: "Google Sheets decision export failed (non-fatal)",
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return "failed";
-  }
-}
-
-/**
  * One KPI snapshot → `metrics`.
  *
  * Unlike the other wrappers this is NOT producer-driven: no background job
@@ -393,24 +366,6 @@ export async function exportMetricsSnapshot(snapshot: MetricsRowInput): Promise<
     });
     return "failed";
   }
-}
-
-// ─── Decision trace sink wiring ──────────────────────────────────────────
-
-/**
- * Register {@link exportDecision} as the decision-engine trace sink.
- *
- * Called lazily from `decision/monitoring.ts` on the first recorded trace (and
- * only when tracking is armed), so a process that serves ONLY
- * `/api/decision/evaluate` still exports, and a process with tracking off never
- * loads this module at all.
- */
-export function registerDecisionSheetSink(): void {
-  registerDecisionTraceSink((entry) => {
-    // `exportDecision` never rejects (it swallows and audits), so a bare
-    // `void` sink is safe and keeps the sink contract promise-free.
-    void exportDecision(entry);
-  });
 }
 
 // Re-exported so callers can build a one-cell row without importing rows.ts.

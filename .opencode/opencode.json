@@ -22,8 +22,8 @@
     }
   },
   "plugin": [
-    "opencode-helicone-session",
-    "opencode-wakatime"
+    "@dietrichgebert/ponytail",
+    "superpowers@git+https://github.com/obra/superpowers.git"
   ],
   "provider": {
     "ollama": {
