@@ -2025,6 +2025,31 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 
 **Verified after fix**: `swingRecommendationService.test.ts` **65/65** (incl. the new regression test) · live dev run: 15 consecutive `cache-bypass poll` lines over 2.5 min while the header stayed `AI targets generating…`, job `85b8d47e` finished `total=20, succeeded=20, failed=0`, and the terminal notification fired (`Telegram broadcast for swing signals, sent=0, jobId=85b8d47e…, status=done` — 0 only because local Prisma is down).
 
+### 87. Netlify Function Bundles Must Stay < 250MB — `worker-runner-background` Was 430MB (v3.59.0)
+**Issue**: Netlify deploys failed with HTTP 400 "The function exceeds the maximum size of 250 MB" (`worker-runner-background` at 430.15MB, `__csp-violations` over).
+
+**Root Cause**: the function bundles the Next standalone tree (`.next/standalone/`) via the plugin's `copyNextDependencies`, and the built artifact carries heavy non-runtime weight: Turbokack build cache (~260MB of SSTs), two 55.6MB `.js.map` source-map files, `worker_logs/`, duplicated server chunks.
+
+**Solution (v3.59.0, `npx netlify build` run 3)**:
+1. `netlify.toml` `[functions] external_node_modules` += `googleapis`, `pg`, `pg-protocol`, `pgpass`, `onnxruntime-node`, `@opentelemetry/*`, `node-cron`, `bullmq`, `nodemailer`.
+2. Plugin `@netlify/plugin-nextjs` 5.16.9 local patches: `dist/build/content/server.js` now extends the standalone-copy filter — excludes `logs`, `worker_logs`, `sample(s)`, `graphify-out`, `mocks`, `__mocks__`, `docs`, `tests`, `__tests__`, `e2e`, `cache`, `.opencode`, `.continue`, `.archify`, `.claude` + all `*.js.map` files.
+3. NEW `scripts/predeploy/prune-standalone.mjs`, appended to the netlify build command: deletes `.next/cache/turbopack`, `.next/standalone/worker_logs`, and all `*.js.map` under `.next` (2022 paths) — the big win (~280MB of the ~281MB were non-runtime).
+
+**Measured after build 3**: `worker-runner-background.zip` = **65.24MB**, `__csp-violations.zip` = **162.59MB**, `___netlify-server-handler.zip` = 48.06MB, `worker-dispatch.zip` = 0.05MB — all under 250MB.
+
+**What the function contains (why it's needed)**: `worker-runner-background` is the Spec 42 durable Netlify Background Function — `netlify/functions/worker-runner-background.mts` (auth-guarded POST → `runBounded()` in `lib/services/worker/netlify-runner.ts`: worker lease via Blobs CAS, durable cron tick — ensure/catch-up crons —, atomic claim of ≤1 task per invocation, 13-min budget, lease release). It bundles that engine plus the Next standalone tree (`node_modules_*.js` chunks ~12.76MB each, `sqlite-mirror.sqlite` 37.2MB, static assets). It exists because the in-process node-cron daemon cannot survive Netlify's serverless cold/pause model — durable execution needs this background function (15-min platform cap, 13-min target). `__csp-violations` is Netlify's CSP-extension violation-report function.
+
+**Rule**: function upload limit = 250MB PER function; a broken deploy ships nothing. Audit the function artifact contents (`Expand-Archive`/Node unzipper) when adding heavy deps.
+
+---
+
+### 88. Production Build Folders — Exclude Non-Runtime Dirs + Source Maps at Copy Time
+**Issue**: `.netlify/functions/*.zip` carried `logs/`, `worker_logs/`, `docs/`, `__mocks__/`, `e2e/`, cache SSTs, `.js.map` files — none of which the server runtime reads.
+
+**Solution**: the plugin copy filter (Lesson 87) is the primary lever; the prune script (Lesson 87) is the backstop for paths the filter doesn't reach (e.g. `copyNextServerCode`'s fast-glob `cp`). Rule: anything not read by the runtime belongs in both.
+
+---
+
 ## Update Log
 - 2026-11-03: Added Lesson 167 (**a fallback that reads a store under the wrong key is not a fallback — it is a silent no-op; and a worker task that only runs when a human clicks it is not a scheduled job**). Spec 35 fixed `20d Mom — / 10d Mom — / 20d Vol —` on every Swing card, and the investigation produced two transferable rules. **(A) Key symmetry across a fallback boundary.** `fetchRecentCloses` was changed to fall back from Prisma `daily_prices` to the SQLite mirror via `getSqlitePriceRange`, and the draft passed the bare symbol (`getSqlitePriceRange("RELIANCE")`). Every mirror OHLCV write is keyed `NSE:<SYMBOL>` — `cacheDailyPriceBars(\`NSE:${sym}\`, …)` in `historicalPriceSyncService` and `backtestDataService` — because the mirror must match Prisma's `daily_prices.ticker` format. A `daily_price` table keyed by `"NSE:RELIANCE"` answers a `"RELIANCE"` lookup with **zero rows**, so the fallback would have shipped green (all tests mocked the reader, not the key), merged, deployed, and fixed nothing. **Rule:** a fallback read must be written against the *writer's* key convention, and the test must assert the **exact key passed** (`expect(getSqlitePriceRange).toHaveBeenCalledWith("NSE:RELIANCE")`), not merely that a reader was called — a mocked boundary cannot catch a key mismatch, an assertion on the argument can. Same class as the A1 1×1 range bug (Lesson 149) and the disjoint header unions (Lesson 26). **(B) "Exists" ≠ "runs".** `historical_price_sync` had a complete executor, a registry entry and a dispatchable `taskType` since v3.10.0 — and no cron row, so `daily_prices` sat at 20 rows / 5 symbols while every consumer dutifully degraded to a dash. The scheduler is a *separate* deliverable from the worker: verify a "scheduled" job by reading `cron_jobs` (or the daemon's ensured list) for its row, not by pointing at the executor. Corollary for payloads: the cron's `config` **is** the task payload (`spawnDueCronJob` → `spawnCronTask`), so a write-mode flag (`dryRun:false`) that is not persisted in `cron_job.config` silently makes the scheduled run read-only while manual runs look identical; config drift comparison must cover **every** key, not just the standard pair, or a row that lost the flag is never repaired. Also recorded: a per-definition config object (`defConfig`) beats a shared one — the other four crons must keep `{ systemManaged, timezone }` unchanged.
 

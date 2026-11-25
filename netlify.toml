@@ -3,7 +3,7 @@
   # it prod tables (e.g. google_sheets_config/ledger) never get created. Then the
   # predeploy guard (self-gates to CONTEXT=production; soft-fail), client regen,
   # and the quickbuild.
-  command = "npx @prisma/prisma7@7 migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild"
+  command = "npx @prisma/prisma7@7 migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild && node scripts/predeploy/prune-standalone.mjs"
   publish = ".next"
 
 [build.environment]
@@ -23,14 +23,30 @@
 # bundler for shrinking function artifacts (Netlify Functions → Bundle docs).
 [functions]
   node_bundler = "esbuild"
-  # Externalize the heavy runtime deps from the worker-runner-background
-  # function artifact — esbuild minification does not shrink the Prisma
-  # client/engine binaries it statically pulls in via lib/services/worker/
-  # netlify-runner -> worker-engine/worker-service/@/lib/prisma. Without this
-  # the built function still exceeds Netlify's function upload limit
-  # ("could not parse form file: http: request body too large"). External
-  # modules resolve from the deployed site's node_modules at runtime.
-  external_node_modules = ["prisma", "@prisma/client", "@prisma/engines"]
+  # Heavy runtime deps externalized from the function artifacts (deploy fix —
+  # functions >250MB). `worker-runner-background` bundles the worker engine +
+  # its deps; googleapis/@opentelemetry/pg/pgpass are the biggest offenders.
+  external_node_modules = [
+    "prisma",
+    "@prisma/client",
+    "@prisma/engines",
+    "googleapis",
+    "pg",
+    "pg-protocol",
+    "pgpass",
+    "onnxruntime-node",
+    "@opentelemetry/api",
+    "@opentelemetry/context-async-hooks",
+    "@opentelemetry/exporter-trace-otlp-http",
+    "@opentelemetry/instrumentation",
+    "@opentelemetry/resources",
+    "@opentelemetry/sdk-trace-base",
+    "@opentelemetry/sdk-trace-node",
+    "@opentelemetry/semantic-conventions",
+    "node-cron",
+    "bullmq",
+    "nodemailer",
+  ]
 
 # Improve caching for static assets
 [[headers]]

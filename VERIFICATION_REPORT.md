@@ -1,4 +1,26 @@
 # TradeNext Feature Verification Report - UPDATED
+**Generated**: 2026-11-26 (v3.59.0 — Netlify deploy fix)  
+**Scope**: Deploy verification — function bundle sizes vs Netlify 250MB limit, `logs/` cleanup, local `npx netlify build` run 3
+
+## Deploy Verification — v3.59.0 (2026-11-26)
+
+| Function zip | Size (local, uncompressed) | Limit | Status |
+|--------------|---------------------------|-------|--------|
+| `worker-runner-background.zip` | **65.24 MB** (was 430.15) | 250 MB | ✅ PASS |
+| `__csp-violations.zip` | **162.59 MB** (was 117.23) | 250 MB | ✅ PASS |
+| `___netlify-server-handler.zip` | 48.06 MB | 250 MB | ✅ PASS |
+| `worker-dispatch.zip` | 0.05 MB | — | ✅ PASS |
+
+Commands run (this machine):
+1. `npx netlify build` — build.command completed (migrate deploy / preserve-mirror / generate / quickbuild / prune-standalone); Functions bundling completed.
+2. `node <measure2.cjs> .netlify/functions` — sizes above.
+
+Logs cleanup: `node scripts/cleanup-logs.mjs` → **removed 772.6 MB, remaining 39.2 MB** (15-day / 50MB cap; `logs/sqlite-mirror.sqlite` 38MB kept — runtime data, not stale logs).
+
+Known remaining issue (pre-existing, out of scope): edge function `___netlify-edge-handler-node-middleware` Windows path bug — `Cannot find module 'F:\Local_git\TradeNext\.netlify\edge-functions\___netlify-edge-handler-node-middleware\server\.next\server\chunks\[turbopack]_runtime.js\server\chunks\[externals]__06f0vc__9yjlr._.js'` (blocked — needs `edge-runtime/lib/cjs.ts` path fixes).
+
+---
+
 **Generated**: 2026-03-11 (Updated: 2026-03-11 17:30)  
 **Branch**: ph12 (current) vs ph11 (comparison)  
 **Production URL**: https://tradenext6.netlify.app/  

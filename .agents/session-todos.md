@@ -1,3 +1,16 @@
+## Current (2026-11-26 — Netlify deploy fix complete — functions < 250MB)
+
+Functions now fit the Netlify upload limit locally: `worker-runner-background.zip` 65.24MB, `__csp-violations.zip` 162.59MB, `___netlify-server-handler.zip` 48.06MB (measured with `node C:\Users\lucky\AppData\Local\Temp\opencode\measure2.cjs .netlify/functions`).
+
+### Netlify deploy fix (v3.59.0) — local `npx netlify build` run 3: COMPLETE
+- [x] `netlify.toml` `[functions] external_node_modules` += prisma/pg/googleapis/@opentelemetry/*/node-cron/bullmq/nodemailer/onnxruntime-node/…
+- [x] Plugin 5.16.9 local patches (Windows edge-runtime path fix + logs exclusion in `dist/build/content/server.js`)
+- [x] NEW `scripts/predeploy/prune-standalone.mjs` (appended to build command): deletes `.next/cache/turbopack` (~260MB), `.next/standalone/worker_logs`, all `*.js.map` — 2022 paths
+- [x] `scripts/cleanup-logs.mjs` — logs/ → 39.2MB remaining (15d/50MB cap); `scripts/cleanup-logs.mjs` + run (772.6MB removed)
+- [ ] **User action:** redeploy (`npx netlify deploy --prod` / Netlify dashboard). Known remaining: edge function `___netlify-edge-handler-node-middleware` Windows path bug (blocked, needs edge-runtime debug).
+
+---
+
 ## Current (2026-11-24 — Laya decision-engine removal — removal done, verification green)
 
 ### [x] Remove the Laya + decision engine (2026-11-24)

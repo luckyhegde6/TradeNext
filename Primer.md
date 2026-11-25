@@ -6,7 +6,7 @@
 
 ## Last Updated
 
-2026-11-15 — **Spec 43 prediction targets & `analysisMode` (v3.58.0, `feature/spec-43-prediction-targets`, commit prep)**: per-stock AI vs Prediction targets across Swing+Daily (DB/schema migration `20261115160000_add_analysis_mode_prediction_targets`, mirror/push sinks, fallback/agents, services/APIs/UI, Telegram/broadcast, exports/Sheets, bounded/idempotent perf backfill). No "AI targets off"/targetless states; daily fallback never HOLD; swing auto prediction on load. **Gates:** targeted Jest 174/174, lint 0 errors, tsc 46 baseline-aware, doc budget OK, quickbuild 202/202. Spec 43 commit requested; Tracks 1–4 sequenced after commit.
+2026-11-26 — **Netlify deploy fix — function upload limit cleared (v3.59.0)**: `worker-runner-background` zip 430.15MB → **65.24MB**; `__csp-violations` → 162.59MB (< 250MB); `___netlify-server-handler` 48.06MB (already OK). Fixes: netlify.toml `[functions] external_node_modules`, plugin 5.16.9 patches, `scripts/predeploy/prune-standalone.mjs` (deletes `.next/cache/turbopack` ~260MB, `.next/standalone/worker_logs`, all `*.js.map`), `scripts/cleanup-logs.mjs` (772.6MB removed; 15d/50MB cap). Local build run 3 (`npx netlify build`): Functions bundling completed; functions now fit. Known remaining issue: `___netlify-edge-handler-node-middleware` Windows edge-runtime path bug (pre-existing, blocked).
 
 ## Current Status
 
@@ -17,6 +17,7 @@
 
 ## Recent Sessions (summary)
 
+- **2026-11-26**: Deploy fix — functions under 250MB (worker-runner-background 430MB→65MB, __csp-violations 162MB); logs cleaned (772MB); netlify.toml externals + plugin patches + prune script; local `npx netlify build` run 3 green on functions bundling. Known remaining: edge function Windows path bug.
 - **2026-11-15**: Skill consolidation to `.agents/skills` (format A), WebMCP skill/agent, rules/commands/agents/orchestration/handoff updates, 3 lib fixes + targeted validation, docs updated, commit/push/PR update.
 - **2026-11-08**: Spec 42 implementation complete (Netlify scheduled/background worker/cron, bounded runner, DR checkpointing, runtime observability). Gates passed (2144 pass, 0 fail / tsc prod 0 / lint 0 / quickbuild 202/202).
 - **2026-11-05**: PR #154 follow-up (Sheets JSX/exporter fixes, Swing publish outside AI failure path, daily rec task outcome telemetry, recovery probe amplification fix).

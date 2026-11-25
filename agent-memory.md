@@ -10,6 +10,26 @@
 
 ---
 
+### 2026-11-26 | Netlify deploy fix — function upload limit (v3.59.0)
+
+**Request:** Continue deploy fix — functions >250MB (worker-runner-background 430MB, __csp-violations); also remove junk folders from the build and clean logs.
+
+**Work completed:**
+- `netlify.toml` `[functions]` `external_node_modules` += `googleapis`, `pg`, `pg-protocol`, `pgpass`, `onnxruntime-node`, `@opentelemetry/*`, `node-cron`, `bullmq`, `nodemailer` (+ existing prisma) → worker-runner-background local zip **430.15MB → 341.09MB**.
+- Patched `node_modules/@netlify/plugin-nextjs` 5.16.9 local build (`dist/build/content/server.js`): extended the standalone-copy filter — excludes `logs`, `worker_logs`, `sample(s)`, `graphify-out`, `mocks`, `__mocks__`, `docs`, `tests`, `__tests__`, `e2e`, `cache`, `.opencode`, `.continue`, `.archify`, `.claude` + all `*.js.map`. (Note: the fast-glob `copyNextServerCode` path doesn't use this filter — that's why the js.maps still appeared; the prune script covers them.)
+- New `scripts/predeploy/prune-standalone.mjs`, appended to the netlify build command: deletes `.next/cache/turbopack` (~260MB of SSTs), `.next/standalone/worker_logs`, and all `*.js.map` under `.next` — **2022 paths removed**.
+- `scripts/cleanup-logs.mjs`: `logs/` cleanup — **772.6MB removed, remaining 39.2MB** (15-day / 50MB cap). Committed as `ac91879`.
+
+**Measurements (npx netlify build run 3, local):** `worker-runner-background.zip` **65.24MB**, `__csp-violations.zip` **162.59MB** (< 250), `___netlify-server-handler.zip` 48.06MB, `worker-dispatch.zip` 0.05MB — all under the limit. (Build command: `prisma migrate deploy && preserve-mirror && prisma generate && quickbuild && prune-standalone`.)
+
+**Analysis — worker-runner-background contents:** the Spec 42 durable Netlify Background Function (`netlify/functions/worker-runner-background.mts` — auth-guarded POST → `runBounded()` in `lib/services/worker/netlify-runner.ts`: worker lease via Blobs CAS, durable cron tick (ensure/catch-up crons), claim ≤1 task per invocation via atomic `updateMany`, 13-min budget, lease release). It bundles that engine plus the Next standalone tree (`.next/standalone/`: server chunks — incl. the two ~12.76MB `node_modules_*.js` chunks, `sqlite-mirror.sqlite` 37.2MB, static assets). Why needed: the in-process cron daemon can't survive Netlify's serverless cold/pause model — durable execution needs this background function (15-min platform cap, 13-min target). `__csp-violations` is Netlify's CSP-extension violation-report function (now 162.59MB — still under the limit).
+
+**Known remaining issue (pre-existing, blocked):** edge function `___netlify-edge-handler-node-middleware` Windows path bug in `edge-runtime/lib/cjs.ts` — `Cannot find module 'F:\...\[turbopack]_runtime.js\server\chunks\[externals]...'` (needs more debugging; Local build run 3 reached Edge bundling and hit it).
+
+**Docs updated:** AGENTS.md v3.59.0 row, Primer.md (Last Updated + Recent Sessions), agent-memory.md (this entry), Lessons.md (new lessons 87/88 — Netlify function-bundle >250MB + prune-cache), .agents/session-todos.md, VERIFICATION_REPORT.md.
+
+---
+
 ### 2026-11-15 | v3.57.0 — canonical `.agents/skills` consolidation, WebMCP, rec/index fixes (PR #155)
 
 **Request:** Approve all and complete skill consolidation/migration to `.agents/skills` (format A), update agents/rules/commands/orchestration/session handoff/continuation, validate targeted lib fixes, update docs, and commit/push/update PR #155 (`feature/spec-42-durable-worker-cron-v2`).
