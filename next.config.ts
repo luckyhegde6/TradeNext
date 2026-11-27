@@ -19,6 +19,38 @@ const nextConfig: NextConfig = {
     "*": ["**/node_modules/semver/preload.js"],
     "/*": ["**/node_modules/semver/preload.js"],
     "next-server": ["**/node_modules/semver/preload.js"],
+    // Deploy fix (functions >250MB): keep heavy non-runtime files out of the
+    // `.next/standalone` output that @netlify/plugin-nextjs bundles into
+    // serverless functions. `logs/` can be hundreds of MB; cache/maps/tests
+    // are never read at runtime; Prisma engine binaries are external.
+    "*": [
+      "**/node_modules/semver/preload.js",
+      "**/logs/**",
+      "**/worker_logs/**",
+      "**/*.js.map",
+      "**/.next/cache/**",
+      "**/node_modules/@prisma/engines/**",
+      "**/node_modules/prisma/libquery_engine*",
+      "**/node_modules/.prisma/client/libquery_engine*",
+      "**/node_modules/.prisma/engines/**",
+      "**/sample/**",
+      "**/samples/**",
+      "**/graphify-out/**",
+      "**/mocks/**",
+      "**/__mocks__/**",
+      "**/docs/**",
+      "**/tests/**",
+      "**/__tests__/**",
+      "**/e2e/**",
+    ],
+    "/*": [
+      "**/node_modules/semver/preload.js",
+      "**/logs/**",
+      "**/worker_logs/**",
+      "**/*.js.map",
+      "**/.next/cache/**",
+    ],
+    "next-server": ["**/node_modules/semver/preload.js"],
   },
   // Configure server-side packages for NSE API routes
   serverExternalPackages: [

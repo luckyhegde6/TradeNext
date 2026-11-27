@@ -32,9 +32,13 @@ function walk(d, out = []) {
 }
 
 // Turbopack build cache (~260MB inside the standalone tree) — not needed at runtime.
+rm(path.join(root, ".next", "cache"));
 rm(path.join(root, ".next", "cache", "turbopack"));
-// Worker engine logs shipped into the standalone tree.
+// Runtime logs + worker logs shipped into the standalone tree (can be huge).
+rm(path.join(root, ".next", "standalone", "logs"));
 rm(path.join(root, ".next", "standalone", "worker_logs"));
+rm(path.join(root, ".next", "standalone", ".next", "cache"));
+rm(path.join(root, ".next", "standalone", ".next", "cache", "turbopack"));
 // Source maps — not served at runtime, and the two biggest non-runtime files.
 for (const f of walk(path.join(root, ".next"))) {
   if (f.endsWith(".js.map")) rm(f);

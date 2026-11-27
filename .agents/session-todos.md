@@ -1,3 +1,14 @@
+## Current (2026-11-27 — Netlify deploy fix: pin npm ci + PR size gate + make everything COMMITTED — prod re-test)
+
+### Session tasks (user instruction 2026-11-27)
+- [ ] **Pin `install-command = "npm ci"`** in `netlify.toml` `[build]` (done — verify prod log reads it; earlier prod resolved config omitted it).
+- [ ] **Committed-not-untracked:** `node_modules/@netlify/plugin-nextjs` patches must NOT rely on local edits — `scripts/predeploy/prune-standalone.mjs` re-applies `server.js` filter + `cjs.ts` + `[turbopack]_runtime.js` at build time; `next.config.ts` `outputFileTracingExcludes` keeps `logs/`, `worker_logs/`, `cache/`, `*.js.map`, Prisma engines, test/sample/docs/mocks out of `.next/standalone`. prune `rm`s `.next/cache`, `.next/standalone/logs`, `.next/standalone/worker_logs`, `.next/standalone/.next/cache`, `*.js.map`.
+- [ ] `npx netlify build` PR gate added: `.github/workflows/netlify-function-size.yml` + `scripts/dev-checks/check-function-size.mjs` (all `.netlify/functions/*.zip` < 250MB on fresh `npm ci`).
+- [ ] **Verify prod-parity locally on fresh `npm ci`.**
+- [ ] **Commit + push; check Netlify production deploy succeeds** (`tradenext6`, site `78401e5d-...`, `npx netlify deploy`/push main). Currently prod failed at 250MB (`worker-runner-background`, `__csp-violations`).
+- [ ] **If deploy succeeds:** add lesson + learnings + "how to proceed in future" (docs + `Lessons.md`).
+- [ ] **If deploy fails:** continue debugging until fix is deployed.
+
 ## Current (2026-11-26 — Netlify deploy fix complete — functions < 250MB)
 
 Functions now fit the Netlify upload limit locally: `worker-runner-background.zip` 65.24MB, `__csp-violations.zip` 162.59MB, `___netlify-server-handler.zip` 48.06MB (measured with `node C:\Users\lucky\AppData\Local\Temp\opencode\measure2.cjs .netlify/functions`).
