@@ -1,0 +1,64 @@
+name: Netlify Function Size
+
+# Guard against Netlify deploys failing with:
+#   "The function exceeds the maximum size of 250 MB"
+# Builds exactly what Netlify would (`npx netlify build`) and asserts every
+# function artifact (.netlify/functions/*.zip) stays under the 250MB upload limit.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  function-size-250mb:
+    name: functions < 250MB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradenext
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Full Netlify production build: migrate deploy + prisma generate + quickbuild
+      # + prune-standalone, then plugin bundling + function zipping.
+      - name: Netlify production build
+        run: npx --yes netlify build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradenext
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/tradenext
+          NEXTAUTH_URL: http://localhost:3000
+          NEXTAUTH_SECRET: ci-not-a-real-secret
+          AUTH_SECRET: ci-not-a-real-secret
+          # PR size checks are local builds — never reach the live preserve endpoint.
+          CONTEXT: production
+          NETLIFY_SKIP_GIT: "true"
+
+      # Assert no function artifact exceeds Netlify's 250MB upload limit.
+      - name: Check function bundle sizes (250MB limit)
+        run: node scripts/dev-checks/check-function-size.mjs

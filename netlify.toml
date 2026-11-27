@@ -5,6 +5,11 @@
   # and the quickbuild.
   command = "npx @prisma/prisma7@7 migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild && node scripts/predeploy/prune-standalone.mjs"
   publish = ".next"
+  # Pin reproducible, lockfile-exact installs: `npm ci` deletes node_modules +
+  # fresh-installs from package-lock.json (faster, no cache drift, no lock
+  # mutation). `postinstall` still runs `prisma generate`. Any @netlify/
+  # plugin-nextjs node_modules patches are re-applied by prune-standalone.mjs.
+  install-command = "npm ci"
 
 [build.environment]
   NODE_VERSION = "22"
