@@ -13,6 +13,13 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # `npm ci` on Netlify: Netlify runs `npm install` by default (NPM_FLAGS passed
+  # to it). `install-command="npm ci"` forces `npm ci`; this flag avoids any
+  # lock mutation + speeds install. If your Netlify version doesn't read
+  # `install-command`, set Build & Deploy → Install command `npm ci`, or
+  # `NPM_FLAGS=--frozen-lockfile`, in the dashboard. `prune-standalone.mjs`
+  # no longer depends on a fresh `npm ci`.
+  NPM_FLAGS = "--no-audit --no-fund"
   SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.githooks,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md,scripts/check-remote-db.ts,e2e,.github/workflows/playwright.yml,.env.example,lib/__tests__/sqlite.test.ts,public/sql-wasm.wasm"
 
 # Spec 42 — standalone Netlify Functions for durable worker/cron execution.
