@@ -1,3 +1,5 @@
+"$schema" = "https://open-api.netlify.com/netlify.schema.json"
+
 [build]
   # Migrations run FIRST — quickbuild skips `prisma migrate deploy`, and without
   # it prod tables (e.g. google_sheets_config/ledger) never get created. Then the
@@ -27,6 +29,7 @@
 # exact version pinned in package.json devDependencies is what runs.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+  pinned_version = "5"
 
 # Improve caching for static assets
 [[headers]]
