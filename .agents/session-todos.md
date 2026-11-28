@@ -5,8 +5,8 @@
 - [x] Removed Spec 42 Scheduled/Background worker chain + `WORKER_DISPATCH_SECRET`; in-process Node watchdogs restored.
 - [x] Published prod `main@35783f6` ready (2 fns 42.6/45.8MB) but homepage 500; root cause = `prune-standalone.mjs` `[turbopack]_runtime.js` patch → `ChunkLoadError /var/task/.next/server/server/chunks/ssr/...`.
 - [x] Removed `scripts/predeploy/prune-standalone.mjs` + its build-command invocation; pinned plugin 5.15.8 file-based + `$schema`; added `netlify-deploy-debug` skill + Lesson 174; docs updated.
-- [ ] Final verification: local rebuild (no prune) + `check-function-size.mjs`; branch preview HTTP 200.
-- [ ] Commit + push; create/update PR; **user merges/deploys** (no prod action by agent).
+- [x] Final verification: remote branch preview `6b0b3a212ad0e2374d3d76ca` `ready`, 2 fns (42.6/45.8MB), homepage HTTP 200.
+- [x] Commit + push (`5ba17cf`); PR **#168** created. **User merges/deploys** (no prod action by agent); verify prod HTTP 200 + function logs.
 
 ## Current (2026-11-27 — Netlify deploy fix: pin npm ci + PR size gate + make everything COMMITTED — prod re-test)
 

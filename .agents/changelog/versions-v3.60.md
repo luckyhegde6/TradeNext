@@ -20,7 +20,8 @@ User: fix Netlify deploy failing at upload (`worker-runner-background`, `__csp-v
 - Netlify preview `6b0b1ad4...` baseline `a5daee9`: 2 functions (`___netlify-server-handler` 33.88MB, `__csp-violations` 41.78MB), plugin 5.15.8, `ready`.
 - Preview with removals: `__csp-violations` fixed; worker-runner still >250MB → led to its removal.
 - Prod `6b0b34812ff171557c73c613` (`main@35783f6`): `ready`, plugin 5.15.8, 2 functions 42.6MB/45.8MB, `Site is live ✨`; then 500 with the SSR chunk error above (function-log evidence).
-- Local `npx @netlify/build` repros + `check-function-size.mjs`; fresh local rebuild after removing prune (final verification below).
+- Local `npx @netlify/build` repros + `check-function-size.mjs`; fresh local rebuild after removing prune completed the build but hit a local-only plugin 5.15.8 manifest-patch error (Windows); **remote preview is authoritative**.
+- **Final branch preview `6b0b3a212ad0e2374d3d76ca`** (`commit 5ba17cf`, `branch-deploy`): `ready`, 2 functions 42.6/45.8 MB, homepage **HTTP 200** rendered. PR **#168** opened against `main`.
 - `npx tsc --noEmit` clean; pre-commit gates (Jest/tsc-baseline/forbidden patterns/swagger/logger) passed on commits.
 
 ## Decision / deviation
