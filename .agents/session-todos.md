@@ -22,7 +22,10 @@ Functions now fit the Netlify upload limit locally: `worker-runner-background.zi
 
 ---
 
-## Current (2026-11-24 — Laya decision-engine removal — removal done, verification green)
+## Current (2026-11-28 — Netlify 250MB function-size fix on `fix/netlify-250mb`)
+
+- Branch `fix/netlify-250mb`. Added `outputFileTracingExcludes` + `serverExternalPackages`, `scripts/predeploy/prune-standalone.mjs`, `install-command="npm ci"`+`NPM_FLAGS`, `.github/workflows/netlify-function-size.yml` + `scripts/dev-checks/check-function-size.mjs`, `clsx`. All 4 functions <250MB locally. **No onnxruntime-node/@huggingface/tokenizers/Laya/decision-engine.** Prod not verified.
+
 
 ### [x] Remove the Laya + decision engine (2026-11-24)
 - [x] Deleted: `lib/services/laya/**` (mock ONNX agent/tokenizer/weights), `lib/services/decision/**`, `app/api/decision/evaluate`, `app/api/admin/decision/{ping,monitoring}`, `app/admin/decision/`, decision tests, `scripts/dev-checks/{laya-agent,laya-forward}.ts`, `scripts/spike-laya/`, `scripts/fetch-laya-weights.mjs`, code docs.
