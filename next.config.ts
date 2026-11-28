@@ -16,8 +16,6 @@ const nextConfig: NextConfig = {
   // Exclude this optional preload path from output file tracing. Include "next-server"
   // because the standalone production server trace does not match route globs (Next.js docs).
   outputFileTracingExcludes: {
-    "*": ["**/node_modules/semver/preload.js"],
-    "/*": ["**/node_modules/semver/preload.js"],
     "next-server": ["**/node_modules/semver/preload.js"],
     // Deploy fix (functions >250MB): keep heavy non-runtime files out of the
     // `.next/standalone` output that @netlify/plugin-nextjs bundles into
@@ -50,7 +48,6 @@ const nextConfig: NextConfig = {
       "**/*.js.map",
       "**/.next/cache/**",
     ],
-    "next-server": ["**/node_modules/semver/preload.js"],
   },
   // Configure server-side packages for NSE API routes
   serverExternalPackages: [
