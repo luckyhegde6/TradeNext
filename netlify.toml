@@ -34,30 +34,11 @@
 # parse form file: http: request body too large"). esbuild is the documented
 # bundler for shrinking function artifacts (Netlify Functions → Bundle docs).
 [functions]
+  # Deploy fix: external_node_modules kept each heavy package as a full
+  # node_modules entry inside EVERY function (including __csp-violations,
+  # which needs none), pushing artifacts past Netlify's 250MB upload cap.
+  # esbuild bundles what each function actually imports instead.
   node_bundler = "esbuild"
-  # Heavy runtime deps externalized from the function artifacts (deploy fix —
-  # functions >250MB). `worker-runner-background` bundles the worker engine +
-  # its deps; googleapis/@opentelemetry/pg/pgpass are the biggest offenders.
-  external_node_modules = [
-    "prisma",
-    "@prisma/client",
-    "@prisma/engines",
-    "googleapis",
-    "pg",
-    "pg-protocol",
-    "pgpass",
-    "@opentelemetry/api",
-    "@opentelemetry/context-async-hooks",
-    "@opentelemetry/exporter-trace-otlp-http",
-    "@opentelemetry/instrumentation",
-    "@opentelemetry/resources",
-    "@opentelemetry/sdk-trace-base",
-    "@opentelemetry/sdk-trace-node",
-    "@opentelemetry/semantic-conventions",
-    "node-cron",
-    "bullmq",
-    "nodemailer",
-  ]
 
 # Improve caching for static assets
 [[headers]]
