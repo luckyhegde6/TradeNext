@@ -1,3 +1,13 @@
+## Current (2026-11-29 — v3.60.0 — Netlify 250MB + prod 500 fix; PR requested)
+
+- [x] Baseline preview of `a5daee9`: ready, 2 functions (33.9/41.8MB), plugin 5.15.8.
+- [x] `external_node_modules` removed → `__csp-violations` fixed; worker-runner still >250MB on Linux.
+- [x] Removed Spec 42 Scheduled/Background worker chain + `WORKER_DISPATCH_SECRET`; in-process Node watchdogs restored.
+- [x] Published prod `main@35783f6` ready (2 fns 42.6/45.8MB) but homepage 500; root cause = `prune-standalone.mjs` `[turbopack]_runtime.js` patch → `ChunkLoadError /var/task/.next/server/server/chunks/ssr/...`.
+- [x] Removed `scripts/predeploy/prune-standalone.mjs` + its build-command invocation; pinned plugin 5.15.8 file-based + `$schema`; added `netlify-deploy-debug` skill + Lesson 174; docs updated.
+- [ ] Final verification: local rebuild (no prune) + `check-function-size.mjs`; branch preview HTTP 200.
+- [ ] Commit + push; create/update PR; **user merges/deploys** (no prod action by agent).
+
 ## Current (2026-11-27 — Netlify deploy fix: pin npm ci + PR size gate + make everything COMMITTED — prod re-test)
 
 ### Session tasks (user instruction 2026-11-27)

@@ -10,7 +10,13 @@ child_sessions: []
 checkpoint: "tracks1-4-verified-archify-graphify-complete"
 ---
 
-# Live Resume — Spec 43 committed; Tracks 1–4 implemented/verified; Archify+Graphify artifacts generated
+# Live Resume — v3.60.0 Netlify 250MB + prod-500 fix on `fix/netlify-250mb-remove-externals`
+
+> Branch: `fix/netlify-250mb-remove-externals` (pushed; PR requested). Prod `main@35783f6` deploy ready but 500 until this fix is deployed by the user. Spec 42 standalone worker + `WORKER_DISPATCH_SECRET` removed; worker/task/cron in-process on Node.js. `external_node_modules` and `prune-standalone.mjs` removed (latter caused Linux SSR `ChunkLoadError`). `@netlify/plugin-nextjs@5.15.8` pinned via file-based config + `$schema`. New skill `netlify-deploy-debug`, Lesson 174, `.agents/changelog/versions-v3.60.md`. No prod deploy/merge by agent. Final local/preview verification + PR pending in this session.
+
+---
+
+# Previous — Spec 43 committed; Tracks 1–4 implemented/verified; Archify+Graphify artifacts generated
 
 > Branch: `feature/spec-43-prediction-targets` @ `1cb4d36` (Spec 43 committed, not pushed/merged/deployed)
 

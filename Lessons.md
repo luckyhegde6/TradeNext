@@ -2270,6 +2270,14 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 **Issue:** In-process node-cron and setTimeout polling depend on the lifetime of a request-serving instance.
 **Rule:** On Netlify, use standalone Scheduled Functions as short UTC wake-ups and Background Functions for bounded work; keep CronJob.nextRun/WorkerTask as durable truth. Branch deploys do not auto-run schedules; verify using Netlify UI Run now or CLI function invocation. Check current platform limits before setting task budgets.
 
+### 174. Netlify function-size fixes can break the runtime; verify HTTP, not just upload
+**Issue:** PR#167 removed upload failures with `external_node_modules` + `scripts/predeploy/prune-standalone.mjs`, but the published prod deploy served **500**. Log: `ChunkLoadError: Cannot find module '/var/task/.next/server/server/chunks/ssr/[root-of-the-server]__*.js'` — duplicated `server/`. Root cause: `prune-standalone.mjs` rewrote `RUNTIME_ROOT` in **every** `[turbopack]_runtime.js` (a Windows-only edge workaround), including the Linux SSR runtime; the patch resolved one directory too shallow. Removing the script (the oversized function was removed too) restored HTTP 200.
+**Rules:**
+1. `external_node_modules` **copies** packages into the artifact (it disables bundling) — it does not shrink it. To exclude, use `ignored_node_modules` or `included_files` with `!` patterns; **`excluded_files` is not in Netlify's config schema** (silently ignored).
+2. UI-installed build plugins run in all contexts; file-based `[[plugins]]` config takes precedence. Pin major via `pinned_version` and exact version in `devDependencies`. Add `$schema = "https://open-api.netlify.com/netlify.schema.json"` to `netlify.toml` to validate keys before deploy.
+3. `netlify deploy --trigger` builds the site's **configured branch in production context** (it built `main@2f8e66cb`), not your current branch. Use `npx netlify api createSiteBuild --data '{"site_id":"...","branch":"..."}'` for a real branch preview; verify `branch`/`context`/`commit_ref` in `get-deploy`.
+4. A green deploy (`state=ready`, `Site is live ✨`) is not proof the site works — fetch the URL and read function logs. Build-time patches to generated framework files must be scoped to the runtime they target; never apply a Windows edge workaround to the SSR bundle.
+
 ### 173. Windows shell quoting breaks `git commit -m` — self-heal by retrying with a safe commit form
 **Issue:** On Windows `cmd` in this environment, `git commit -m "docs: add Spec 43 prediction targets spec plan and session tracking"` was parsed as multiple pathspec/arguments (`error: pathspec 'add' did not match...`) and the commit failed repeatedly until retried as `git commit -m docs-spec43-planning`.
 **Cause:** Spaces/punctuation/quotes in `-m` messages can be mangled by the active shell quoting layer (cmd/PowerShell/call wrappers), so a valid-looking command becomes invalid pathspecs.

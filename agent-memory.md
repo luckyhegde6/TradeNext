@@ -1,3 +1,15 @@
+### 2026-11-29 | v3.60.0 — Netlify 250MB deploy fix + production 500 recovery
+
+**Request:** Fix prod deploy failing at upload (`worker-runner-background`, `__csp-violations` >250MB); bisect from last-good `a5daee9`, preview via Netlify MCP/CLI; remove worker/secret (worker/task/cron on Node.js side); recover prod 500; add deploy-log skill; document + commit/push + PR.
+
+**Work completed:** Removed `worker-runner-background.mts`, `worker-dispatch.mjs`, `netlify-runner.ts` + test, `WORKER_DISPATCH_SECRET` usage and all Spec 42 comments; `instrumentation.ts` watchdogs now start on Netlify too. Removed `external_node_modules` (fixed `__csp-violations`) and finally `scripts/predeploy/prune-standalone.mjs` — its `[turbopack]_runtime.js` RUNTIME_ROOT patch produced `/var/task/.next/server/server/chunks/ssr/...` and 500 on Linux SSR despite a `ready` deploy. Pinned `@netlify/plugin-nextjs@5.15.8` via `[[plugins]] pinned_version` + devDependency; added `$schema` to `netlify.toml`. Added `.agents/skills/netlify-deploy-debug/SKILL.md` (+ matrix/AGENTS wiring; subagent application test passed).
+
+**Verification:** prod preview `6b0b34812ff171557c73c613` (`main@35783f6`) `ready`, plugin 5.15.8, 2 functions (42.6/45.8MB); baseline preview `a5daee9` 33.9/41.8MB; local `npx @netlify/build` + `check-function-size.mjs`; `npx tsc --noEmit` clean; pre-commit gates passed on each commit. Prod 500 evidence: function log `ChunkLoadError /var/task/.next/server/server/chunks/ssr/...` on 5 instances.
+
+**Docs/session:** `versions-v3.60.md`, CHANGELOG index, AGENTS v3.60.0 row, Lessons 174, Primer/TODO/session-todos/handoff, `.agents/sessions/2026-11-29-5a4d519f/`. No prod deploy/merge by agent.
+
+---
+
 ### 2026-11-15 | Spec 43 (v3.58.0) — prediction targets & `analysisMode` (commit prep)
 
 **Request:** Proceed with Spec 43 implementation/gates (1–4) and commit Spec 43 on `feature/spec-43-prediction-targets`, then continue with Tracks 1–4 and tooling todos (Archify/Graphify).
