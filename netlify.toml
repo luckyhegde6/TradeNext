@@ -46,7 +46,6 @@
     "pg",
     "pg-protocol",
     "pgpass",
-    "onnxruntime-node",
     "@opentelemetry/api",
     "@opentelemetry/context-async-hooks",
     "@opentelemetry/exporter-trace-otlp-http",
