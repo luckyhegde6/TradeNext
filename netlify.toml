@@ -22,6 +22,12 @@
   NPM_FLAGS = "--no-audit --no-fund"
   SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.githooks,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md,scripts/check-remote-db.ts,e2e,.github/workflows/playwright.yml,.env.example,lib/__tests__/sqlite.test.ts,public/sql-wasm.wasm"
 
+# File-based plugin config takes precedence over the UI-installed copy
+# (https://docs.netlify.com/extend/install-and-use/build-plugins/), so the
+# exact version pinned in package.json devDependencies is what runs.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # Improve caching for static assets
 [[headers]]
   for = "/_next/static/*"
