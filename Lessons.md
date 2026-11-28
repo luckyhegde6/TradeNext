@@ -2031,7 +2031,7 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 **Root Cause**: the function bundles the Next standalone tree (`.next/standalone/`) via the plugin's `copyNextDependencies`, and the built artifact carries heavy non-runtime weight: Turbokack build cache (~260MB of SSTs), two 55.6MB `.js.map` source-map files, `worker_logs/`, duplicated server chunks.
 
 **Solution (v3.59.0, `npx netlify build` run 3)**:
-1. `netlify.toml` `[functions] external_node_modules` += `googleapis`, `pg`, `pg-protocol`, `pgpass`, `onnxruntime-node`, `@opentelemetry/*`, `node-cron`, `bullmq`, `nodemailer`.
+1. `netlify.toml` `[functions] external_node_modules` += `googleapis`, `pg`, `pg-protocol`, `pgpass`, `@opentelemetry/*`, `node-cron`, `bullmq`, `nodemailer`. (No `onnxruntime-node`/`@huggingface/tokenizers` — Laya/decision-engine removed.)
 2. Plugin `@netlify/plugin-nextjs` 5.16.9 local patches: `dist/build/content/server.js` now extends the standalone-copy filter — excludes `logs`, `worker_logs`, `sample(s)`, `graphify-out`, `mocks`, `__mocks__`, `docs`, `tests`, `__tests__`, `e2e`, `cache`, `.opencode`, `.continue`, `.archify`, `.claude` + all `*.js.map` files.
 3. NEW `scripts/predeploy/prune-standalone.mjs`, appended to the netlify build command: deletes `.next/cache/turbopack`, `.next/standalone/worker_logs`, and all `*.js.map` under `.next` (2022 paths) — the big win (~280MB of the ~281MB were non-runtime).
 
@@ -2060,7 +2060,7 @@ The failure was logged at **`debug`**, which made it invisible in production. Th
 **Fix (committed, not untracked)**:
 - `scripts/predeploy/prune-standalone.mjs` (appended to build command, runs BEFORE `@netlify/plugin-nextjs` onPostBuild + zipping): `rm` `.next/cache`, `.next/standalone/logs`, `.next/standalone/worker_logs`, `.next/standalone/.next/cache`, `*.js.map`, `.next/cache/turbopack`; patch generated `[turbopack]_runtime.js` `RUNTIME_ROOT = path.resolve(__filename,...)` → `path.resolve(path.dirname(__filename), "..", "..")`; **re-apply** plugin `server.js` copy-filter + `cjs.ts` if missing.
 - `next.config.ts` `outputFileTracingExcludes` `*`/`/*` += `**/logs/**`, `**/worker_logs/**`, `**/*.js.map`, `**/.next/cache/**`, `**/node_modules/@prisma/engines/**`, `node_modules/prisma/libquery_engine*`, `node_modules/.prisma/client/libquery_engine*`, `node_modules/.prisma/engines/**`, `**/sample(s)**`, `**/graphify-out/**`, `**/mocks**`, `**/__mocks__/**`, `**/docs/**`, `**/tests/**`, `**/__tests__/**`, `**/e2e/**`. NOTE object-literal duplicate key → **TS1117**; don't repeat `"*"`.
-- `netlify.toml` `[functions] external_node_modules` += `@prisma/engines`,`googleapis`,`pg`,`@opentelemetry/*`,`node-cron`,`bullmq`,`nodemailer`,`onnxruntime-node`,`node-bundler=esbuild`.
+- `netlify.toml` `[functions] external_node_modules` += `@prisma/engines`,`googleapis`,`pg`,`@opentelemetry/*`,`node-cron`,`bullmq`,`nodemailer`,`node-bundler=esbuild`.
 - Prisma already minimal: `@prisma/extension-accelerate` `withAccelerate()`, `@prisma/adapter-pg`, `serverExternalPackages`, schema `binaryTargets=["native","rhel-openssl-3.0.x"]`, `@prisma/engines` external. NOT adding schema `previewFeatures` (DB permission).
 - `@opentelemetry/*` already external in netlify `external_node_modules`; not removing.
 
