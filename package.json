@@ -76,6 +76,7 @@
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.7.6",
     "chart.js": "^4.6.1",
+    "clsx": "^2.1.1",
     "csv-parse": "^7.0.3",
     "csv-parser": "^3.2.1",
     "fetch-cookie": "^3.2.0",
