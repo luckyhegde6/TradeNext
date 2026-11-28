@@ -40,22 +40,6 @@
   # esbuild bundles what each function actually imports instead.
   node_bundler = "esbuild"
 
-# The worker bundles the durable worker engine; the Netlify/Next plugin also
-# copies the whole standalone tree + node_modules into it. None of that is
-# read at runtime (esbuild inlines the function's own imports), and it is what
-# pushes the zip past 250MB on Linux. Exclude it for this function only.
-[functions."worker-runner-background"]
-  excluded_files = [
-    ".next/**",
-    "**/*.js.map",
-    "node_modules/sql.js/dist/*debug*",
-    "node_modules/sql.js/dist/sqljs-all.zip",
-    "node_modules/@prisma/engines/**",
-    "node_modules/prisma/**",
-    "node_modules/@typescript/**",
-    "node_modules/@electric-sql/**",
-  ]
-
 # Improve caching for static assets
 [[headers]]
   for = "/_next/static/*"
