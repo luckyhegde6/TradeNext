@@ -3,7 +3,7 @@
   # it prod tables (e.g. google_sheets_config/ledger) never get created. Then the
   # predeploy guard (self-gates to CONTEXT=production; soft-fail), client regen,
   # and the quickbuild.
-  command = "npx prisma generate && node scripts/predeploy/preserve-mirror.mjs && npm run quickbuild && node scripts/predeploy/prune-standalone.mjs"
+  command = "npx @prisma/prisma7@7 migrate deploy && node scripts/predeploy/preserve-mirror.mjs && npx prisma generate && npm run quickbuild && node scripts/predeploy/prune-standalone.mjs"
   publish = ".next"
   # Pin reproducible, lockfile-exact installs: `npm ci` deletes node_modules +
   # fresh-installs from package-lock.json (faster, no cache drift, no lock
@@ -21,24 +21,6 @@
   # no longer depends on a fresh `npm ci`.
   NPM_FLAGS = "--no-audit --no-fund"
   SECRETS_SCAN_OMIT_PATHS = "AGENTS.md,README.md,USAGE.md,prisma/seed.ts,.netlify,.agents,.githooks,.opencode,opencode.json,tests,.agents/README.md,app/api/openapi,TODO.md,scripts/check-remote-db.ts,e2e,.github/workflows/playwright.yml,.env.example,lib/__tests__/sqlite.test.ts,public/sql-wasm.wasm"
-
-# Spec 42 — standalone Netlify Functions for durable worker/cron execution.
-# Scheduled Function: one-minute UTC wake-up, dispatches to the background runner.
-# Background Function: bounded runner (≤15 min platform cap, target ≤13 min).
-# Schedule is declared in the function's exported `config` (netlify/functions/worker-dispatch.mjs).
-# Netlify config parsing rejects [[functions]] array syntax in this file format.
-
-# Function-bundle optimization: `worker-runner-background` (Spec 42 durable worker
-# runner) bundles the worker engine + Prisma client; with the default bundler the
-# built artifact exceeded Netlify's function upload limit (HTTP 400: "could not
-# parse form file: http: request body too large"). esbuild is the documented
-# bundler for shrinking function artifacts (Netlify Functions → Bundle docs).
-[functions]
-  # Deploy fix: external_node_modules kept each heavy package as a full
-  # node_modules entry inside EVERY function (including __csp-violations,
-  # which needs none), pushing artifacts past Netlify's 250MB upload cap.
-  # esbuild bundles what each function actually imports instead.
-  node_bundler = "esbuild"
 
 # Improve caching for static assets
 [[headers]]

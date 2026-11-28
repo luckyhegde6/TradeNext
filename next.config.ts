@@ -64,9 +64,9 @@ const nextConfig: NextConfig = {
     // production while working in dev/tests. Keep it external so the WASM
     // is resolvable from node_modules/sql.js/dist on the runtime server.
     'sql.js',
-    // Deploy fix (functions >250MB — worker-runner-background): keep the
-    // Prisma client + CLI out of server bundles. NOTE: Next 16 key is
-    // `serverExternalPackages`, NOT `experimental.serverComponentsExternalPackages`.
+    // Deploy fix (function bundles >250MB): keep the Prisma client + CLI out
+    // of server bundles. NOTE: Next 16 key is `serverExternalPackages`, NOT
+    // `experimental.serverComponentsExternalPackages`.
     'prisma',
     '@prisma/client',
     '.prisma/client',

@@ -17,15 +17,6 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
-  // Spec 42 §5.7/§7: On Netlify, skip the in-process worker + cron daemon
-  // loops — execution is owned by the standalone Scheduled/Background
-  // Functions (netlify/functions/worker-dispatch / worker-runner-background).
-  // Preserve unrelated startup work (cache, SQLite, price flush, ops
-  // counters, write-behind). Use isNetlifyRuntime() from lib/netlify.ts —
-  // no new detection heuristic.
-  const { isNetlifyRuntime } = await import("@/lib/netlify");
-  const onNetlify = isNetlifyRuntime();
-
   try {
     const [{ startCronDaemon, stopCronDaemon }, { startWorker, stopWorkerEngine }, { restoreIntelligenceCacheFromDB }, { initSqliteBackup, getSqliteFallback, startOpsCounterPersistence, startWriteBehindFlush }, { startDailyPriceFlushTimer }, { setDegradedMode, isDegradedModeActive }, { default: logger }] = await Promise.all([
       import("@/lib/services/worker/cron-daemon"),
@@ -37,13 +28,13 @@ export async function register() {
       import("@/lib/logger"),
     ]);
 
-    // LEADER WATCHDOGS (v3.33.0, spec 11): On Netlify, skip all three
-    // watchdog loops — the standalone Scheduled/Background Functions own
-    // execution via the shared DB lease (failOpen:false). On persistent Node,
-    // the self-healing watchdog loops start as before.
+    // LEADER WATCHDOGS (v3.33.0, spec 11): self-healing loops start on every
+    // runtime (persistent Node + Netlify). The standalone worker functions
+    // were removed; the in-process cron/worker owns execution via the shared
+    // DB lease (failOpen:false).
     const leader = await import("@/lib/services/leader");
 
-    if (!onNetlify) {
+    {
       leader.watchLeaderRole("worker", {
         onAcquired: () => {
           // Poll loop picks up the WorkerTasks the daemon spawns (and admin runNow).
@@ -83,9 +74,7 @@ export async function register() {
         },
       });
 
-      logger.info({ msg: "Leader watchdogs started (persistent Node mode)", self: leader.LEADER_SELF });
-    } else {
-      logger.info({ msg: "Leader watchdogs skipped (Netlify runtime — standalone functions own execution)", self: leader.LEADER_SELF });
+      logger.info({ msg: "Leader watchdogs started", self: leader.LEADER_SELF });
     }
 
     // Pre-load intelligence cache from DB so there's no cold-start penalty

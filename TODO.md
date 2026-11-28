@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-Current branch — **`feature/spec-43-prediction-targets`** (Spec 43 implementation), created from local `main` and merged with `origin/main` (PR #155 merged; v3.57.0 included). Spec 43/Plan 43 **approved** (DB migration/backfill + verification permitted) — implementation in progress. Spec 42 (PR #155) complete on main; `WORKER_DISPATCH_SECRET` must be set in Netlify dashboard before deploy (user controls deploy/merge).
+Current branch — **`fix/netlify-250mb-remove-externals`** (Netlify 250MB function-size fix). Spec 42 standalone Scheduled/Background Functions + `WORKER_DISPATCH_SECRET` removed (function exceeded 250MB and was inert without the secret); in-process cron/worker daemon re-enabled on Netlify. Spec 43 merged on main. No commit/push/merge/deploy without explicit user request.
 
 **In progress — Spec 43 (Prediction targets & analysis mode; no "AI targets off") — SPEC + PLAN DRAFTED — IMPLEMENTATION AWAITING USER APPROVAL (D9, SDD gate + DB migration/backfill permission required)** (2026-11-15):
 > **Goal:** always show persisted prediction/calculated targets when AI is unavailable (no "AI targets off"/targetless screener-only state), with explicit per-stock `analysisMode` = `"AI Targets"` | `"Prediction Targets"` across Swing + Daily (DB/APIs/UI/Telegram/exports/Sheets). Spec: `.agents/specs/43-prediction-targets-analysis-mode.md` · Plan: `.agents/plans/43-prediction-targets-analysis-mode.md` · Session: `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`.

@@ -94,7 +94,7 @@ Branch: `feature/spec-43-and-44-execution` (created 2026-11-21 from `main` @ `89
 
 ### Carried forward
 - [ ] **S2 (blocked):** retry minimal Prisma-Remote prod read-only diagnostics (ops-limited) once approval/tool access is available.
-- [ ] **User controls merge/deploy**; `WORKER_DISPATCH_SECRET` must be set in Netlify dashboard before deploy (Spec 42). No merge/deploy without explicit user request.
+- [ ] **User controls merge/deploy**; Spec 42 standalone worker functions + `WORKER_DISPATCH_SECRET` removed (250MB function-size fix); in-process cron/worker daemon re-enabled. No merge/deploy without explicit user request.
 
 ### Tooling / diagrams (user-requested)
 - [ ] **Archify:** install for the user by reading https://raw.githubusercontent.com/tt-a1i/archify/main/llms.txt and following its confirmed install steps (respect install-scope/agent confirmation and package-install permission). Use Archify to draw diagrams based on the codebase. Repo: https://github.com/tt-a1i/archify/tree/main

@@ -37,13 +37,13 @@ checkpoint: "tracks1-4-verified-archify-graphify-complete"
 ## Blockers / notes
 - **Uncommitted work:** Tracks 1–4 + `lib/__tests__/dbHealthRoute.test.ts` + Archify/Graphify artifacts/candidates/scripts in `.archify/` and `.agents/skills/archify/` and `graphify-out/` (review before staging; `graphify-out`/generated artifacts may be large/gitignored depending on repo policy).
 - Dev-log observation (likely unrelated): SQLite push/outbox errors for `swing_analysis_job`/`swing_signal` (`analyzedCount` null / FK) during local run.
-- No commit/push/merge/deploy without explicit request. `WORKER_DISPATCH_SECRET` required in Netlify before deploy (Spec 42).
+- No commit/push/merge/deploy without explicit request. Spec 42 standalone worker functions + `WORKER_DISPATCH_SECRET` removed; in-process daemon re-enabled (250MB fix).
 - S2 minimal Prisma-Remote prod read-only diagnostics pending approval/tool access. Full `npm test` and full eslint warning summary not completed.
 
 ## Next Steps
 1. On explicit request: review `git status`, decide which artifacts (`.agents/skills/archify`, `.archify`, `graphify-out`) to include/ignore, stage, and commit Tracks 1–4 (+ docs/tests as appropriate).
 2. Optional follow-ups: label Graphify communities with an LLM backend if desired; refine Archify layout/readability for visual review hints; run full `npm test`.
-3. Push/PR/merge/deploy only on explicit request (ensure `WORKER_DISPATCH_SECRET` set before deploy).
+3. Push/PR/merge/deploy only on explicit request (no `WORKER_DISPATCH_SECRET` needed — standalone worker removed).
 
 ## Resume from
 - `.agents/session-todos.md`, `.agents/sessions/2026-11-15-prediction-targets/{decisions,flow}.md`

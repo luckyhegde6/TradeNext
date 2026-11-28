@@ -13,7 +13,7 @@
 - **Branch:** `feature/spec-43-prediction-targets` (includes merged PR #155 / v3.57.0 baseline; Spec 43 implementation uncommitted, commit prep in progress)
 - **Spec 43:** spec/plan approved; implementation present (schema+migration, persistence, fallback/agents, daily+swing propagation, APIs/UI, Telegram/exports/Sheets, perf backfill) + targeted verification green.
 - **Next (approved sequence):** commit Spec 43, then Track 1 (outbound notification tracking) → Track 2/3 (unified notifications + admin UI/history) → Track 4 (sync prepare-for-deploy with `worker_tasks` + workers visibility fix) with PR screenshots.
-- **Blocked/carry-forward:** S2 prod Prisma-Remote diagnostics; Archify/Graphify installs/diagrams require explicit package/tool-install permission; no push/merge/deploy without explicit request (`WORKER_DISPATCH_SECRET` required before deploy).
+- **Blocked/carry-forward:** S2 prod Prisma-Remote diagnostics; Archify/Graphify installs/diagrams require explicit package/tool-install permission; no push/merge/deploy without explicit request (Spec 42 standalone worker + `WORKER_DISPATCH_SECRET` removed in 250MB fix).
 
 ## Recent Sessions (summary)
 
