@@ -65,9 +65,13 @@ const nextConfig: NextConfig = {
     // is resolvable from node_modules/sql.js/dist on the runtime server.
     'sql.js',
     // Deploy fix (functions >250MB — worker-runner-background): keep the
-    // Prisma client + CLI out of server bundles.
+    // Prisma client + CLI out of server bundles. NOTE: Next 16 key is
+    // `serverExternalPackages`, NOT `experimental.serverComponentsExternalPackages`.
     'prisma',
-    '@prisma/client'
+    '@prisma/client',
+    '.prisma/client',
+    '@prisma/engines',
+    '@prisma/extension-accelerate'
   ],
   // Ensure proper headers for production
   async headers() {
