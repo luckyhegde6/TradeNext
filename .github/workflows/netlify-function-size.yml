@@ -47,8 +47,10 @@ jobs:
 
       # Full Netlify production build: migrate deploy + prisma generate + quickbuild
       # + prune-standalone, then plugin bundling + function zipping.
+      # Use `@netlify/build` directly — no `.netlify` project link / site ID / auth
+      # on a fresh GitHub checkout (npx netlify build errors "Could not find project ID").
       - name: Netlify production build
-        run: npx --yes netlify build
+        run: npx --yes @netlify/build
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradenext
           DIRECT_URL: postgresql://postgres:postgres@localhost:5432/tradenext

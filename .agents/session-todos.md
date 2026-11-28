@@ -14,7 +14,7 @@
 Functions now fit the Netlify upload limit locally: `worker-runner-background.zip` 65.24MB, `__csp-violations.zip` 162.59MB, `___netlify-server-handler.zip` 48.06MB (measured with `node C:\Users\lucky\AppData\Local\Temp\opencode\measure2.cjs .netlify/functions`).
 
 ### Netlify deploy fix (v3.59.0) — local `npx netlify build` run 3: COMPLETE
-- [x] `netlify.toml` `[functions] external_node_modules` += prisma/pg/googleapis/@opentelemetry/*/node-cron/bullmq/nodemailer/onnxruntime-node/…
+- [x] `netlify.toml` `[functions] external_node_modules` += prisma/pg/googleapis/@opentelemetry/*/node-cron/bullmq/nodemailer/… (no `onnxruntime-node`/`@huggingface/tokenizers` — Laya/decision-engine removed)
 - [x] Plugin 5.16.9 local patches (Windows edge-runtime path fix + logs exclusion in `dist/build/content/server.js`)
 - [x] NEW `scripts/predeploy/prune-standalone.mjs` (appended to build command): deletes `.next/cache/turbopack` (~260MB), `.next/standalone/worker_logs`, all `*.js.map` — 2022 paths
 - [x] `scripts/cleanup-logs.mjs` — logs/ → 39.2MB remaining (15d/50MB cap); `scripts/cleanup-logs.mjs` + run (772.6MB removed)
@@ -22,7 +22,10 @@ Functions now fit the Netlify upload limit locally: `worker-runner-background.zi
 
 ---
 
-## Current (2026-11-24 — Laya decision-engine removal — removal done, verification green)
+## Current (2026-11-28 — Netlify 250MB function-size fix on `fix/netlify-250mb`)
+
+- Branch `fix/netlify-250mb`. Added `outputFileTracingExcludes` + `serverExternalPackages`, `scripts/predeploy/prune-standalone.mjs`, `install-command="npm ci"`+`NPM_FLAGS`, `.github/workflows/netlify-function-size.yml` + `scripts/dev-checks/check-function-size.mjs`, `clsx`. All 4 functions <250MB locally. **No onnxruntime-node/@huggingface/tokenizers/Laya/decision-engine.** Prod not verified.
+
 
 ### [x] Remove the Laya + decision engine (2026-11-24)
 - [x] Deleted: `lib/services/laya/**` (mock ONNX agent/tokenizer/weights), `lib/services/decision/**`, `app/api/decision/evaluate`, `app/api/admin/decision/{ping,monitoring}`, `app/admin/decision/`, decision tests, `scripts/dev-checks/{laya-agent,laya-forward}.ts`, `scripts/spike-laya/`, `scripts/fetch-laya-weights.mjs`, code docs.
